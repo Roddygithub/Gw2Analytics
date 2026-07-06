@@ -244,7 +244,10 @@ def _iter_agents(data: bytes, count: int) -> Iterator[Agent]:
                 f"need {AGENT_SIZE} bytes, only {end - cursor} available",
             )
         yield _decode_agent(data, cursor)
-        cursor += AGENT_SIZEdef _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
+        cursor += AGENT_SIZE
+
+
+def _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
     """Read up to ``count`` variable-size skill records starting at ``offset``.
 
     Each record has a fixed 8-byte header (``skill_id`` u32 + ``name_len``
@@ -302,7 +305,9 @@ def _iter_agents(data: bytes, count: int) -> Iterator[Agent]:
                 end - cursor,
             )
             return
-        name_bytes = data[cursor + _SKILL_HEADER_STRUCT.size : cursor + _SKILL_HEADER_STRUCT.size + name_len]
+        name_bytes = data[
+            cursor + _SKILL_HEADER_STRUCT.size : cursor + _SKILL_HEADER_STRUCT.size + name_len
+        ]
         name = name_bytes.decode("utf-8", errors="replace")
         yield Skill(id=skill_id, name=name)
         cursor += record_size
