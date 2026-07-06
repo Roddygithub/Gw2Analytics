@@ -1,14 +1,26 @@
 """Application configuration via environment.
 
 Single source of truth for every connection string and bucket name.
-Reads from ``DATABASE_URL`` and ``MINIO_*`` env vars; sensible
-defaults match the in-repo ``docker-compose.yml`` development stack.
+Reads from ``.env`` and process env vars; required keys (``DATABASE_URL``
+and ``S3_*``) have no defaults so a misconfigured deployment fails loudly
+at startup with a pydantic ``ValidationError`` listing the missing keys
+instead of silently pointing at dev sentinels.
+
+Dev/CI credentials live in ``.env.example`` (copy to ``.env``); the test
+suite auto-loads them via ``pytest-env`` so contributors never have to
+hand-roll a ``.env`` file just to run ``uv run pytest``.
+
+Note: field names like ``minio_endpoint`` only map to the explicitly
+aliased env vars (``S3_ENDPOINT`` here); the Python name itself is not
+an env key. Setting ``MINIO_ENDPOINT=...`` in ``.env`` will be silently
+ignored.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,17 +34,21 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Defaults mirror docker-compose.yml dev credentials (override via .env).
-    # S105: the embedded value in ``minio_secret_key`` is a dev-only
-    # sentinel so ``uv run uvicorn ...`` works out-of-the-box.
-    # TODO(#security): move to env-only in production deployments.
-    database_url: str = "postgresql+psycopg://gw2analytics:gw2analytics@localhost:5432/gw2analytics"
-    minio_endpoint: str = "localhost:9000"
-    minio_access_key: str = "gw2analytics"
-    minio_secret_key: str = "gw2analytics-secret"
-    minio_bucket: str = "gw2analytics"
+    # ``database_url`` and the ``minio_*`` fields are *required*: no
+    # defaults so a misconfigured deployment fails fast at startup.
+    # The ``minio_*`` snake_case Python names map to ``S3_*`` env-var
+    # aliases because the underlying MinIO client speaks the S3 protocol
+    # and the project-wide convention (per ``.env.example``) is the
+    # S3 nomenclature regardless of the actual provider.
+    database_url: str = Field(validation_alias="DATABASE_URL")
+    minio_endpoint: str = Field(validation_alias="S3_ENDPOINT")
+    minio_access_key: str = Field(validation_alias="S3_ACCESS_KEY")
+    minio_secret_key: str = Field(validation_alias="S3_SECRET_KEY")
+    minio_bucket: str = Field(validation_alias="S3_BUCKET")
+    # ``minio_secure`` and ``parser_version`` keep their previous
+    # defaults: unrelated to credentials and unlikely to need per-env
+    # overrides in the current scope.
     minio_secure: bool = False
-
     parser_version: str = "0.5.0"
 
 

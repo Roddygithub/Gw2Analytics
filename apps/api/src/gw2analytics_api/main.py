@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_mcp import FastApiMCP
+from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
 
 from gw2analytics_api.routes import fights, uploads
 
