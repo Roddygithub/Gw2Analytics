@@ -375,16 +375,21 @@ def test_player_with_empty_char_name_but_valid_account_and_subgroup() -> None:
     do not rely solely on the ``/tmp/inner_20251002-213519`` integration
     fixture for this coverage.
     """
-    rec = struct.pack("<QIIhhhhhh", 1, 0, 0, 0, 0, 0, 0, 0, 0)
-    # parts: empty char, ":Account.1234", "subSquad"
-    name_raw = b"\x00:Account.1234\x00subSquad\x00"
-    assert len(name_raw) == 1 + 13 + 1 + 8 + 1  # 24 bytes
-    assert len(name_raw) <= AGENT_NAME_SIZE
-    name_buf = name_raw + b"\x00" * (AGENT_NAME_SIZE - len(name_raw))
-    blob = rec + name_buf
-    assert len(blob) == AGENT_SIZE
+    # Hand the empty-char-name quirk to the shared helper: an empty
+    # ``name`` (parts[0]) followed by ``:account`` (parts[1]) + ``subgroup``
+    # (parts[2]) is the same byte sequence as the manual packing below
+    # produces -- the helper centralises the null-padded combo string.
+    rec = _build_agent_record(
+        1,
+        0,
+        0,
+        "",
+        account_name=":Account.1234",
+        subgroup="subSquad",
+    )
+    assert len(rec) == AGENT_SIZE
     header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
-    fight = next(iter(PythonEvtcParser().parse(header + blob)))
+    fight = next(iter(PythonEvtcParser().parse(header + rec)))
     a = fight.agents[0]
     assert a.is_player is True
     assert a.name == ""
