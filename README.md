@@ -87,7 +87,7 @@ cd web && pnpm dev
 ✅ **Phase 0** — monorepo skeleton + tooling + scaffolding.
 ✅ **Phase 1** — first `EvtcParser` PartialImpl + read agents/skills from a real `.zevtc`. (V1.3 binary layout, 545-line synthetic + real-fixture test suite, lenient on the skill table, strict on agent boundaries.)
 ⏭ **Phase 2** — FastAPI gate, Alembic, MinIO content-addressed blobs, V1.3 schema (`fights`, `fight_agents`, `fight_skills`), 38-test pytest suite, env-driven credentials via `pydantic-settings` + `pytest-env`.
-🛠 **Phase 3** — `gw2_analytics` aggregations (single / multi-fight / per-player) + `gw2_api_client` consumption + `web` (Next.js 15) frontend wiring.
+⏭ **Phase 3** — `gw2_analytics` aggregations (single / multi-fight / per-player) + `gw2_api_client` consumption + `web` (Next.js 15) frontend wiring. (Started: `SingleFightAggregator` + `FightAggregate` contract landed in `libs/gw2_analytics/aggregate.py`; tagged `v0.1.0-analytics-prototype`.)
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the per-commit history.
 

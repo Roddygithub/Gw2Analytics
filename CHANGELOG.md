@@ -101,4 +101,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/tmp/inner_20251002-213519` (skipped if the fixture is absent).
 
 [Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/a67e672...HEAD
+## [0.1.0] - Phase 3 analytics prototype
+
+### Added
+
+- `libs/gw2_analytics/src/gw2_analytics/aggregate.py`: the Phase 3 starter.
+  Defines four frozen pydantic models and one stateless aggregator:
+
+  - `CombatantSummary`: one player-roster row mirroring parsed
+    ``Agent`` data but flattened (string-only subgroup; mandatory
+    colon-prefixed account_name; player-only).
+  - `SkillCatalogEntry`: one row of the fight\'s skill table
+    (skill_id + name).
+  - `GroupSummary`: per-subgroup roll-up (subgroup + combatant_count +
+    sorted account_names).
+  - `FightAggregate`: top-level denormalised view of one fight
+    (fight_id, encounter_id, agent_count, player_count + npc_count,
+    skill_count, combatants, groups, skill_catalog).
+  - `SingleFightAggregator.aggregate(fight: Fight) -> FightAggregate`:
+    the canonical entry-point. Deterministic ordering
+    (combatants by ``(account_name, name)``, groups by ``subgroup``,
+    catalog by ``skill_id``). Cross-field invariants
+    (``player + npc == agent``; ``skill_count == len(catalog)``;
+    group combatant counts match combatants in that bucket)
+    post-validated; violations raise ``ValueError``.
+
+- `libs/gw2_analytics/tests/test_aggregate.py`: 14-test unit suite
+  covering empty fight, single player, single NPC, mixed
+  players + NPC, deterministic ordering, group roll-up invariants,
+  empty-squad subgroup behaviour, frozen-pydantic semantics, and
+  ``Fight.id`` / ``encounter_id`` propagation.
+
+- `libs/gw2_analytics/src/gw2_analytics/__init__.py`: re-exports the
+  five new public symbols. ``__version__`` bumped to ``0.1.0``.
+
+- `libs/gw2_analytics/pyproject.toml`: version bumped ``0.0.1 -> 0.1.0``.
+
+### Notes
+
+- No event-stream consumer. Target-DPS, damage taken, healing and
+  other event-driven aggregates are out of scope for this slice
+  and land in a sibling module in a later phase.
+- Library surface is intentionally minimal so future
+  ``MultiFightAggregator`` / ``SingleEventAggregator`` siblings
+  can be added without breaking this contract.
+
 [0.4.0]: https://github.com/Roddygithub/Gw2Analytics/releases/tag/0.4.0
