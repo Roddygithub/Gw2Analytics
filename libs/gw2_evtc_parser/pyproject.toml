@@ -1,6 +1,6 @@
 [project]
 name = "gw2_evtc_parser"
-version = "0.0.1"
+version = "0.1.0"
 description = "arcdps EVTC binary parser. Behind EvtcParser Protocol — implementations are swappable."
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -9,6 +9,9 @@ dependencies = [
     "pydantic>=2.9",
     "gw2_core",
 ]
+
+[project.scripts]
+gw2-parser = "gw2_evtc_parser.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -19,3 +22,8 @@ packages = ["src/gw2_evtc_parser"]
 
 [tool.uv]
 package = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]

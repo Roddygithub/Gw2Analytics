@@ -7,8 +7,25 @@ produce these models. It MUST NOT import anyone else.
 
 from __future__ import annotations
 
-from gw2_core.models import Fight, GameType, Profession
+from gw2_core.models import (
+    Agent,
+    EliteSpec,
+    EvtcHeader,
+    Fight,
+    GameType,
+    Profession,
+    Skill,
+)
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
-__all__ = ["Fight", "GameType", "Profession", "__version__"]
+__all__ = [
+    "Agent",
+    "EliteSpec",
+    "EvtcHeader",
+    "Fight",
+    "GameType",
+    "Profession",
+    "Skill",
+    "__version__",
+]

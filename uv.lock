@@ -280,11 +280,16 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.9" }]
 
 [[package]]
 name = "gw2-evtc-parser"
-version = "0.0.1"
+version = "0.1.0"
 source = { editable = "libs/gw2_evtc_parser" }
 dependencies = [
     { name = "gw2-core" },
     { name = "pydantic" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -292,6 +297,9 @@ requires-dist = [
     { name = "gw2-core", editable = "libs/gw2_core" },
     { name = "pydantic", specifier = ">=2.9" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3" }]
 
 [[package]]
 name = "gw2analytics-api"

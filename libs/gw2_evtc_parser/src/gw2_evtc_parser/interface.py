@@ -8,30 +8,34 @@ zero changes elsewhere in the codebase.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import BinaryIO, Protocol, runtime_checkable
 
 from gw2_core import Fight
 
 
 @runtime_checkable
 class EvtcParser(Protocol):
-    """Read one .zevtc / .evtc file and yield domain combat entities.
+    """Read one EVTC binary stream and yield domain combat entities.
 
     Implementations are expected to be **stateless** and **stream-friendly**.
+
+    Note:
+        ``source`` is the **raw EVTC binary** (not the ``.zevtc`` zip wrap):
+        the caller is responsible for unpacking the archive when relevant
+        so that this Protocol stays transport-agnostic and future Rust
+        bindings do not need to reimplement zip support.
     """
 
     def supported_versions(self) -> frozenset[str]:
-        """EVTC version strings this parser can handle, e.g. {'EVTC20251123'}."""
+        """EVTC build-version strings (arcdps build date, yyyymmdd) that this parser can handle."""
         ...
 
-    def parse(self, source: Path) -> Iterator[Fight]:
-        """Yield every :class:`~gw2_core.Fight` contained in this source.
+    def parse(self, source: BinaryIO | bytes) -> Iterator[Fight]:
+        """Yield every :class:`~gw2_core.Fight` contained in this raw EVTC stream.
 
         Args:
-            source: Path to a `.zevtc` archive (one uncompressed `.evtc` inside)
-                or to a raw `.evtc` file on disk. Implementations decide
-                whether to read by chunks or memory-map the file.
+            source: Either raw EVTC bytes, or any seekable/readable
+                binary IO object exposing :py:meth:`read`.
         """
         ...
 
