@@ -13,9 +13,23 @@ repos:
         files: ^(libs|apps)/.*\.py$
         additional_dependencies:
           - pydantic
+          - pydantic-settings
           - sqlalchemy
           - alembic
           - fastapi
+          - pytest
+          - minio
+          - uvicorn
+        # ``--disable-error-code=misc`` silences two noise categories
+        # that fire in the pre-commit hook venv (a subset of the
+        # project's full workspace venv):
+        #   - "Class cannot subclass X (has type 'Any')" when a
+        #     third-party package lacks stubs in the hook venv
+        #   - "Untyped decorator" on pytest fixtures (pytest's
+        #     decorator types are not in the stdlib stubs)
+        # The project's own mypy run (``uv run mypy libs apps``) gets
+        # the full workspace venv and resolves these correctly.
+        args: [--disable-error-code=misc]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
