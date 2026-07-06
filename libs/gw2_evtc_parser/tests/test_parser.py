@@ -40,7 +40,6 @@ import pytest
 from gw2_core import EliteSpec, Profession
 from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
 from gw2_evtc_parser.parser import (
-    ACCOUNT_NAME_PREFIX,
     AGENT_COUNT_OFFSET,
     AGENT_NAME_SIZE,
     AGENT_PREFIX_SIZE,
@@ -86,9 +85,12 @@ def _build_agent_record(
         # NPC: single null-terminated string, null-padded to 68 bytes.
         raw = name.encode("utf-8") + b"\x00"
     else:
-        if not account_name.startswith(":"):
-            msg = f"account_name must start with {ACCOUNT_NAME_PREFIX!r}"
-            raise ValueError(msg)
+        # Player. Combo string ``name\0account\0sub\0``. We DELIBERATELY
+        # do not enforce the ``:`` prefix on account_name here: real arcdps
+        # revisions emit unprefixed accounts (see
+        # test_account_name_without_colon_is_accepted_as_player) and the
+        # parser's leniency class accepts them. Prefix enforcement belongs
+        # at the parser layer, not at the test fixture layer.
         raw = name.encode("utf-8") + b"\x00" + account_name.encode("utf-8") + b"\x00"
         if subgroup is not None:
             raw += subgroup.encode("utf-8") + b"\x00"
@@ -325,15 +327,17 @@ def test_account_name_without_colon_is_accepted_as_player() -> None:
     player signal; the leading ``:`` is a soft convention we surface
     as ``logger.debug`` rather than reject.
     """
-    rec = struct.pack("<QIIhhhhhh", 1, 0, 0, 0, 0, 0, 0, 0, 0)
-    # b"Name\x00no_colon\x00\x00" is 4 + 1 + 8 + 1 + 1 = 15 bytes.
-    name_raw = b"Name\x00no_colon\x00\x00"
-    assert len(name_raw) == 15
-    name_buf = name_raw + b"\x00" * (AGENT_NAME_SIZE - len(name_raw))
-    blob = rec + name_buf
-    assert len(blob) == AGENT_SIZE
+    rec = _build_agent_record(
+        1,
+        0,
+        0,
+        "Name",
+        account_name="no_colon",
+        # subgroup omitted intentionally -> helper writes a single \x00 tail
+    )
+    assert len(rec) == AGENT_SIZE
     header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
-    fight = next(iter(PythonEvtcParser().parse(header + blob)))
+    fight = next(iter(PythonEvtcParser().parse(header + rec)))
     a = fight.agents[0]
     assert a.is_player is True
     assert a.name == "Name"
@@ -343,14 +347,14 @@ def test_account_name_without_colon_is_accepted_as_player() -> None:
 
 def test_player_with_empty_account_name_and_subgroup() -> None:
     """Real arcdps WvW edge case: account_name is empty but subgroup is set."""
-    rec = struct.pack("<QIIhhhhhh", 1, 0, 0, 0, 0, 0, 0, 0, 0)
-    name_raw = b"Name\x00\x00sub\x00"
-    assert len(name_raw) == 10
-    name_buf = name_raw + b"\x00" * (AGENT_NAME_SIZE - len(name_raw))
-    blob = rec + name_buf
-    assert len(blob) == AGENT_SIZE
+    # Combo string ``Name\0\0sub\0`` -- the empty account_name bytes
+    # correspond to a ``None`` account_name at the parser layer; subgroup
+    # is what marks this record as a player. Helper reproduces the bytes
+    # verbatim.
+    rec = _build_agent_record(1, 0, 0, "Name", account_name="", subgroup="sub")
+    assert len(rec) == AGENT_SIZE
     header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
-    fight = next(iter(PythonEvtcParser().parse(header + blob)))
+    fight = next(iter(PythonEvtcParser().parse(header + rec)))
     a = fight.agents[0]
     assert a.is_player is True
     assert a.name == "Name"
@@ -398,12 +402,10 @@ def test_player_with_empty_char_name_but_valid_account_and_subgroup() -> None:
 
 
 def test_npc_with_fully_null_tail_after_name_is_npc() -> None:
-    rec = struct.pack("<QIIhhhhhh", 1, 0, 0, 0, 0, 0, 0, 0, 0)
-    name_buf = b"Mob\x00" + b"\x00" * (AGENT_NAME_SIZE - 4)
-    blob = rec + name_buf
-    assert len(blob) == AGENT_SIZE
+    rec = _build_agent_record(1, 0, 0, "Mob")
+    assert len(rec) == AGENT_SIZE
     header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
-    fight = next(iter(PythonEvtcParser().parse(header + blob)))
+    fight = next(iter(PythonEvtcParser().parse(header + rec)))
     a = fight.agents[0]
     assert a.is_player is False
     assert a.name == "Mob"
