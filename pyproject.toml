@@ -16,7 +16,8 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pre-commit>=4.0",
-    "httpx>=0.27",     # for tests
+    "httpx>=0.27", # for tests
+    "pytest-env>=1.6.0",
 ]
 
 [tool.uv.workspace]
@@ -52,22 +53,36 @@ select = [
     "F",   # pyflakes
     "I",   # isort
     "B",   # bugbear
-    "UP",  # pyupgrade
-    "S",   # flake8-bandit (security; S105 silenced per-file for the dev config)
+    "UP",  # pyupgrade    "S",   # flake8-bandit (security; no per-file carve-out needed since
+           # config.py migrated to fully env-driven credentials)
     "RUF", # ruff-specific
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# apps/api/src/gw2analytics_api/config.py holds the dev-only sentinels
-# (database_url, minio_secret_key) that the docker-compose stack
-# depends on. ``# TODO(#security): move to env-only in production``.
-"apps/api/src/gw2analytics_api/config.py" = ["S105"]
 # Tests can be more relaxed on naming + bandit (random data, asserts, etc.).
+# ``apps/**/config.py`` no longer needs an S105 carve-out: the file
+# migrated to fully env-driven credentials (see apps/api/src/.../config.py)
+# with no hardcoded sentinel values, so bandit can flag any future
+# regression at PR time.
 "**/tests/**/*.py" = ["S101", "S105", "S311", "PLR2004", "N801"]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# pytest-env: inject docker-compose dev credentials into ``os.environ`` at
+# session startup, so the test suite never depends on a hand-rolled
+# ``.env`` file. Values mirror the credentials declared in
+# ``docker-compose.yml`` for the postgres + minio services.
+# ---------------------------------------------------------------------------
+
+[tool.pytest_env]
+DATABASE_URL = "postgresql+psycopg://gw2analytics:gw2analytics@localhost:5432/gw2analytics"
+S3_ENDPOINT = "localhost:9000"
+S3_ACCESS_KEY = "gw2analytics"
+S3_SECRET_KEY = "gw2analytics-secret"
+S3_BUCKET = "gw2analytics"
 
 # ---------------------------------------------------------------------------
 # Mypy: project-wide type-check config. Per-package overrides live in
