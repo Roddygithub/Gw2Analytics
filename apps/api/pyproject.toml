@@ -16,6 +16,7 @@ dependencies = [
     "alembic>=1.13",
     "minio>=7.2",
     "python-multipart>=0.0.20",
+    "fastapi-mcp>=0.1",
     "httpx>=0.27",
     "gw2_core",
     "gw2_evtc_parser",

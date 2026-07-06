@@ -584,6 +584,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "fastapi-mcp", specifier = ">=0.1" },
     { name = "fastapi-mcp", specifier = ">=0.4" },
     { name = "gw2-core", editable = "libs/gw2_core" },
     { name = "gw2-evtc-parser", editable = "libs/gw2_evtc_parser" },
