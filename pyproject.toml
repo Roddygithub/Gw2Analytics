@@ -36,3 +36,56 @@ gw2_api_client = { workspace = true }
 
 [tool.uv]
 package = false
+
+# ---------------------------------------------------------------------------
+# Ruff: project-wide lint config (applies to every workspace member).
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Sensible default rule set; members can extend via their own pyproject.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "S",   # flake8-bandit (security; S105 silenced per-file for the dev config)
+    "RUF", # ruff-specific
+]
+
+[tool.ruff.lint.per-file-ignores]
+# apps/api/src/gw2analytics_api/config.py holds the dev-only sentinels
+# (database_url, minio_secret_key) that the docker-compose stack
+# depends on. ``# TODO(#security): move to env-only in production``.
+"apps/api/src/gw2analytics_api/config.py" = ["S105"]
+# Tests can be more relaxed on naming + bandit (random data, asserts, etc.).
+"**/tests/**/*.py" = ["S101", "S105", "S311", "PLR2004", "N801"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# Mypy: project-wide type-check config. Per-package overrides live in
+# each member's pyproject.toml.
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.12"
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+# ``fastapi_mcp`` is imported in main.py and used at runtime
+# (FastApiMCP(app).mount()) but ships no type stubs. Silence the
+# import-untyped warning so the project's own mypy run stays clean.
+# The pre-commit mypy hook reads this same pyproject.toml.
+
+[[tool.mypy.overrides]]
+module = ["fastapi_mcp"]
+ignore_missing_imports = true
