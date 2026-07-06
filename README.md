@@ -57,10 +57,15 @@ uv run pre-commit install
 # 4. Bring up the infra (Postgres + MinIO + Redis)
 docker compose up -d
 
-# 5. Boot the API (http://localhost:8000/docs)
+# 5. Configure local app env
+#    Required so the FastAPI process picks up DATABASE_URL + S3_* creds.
+#    Values mirror docker-compose.yml; never commit the real .env file.
+cp .env.example .env
+
+# 6. Boot the API (http://localhost:8000/docs)
 uv run fastapi dev apps/api/src/gw2analytics_api/main.py
 
-# 6. Boot the frontend (http://localhost:3000)
+# 7. Boot the frontend (http://localhost:3000)
 cd web && pnpm dev
 ```
 
