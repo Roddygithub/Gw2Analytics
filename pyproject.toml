@@ -53,8 +53,9 @@ select = [
     "F",   # pyflakes
     "I",   # isort
     "B",   # bugbear
-    "UP",  # pyupgrade    "S",   # flake8-bandit (security; no per-file carve-out needed since
-           # config.py migrated to fully env-driven credentials)
+    "UP", # pyupgrade
+    "S",  # flake8-bandit (security; no per-file carve-out needed since
+          # config.py migrated to fully env-driven credentials)
     "RUF", # ruff-specific
 ]
 
