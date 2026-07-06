@@ -1,5 +1,7 @@
 # GW2Analytics
 
+[![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
+
 Modern combat analytics platform for **Guild Wars 2 WvW** (World vs World).
 
 > Independent of any third-party service (no dps.report, no Elite Insights web, etc.).
