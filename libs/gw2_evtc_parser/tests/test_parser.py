@@ -46,6 +46,7 @@ from gw2_evtc_parser.parser import (
     AGENT_PREFIX_SIZE,
     AGENT_SIZE,
     HEADER_SIZE,
+    MAX_SKILL_NAME_BYTES,
     SKILL_COUNT_OFFSET,
 )
 
@@ -447,7 +448,6 @@ def test_synthetic_skill_name_too_long_stops_early() -> None:
     Lenient: the parser yields whatever skills it read so far and
     stops. The remaining ``header.skill_count`` slots are abandoned.
     """
-    from gw2_evtc_parser.parser import MAX_SKILL_NAME_BYTES
 
     # First a valid skill, then a corrupt one (name_len too large).
     good_skill = _build_skill_record(1, "Whirlwind")
@@ -525,7 +525,11 @@ def test_real_evtc_binary_parses_with_realistic_agent_count() -> None:
     for p in players:
         assert p.account_name is not None
         assert p.account_name, f"player {p.id} has empty account_name"
-        assert p.name, f"player {p.id} has empty name"
+        # NOTE: we deliberately do NOT assert ``p.name`` here. Real
+        # arcdps WvW logs can emit a player record with an empty
+        # char-name buffer (the 68-byte name is fully null) but a
+        # valid account_name. The account_name is the authoritative
+        # player identifier; the char name is best-effort.
     for a in fight.agents:
         if not a.is_player:
             assert a.account_name is None

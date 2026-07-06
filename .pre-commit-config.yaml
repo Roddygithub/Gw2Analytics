@@ -17,6 +17,7 @@ repos:
           - sqlalchemy
           - alembic
           - fastapi
+          - fastapi-mcp
           - pytest
           - minio
           - uvicorn
