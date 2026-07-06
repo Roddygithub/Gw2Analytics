@@ -497,7 +497,7 @@ wheels = [
 
 [[package]]
 name = "gw2-analytics"
-version = "0.0.1"
+version = "0.1.0"
 source = { editable = "libs/gw2_analytics" }
 dependencies = [
     { name = "gw2-core" },
