@@ -1,0 +1,16 @@
+# Caddy reverse-proxy for self-hosted deployment.
+# Replace *placeholder.tld with your real domain in production.
+
+(common) {
+    encode gzip zstd
+}
+
+api.placeholder.tld {
+    import common
+    reverse_proxy localhost:8000
+}
+
+placeholder.tld {
+    import common
+    reverse_proxy localhost:3000
+}

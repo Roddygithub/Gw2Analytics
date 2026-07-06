@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+*.manifest
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.hypothesis/
+htmlcov/
+dist/
+build/
+
+# uv
+.venv/
+
+# Environment (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# IDE / editor
+.vscode/
+.idea/
+.fleet/
+*.swp
+*.swo
+.DS_Store
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.tsbuildinfo
+next-env.d.ts
+
+# Local infra data
+data/
+logs/
+
+# OS
+Thumbs.db
