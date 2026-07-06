@@ -146,4 +146,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``MultiFightAggregator`` / ``SingleEventAggregator`` siblings
   can be added without breaking this contract.
 
+## [0.2.0] - Phase 3 depth: multi-fight rollup
+
+### Added
+
+- ``libs/gw2_analytics/src/gw2_analytics/multi_fight.py``: the Phase 3
+  depth sibling of the single-fight aggregator. Defines two frozen
+  pydantic models + one stateless aggregator:
+
+  - ``CombatantRollup``: per-account attendance + identity roll-up.
+    ``account_name`` + ``name`` (last-seen char-name) + ``profession``
+    (first-seen) + ``elite`` (first-seen) + ``player_attendance``.
+    Keyed on ``account_name`` -- one row per stable account across
+    multiple fights (not one row per agent-record).
+  - ``MultiFightAggregate``: ``fight_ids`` (sorted ascending unique
+    fight ids) + ``total_agents`` + ``total_players`` +
+    ``combatant_rollups`` (sorted by ``account_name``).
+  - ``MultiFightAggregator.aggregate(fights: Iterable[Fight]) -> MultiFightAggregate``:
+    deterministic ordering; cross-field invariants
+    (``total_players == sum(player_attendance)``,
+    ``attendance <= len(fight_ids)``,
+    ``combatant_rollups`` ordered by ``account_name``,
+    ``fight_ids`` strictly ascending) post-validated; violations
+    raise ``ValueError``.
+
+- ``libs/gw2_analytics/tests/test_multi_fight.py``: 12-test
+  unit suite covering empty input, single fight, disjoint
+  fights, overlapping fights (verify ``name`` = last-seen
+  + ``profession``/``elite`` = first-seen), full attendance,
+  duplicate ``Fight.id`` (with ``caplog``-asserted warning),
+  empty-agents drop, all-NPC runs, deterministic ordering,
+  frozen-pydantic semantics, lenient-parser WvW ``account_name=None``
+  quirk filter, and cross-fight math sums over a 3-fight mixed
+  player/NPC run.
+
+- ``libs/gw2_analytics/src/gw2_analytics/__init__.py``: re-exports
+  ``CombatantRollup``, ``MultiFightAggregate``,
+  ``MultiFightAggregator``.
+
+- ``libs/gw2_analytics/pyproject.toml``: version bumped 0.1.0 -> 0.2.0.
+
+### Changed
+
+- ``libs/gw2_analytics/src/gw2_analytics/__init__.py``:
+  ``__version__`` bumped to ``0.2.0``.
+
+### Notes
+
+- Per-fight rollups reuse ``SingleFightAggregator.aggregate(fight)``
+  internally, so the WvW empty-account quirk filter and the strict
+  ``player_count + npc_count == agent_count`` invariant are unchanged.
+- Empty-agents fights are silently dropped (their ``Fight.id`` does
+  not appear in ``fight_ids``). Duplicate ``Fight.id`` is silently
+  skipped with a ``logging.warning``.
+- MultiFight surface is intentionally narrow. Event-derived
+  aggregations (``EventWindowAggregator``, ``TargetDpsAggregator``)
+  drop into new files in a later phase.
 [0.4.0]: https://github.com/Roddygithub/Gw2Analytics/releases/tag/0.4.0
