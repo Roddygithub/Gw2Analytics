@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from gw2_evtc_parser.exceptions import EvtcBaseError, EvtcParseError, UnsupportedVersionError
 from gw2_evtc_parser.interface import EvtcParser
-from gw2_evtc_parser.parser import PythonEvtcParser, read_zevtc_archive
+from gw2_evtc_parser.parser import PythonEvtcParser, read_zevtc_archive, read_zevtc_bytes
 
 __version__ = "0.1.0"
 
@@ -21,4 +21,5 @@ __all__ = [
     "UnsupportedVersionError",
     "__version__",
     "read_zevtc_archive",
+    "read_zevtc_bytes",
 ]

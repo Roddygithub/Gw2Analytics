@@ -1,21 +1,41 @@
-"""FastAPI application factory and route registrations.
+"""FastAPI application entrypoint.
 
-Only the :func:`app` instance is exported. New routes / dependencies
-are wired in :mod:`.routers` (added in subsequent phases).
+Wiring lives here; routes import no FastAPI primitives, only their
+sub-router. We expose CORS, ``/healthz``, and the v1 routers.
 """
 
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from gw2analytics_api.routes import fights, uploads
 
 app = FastAPI(
     title="GW2Analytics API",
-    version="0.0.1",
-    description="WvW combat analytics for Guild Wars 2.",
+    description=(
+        "WvW combat-log ingestion + analytics. Wires gw2_evtc_parser behind "
+        "a MinIO blob store and Postgres fight tables (Phase 2)."
+    ),
+    version="0.1.0",
+)
+
+# CORS — wide-open for local dev; tighten in production (Phase 3).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
-@app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    """Liveness probe. Returns OK if the process is alive."""
+@app.get("/healthz", include_in_schema=False)
+def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+app.include_router(uploads.router)
+app.include_router(fights.router)
+
+
+__all__ = ["app"]

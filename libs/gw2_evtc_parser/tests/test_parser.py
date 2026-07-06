@@ -12,9 +12,9 @@ Strategy
    earlier diagnostic). This guards against the synthetic fixture being
    too clean.
 
-The header layout was corrected in commit 1c89b7c → next: arcdps
-header is 20 bytes total, with agent_count u32 at offset 16 and
-agents starting at offset 20.
+The header layout corrected in commit 1c89b7c: arcdps header is 20
+bytes total, with ``agent_count`` u32 at offset 16 and agents starting
+at offset 20.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 
 from gw2_core import EliteSpec, Profession
-from gw2_evtc_parser import EvtcParseError, PythonEvtcParser
+from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
 from gw2_evtc_parser.parser import AGENT_COUNT_OFFSET, HEADER_SIZE
 
 # ---------------------------------------------------------------------------
@@ -163,10 +163,8 @@ def test_zevtc_archive_is_unpacked_and_parsed() -> None:
         [(1, Profession.MESMER.value, EliteSpec.CHRONOMANCER.value, "Chrono", True)],
     )
     zevtc = _wrap_zevtc(evtc)
-    inner = None
     with zipfile.ZipFile(BytesIO(zevtc)) as zf:
         inner = zf.read("fight.evtc")
-    assert inner is not None
     fight = next(iter(PythonEvtcParser().parse(inner)))
     assert fight.agents[0].name == "Chrono"
     assert fight.agents[0].profession == Profession.MESMER
@@ -192,9 +190,37 @@ def test_layout_constants_match_real_arcdps_v0() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Real-file integration (skipped if fixture absent)
+# read_zevtc_bytes
 # ---------------------------------------------------------------------------
 
+
+def test_read_zevtc_bytes_extracts_inner_evtc() -> None:
+    """``read_zevtc_bytes`` is the bytes-equivalent of ``read_zevtc_archive``."""
+    inner = struct.pack("<4s8sBHBI", b"EVTC", b"20250925", 0, 0, 0, 0)
+    zevtc = _wrap_zevtc(inner)
+    assert read_zevtc_bytes(zevtc) == inner
+    # Round-trip with the parser itself.
+    fight = next(iter(PythonEvtcParser().parse(read_zevtc_bytes(zevtc))))
+    assert fight.header is not None
+    assert fight.header.build_version == "20250925"
+
+
+def test_read_zevtc_bytes_raises_on_bogus_zip() -> None:
+    with pytest.raises(EvtcParseError, match="not a valid"):
+        read_zevtc_bytes(b"not a zip")
+
+
+def test_read_zevtc_bytes_raises_on_empty_zip() -> None:
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w"):  # empty archive
+        pass
+    with pytest.raises(EvtcParseError, match="empty"):
+        read_zevtc_bytes(buf.getvalue())
+
+
+# ---------------------------------------------------------------------------
+# Real-file integration (skipped if fixture absent)
+# ---------------------------------------------------------------------------
 
 _REAL_FIXTURE = Path("/tmp/inner_20251002-213519")  # noqa: S108 (test-only diagnostic fixture)
 
@@ -203,7 +229,7 @@ _REAL_FIXTURE = Path("/tmp/inner_20251002-213519")  # noqa: S108 (test-only diag
 @pytest.mark.xfail(
     reason=(
         "V0 _AGENT_STRUCT (<QII64s) is misaligned with real arcdps agent-record "
-        "layout; reading names/professions accurately is deferred to Phase 2."
+        "layout; reading names/professions accurately is deferred to Phase 2+."
     ),
     strict=False,
 )

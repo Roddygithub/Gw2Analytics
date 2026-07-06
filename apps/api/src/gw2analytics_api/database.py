@@ -1,0 +1,58 @@
+"""SQLAlchemy 2.0 engine, sessionmaker, and declarative base.
+
+Engine is constructed **lazily** so importing this module does not require
+the database to be reachable. The :func:`get_session` dependency is what
+FastAPI routes use; tests can call it directly.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+
+from sqlalchemy import Engine, create_engine
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+from gw2analytics_api.config import get_settings
+
+
+class Base(DeclarativeBase):
+    """Declarative base for every ORM model in this app."""
+
+
+_engine: Engine | None = None
+_SessionLocal: sessionmaker[Session] | None = None
+
+
+def get_engine() -> Engine:
+    """Return the process-wide SQLAlchemy engine, built on first call."""
+    global _engine  # noqa: PLW0603 -- intentional lazy init
+    if _engine is None:
+        settings = get_settings()
+        _engine = create_engine(
+            settings.database_url,
+            future=True,
+            pool_pre_ping=True,
+        )
+    return _engine
+
+
+def get_sessionmaker() -> sessionmaker[Session]:
+    """Return the process-wide sessionmaker."""
+    global _SessionLocal  # noqa: PLW0603
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(
+            bind=get_engine(),
+            autocommit=False,
+            autoflush=False,
+            expire_on_commit=False,
+        )
+    return _SessionLocal
+
+
+def get_session() -> Iterator[Session]:
+    """FastAPI dependency yielding a SQLAlchemy Session per request."""
+    session = get_sessionmaker()()
+    try:
+        yield session
+    finally:
+        session.close()

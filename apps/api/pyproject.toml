@@ -1,7 +1,7 @@
 [project]
 name = "gw2analytics_api"
-version = "0.0.1"
-description = "FastAPI gateway for GW2Analytics. Thin layer: serializes gw2_core."
+version = "0.1.0"
+description = "FastAPI app for GW2Analytics. Wires gw2_core + gw2_evtc_parser behind endpoints."
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "GW2Analytics team" }]
@@ -11,15 +11,19 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0",
-    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.13",
+    "minio>=7.2",
+    "python-multipart>=0.0.20",
+    "httpx>=0.27",
     "gw2_core",
     "gw2_evtc_parser",
-    "gw2_analytics",
-    "gw2_api_client",
 ]
 
-# Dev tools declared at root [dependency-groups] dev (no duplicate here).
-# apps/api only declares production runtime deps.
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
 
 [build-system]
 requires = ["hatchling"]

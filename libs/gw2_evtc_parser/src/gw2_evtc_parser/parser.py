@@ -24,6 +24,7 @@ This module conforms to :class:`~gw2_evtc_parser.interface.EvtcParser`.
 from __future__ import annotations
 
 import hashlib
+import io
 import struct
 import zipfile
 from collections.abc import Iterator
@@ -97,7 +98,9 @@ class PythonEvtcParser:
         """Yield :class:`Fight` records from a raw EVTC binary stream.
 
         V0 yields exactly one Fight per file (arcdps logs record a single
-        combat encounter).
+        combat encounter). The bytes passed in must be the *inner* EVTC
+        blob — use :func:`read_zevtc_archive` or :func:`read_zevtc_bytes`
+        to unwrap a ``.zevtc`` zip first.
         """
         data = _read_all(source)
         return _iter_fights(data)
@@ -210,8 +213,16 @@ def _parse_agent(data: bytes, offset: int) -> Agent:
 # ---------------------------------------------------------------------------
 
 
+def _first_entry(zf: zipfile.ZipFile) -> bytes:
+    """Return the bytes of the first entry in an open zip."""
+    names = zf.namelist()
+    if not names:
+        raise EvtcParseError("zevtc has no entries (empty zip)")
+    return zf.read(names[0])
+
+
 def read_zevtc_archive(path: Path) -> bytes:
-    """Open a ``.zevtc`` (zip) and return the inner EVTC blob.
+    """Open a ``.zevtc`` (zip) on disk and return the inner EVTC blob.
 
     The inner file is conventionally named ``fight.evtc`` or — for newer
     arcdps releases — the timestamp string (e.g. ``20251002-213519``).
@@ -219,12 +230,24 @@ def read_zevtc_archive(path: Path) -> bytes:
     """
     try:
         with zipfile.ZipFile(path, "r") as zf:
-            names = zf.namelist()
-            if not names:
-                raise EvtcParseError(f"{path} is an empty zip")
-            return zf.read(names[0])
+            return _first_entry(zf)
     except zipfile.BadZipFile as exc:
         raise EvtcParseError(f"{path} is not a valid zip archive: {exc}") from exc
+
+
+def read_zevtc_bytes(data: bytes) -> bytes:
+    """Open an in-memory ``.zevtc`` (zip) blob and return its inner EVTC.
+
+    Bytes-equivalent of :func:`read_zevtc_archive`. Use when callers
+    already hold the zip bytes (FastAPI upload handlers, FaaS payloads,
+    CLI stdin). Reads the first entry — arcdps ``.zevtc`` files always
+    contain exactly one. ``zipfile.is_zipfile`` is used to discriminate
+    so we accept zip64 / PK\\x05\\x06 archives too.
+    """
+    if not zipfile.is_zipfile(io.BytesIO(data)):
+        raise EvtcParseError("not a valid .zevtc zip archive")
+    with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
+        return _first_entry(zf)
 
 
 # Re-export the public header for downstream imports.
@@ -233,4 +256,5 @@ __all__ = [
     "HEADER_SIZE",
     "PythonEvtcParser",
     "read_zevtc_archive",
+    "read_zevtc_bytes",
 ]
