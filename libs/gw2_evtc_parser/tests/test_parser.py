@@ -358,6 +358,40 @@ def test_player_with_empty_account_name_and_subgroup() -> None:
     assert a.subgroup == "sub"
 
 
+def test_player_with_empty_char_name_but_valid_account_and_subgroup() -> None:
+    """WvW arcdps edge case: empty ``char_name`` (parts[0]) but a valid
+    ``account_name`` (parts[1]) and a non-empty ``subgroup`` (parts[2]).
+
+    Distinct from ``test_player_with_empty_account_name_and_subgroup`` which
+    zeroes out parts[1] instead: here parts[0] is empty. Per the parser's
+    documented leniency class (parser.py ``_decode_agent``), an agent is
+    classified as a player when EITHER ``raw_account`` (parts[1]) OR
+    ``raw_subgroup`` (parts[2]) is non-empty -- so an empty char_name
+    alone does NOT downgrade the agent to NPC.
+
+    This locks down the real arcdps WvW quirk (a player record whose
+    68-byte name buffer starts with a null char-name but carries a
+    valid ``:account`` + ``\\subgroup`` tail) at unit-test level so we
+    do not rely solely on the ``/tmp/inner_20251002-213519`` integration
+    fixture for this coverage.
+    """
+    rec = struct.pack("<QIIhhhhhh", 1, 0, 0, 0, 0, 0, 0, 0, 0)
+    # parts: empty char, ":Account.1234", "subSquad"
+    name_raw = b"\x00:Account.1234\x00subSquad\x00"
+    assert len(name_raw) == 1 + 13 + 1 + 8 + 1  # 24 bytes
+    assert len(name_raw) <= AGENT_NAME_SIZE
+    name_buf = name_raw + b"\x00" * (AGENT_NAME_SIZE - len(name_raw))
+    blob = rec + name_buf
+    assert len(blob) == AGENT_SIZE
+    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
+    fight = next(iter(PythonEvtcParser().parse(header + blob)))
+    a = fight.agents[0]
+    assert a.is_player is True
+    assert a.name == ""
+    assert a.account_name == ":Account.1234"
+    assert a.subgroup == "subSquad"
+
+
 def test_npc_with_fully_null_tail_after_name_is_npc() -> None:
     rec = struct.pack("<QIIhhhhhh", 1, 0, 0, 0, 0, 0, 0, 0, 0)
     name_buf = b"Mob\x00" + b"\x00" * (AGENT_NAME_SIZE - 4)
