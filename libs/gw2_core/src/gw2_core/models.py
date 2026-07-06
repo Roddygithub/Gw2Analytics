@@ -1,14 +1,26 @@
-"""Pydantic models for GW2 combat data.
+"""Pydantic models for GW2 combat data + the official v2 API.
 
 This module is the **stable internal data model** of the application.
 Nothing else may import from another domain to define a model. Other
 packages may only consume or produce these shapes.
+
+Two model families live here:
+
+1. **Combat-data models** (`Agent`, `Skill`, `Fight`, etc.) -- the
+   parser / analytics layer's vocabulary.
+
+2. **API-data models** (`AccountInfo`, `WorldInfo`, `Population`)
+   -- the cross-cutting shapes needed for downstream enrichment (the
+   v2 REST API's ``account`` and ``worlds`` endpoints). The
+   ``gw2_api_client`` library OO-wraps the HTTP calls but delegates
+   the shape definitions here so ``gw2_analytics`` can consume them
+   without importing the HTTP client.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,7 +53,7 @@ class EliteSpec(IntEnum):
 
     Integer values mirror ``arcdps`` bytes 12-15. Values are taken from the
     Elite Insights / GW2 wiki mapping. The catalogue is intentionally
-    incomplete — unknown values fall back to :attr:`UNKNOWN` at parse time.
+    incomplete -- unknown values fall back to :attr:`UNKNOWN` at parse time.
 
     NOTE: Some older ``arcdps`` revisions write legacy IDs that no longer
     match the current catalogue (e.g. Druid = 5 reused for Soulbeast in
@@ -94,6 +106,16 @@ class GameType(IntEnum):
     WVW = 1
     PVE = 2
     PVP = 3
+
+
+class Population(StrEnum):
+    """GW2 world population state. Capitalised exactly as the v2 API emits."""
+
+    LOW = "Low"
+    MEDIUM = "Medium"
+    HIGH = "High"
+    VERY_HIGH = "VeryHigh"
+    FULL = "Full"
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +176,7 @@ class Agent(BaseModel):
 class Skill(BaseModel):
     """One skill/buff used or referenced during the fight.
 
-    V0 keeps this contract minimal — the parser does not yet expand skill
+    V0 keeps this contract minimal -- the parser does not yet expand skill
     names because none of V0 metrics need skill-name attribution.
     """
 
@@ -192,12 +214,60 @@ class Fight(BaseModel):
     skills: list[Skill] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# API-data models (gw2 v2 REST API surface -- consumed by gw2_api_client
+# + gw2_analytics for cross-fight enrichment via the v2 worlds index)
+# ---------------------------------------------------------------------------
+
+
+class AccountInfo(BaseModel):
+    """The authenticated GW2 account, returned by ``GET /v2/account``.
+
+    Distinct from :class:`Agent` (arcdps EVTC agent) -- this is the
+    authoritative GW2 v2 API view of the linked account.
+
+    The model uses ``extra="ignore"`` rather than ``extra="forbid"``
+    so the v2 API can grow new fields without breaking the library;
+    unknown keys are silently dropped at validation time.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    #: Account GUID (e.g. ``"ABC12345-1234-5678-9ABC-DEF123456789"``).
+    id: str = Field(..., min_length=1)
+    #: Account name (no ``:`` prefix -- this is the v2 API convention,
+    #: not arcdps, so analytics has to add the prefix when joining).
+    name: str = Field(..., min_length=1)
+    #: World the account is currently on. Renamed ``world`` -> ``world_id``
+    #: via Pydantic ``alias`` so the surface uses the analyst-friendly
+    #: name while the wire format stays aligned with the API.
+    world_id: int = Field(..., alias="world", ge=1)
+
+
+class WorldInfo(BaseModel):
+    """One world record, returned by ``GET /v2/worlds[?ids=...]``.
+
+    Distinct from ``AccountInfo.world_id`` -- ``WorldInfo`` describes
+    ONE world (id + name + population); ``AccountInfo`` references one
+    by its ``world_id`` foreign key.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    id: int = Field(..., ge=1)
+    name: str = Field(..., min_length=1)
+    population: Population
+
+
 __all__ = [
+    "AccountInfo",
     "Agent",
     "EliteSpec",
     "EvtcHeader",
     "Fight",
     "GameType",
+    "Population",
     "Profession",
     "Skill",
+    "WorldInfo",
 ]

@@ -81,6 +81,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No hardcoded credentials remain anywhere in the source tree.
 
+## [0.2.0] - gw2_core 0.2.0: API-data models (Phase 4 prep)
+
+### Added
+
+- `libs/gw2_core/src/gw2_core/models.py`: three new pydantic
+  models for the Guild Wars 2 v2 REST API surface, exposed so the
+  `gw2_api_client` (this commit) and a future `gw2_analytics`
+  enrichment consumer can share an authoritative contract without
+  the analytics layer having to import the HTTP client.
+
+  - `Population` (`StrEnum`): the five bucket values (`Low`,
+    `Medium`, `High`, `VeryHigh`, `Full`) -- capitalised exactly as
+    the v2 API emits them so round-tripping through
+    `WorldInfo.model_validate(...)` round-trips losslessly.
+  - `AccountInfo`: the authenticated account returned by
+    `GET /v2/account`. `extra="ignore"` (rather than
+    `extra="forbid"`) so the v2 API can grow new fields without
+    breaking the library; the wire-format `world` field is renamed
+    `world_id` via Pydantic `alias="world"` so the analyst-friendly
+    foreign key survives the rename at validation time.
+  - `WorldInfo`: one row from `GET /v2/worlds[?ids=...]`
+    (id + name + Population). Id is a strict `>= 1` positive int
+    foreign key.
+
+- `libs/gw2_core/src/gw2_core/__init__.py`: re-exports
+  `AccountInfo`, `WorldInfo`, `Population`. `__version__` bumped
+  to `0.2.0`.
+
+- `libs/gw2_core/pyproject.toml`: version bumped `0.0.1 -> 0.2.0`.
+
+## [0.1.0] - gw2_api_client 0.1.0: typed async v2 wrapper (Phase 4)
+
+### Added
+
+- `libs/gw2_api_client/pyproject.toml`: hatchling backend, depends
+  on `gw2_core>=0.2.0` + `httpx>=0.27`. Declared
+  `gw2_api_client = ["S101"]` in `[tool.ruff.lint.per-file-ignores]`
+  (the `assert` in tests).
+
+- `libs/gw2_api_client/src/gw2_api_client/exceptions.py`: a typed
+  exception hierarchy rooted at `GuildWars2ClientError`. The
+  hierarchy deliberately does NOT inherit from `httpx`'s
+  exceptions so a future transport swap (aiohttp / urllib3) does
+  not bleed into the public surface.
+
+  - `MissingApiKeyError` -- raised by `from_env()` when the
+    configured env var is unset / empty.
+  - `GuildWars2HttpError` -- any non-2xx that is not 429 (401, 403,
+    404, 5xx); also wraps transport errors (`httpx.HTTPError`
+    subclasses) so callers see a transport-agnostic surface.
+  - `GuildWars2RateLimitError` -- 429 retry budget exhausted
+    (after `_MAX_RATE_LIMIT_RETRIES = 3` attempts).
+
+- `libs/gw2_api_client/src/gw2_api_client/client.py`: the v2 REST
+  API wrapper. Two public surfaces:
+
+  - `GuildWars2Client` -- a `typing.Protocol` with three members
+    (`supported_endpoints()`, `account_get()`,
+    `worlds_get(ids)`). Future sync / cached / batched
+    implementations can satisfy this Protocol without test
+    rewrites.
+  - `AsyncGuildWars2Client` -- the only implementation shipped
+    today. Stateless from the caller's perspective; owns one
+    `httpx.AsyncClient` connection pool; always use as an
+    `async with` so the pool closes deterministically on exit.
+
+  Rate-limit policy: 3 attempts total with exponential backoff
+  (0.5s, 1.0s, 2.0s) before `GuildWars2RateLimitError` is raised.
+  `worlds_get([])` short-circuits client-side (no HTTP round-trip
+  -- the v2 API rejects empty `ids=` with a 400). `account_get()`
+  has 401 specifically mapped to `GuildWars2HttpError` (auth
+  required). `from_env()` reads `GW2_API_KEY` (or an override env
+  var) and raises `MissingApiKeyError` on absence.
+
+- `libs/gw2_api_client/src/gw2_api_client/__init__.py`: re-exports
+  the Protocol, the async implementation, the four exception
+  classes. `__version__ = "0.1.0"`.
+
+- `libs/gw2_api_client/tests/test_client.py`: 12-test unit suite
+  using `respx` to mock `httpx` end-to-end (no real network
+  calls). Covers:
+
+  - `account_get` happy path (alias rename `world` -> `world_id`
+    survives), 401 -> `GuildWars2HttpError`, transport error
+    -> `GuildWars2HttpError`, 3x 429 -> `GuildWars2RateLimitError`
+    after 3 attempts, 2x 429 then 200 -> success on attempt 2.
+  - `worlds_get([])` short-circuits without HTTP, happy path
+    round-trips `Population.HIGH` and `Population.MEDIUM`.
+  - `from_env` with / without `GW2_API_KEY` (missing -> the
+    typed error).
+  - `supported_endpoints()` returns the (`account`, `worlds`)
+    tuple.
+  - async context manager enters + exits cleanly.
+
+### Changed
+
+- `pyproject.toml`: dev dependency group gained
+  `pytest-asyncio>=0.24` + `respx>=0.21`. `[tool.pytest.ini_options]`
+  sets `asyncio_mode = "strict"` so async tests require an
+  explicit `@pytest.mark.asyncio` (the test suite uses strict
+  mode markers throughout).
+
+- `uv.lock`: bumped to reflect the new gw2_core 0.2.0 +
+  gw2_api_client 0.1.0 versions and the new dev deps.
+
+### Notes
+
+- Only the V1 minimum API surface (`/v2/account` + `/v2/worlds`)
+  is exposed. A future `/v2/commerce` / `/v2/account/achievements`
+  endpoint just needs a new method on the Protocol + a row in
+  `supported_endpoints()`.
+- The Protocol is deliberately not `@runtime_checkable`
+  (async methods break the runtime check); tests duck-type against
+  it instead.
+- Library ships one `NullHandler` no-op by convention so
+  downstream apps that haven't configured logging don't see
+  `logger.warning(...)` calls propagate up to the root logger.
+
 ## [0.4.0] - Phase 1 parser landed
 
 ### Added
