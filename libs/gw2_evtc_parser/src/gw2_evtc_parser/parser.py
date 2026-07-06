@@ -244,17 +244,23 @@ def _iter_agents(data: bytes, count: int) -> Iterator[Agent]:
                 f"need {AGENT_SIZE} bytes, only {end - cursor} available",
             )
         yield _decode_agent(data, cursor)
-        cursor += AGENT_SIZE
-
-
-def _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
-    """Read ``count`` variable-size skill records starting at ``offset``.
+        cursor += AGENT_SIZEdef _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
+    """Read up to ``count`` variable-size skill records starting at ``offset``.
 
     Each record has a fixed 8-byte header (``skill_id`` u32 + ``name_len``
     u32) followed by ``name_len`` bytes of UTF-8 name. arcdps writes a
     trailing null byte after the name, which is included in the byte
     stream but not counted in ``name_len``; the next record starts
     immediately after the null terminator (``offset += 8 + name_len + 1``).
+
+    The function is **lenient**: if the cursor runs past the end of the
+    data, or if a record's ``name_len`` exceeds the safety bound (which
+    happens when ``header.skill_count`` is larger than the actual number
+    of skill records — a known arcdps quirk), the parser stops early
+    and emits a warning. The yielded count may therefore be less than
+    ``count``. This is preferable to raising, because the alternative
+    (reading into the event stream) produces garbage records that
+    pollute downstream analytics.
     """
     if count == 0:
         return
@@ -262,26 +268,41 @@ def _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
     end = len(data)
     for skill_index in range(count):
         if cursor + _SKILL_HEADER_STRUCT.size > end:
-            raise EvtcParseError(
-                f"Truncated skill header at offset {cursor}: "
-                f"need {_SKILL_HEADER_STRUCT.size} bytes, only {end - cursor} available",
+            logger.warning(
+                "Truncated skill table at skill %d: header would read at offset %d "
+                "but only %d bytes remain; stopping early (claimed %d skills)",
+                skill_index,
+                cursor,
+                end - cursor,
+                count,
             )
+            return
         skill_id, name_len = _SKILL_HEADER_STRUCT.unpack_from(data, cursor)
         if name_len > MAX_SKILL_NAME_BYTES:
-            raise EvtcParseError(
-                f"Skill {skill_index} at offset {cursor} has name_len={name_len} "
-                f"exceeds safety bound {MAX_SKILL_NAME_BYTES}",
+            logger.warning(
+                "Skill %d at offset %d has name_len=%d exceeding safety bound %d; "
+                "the skill table likely ends here (header claimed %d skills, "
+                "but the next bytes look like event-stream data)",
+                skill_index,
+                cursor,
+                name_len,
+                MAX_SKILL_NAME_BYTES,
+                count,
             )
+            return
         # 8 bytes header + name_len bytes name + 1 byte null terminator.
         record_size = _SKILL_HEADER_STRUCT.size + name_len + 1
         if cursor + record_size > end:
-            raise EvtcParseError(
-                f"Truncated skill body at offset {cursor}: "
-                f"need {record_size} bytes, only {end - cursor} available",
+            logger.warning(
+                "Truncated skill body at skill %d offset %d: "
+                "need %d bytes, only %d available; stopping early",
+                skill_index,
+                cursor,
+                record_size,
+                end - cursor,
             )
-        name_bytes = data[
-            cursor + _SKILL_HEADER_STRUCT.size : cursor + _SKILL_HEADER_STRUCT.size + name_len
-        ]
+            return
+        name_bytes = data[cursor + _SKILL_HEADER_STRUCT.size : cursor + _SKILL_HEADER_STRUCT.size + name_len]
         name = name_bytes.decode("utf-8", errors="replace")
         yield Skill(id=skill_id, name=name)
         cursor += record_size

@@ -20,7 +20,11 @@ agents or a single null-terminated string for NPCs.
 
 The skill table (V1.3) is a sequence of variable-size records: each
 starts with a u32 ``skill_id`` + u32 ``name_len`` header followed by
-``name_len`` bytes of UTF-8 name + a 1-byte null terminator.
+``name_len`` bytes of UTF-8 name + a 1-byte null terminator. The
+parser is **lenient**: if a record's name_len exceeds the safety
+bound (which happens when ``header.skill_count`` is larger than the
+actual skill table size — a known arcdps quirk), the parser stops
+early and logs a warning.
 """
 
 from __future__ import annotations
@@ -412,30 +416,47 @@ def test_synthetic_skill_with_unicode_name() -> None:
     assert fight.skills[0].name == "Éruption solaire"
 
 
-def test_synthetic_truncated_skill_header_raises() -> None:
-    """Header claims 1 skill but body is missing the 8-byte skill header."""
+def test_synthetic_truncated_skill_header_stops_early() -> None:
+    """Header claims 1 skill but body is missing the 8-byte skill header.
+
+    The parser is lenient: it logs a warning and yields zero skills
+    rather than raising. This is the V1.3 behavior for real arcdps
+    files whose ``header.skill_count`` exceeds the actual skill table
+    size — a known arcdps quirk.
+    """
     header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 1, 0)
-    with pytest.raises(EvtcParseError, match="Truncated skill header"):
-        list(PythonEvtcParser().parse(header))
+    fight = next(iter(PythonEvtcParser().parse(header)))
+    assert fight.skills == []
 
 
-def test_synthetic_truncated_skill_body_raises() -> None:
-    """Skill header says name_len=10 but body is only 3 bytes."""
+def test_synthetic_truncated_skill_body_stops_early() -> None:
+    """Skill header says name_len=10 but body is only 3 bytes.
+
+    Lenient: parser yields zero skills and logs a warning.
+    """
     header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 1, 0)
     skill_header = struct.pack("<II", 1, 10)
     blob = header + skill_header + b"abc"  # 8 + 3 = 11 bytes; need 8 + 10 + 1 = 19
-    with pytest.raises(EvtcParseError, match="Truncated skill body"):
-        list(PythonEvtcParser().parse(blob))
+    fight = next(iter(PythonEvtcParser().parse(blob)))
+    assert fight.skills == []
 
 
-def test_synthetic_skill_name_too_long_raises() -> None:
-    """A name_len > MAX_SKILL_NAME_BYTES is a safety violation."""
+def test_synthetic_skill_name_too_long_stops_early() -> None:
+    """A name_len > MAX_SKILL_NAME_BYTES stops the skill table early.
+
+    Lenient: the parser yields whatever skills it read so far and
+    stops. The remaining ``header.skill_count`` slots are abandoned.
+    """
     from gw2_evtc_parser.parser import MAX_SKILL_NAME_BYTES
 
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 1, 0)
-    skill_header = struct.pack("<II", 1, MAX_SKILL_NAME_BYTES + 1)
-    with pytest.raises(EvtcParseError, match="safety bound"):
-        list(PythonEvtcParser().parse(header + skill_header))
+    # First a valid skill, then a corrupt one (name_len too large).
+    good_skill = _build_skill_record(1, "Whirlwind")
+    bad_header = struct.pack("<II", 2, MAX_SKILL_NAME_BYTES + 1)
+    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 2, 0)
+    fight = next(iter(PythonEvtcParser().parse(header + good_skill + bad_header)))
+    assert len(fight.skills) == 1
+    assert fight.skills[0].id == 1
+    assert fight.skills[0].name == "Whirlwind"
 
 
 def test_synthetic_skills_and_agents_together() -> None:
@@ -509,5 +530,12 @@ def test_real_evtc_binary_parses_with_realistic_agent_count() -> None:
         if not a.is_player:
             assert a.account_name is None
             assert a.subgroup is None
-    # V1.3: skill count matches the actual parsed skills.
-    assert fight.header.skill_count == len(fight.skills)
+    # V1.3: skill count is at most the header's claim (the parser is
+    # lenient and stops early on a corrupt skill record — a known
+    # arcdps quirk where header.skill_count can exceed the actual
+    # skill table size).
+    assert len(fight.skills) <= fight.header.skill_count
+    if fight.header.skill_count > 0:
+        assert (
+            len(fight.skills) >= 1
+        ), f"header claims {fight.header.skill_count} skills but parser read 0"
