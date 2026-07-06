@@ -1,4 +1,4 @@
-"""``/api/v1/fights`` endpoints.
+"""/api/v1/fights`` endpoints.
 
 GET list : paginated metadata list of all fights the API has parsed.
 GET detail: a single fight with its embedded agents.
@@ -63,6 +63,8 @@ def _to_fight_out(fight: OrmFight) -> FightOut:
                 profession=("UNKNOWN" if a.profession == 0 else f"PROF({a.profession})"),
                 elite_spec=("BASE" if a.elite_spec == 0 else f"ELITE({a.elite_spec})"),
                 is_player=a.is_player,
+                account_name=a.account_name,
+                subgroup=a.subgroup,
             )
             for a in fight.agents
         ],

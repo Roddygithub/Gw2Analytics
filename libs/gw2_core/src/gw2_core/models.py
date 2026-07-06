@@ -125,13 +125,30 @@ class Agent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: int = Field(..., ge=0, description="arcdps pointer-sized agent id (uint64).")
-    name: str = Field(..., min_length=0, max_length=64)
+    name: str = Field(..., min_length=0, max_length=128)
     profession: Profession = Profession.UNKNOWN
     elite: EliteSpec = EliteSpec.UNKNOWN
     elite_raw: int = Field(
         default=0, ge=0, le=0xFFFFFFFF, description="Raw elite byte for forensics."
     )
-    is_player: bool = Field(default=False)
+    is_player: bool = Field(
+        default=False,
+        description=(
+            "True for player agents (name is a combo string "
+            "'char_name\\0account_name\\0subgroup\\0' in arcdps EVTC). "
+            "False for NPCs and gadgets (name is a single null-terminated string)."
+        ),
+    )
+    account_name: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Player's account name (always prefixed with ':' in arcdps). None for NPCs.",
+    )
+    subgroup: str | None = Field(
+        default=None,
+        max_length=128,
+        description="arcdps subgroup string (e.g. 'Subgroup 1' or empty). None for NPCs.",
+    )
 
 
 class Skill(BaseModel):

@@ -21,6 +21,8 @@ class AgentOut(BaseModel):
     profession: str
     elite_spec: str
     is_player: bool
+    account_name: str | None = None
+    subgroup: str | None = None
 
 
 class FightOut(BaseModel):

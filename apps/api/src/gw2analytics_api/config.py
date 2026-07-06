@@ -23,10 +23,13 @@ class Settings(BaseSettings):
     )
 
     # Defaults mirror docker-compose.yml dev credentials (override via .env).
+    # S105: the embedded value in ``minio_secret_key`` is a dev-only
+    # sentinel so ``uv run uvicorn ...`` works out-of-the-box.
+    # TODO(#security): move to env-only in production deployments.
     database_url: str = "postgresql+psycopg://gw2analytics:gw2analytics@localhost:5432/gw2analytics"
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "gw2analytics"
-    minio_secret_key: str = "gw2analytics-secret"  # noqa: S105
+    minio_secret_key: str = "gw2analytics-secret"
     minio_bucket: str = "gw2analytics"
     minio_secure: bool = False
 

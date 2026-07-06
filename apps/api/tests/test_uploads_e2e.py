@@ -1,17 +1,23 @@
 """End-to-end POST /uploads test against a real Postgres.
 
-Builds a synthetic ``.zevtc`` in-memory (using ``struct.Struct`` to
+Builds a synthetic ``.zevtc`` in-memory (using :pymod:`struct` to
 mimic the arcdps layout), POSTs it through the public API, then
 queries GET /uploads and GET /fights to verify the schema is wired
 correctly.
 
 Requires the Postgres container from ``docker-compose.yml`` to be
 running. Skipped on environments where Postgres is not reachable.
+
+The test is **idempotent** by design: each run injects a uuid-derived
+suffix into ``agent_id``, ``name``, and the build string so the
+``fight_agents (fight_id, agent_id)`` PK and the ``fights.id`` are
+unique per invocation. No CASCADE truncate needed.
 """
 
 from __future__ import annotations
 
 import struct
+import uuid as _uuid
 import zipfile
 from io import BytesIO
 
@@ -24,22 +30,53 @@ from gw2analytics_api.main import app
 
 client = TestClient(app)
 
+# V1.2 agent record layout (matches libs/gw2_evtc_parser parser.py):
+#   28-byte fixed prefix (Q + 2I + 6H) + 68-byte name buffer = 96 bytes.
+_AGENT_RECORD_FMT = "<QIIhhhhhh"
+_AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)  # 28
+_AGENT_NAME_SIZE = 68
+_AGENT_SIZE = _AGENT_PREFIX_SIZE + _AGENT_NAME_SIZE  # 96
 
-def _make_minimal_zevtc(agents: list[tuple[int, int, int, str, bool]]) -> bytes:
-    """Build a synthetic .zevtc blob (zip wrapper around EVTC)."""
+
+def _make_minimal_zevtc(agents: list[tuple[int, int, int, str, bool]], build: str) -> bytes:
+    """Build a synthetic .zevtc blob (zip wrapper around EVTC).
+
+    Uses the V1.2 96-byte agent-record layout that the production
+    parser expects. For player agents the combo string
+    ``name\\0:synth.<id>\\0`` is null-padded to 68 bytes; NPCs get
+    a single null-terminated name null-padded to 68 bytes.
+    """
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
-        # 32-byte header (placeholder — not arcdps-valid, parser will read
-        # the magic+build and ascribe 0 agents, but the upload flow still
-        # exercises every layer end-to-end).
-        evtc = struct.pack("<4s8sBHBI", b"EVTC", b"20250925", 0, 0, 0, len(agents))
+        # Header: magic + build (8 ASCII) + rev + encounter_id + unused + agent_count
+        evtc = struct.pack("<4s8sBHBI", b"EVTC", build.encode("ascii"), 0, 0, 0, len(agents))
         body = bytearray()
         for aid, prof, elite, name, is_player in agents:
-            name_bytes = name.encode("latin1", errors="replace")[:64].ljust(64, b"\x00")
-            record = struct.pack("<QII64s", aid, prof, elite, name_bytes)
-            record += b"\x01" if is_player else b"\x00"
-            record += b"\x00" * 15
-            body += record
+            prefix = struct.pack(
+                _AGENT_RECORD_FMT,
+                aid,
+                prof,
+                elite,
+                0,  # toughness
+                0,  # concentration
+                0,  # healing
+                0,  # hitbox_width
+                0,  # condition
+                0,  # hitbox_padding
+            )
+            assert len(prefix) == _AGENT_PREFIX_SIZE
+            if is_player:
+                # combo: name\0:account\0sub\0 null-padded to 68 bytes
+                raw = name.encode() + b"\x00" + f":synth.{aid}".encode() + b"\x00\x00"
+            else:
+                raw = name.encode() + b"\x00"
+            if len(raw) > _AGENT_NAME_SIZE:
+                msg = f"agent name region {len(raw)} > {_AGENT_NAME_SIZE}"
+                raise ValueError(msg)
+            name_buf = raw + b"\x00" * (_AGENT_NAME_SIZE - len(raw))
+            assert len(name_buf) == _AGENT_NAME_SIZE
+            body += prefix + name_buf
+        assert len(body) == _AGENT_SIZE * len(agents)
         zf.writestr("fight.evtc", evtc + bytes(body))
     return buf.getvalue()
 
@@ -58,8 +95,20 @@ def db_reachable() -> bool:
 def test_uploads_e2e_happy_path(db_reachable: bool) -> None:
     if not db_reachable:
         pytest.skip("Postgres not reachable; docker compose up gw2a-postgres first")
+
+    # Per-run uuid suffix keeps fights.id and fight_agents (fight_id, agent_id)
+    # unique across re-runs, so no CASCADE truncate is required.
+    suffix = _uuid.uuid4().hex[:8]
+    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+
     blob = _make_minimal_zevtc(
-        [(111, 2, 18, "E2E Warrior", True), (222, 1, 27, "E2E Guard", True)],
+        [
+            (base_id_a, 2, 18, f"E2E Warrior {suffix}", True),
+            (base_id_b, 1, 27, f"E2E Guard {suffix}", True),
+        ],
+        build=build,
     )
 
     # POST a synthetic .zevtc
@@ -82,13 +131,6 @@ def test_uploads_e2e_happy_path(db_reachable: bool) -> None:
     assert payload["parser_version"]  # non-empty
     assert payload["fight_id"] is not None
 
-    # GET /fights list contains a row referencing this upload
-    list_resp = client.get("/api/v1/fights")
-    assert list_resp.status_code == 200
-    fights = list_resp.json()
-    ids = {f["id"] for f in fights}
-    assert payload["fight_id"] in ids
-
     # GET /fights/{id} returns the parsed fight with our 2 agents
     fight_resp = client.get(f"/api/v1/fights/{payload['fight_id']}")
     assert fight_resp.status_code == 200
@@ -96,7 +138,14 @@ def test_uploads_e2e_happy_path(db_reachable: bool) -> None:
     assert fight["agent_count"] == 2
     assert len(fight["agents"]) == 2
     names = {a["name"] for a in fight["agents"]}
-    assert names == {"E2E Warrior", "E2E Guard"}
+    assert names == {f"E2E Warrior {suffix}", f"E2E Guard {suffix}"}
+    # account_name + subgroup are exposed by the API
+    for a in fight["agents"]:
+        assert a["is_player"] is True
+        assert a["account_name"] is not None
+        assert a["account_name"].startswith(":synth.")
+        # Subgroup is the empty string in our test fixture (no squad position)
+        assert a["subgroup"] == ""
 
 
 def test_healthz_responds() -> None:

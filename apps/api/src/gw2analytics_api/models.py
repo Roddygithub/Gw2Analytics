@@ -109,9 +109,11 @@ class OrmFightAgent(Base):
         primary_key=True,
     )
     agent_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
     profession: Mapped[int] = mapped_column(Integer, nullable=False)
     elite_spec: Mapped[int] = mapped_column(Integer, nullable=False)
     is_player: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    account_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    subgroup: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     fight: Mapped[OrmFight] = relationship(back_populates="agents")

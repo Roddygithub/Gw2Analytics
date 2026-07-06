@@ -117,6 +117,8 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
                 profession=_prof_id(agent.profession),
                 elite_spec=_elite_id(agent.elite),
                 is_player=agent.is_player,
+                account_name=agent.account_name,
+                subgroup=agent.subgroup,
             ),
         )
 

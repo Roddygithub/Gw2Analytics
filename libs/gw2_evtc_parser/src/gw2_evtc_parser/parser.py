@@ -1,22 +1,41 @@
 """Python reference implementation of the EVTC parser.
 
-This implementation is intentionally minimal — V0 only reads:
+This implementation reads:
 
 * the 20-byte file header (``EVTC`` magic + ``yyyymmdd`` build date +
   revision byte + encounter_id + unused + ``agent_count`` u32),
-* the agent table (``agent_count`` records of 96 bytes each).
+* ``agent_count`` **fixed-size** agent records of 96 bytes each,
+  matching the C ``struct ag`` in ``arcdps.h`` exactly:
 
-Skill and event streams are left to later phases. The aim of V0 is to
-prove the data pipeline end-to-end (given a real ``.zevtc`` file, the
-CLI can list every player agent) without committing to the brittle
-event-record layout prematurely.
+    +-----+--------+--------------------------------------------+
+    | off | size   | field                                      |
+    +-----+--------+--------------------------------------------+
+    |  0  |  Q     | id (uint64)                                |
+    |  8  |  I     | profession (uint32)                        |
+    | 12  |  I     | is_elite (uint32)                          |
+    | 16  |  H     | toughness (uint16)                         |
+    | 18  |  H     | concentration (uint16)                     |
+    | 20  |  H     | healing (uint16)                           |
+    | 22  |  H     | hitbox_width (uint16)                      |
+    | 24  |  H     | condition (uint16)                         |
+    | 26  |  H     | hitbox_padding (uint16)                    |
+    | 28  |  68s   | name (null-padded 68-byte buffer)          |
+    +-----+--------+--------------------------------------------+
 
-CAVEAT (V0): the agent-record byte layout inside ``_AGENT_STRUCT``
-(``<QII64s``) is best-effort and not aligned with the empirical arcdps
-file layout. Names and professions of *real* WvW logs may read empty
-or mis-mapped. Header parsing (magic, build_version, agent_count)
-*is* accurate. A correct agent-record layout is the first task on the
-Phase 2 backlog.
+  The 68-byte ``name`` buffer holds the *combo string* for player
+  agents (``"char_name\\0:account_name\\0subgroup\\0"`` null-padded to
+  68 bytes) and a single null-terminated string for NPCs. The parser
+  splits the buffer on null bytes; presence of a second non-empty
+  part marks the agent as a player.
+
+  The V0/V1 assumption that the on-disk record is variable-size (the
+  name ends at the *first* null and the cursor advances just past
+  it) was incorrect: the in-memory struct is fixed, and arcdps
+  serialises the whole 96-byte block including the trailing nulls.
+  Trying to walk variable offsets loses alignment on the next
+  record.
+
+Skill and event streams are left to later phases.
 
 This module conforms to :class:`~gw2_evtc_parser.interface.EvtcParser`.
 """
@@ -25,6 +44,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import struct
 import zipfile
 from collections.abc import Iterator
@@ -41,18 +61,19 @@ from gw2_core import (
 )
 from gw2_evtc_parser.exceptions import EvtcParseError
 
+# Module-level logger for soft warnings (e.g. unrecognised arcdps
+# account_name format). Library consumers control verbosity via the
+# standard ``logging`` configuration; we do not call ``basicConfig``.
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
-# Binary layout constants (V0 schema)
+# Binary layout constants
 # ---------------------------------------------------------------------------
 
 #: Total size of the EVTC file header + agent_count preamble in bytes.
-#: Layout: magic(4) + build(8) + rev(1) + encounter_id(2) + unused(1) +
-#: agent_count(I) = 20 bytes.
 HEADER_SIZE: Final[int] = 20
 
 #: ``struct`` format for the file header + agent_count.
-#: Layout (little-endian): magic(4s) + build(8s) + rev(B) + encounter_id(H)
-#: + unused(B) + agent_count(I).
 _HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<4s8sBHBI")
 
 #: Byte offset of the agent_count field inside the header.
@@ -61,15 +82,28 @@ AGENT_COUNT_OFFSET: Final[int] = 16
 #: Byte offset of the build date field inside the header.
 BUILD_OFFSET: Final[int] = 4
 
-#: Total size of one agent record in bytes.
+#: Total size of one agent record on disk (the C ``struct ag`` size).
 AGENT_SIZE: Final[int] = 96
 
-#: ``struct`` format for the fixed prefix of one agent record.
-#: Layout (little-endian): id(Q) + profession(I) + elite(I) + name(64s).
-_AGENT_STRUCT: Final[struct.Struct] = struct.Struct("<QII64s")
+#: Size of the 28-byte fixed prefix that starts every agent record.
+AGENT_PREFIX_SIZE: Final[int] = 28
+
+#: Size of the 68-byte name buffer that ends every agent record.
+AGENT_NAME_SIZE: Final[int] = AGENT_SIZE - AGENT_PREFIX_SIZE
+
+#: ``struct`` format for the entire 96-byte agent record.
+#: Layout (little-endian): id(Q) + prof(I) + elite(I) + six uint16s +
+#: 68-byte name buffer.
+_AGENT_STRUCT: Final[struct.Struct] = struct.Struct(f"<QIIhhhhhh{AGENT_NAME_SIZE}s")
 
 #: Sanity bound on agent_count to defend against pathological sources.
 MAX_AGENTS: Final[int] = 10_000
+
+#: arcdps account-name soft signal. Real arcdps revisions usually
+#: prefix account strings with ``:``; we surface ``account_name``
+#: verbatim and let downstream code decide whether the leading ``:``
+#: is present (an empty account_name is also valid).
+ACCOUNT_NAME_PREFIX: Final[bytes] = b":"
 
 
 # ---------------------------------------------------------------------------
@@ -85,22 +119,16 @@ class PythonEvtcParser:
 
     @staticmethod
     def supported_versions() -> frozenset[str]:
-        """V0 supports any arcdps build date.
-
-        The format has been ``stable-ish`` since 2017 at the byte offsets
-        we read (header + agent table). We do not gate on the specific
-        yyyymmdd; instead, we surface it in :attr:`EvtcHeader.build_version`.
-        """
+        """Any arcdps build date with the 96-byte agent-record layout."""
         return frozenset()
 
     @staticmethod
     def parse(source: BinaryIO | bytes) -> Iterator[Fight]:
         """Yield :class:`Fight` records from a raw EVTC binary stream.
 
-        V0 yields exactly one Fight per file (arcdps logs record a single
-        combat encounter). The bytes passed in must be the *inner* EVTC
-        blob — use :func:`read_zevtc_archive` or :func:`read_zevtc_bytes`
-        to unwrap a ``.zevtc`` zip first.
+        Yields exactly one Fight per file. The bytes passed in must be
+        the *inner* EVTC blob — use :func:`read_zevtc_archive` or
+        :func:`read_zevtc_bytes` to unwrap a ``.zevtc`` zip first.
         """
         data = _read_all(source)
         return _iter_fights(data)
@@ -151,7 +179,7 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     )
 
     agents = list(_iter_agents(data, agent_count))
-    skills: list[Skill] = []  # V0 stops before skill table.
+    skills: list[Skill] = []  # V1 stops before skill table.
 
     fight_id = hashlib.sha256(data).hexdigest()
     yield Fight(
@@ -163,30 +191,61 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
 
 
 def _iter_agents(data: bytes, count: int) -> Iterator[Agent]:
-    """Read ``count`` agent records starting at offset ``HEADER_SIZE``."""
+    """Read ``count`` fixed-size 96-byte agent records starting at ``HEADER_SIZE``."""
     if count == 0:
         return
-    expected_size = count * AGENT_SIZE
-    available = len(data) - HEADER_SIZE
-    if available < expected_size:
-        raise EvtcParseError(
-            f"Need {expected_size} bytes for {count} agents, "
-            f"only {available} available after header",
-        )
-    for i in range(count):
-        offset = HEADER_SIZE + i * AGENT_SIZE
-        yield _parse_agent(data, offset)
+    cursor = HEADER_SIZE
+    end = len(data)
+    for _ in range(count):
+        if cursor + AGENT_SIZE > end:
+            raise EvtcParseError(
+                f"Truncated agent record at offset {cursor}: "
+                f"need {AGENT_SIZE} bytes, only {end - cursor} available",
+            )
+        yield _decode_agent(data, cursor)
+        cursor += AGENT_SIZE
 
 
-def _parse_agent(data: bytes, offset: int) -> Agent:
-    """Decode a single 96-byte agent record."""
-    agent_id, prof_raw, elite_raw, name_bytes = _AGENT_STRUCT.unpack_from(data, offset)
-    name = name_bytes.split(b"\x00", 1)[0].decode("latin1", errors="replace")
+def _decode_agent(data: bytes, offset: int) -> Agent:
+    """Decode a single 96-byte agent record at ``offset``."""
+    aid, prof_raw, elite_raw, _tough, _conc, _heal, _width, _cond, _pad, name_buf = (
+        _AGENT_STRUCT.unpack_from(data, offset)
+    )
 
-    # ``is_player`` lives at byte 80 of the 96-byte agent record
-    # (the field immediately after the 64-byte name region).
-    is_player_byte = data[offset + 80]
-    is_player = is_player_byte != 0
+    # Split the 68-byte name buffer on null bytes. arcdps writes the
+    # combo string ``char\0acc\0sub\0`` null-padded to 68 bytes for
+    # players, and a single ``name\0`` null-padded for NPCs.
+    parts = name_buf.split(b"\x00")
+
+    # ``split`` always returns at least one element (the empty string
+    # if the buffer is all nulls); a fully-null buffer means "no name".
+    char_name = parts[0].decode("utf-8", errors="replace") if parts else ""
+
+    # A record is a player if either the account_name (parts[1]) is
+    # non-empty OR a non-empty subgroup (parts[2]) is present after an
+    # empty account_name. Both empty means NPC. The "empty
+    # account_name + non-empty subgroup" branch covers a real arcdps
+    # WvW edge case where a player's account was not captured but
+    # their squad position was. The "both empty" case is
+    # fundamentally indistinguishable from an NPC, so we classify as
+    # NPC.
+    raw_account = parts[1] if len(parts) >= 2 else b""
+    raw_subgroup = parts[2] if len(parts) >= 3 else b""
+    is_player = bool(raw_account or raw_subgroup)
+    account_name: str | None = None
+    subgroup: str | None = None
+    if is_player:
+        if raw_account and not raw_account.startswith(ACCOUNT_NAME_PREFIX):
+            logger.debug(
+                "Player account_name lacks %r prefix (arcdps-version variation): %r",
+                ACCOUNT_NAME_PREFIX,
+                raw_account,
+            )
+        account_name = raw_account.decode("utf-8", errors="replace") if raw_account else None
+        # subgroup is the 3rd part. An empty raw_subgroup means
+        # arcdps wrote ``\0\0`` (no subgroup); surface as the empty
+        # string so callers can distinguish from a missing subgroup.
+        subgroup = raw_subgroup.decode("utf-8", errors="replace")
 
     try:
         profession = Profession(prof_raw)
@@ -199,12 +258,14 @@ def _parse_agent(data: bytes, offset: int) -> Agent:
         elite = EliteSpec.UNKNOWN
 
     return Agent(
-        id=agent_id,
-        name=name,
+        id=aid,
+        name=char_name,
         profession=profession,
         elite=elite,
         elite_raw=elite_raw,
         is_player=is_player,
+        account_name=account_name,
+        subgroup=subgroup,
     )
 
 
@@ -252,8 +313,14 @@ def read_zevtc_bytes(data: bytes) -> bytes:
 
 # Re-export the public header for downstream imports.
 __all__ = [
+    "ACCOUNT_NAME_PREFIX",
+    "AGENT_COUNT_OFFSET",
+    "AGENT_NAME_SIZE",
+    "AGENT_PREFIX_SIZE",
     "AGENT_SIZE",
+    "BUILD_OFFSET",
     "HEADER_SIZE",
+    "MAX_AGENTS",
     "PythonEvtcParser",
     "read_zevtc_archive",
     "read_zevtc_bytes",

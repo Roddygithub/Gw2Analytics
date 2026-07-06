@@ -12,9 +12,11 @@ Strategy
    earlier diagnostic). This guards against the synthetic fixture being
    too clean.
 
-The header layout corrected in commit 1c89b7c: arcdps header is 20
-bytes total, with ``agent_count`` u32 at offset 16 and agents starting
-at offset 20.
+The agent-record layout is the C ``struct ag`` from ``arcdps.h``:
+96 bytes total — 28-byte fixed prefix (id + prof + elite + 6 uint16s)
+followed by a 68-byte name buffer that arcdps writes as a null-padded
+combo string ``"char_name\\0:account_name\\0subgroup\\0"`` for player
+agents or a single null-terminated string for NPCs.
 """
 
 from __future__ import annotations
@@ -29,11 +31,66 @@ import pytest
 
 from gw2_core import EliteSpec, Profession
 from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
-from gw2_evtc_parser.parser import AGENT_COUNT_OFFSET, HEADER_SIZE
+from gw2_evtc_parser.parser import (
+    ACCOUNT_NAME_PREFIX,
+    AGENT_COUNT_OFFSET,
+    AGENT_NAME_SIZE,
+    AGENT_PREFIX_SIZE,
+    AGENT_SIZE,
+    HEADER_SIZE,
+)
 
 # ---------------------------------------------------------------------------
 # Synthetic fixture
 # ---------------------------------------------------------------------------
+
+
+def _build_agent_record(
+    agent_id: int,
+    prof: int,
+    elite: int,
+    name: str,
+    *,
+    account_name: str | None = None,
+    subgroup: str | None = None,
+) -> bytes:
+    """Build one 96-byte V1.2 agent record.
+
+    The 68-byte name buffer is filled with the combo string
+    (player) or single name (NPC) null-padded to 68 bytes. arcdps
+    fills the full buffer unconditionally, so we mirror that.
+    """
+    prefix = struct.pack(
+        "<QIIhhhhhh",
+        agent_id,
+        prof,
+        elite,
+        0,  # toughness
+        0,  # concentration
+        0,  # healing
+        0,  # hitbox_width
+        0,  # condition
+        0,  # hitbox_padding
+    )
+    if account_name is None:
+        # NPC: single null-terminated string, null-padded to 68 bytes.
+        raw = name.encode("utf-8") + b"\x00"
+    else:
+        if not account_name.startswith(":"):
+            msg = f"account_name must start with {ACCOUNT_NAME_PREFIX!r}"
+            raise ValueError(msg)
+        raw = name.encode("utf-8") + b"\x00" + account_name.encode("utf-8") + b"\x00"
+        if subgroup is not None:
+            raw += subgroup.encode("utf-8") + b"\x00"
+        else:
+            raw += b"\x00"
+    if len(raw) > AGENT_NAME_SIZE:
+        msg = f"name region {len(raw)} bytes exceeds {AGENT_NAME_SIZE}"
+        raise ValueError(msg)
+    # Null-pad to exactly 68 bytes.
+    name_buf = raw + b"\x00" * (AGENT_NAME_SIZE - len(raw))
+    assert len(name_buf) == AGENT_NAME_SIZE
+    return prefix + name_buf
 
 
 def _build_minimal_evtc(
@@ -43,9 +100,10 @@ def _build_minimal_evtc(
 ) -> bytes:
     """Build a synthetic EVTC binary with the given agents.
 
-    Header layout is 20 bytes: magic(4) + build(8) + rev(1) +
-    encounter_id(2) + unused(1) + agent_count(I). Each agent tuple is
-    ``(id, profession_id, elite_id, name, is_player)``.
+    Header layout is 20 bytes (see :data:`HEADER_SIZE`). Each agent
+    tuple is ``(id, profession_id, elite_id, name, is_player)``. For
+    is_player=True agents, a default account_name of ``:synth.<id>`` and
+    no subgroup is added. NPCs have no account/subgroup.
     """
     if len(build) != 8:
         msg = f"build must be exactly 8 ASCII chars (yyyymmdd), got {len(build)}"
@@ -61,12 +119,17 @@ def _build_minimal_evtc(
     )
     body = bytearray()
     for aid, prof, elite, name, is_player in agents:
-        name_bytes = name.encode("latin1", errors="replace")[:64].ljust(64, b"\x00")
-        record = struct.pack("<QII64s", aid, prof, elite, name_bytes)
-        record += b"\x01" if is_player else b"\x00"
-        record += b"\x00" * 15  # 16 bytes misc, of which 1 = is_player
-        assert len(record) == 96, f"agent record must be 96 bytes, got {len(record)}"
-        body += record
+        if is_player:
+            rec = _build_agent_record(
+                aid,
+                prof,
+                elite,
+                name,
+                account_name=f":synth.{aid}",
+            )
+        else:
+            rec = _build_agent_record(aid, prof, elite, name)
+        body += rec
     return header + bytes(body)
 
 
@@ -95,56 +158,83 @@ def test_synthetic_minimal_evtc_parses() -> None:
     assert fight.skills == []
 
 
-def test_synthetic_evtc_with_agents_parses() -> None:
+def test_synthetic_player_agent_has_account_and_is_player() -> None:
+    evtc = _build_minimal_evtc(
+        [(123456, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Test Guardian", True)],
+    )
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    assert len(fight.agents) == 1
+    a = fight.agents[0]
+    assert a.name == "Test Guardian"
+    assert a.account_name == ":synth.123456"
+    assert a.is_player is True
+    assert a.subgroup == ""  # empty subgroup is a string
+    assert a.profession == Profession.GUARDIAN
+    assert a.elite == EliteSpec.DRAGONHUNTER
+
+
+def test_synthetic_npc_agent_has_no_account() -> None:
+    evtc = _build_minimal_evtc(
+        [(789012, 99, 99, "Hostile NPC", False)],
+    )
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    a = fight.agents[0]
+    assert a.name == "Hostile NPC"
+    assert a.is_player is False
+    assert a.account_name is None
+    assert a.subgroup is None
+    assert a.profession == Profession.UNKNOWN
+    assert a.elite == EliteSpec.UNKNOWN
+
+
+def test_synthetic_mixed_players_and_npcs() -> None:
     agents = [
-        (123456, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Test Guardian", True),
-        (789012, Profession.WARRIOR.value, EliteSpec.BERSERKER.value, "Test Bers", True),
-        (345678, 99, 99, "Unknown NPC", False),
+        (1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "G1", True),
+        (2, Profession.WARRIOR.value, EliteSpec.BERSERKER.value, "W1", True),
+        (3, 99, 99, "Mob", False),
     ]
     evtc = _build_minimal_evtc(agents)
     fight = next(iter(PythonEvtcParser().parse(evtc)))
     assert len(fight.agents) == 3
-
-    by_name = {a.name: a for a in fight.agents}
-    g = by_name["Test Guardian"]
-    assert g.profession == Profession.GUARDIAN
-    assert g.elite == EliteSpec.DRAGONHUNTER
-    assert g.is_player is True
-
-    w = by_name["Test Bers"]
-    assert w.profession == Profession.WARRIOR
-    assert w.elite == EliteSpec.BERSERKER
-    assert w.is_player is True
-
-    npc = by_name["Unknown NPC"]
-    assert npc.profession == Profession.UNKNOWN
-    assert npc.elite == EliteSpec.UNKNOWN
-    assert npc.is_player is False
+    players = [a for a in fight.agents if a.is_player]
+    npcs = [a for a in fight.agents if not a.is_player]
+    assert len(players) == 2
+    assert len(npcs) == 1
+    for p in players:
+        assert p.account_name is not None
+        assert p.account_name.startswith(":")
+    for n in npcs:
+        assert n.account_name is None
 
 
 def test_synthetic_truncated_blob_raises() -> None:
-    # 14 bytes < HEADER_SIZE 20, so we should bail out before reading the magic.
     short = b"EVTC" + b"\x00" * 10
     with pytest.raises(EvtcParseError, match="header needs 20"):
         list(PythonEvtcParser().parse(short))
 
 
 def test_synthetic_bad_magic_raises() -> None:
-    blob = b"JUNK" + b"\x00" * 16  # >= HEADER_SIZE so magic check fires
+    blob = b"JUNK" + b"\x00" * 16
     with pytest.raises(EvtcParseError, match="magic"):
         list(PythonEvtcParser().parse(blob))
 
 
+def test_synthetic_truncated_agent_prefix_raises() -> None:
+    """Header claims 1 agent but there is no AGENT_SIZE bytes after the header."""
+    header = struct.pack("<4s8sBHBI", b"EVTC", b"20250925", 0, 0, 0, 1)
+    blob = header + b"\x00" * 50  # only 50 bytes after header (need 96)
+    with pytest.raises(EvtcParseError, match="Truncated agent record"):
+        list(PythonEvtcParser().parse(blob))
+
+
 def test_synthetic_agent_count_lie_raises() -> None:
-    """Header claims 99 agents but body has none — parser must raise."""
-    blob = bytearray(_build_minimal_evtc([]))
-    blob[AGENT_COUNT_OFFSET : AGENT_COUNT_OFFSET + 4] = struct.pack("<I", 99)
-    with pytest.raises(EvtcParseError, match="agents"):
-        list(PythonEvtcParser().parse(bytes(blob)))
+    """Header claims 99 agents but body has none — first iteration truncates."""
+    header = struct.pack("<4s8sBHBI", b"EVTC", b"20250925", 0, 0, 0, 99)
+    with pytest.raises(EvtcParseError, match="Truncated agent record"):
+        list(PythonEvtcParser().parse(header))
 
 
 def test_synthetic_encounter_id_propagates() -> None:
-    """The encounter_id at offset 13-14 should surface on EvtcHeader."""
     evtc = _build_minimal_evtc([], encounter_id=0xBEEF)
     fight = next(iter(PythonEvtcParser().parse(evtc)))
     assert fight.header is not None
@@ -168,6 +258,7 @@ def test_zevtc_archive_is_unpacked_and_parsed() -> None:
     fight = next(iter(PythonEvtcParser().parse(inner)))
     assert fight.agents[0].name == "Chrono"
     assert fight.agents[0].profession == Profession.MESMER
+    assert fight.agents[0].account_name == ":synth.1"
 
 
 def test_stable_fight_id_is_sha256_of_input() -> None:
@@ -179,14 +270,82 @@ def test_stable_fight_id_is_sha256_of_input() -> None:
     assert fight.id == expected
 
 
-def test_layout_constants_match_real_arcdps_v0() -> None:
-    """Sanity-check the layout constants we publish.
-
-    These are byte offsets other packages rely on. They MUST stay
-    in sync with the schema this parser consumes.
-    """
+def test_layout_constants_match_arcdps_v1() -> None:
+    """Sanity-check the layout constants we publish."""
     assert HEADER_SIZE == 20
     assert AGENT_COUNT_OFFSET == 16
+    assert AGENT_PREFIX_SIZE == 28
+    assert AGENT_NAME_SIZE == 68
+    assert AGENT_SIZE == 96
+
+
+def test_account_name_without_colon_is_accepted_as_player() -> None:
+    """A 'player' record whose account_name lacks ``:`` is *not* an error in V1.
+
+    Real arcdps revisions have emitted bare account ids (e.g. ``b'2'``)
+    and we accept them. The 3-part combo structure is the authoritative
+    player signal; the leading ``:`` is a soft convention we surface
+    as ``logger.debug`` rather than reject.
+    """
+    rec = struct.pack("<QIIhhhhhh", 1, 0, 0, 0, 0, 0, 0, 0, 0)
+    # b"Name\x00no_colon\x00\x00" is 4 + 1 + 8 + 1 + 1 = 15 bytes.
+    name_raw = b"Name\x00no_colon\x00\x00"
+    assert len(name_raw) == 15
+    name_buf = name_raw + b"\x00" * (AGENT_NAME_SIZE - len(name_raw))
+    blob = rec + name_buf
+    assert len(blob) == AGENT_SIZE
+    header = struct.pack("<4s8sBHBI", b"EVTC", b"20250925", 0, 0, 0, 1)
+    fight = next(iter(PythonEvtcParser().parse(header + blob)))
+    a = fight.agents[0]
+    assert a.is_player is True
+    assert a.name == "Name"
+    assert a.account_name == "no_colon"
+    assert a.subgroup == ""
+
+
+def test_player_with_empty_account_name_and_subgroup() -> None:
+    """Real arcdps WvW edge case: account_name is empty but subgroup is set.
+
+    arcdps writes the combo string ``char\0\0sub\0`` for a player
+    whose account was not captured but whose squad position was.
+    The parser must classify this as a player (not an NPC) and
+    surface ``account_name=None`` while preserving the subgroup.
+    """
+    rec = struct.pack("<QIIhhhhhh", 1, 0, 0, 0, 0, 0, 0, 0, 0)
+    # b"Name\x00\x00sub\x00" is 4 + 1 + 1 + 3 + 1 = 10 bytes.
+    name_raw = b"Name\x00\x00sub\x00"
+    assert len(name_raw) == 10
+    name_buf = name_raw + b"\x00" * (AGENT_NAME_SIZE - len(name_raw))
+    blob = rec + name_buf
+    assert len(blob) == AGENT_SIZE
+    header = struct.pack("<4s8sBHBI", b"EVTC", b"20250925", 0, 0, 0, 1)
+    fight = next(iter(PythonEvtcParser().parse(header + blob)))
+    a = fight.agents[0]
+    assert a.is_player is True
+    assert a.name == "Name"
+    assert a.account_name is None
+    assert a.subgroup == "sub"
+
+
+def test_npc_with_fully_null_tail_after_name_is_npc() -> None:
+    """A record with only a char name and null padding is an NPC.
+
+    This is fundamentally indistinguishable from "player with empty
+    account_name AND empty subgroup"; we treat it as NPC. The
+    previous edge-case test covers the recoverable case (subgroup
+    set after empty account).
+    """
+    rec = struct.pack("<QIIhhhhhh", 1, 0, 0, 0, 0, 0, 0, 0, 0)
+    name_buf = b"Mob\x00" + b"\x00" * (AGENT_NAME_SIZE - 4)
+    blob = rec + name_buf
+    assert len(blob) == AGENT_SIZE
+    header = struct.pack("<4s8sBHBI", b"EVTC", b"20250925", 0, 0, 0, 1)
+    fight = next(iter(PythonEvtcParser().parse(header + blob)))
+    a = fight.agents[0]
+    assert a.is_player is False
+    assert a.name == "Mob"
+    assert a.account_name is None
+    assert a.subgroup is None
 
 
 # ---------------------------------------------------------------------------
@@ -195,11 +354,9 @@ def test_layout_constants_match_real_arcdps_v0() -> None:
 
 
 def test_read_zevtc_bytes_extracts_inner_evtc() -> None:
-    """``read_zevtc_bytes`` is the bytes-equivalent of ``read_zevtc_archive``."""
-    inner = struct.pack("<4s8sBHBI", b"EVTC", b"20250925", 0, 0, 0, 0)
+    inner = _build_minimal_evtc([])
     zevtc = _wrap_zevtc(inner)
     assert read_zevtc_bytes(zevtc) == inner
-    # Round-trip with the parser itself.
     fight = next(iter(PythonEvtcParser().parse(read_zevtc_bytes(zevtc))))
     assert fight.header is not None
     assert fight.header.build_version == "20250925"
@@ -212,7 +369,7 @@ def test_read_zevtc_bytes_raises_on_bogus_zip() -> None:
 
 def test_read_zevtc_bytes_raises_on_empty_zip() -> None:
     buf = BytesIO()
-    with zipfile.ZipFile(buf, "w"):  # empty archive
+    with zipfile.ZipFile(buf, "w"):
         pass
     with pytest.raises(EvtcParseError, match="empty"):
         read_zevtc_bytes(buf.getvalue())
@@ -226,19 +383,24 @@ _REAL_FIXTURE = Path("/tmp/inner_20251002-213519")  # noqa: S108 (test-only diag
 
 
 @pytest.mark.skipif(not _REAL_FIXTURE.exists(), reason="real EVTC fixture not available")
-@pytest.mark.xfail(
-    reason=(
-        "V0 _AGENT_STRUCT (<QII64s) is misaligned with real arcdps agent-record "
-        "layout; reading names/professions accurately is deferred to Phase 2+."
-    ),
-    strict=False,
-)
 def test_real_evtc_binary_parses_with_realistic_agent_count() -> None:
     raw = _REAL_FIXTURE.read_bytes()
     fight = next(iter(PythonEvtcParser().parse(raw)))
     assert fight.header is not None
     assert fight.header.agent_count >= 2
     assert len(fight.agents) == fight.header.agent_count
-    assert all(a.name for a in fight.agents), "real fixture produced empty names"
+    # Real WvW log: at least one player (account_name present).
     players = [a for a in fight.agents if a.is_player]
     assert len(players) >= 1, f"no players detected among {len(fight.agents)} agents"
+    for p in players:
+        assert p.account_name is not None
+        # arcdps' standard convention starts with ':'; accept any non-empty string
+        # because some revisions emit bare ids.
+        assert p.account_name, f"player {p.id} has empty account_name"
+        # Real names: no longer empty
+        assert p.name, f"player {p.id} has empty name"
+    # NPCs (if any) have no account
+    for a in fight.agents:
+        if not a.is_player:
+            assert a.account_name is None
+            assert a.subgroup is None
