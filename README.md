@@ -99,4 +99,4 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the per-commit history.
 - Squash-merged PRs, linear history
 - Python: type hints mandatory (mypy `--strict`), ruff format
 - TypeScript: strict mode
-- See `CONTRIBUTING.md` once we add it.
+- See [`CONTRIBUTING.md`](CONTRIBUTING.md) for branch protection rules, conventional commits spec, the pre-commit/CI mirror table, and test requirements.
