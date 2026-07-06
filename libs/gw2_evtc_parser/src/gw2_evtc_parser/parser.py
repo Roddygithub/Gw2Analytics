@@ -2,14 +2,21 @@
 
 This implementation is intentionally minimal — V0 only reads:
 
-* the 32-byte file header (``EVTC`` magic + ``yyyymmdd`` build date +
-  16 bytes reserved + ``agent_count`` u32),
+* the 20-byte file header (``EVTC`` magic + ``yyyymmdd`` build date +
+  revision byte + encounter_id + unused + ``agent_count`` u32),
 * the agent table (``agent_count`` records of 96 bytes each).
 
 Skill and event streams are left to later phases. The aim of V0 is to
 prove the data pipeline end-to-end (given a real ``.zevtc`` file, the
 CLI can list every player agent) without committing to the brittle
 event-record layout prematurely.
+
+CAVEAT (V0): the agent-record byte layout inside ``_AGENT_STRUCT``
+(``<QII64s``) is best-effort and not aligned with the empirical arcdps
+file layout. Names and professions of *real* WvW logs may read empty
+or mis-mapped. Header parsing (magic, build_version, agent_count)
+*is* accurate. A correct agent-record layout is the first task on the
+Phase 2 backlog.
 
 This module conforms to :class:`~gw2_evtc_parser.interface.EvtcParser`.
 """
@@ -38,15 +45,20 @@ from gw2_evtc_parser.exceptions import EvtcParseError
 # ---------------------------------------------------------------------------
 
 #: Total size of the EVTC file header + agent_count preamble in bytes.
-#: Layout: magic(4) + build(8) + reserved(16) + agent_count(I) = 32 bytes.
-HEADER_SIZE: Final[int] = 32
+#: Layout: magic(4) + build(8) + rev(1) + encounter_id(2) + unused(1) +
+#: agent_count(I) = 20 bytes.
+HEADER_SIZE: Final[int] = 20
 
 #: ``struct`` format for the file header + agent_count.
-#: Layout (little-endian): magic(4s) + build(8s) + reserved(16s) + agent_count(I).
-_HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<4s8s16sI")
+#: Layout (little-endian): magic(4s) + build(8s) + rev(B) + encounter_id(H)
+#: + unused(B) + agent_count(I).
+_HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<4s8sBHBI")
 
 #: Byte offset of the agent_count field inside the header.
-AGENT_COUNT_OFFSET: Final[int] = 28
+AGENT_COUNT_OFFSET: Final[int] = 16
+
+#: Byte offset of the build date field inside the header.
+BUILD_OFFSET: Final[int] = 4
 
 #: Total size of one agent record in bytes.
 AGENT_SIZE: Final[int] = 96
@@ -55,8 +67,8 @@ AGENT_SIZE: Final[int] = 96
 #: Layout (little-endian): id(Q) + profession(I) + elite(I) + name(64s).
 _AGENT_STRUCT: Final[struct.Struct] = struct.Struct("<QII64s")
 
-#: Encounter id is not part of the V0 layout; we surface ``0``.
-_ENCOUNTER_ID_PLACEHOLDER: Final[int] = 0
+#: Sanity bound on agent_count to defend against pathological sources.
+MAX_AGENTS: Final[int] = 10_000
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +127,7 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     if len(data) < HEADER_SIZE:
         raise EvtcParseError(f"EVTC blob is {len(data)} bytes, header needs {HEADER_SIZE}")
 
-    magic, build, _reserved, agent_count = _HEADER_STRUCT.unpack_from(data, 0)
+    magic, build, _rev, encounter_id, _unused, agent_count = _HEADER_STRUCT.unpack_from(data, 0)
 
     if magic != b"EVTC":
         raise EvtcParseError(f"Bad magic bytes: {magic!r} (expected b'EVTC')")
@@ -125,9 +137,12 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     except UnicodeDecodeError as exc:
         raise EvtcParseError(f"Build bytes are not pure ASCII: {build!r}") from exc
 
+    if agent_count > MAX_AGENTS:
+        raise EvtcParseError(f"agent_count={agent_count} exceeds safety bound {MAX_AGENTS}")
+
     header = EvtcHeader(
         build_version=build_str,
-        encounter_id=_ENCOUNTER_ID_PLACEHOLDER,
+        encounter_id=encounter_id,
         skill_count=0,
         agent_count=agent_count,
     )
