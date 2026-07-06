@@ -116,7 +116,7 @@ class EvtcHeader(BaseModel):
     )
     encounter_id: int = Field(default=0, ge=0, le=0xFFFF)
     agent_count: int = Field(..., ge=0, le=10_000)
-    skill_count: int = Field(default=0, ge=0, le=10_000)
+    skill_count: int = Field(default=0, ge=0, le=100_000)
 
 
 class Agent(BaseModel):

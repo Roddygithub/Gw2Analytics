@@ -25,6 +25,13 @@ class AgentOut(BaseModel):
     subgroup: str | None = None
 
 
+class SkillOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+
+
 class FightOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -35,6 +42,7 @@ class FightOut(BaseModel):
     started_at: datetime
     game_type: int
     agents: list[AgentOut] = []
+    skills: list[SkillOut] = []
 
 
 class UploadOut(BaseModel):

@@ -21,6 +21,7 @@ from gw2analytics_api.models import (
     UPLOAD_STATUS_FAILED,
     OrmFight,
     OrmFightAgent,
+    OrmFightSkill,
     Upload,
 )
 
@@ -119,6 +120,15 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
                 is_player=agent.is_player,
                 account_name=agent.account_name,
                 subgroup=agent.subgroup,
+            ),
+        )
+
+    for skill in cf.skills:
+        db.add(
+            OrmFightSkill(
+                fight_id=cf.id,
+                skill_id=int(skill.id),
+                name=skill.name or "",
             ),
         )
 

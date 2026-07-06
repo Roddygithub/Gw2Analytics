@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight
-from gw2analytics_api.schemas import AgentOut, FightOut
+from gw2analytics_api.schemas import AgentOut, FightOut, SkillOut
 
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
 
@@ -41,7 +41,9 @@ def get_fight(
 ) -> FightOut:
     """Return a fight by id (the upload's sha256)."""
     fight = db.execute(
-        select(OrmFight).where(OrmFight.id == fight_id).options(selectinload(OrmFight.agents)),
+        select(OrmFight)
+        .where(OrmFight.id == fight_id)
+        .options(selectinload(OrmFight.agents), selectinload(OrmFight.skills)),
     ).scalar_one_or_none()
     if fight is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
@@ -68,4 +70,5 @@ def _to_fight_out(fight: OrmFight) -> FightOut:
             )
             for a in fight.agents
         ],
+        skills=[SkillOut(id=s.skill_id, name=s.name) for s in fight.skills],
     )

@@ -96,6 +96,11 @@ class OrmFight(Base):
         cascade="all, delete-orphan",
         order_by="OrmFightAgent.agent_id",
     )
+    skills: Mapped[list[OrmFightSkill]] = relationship(
+        back_populates="fight",
+        cascade="all, delete-orphan",
+        order_by="OrmFightSkill.skill_id",
+    )
 
 
 class OrmFightAgent(Base):
@@ -117,3 +122,23 @@ class OrmFightAgent(Base):
     subgroup: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     fight: Mapped[OrmFight] = relationship(back_populates="agents")
+
+
+class OrmFightSkill(Base):
+    """One skill record (V1.3).
+
+    Normalised into its own table so future event-stream tables (V1.4+)
+    can FK into ``(fight_id, skill_id)`` for damage/healing/CC analytics.
+    """
+
+    __tablename__ = "fight_skills"
+
+    fight_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("fights.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    skill_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    fight: Mapped[OrmFight] = relationship(back_populates="skills")
