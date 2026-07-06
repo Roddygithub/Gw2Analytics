@@ -540,6 +540,6 @@ def test_real_evtc_binary_parses_with_realistic_agent_count() -> None:
     # skill table size).
     assert len(fight.skills) <= fight.header.skill_count
     if fight.header.skill_count > 0:
-        assert (
-            len(fight.skills) >= 1
-        ), f"header claims {fight.header.skill_count} skills but parser read 0"
+        assert len(fight.skills) >= 1, (
+            f"header claims {fight.header.skill_count} skills but parser read 0"
+        )
