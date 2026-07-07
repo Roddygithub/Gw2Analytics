@@ -30,7 +30,8 @@ this spec via `pnpm generate:api` (no live uvicorn needed; uses
 ## Local bring-up
 
 See the root `README.md` Quickstart for the end-to-end bring-up (infra,
-env, alembic, fastapi). Quickstart steps 4-8 cover this package.
+env, alembic, fastapi). Quickstart steps 4-8 (Bring up infra through
+Boot the API) cover this package.
 
 ## Postgres dependency for the e2e test
 
@@ -45,11 +46,6 @@ with a Postgres reachable at the `DATABASE_URL` declared in
 | Local dev            | `docker compose up -d gw2a-postgres` (already in `docker compose up -d`) |
 | GitHub Actions CI    | `lint-and-test` job spins up a `postgres:16-alpine` service on `localhost:5432` (credentials match `pytest_env`) |
 | Ad-hoc prod-shaped   | Any reachable Postgres ≥ 14 will do — Alembic baseline migration is API-version-agnostic |
-
-If a test name is mentioned elsewhere in the docs and gets renamed (the
-contract — POST → GET uploads → GET fights chain — is what matters, not
-the function identifier), update the contract description, not the
-function name in prose.
 
 If a developer runs `pytest` without a reachable Postgres, the e2e test
 **raises** (not skips) — that's the intended loud signal.
@@ -100,3 +96,6 @@ apps/api/
 - CORS is **env-driven** via `CORS_ALLOWED_ORIGINS` (comma-separated
   origins, with `*` as the wide-open shortcut for local dev). Default
   in dev = `["*"]`; tighten to the real domain list in production.
+- Test identifiers appear in prose only when the **contract** the test
+  guards (the end-to-end chain it exercises) is more memorable than the
+  function name; rename prose when the test renames.
