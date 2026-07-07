@@ -95,8 +95,40 @@ jobs:
       - name: Mypy
         run: uv run mypy libs apps --no-incremental
 
+      # ----------------------------------------------------------------
+      # Health probe CI gate (v0.8.7)
+      # ----------------------------------------------------------------
+      # Closes the loop on the v0.8.6 operational health probe.
+      # Step 1 captures the probe response BEFORE the e2e suite runs
+      # (so the baseline reflects the test DB state at the start of
+      # the suite, which is the legitimate "ground truth" against
+      # which the post-e2e drift is measured). Step 3 (after pytest)
+      # hits the probe again and compares to the baseline -- a
+      # ``drift_count`` delta > ``MAX_DRIFT_DELTA = 2`` fails the
+      # build (a real regression in the v0.8.4 materialise would
+      # add ~1 more fight of drift per e2e test that creates a new
+      # fight, so the delta would be ~3-4). The delta approach is
+      # baseline-agnostic -- a strict absolute ``drift_pct`` budget
+      # would be too fragile (1% fails when the test DB has ~10
+      # fights, 10% misses regressions when the test DB has ~100
+      # fights). See ``apps/api/ci_health_gate.py`` for the
+      # detailed design notes.
+      # ----------------------------------------------------------------
+      - name: Health probe baseline (v0.8.7)
+        run: uv run python apps/api/ci_health_gate.py --save-baseline /tmp/health_baseline.json
+
       - name: Pytest
         run: uv run pytest --tb=line -q
+
+      - name: Health probe CI gate (v0.8.7 regression check)
+        run: uv run python apps/api/ci_health_gate.py --check-delta /tmp/health_baseline.json
+
+      # The /tmp/health_baseline.json file is ephemeral -- clean it
+      # up so a later job in the same runner environment doesn't pick
+      # it up.
+      - name: "Health probe: cleanup /tmp/health_baseline.json"
+        if: always()
+        run: rm -f /tmp/health_baseline.json
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
