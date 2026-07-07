@@ -197,6 +197,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `web/pnpm-lock.yaml`: bumped to reflect AG Grid Community,
   AG Grid React, and `openapi-typescript` resolutions.
 
+### Added (Phase 4 followup -- web/ unit-test scaffolding)
+
+- `web/vitest.config.ts` (NEW): vitest 2.x config for the
+  Next.js 16 frontend -- `environment: "jsdom"`,
+  `setupFiles: ["./tests/setup.ts"]`, `css: false` (Next.js
+  owns styleable output), alias `@/*` -> `src/*` mirroring the
+  tsconfig root. Pattern-matches `tests/**/*.test.{ts,tsx}`
+  (so accidental `.spec.ts`-style files are ignored) and
+  `clearMocks: true` (so tests don't leak `vi.fn()` state
+  between cases).
+- `web/tests/setup.ts` (NEW): global `vi.mock` shims for
+  `next/link` (anchor), `next/font/google` (inert CSS-variable
+  shim), and `@/lib/env` (`http://test/api`); also extends
+  `expect` via `@testing-library/jest-dom/vitest`.
+- `web/tests/app/layout.test.tsx` (NEW): asserts `RootLayout`
+  exports metadata with title `GW2Analytics` + wraps children
+  in `<html lang=en>` with both Geist font variable classes
+  set.
+- `web/tests/app/page.test.tsx` (NEW): renders `<Home />` and
+  asserts the hero heading + tagline + both `next/link` cards
+  (`/fights`, `/account`) + the mocked `displayedApiBaseUrl`
+  in the footer.
+- `web/tests/app/fights-page.test.tsx` (NEW): CI smoke only --
+  the `await FightsPage()` call simulates a Server Component
+  invocation without booting the Next.js RSC runtime (see the
+  file header for the `headers()` / `cookies()` migration
+  path). Two cases: `fetchFights -> []` renders the
+  empty-state counter; `fetchFights throws` renders the
+  upstream-error card.
+- `web/package.json`: dev dependency group gains `vitest ^2.1.9`,
+  `jsdom ^25.0.1`, `@testing-library/react ^16.3.2`,
+  `@testing-library/jest-dom ^6.9.1`. Two new scripts --
+  `pnpm test` (vitest watch) and `pnpm test:unit` (vitest
+  run once in CI).
+- `web/pnpm-lock.yaml`: bumped to reflect the new dev deps.
+
+### Changed
+
+- `web/.npmrc`: bumped build-script allowlist from `[sharp]` to
+  `[sharp, esbuild]` (`esbuild` is vitest + Vite + Next.js
+  bundler native binary loader; `sharp` continues to be the
+  Next.js Image pipeline binary loader). pnpm 11 deprecated
+  the `pnpm.onlyBuiltDependencies` package.json field -- the
+  authoritative home is .npmrc.
+- `web/pnpm-workspace.yaml`: cleaned the leftover
+  `allowBuilds:` placeholder block from an earlier interactive
+  `pnpm approve-builds` call (whose values were literally
+  "set this to true or false"); pointed the docstring at
+  `web/.npmrc` for the postinstall allowlist; kept
+  `verify-deps-before-run: false`.
+
+### Added (CI followup)
+
+- `.github/workflows/ci.yml::lint-and-test`: new `Web unit
+  tests (vitest)` step after `Type-check web`, running
+  `pnpm exec vitest run --reporter=verbose` with
+  `working-directory: web`. The vitest runner is now part of
+  the PR merge gate.
+
+### Known noise
+
+- `pnpm install` continues to emit `[ERR_PNPM_IGNORED_BUILDS]`
+  on sharp and esbuild even though they are explicitly listed
+  in `web/.npmrc`. This is a pnpm 11.10 + esbuild/sharp peer
+  quirk: `esbuild`'s install exit code is 0 (falls back to
+  JS-only mode) and `sharp`'s native binary IS downloaded, so
+  vitest + Next.js optimize work correctly. The warning is
+  treated as cosmetic noise; future pnpm bumps may resolve
+  it silently.
+
 ## [0.2.0] - gw2_core 0.2.0: API-data models (Phase 4 prep)
 
 ### Added
