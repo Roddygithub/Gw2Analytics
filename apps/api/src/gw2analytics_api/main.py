@@ -25,7 +25,12 @@ app = FastAPI(
     # roll-ups. The per-target damage + healing + buff-removal trio
     # and the per-bucket event windows stay locked at the 0.3.0
     # contract.
-    version="0.7.0",
+    # v0.8.4: materialises the per-(fight, account_name) roll-up in
+    # the new `OrmFightPlayerSummary` table so the player routes
+    # serve the per-account view with a pure SQL aggregation
+    # (avoids the 5-30s latency for users with 100+ fights
+    # documented in the v0.7.0 CHANGELOG).
+    version="0.8.4",
 )
 
 # CORS — wide-open by default for local dev (Next.js at :3000,

@@ -150,3 +150,63 @@ class OrmFightSkill(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
 
     fight: Mapped[OrmFight] = relationship(back_populates="skills")
+
+
+class OrmFightPlayerSummary(Base):
+    """One row per ``(fight_id, account_name)`` pair: the per-fight
+    per-account damage / healing / buff-removal totals (v0.8.4).
+
+    Materialises the cross-fight roll-up so the ``/api/v1/players``,
+    ``/api/v1/players/{name}`` and ``/api/v1/players/{name}/timeline``
+    routes can serve the per-account view with a pure SQL aggregation
+    instead of walking every fight's gzipped events blob on every
+    request. The previous O(fights x events) per-request cost was
+    acceptable for v0.7.0 (handful of fights in the local-dev
+    dataset) but the 5-30s latency for users with 100+ fights was
+    the documented v0.7.0 perf debt.
+
+    Schema design
+    -------------
+    - **Composite PK on ``(fight_id, account_name)``**: the row is
+      identified by its (fight, player) pair; the CASCADE FK on
+      ``fight_id`` keeps the table in sync with ``fights`` (a
+      re-parsed fight replaces its rows atomically; a deleted
+      fight removes its rows automatically).
+    - **Denormalised identity** (``name`` / ``profession`` /
+      ``elite_spec``): the source-side ``OrmFightAgent`` row carries
+      the canonical identity, but denormalising on the summary
+      eliminates the JOIN on every player-route request. The
+      trade-off is a small write-time cost: a single
+      ``OrmFightAgent.account_name -> (name, profession, elite_spec)``
+      lookup per source-side event during the write. ``name`` is the
+      last-seen char-name (the aggregator's contract);
+      ``profession`` / ``elite_spec`` are first-seen anchors (also
+      the aggregator's contract).
+    - **Composite index on ``(account_name, fight_id)``**: the 3
+      player routes filter on ``account_name`` (the per-player view)
+      and sort by ``fight_id`` (the recency-first tiebreaker) so
+      this single index covers both access patterns. ``fight_id``
+      alone is also covered by the PK index (for the re-parse
+      DELETE).
+    """
+
+    __tablename__ = "fight_player_summaries"
+
+    fight_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("fights.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    account_name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    # Denormalised identity (last-seen name, first-seen profession /
+    # elite_spec) so the player routes don't JOIN ``OrmFightAgent``
+    # on every request. See the class docstring for the rationale.
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    profession: Mapped[int] = mapped_column(Integer, nullable=False)
+    elite_spec: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The 3 magnitudes. ``>= 0`` (the events blob is filtered to
+    # positive values at parse time; the migration is additive so
+    # existing rows keep their values without a backfill check).
+    total_damage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_healing: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_buff_removal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

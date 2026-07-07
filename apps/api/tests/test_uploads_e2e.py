@@ -41,11 +41,11 @@ from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app
-from gw2analytics_api.models import OrmFight
+from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary
 
 client = TestClient(app)
 
@@ -394,6 +394,125 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     # the same name_map produces the same name on every roll-up
     # row that targets A.
     assert strip_row["name"] == f"E2E Warrior {suffix}"
+
+    # v0.8.4: the parser also materialises the per-(fight, account)
+    # roll-up in ``OrmFightPlayerSummary``. Source-side attribution
+    # (event.source_agent_id -> account_name) is the OPPOSITE of the
+    # target-side roll-up the test asserted above: the SUMMARY
+    # attributes events to the SOURCE agent (the player who
+    # generated them), while the per-target roll-ups attribute to
+    # the TARGET agent (the player who received them).
+    #
+    # In this fixture the 2 damage events flow A -> B (A is the
+    # source of 1_234 + 567 = 1_801 damage; B receives it). The
+    # 2 heal events + 1 dual-emit's strip half + 1 pure-strip
+    # record all flow B -> A (B is the source of 800 + 400 = 1_200
+    # healing + 300 + 200 = 500 strip-removal; A receives them).
+    # A's source-side totals are therefore 1_801 damage + 0 heal
+    # + 0 strip; B's are 0 damage + 1_200 heal + 500 strip.
+    # The cross-check against the per-target roll-ups above
+    # (A received 1_200 heal + 500 strip; B received 1_801
+    # damage) confirms the source/target inversion.
+    session = get_sessionmaker()()
+    try:
+        summary_rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(
+                    OrmFightPlayerSummary.fight_id == payload["fight_id"],
+                ),
+            )
+            .scalars()
+            .all()
+        )
+        # The fixture has 2 player agents, so we expect exactly
+        # 2 summary rows (one per (fight_id, account_name) pair).
+        assert len(summary_rows) == 2
+        by_account = {r.account_name: r for r in summary_rows}
+        a_row = by_account[f":synth.{base_id_a}"]
+        b_row = by_account[f":synth.{base_id_b}"]
+        # A's source-side totals: A is the SOURCE of the 2 damage
+        # events only (the heal + strip events all flow B -> A,
+        # so B is their source). A's damage is 1_234 + 567; heal
+        # and strip are 0.
+        assert a_row.total_damage == 1_234 + 567
+        assert a_row.total_healing == 0
+        assert a_row.total_buff_removal == 0
+        # B's source-side totals: B is the SOURCE of the 2 heal
+        # events (800 + 400) + the dual-emit's strip half (300) +
+        # the pure-strip (200) = 500 strip total. B's damage is 0
+        # (B is the TARGET, not the source, of the 2 damage
+        # events).
+        assert b_row.total_damage == 0
+        assert b_row.total_healing == 800 + 400
+        assert b_row.total_buff_removal == 300 + 200
+        # Denormalised identity: name is the agent's char-name
+        # (last-seen, which here equals the only seen event);
+        # profession/elite are the agent table's values.
+        assert a_row.name == f"E2E Warrior {suffix}"
+        assert b_row.name == f"E2E Guard {suffix}"
+    finally:
+        session.close()
+
+    # v0.8.4 fast-path parity: the /players list, /players/{name}
+    # detail, and /players/{name}/timeline routes must serve the
+    # SAME per-(fight, account) totals via the new
+    # OrmFightPlayerSummary fast-path that the v0.7.0 slow-path
+    # served via the events blob walk. The two paths are locked
+    # against drift by this assertion (a regression in the
+    # fast-path would flip one of these totals and fail the
+    # test). The aggregation rules (last-seen name, first-seen
+    # profession/elite) are the same in both paths; only the
+    # READ source differs.
+    players_resp = client.get("/api/v1/players")
+    assert players_resp.status_code == 200, players_resp.text
+    players_rows = players_resp.json()
+    players_by_account = {r["account_name"]: r for r in players_rows}
+    a_player = players_by_account[f":synth.{base_id_a}"]
+    # Source-side attribution: A is the source of 2 damage events
+    # only (the heal + strip events all flow B -> A). The
+    # player route's cross-fight roll-up feeds the same per-(fight,
+    # account) contributions, so the totals match the summary
+    # table assertions above.
+    assert a_player["total_damage"] == 1_234 + 567
+    assert a_player["total_healing"] == 0
+    assert a_player["total_buff_removal"] == 0
+    assert a_player["fights_attended"] == 1
+
+    # v0.8.4 re-parse safety: re-uploading the same SHA (the parser
+    # reuses the existing OrmFight row) must DELETE the old
+    # summary rows and INSERT the new ones -- not duplicate them.
+    # The events blob itself is identical (same SHA), so the
+    # per-(fight, account) totals are also identical; the only
+    # observable signal is the ROW COUNT (no duplicates) + the
+    # timestamps on the rows (the new INSERTs overwrite the old
+    # DELETE-tracked rows). Re-posting via the test client.
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("sample.zevtc", blob, "application/octet-stream")},
+    )
+    assert resp.status_code == 201, resp.text
+    _wait_for_upload_completion(resp.json()["id"])
+    # After re-parse: still exactly 2 summary rows (no duplicate
+    # INSERTs from the first parse + the second parse).
+    session = get_sessionmaker()()
+    try:
+        summary_rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(
+                    OrmFightPlayerSummary.fight_id == payload["fight_id"],
+                ),
+            )
+            .scalars()
+            .all()
+        )
+        assert len(summary_rows) == 2
+        by_account = {r.account_name: r for r in summary_rows}
+        # Totals are unchanged (same events blob => same totals).
+        assert by_account[f":synth.{base_id_a}"].total_damage == 1_234 + 567
+        assert by_account[f":synth.{base_id_a}"].total_healing == 0
+        assert by_account[f":synth.{base_id_b}"].total_buff_removal == 300 + 200
+    finally:
+        session.close()
 
 
 def test_fight_events_404_when_unknown_fight() -> None:

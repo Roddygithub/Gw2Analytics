@@ -23,10 +23,11 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, selectinload
 
-from gw2_core import EliteSpec, Profession
+from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, Event, HealingEvent, Profession
 from gw2_core import Fight as DomainFight
 from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
 from gw2analytics_api.models import (
@@ -34,6 +35,7 @@ from gw2analytics_api.models import (
     UPLOAD_STATUS_FAILED,
     OrmFight,
     OrmFightAgent,
+    OrmFightPlayerSummary,
     OrmFightSkill,
     Upload,
 )
@@ -157,6 +159,22 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
             ),
         )
 
+    # Flush the staged agents + skills so the re-query in
+    # :func:`_persist_event_blob` can see them via the
+    # ``selectinload(OrmFight.agents)`` pre-load. The session is
+    # configured with ``autoflush=False`` (see
+    # :func:`gw2analytics_api.database.get_sessionmaker`), so
+    # the staged rows are NOT visible to the next query until we
+    # explicitly flush. Without this flush the re-query returns
+    # an orm_fight with an empty agents list and the per-fight
+    # per-account summary silently produces zero rows (the
+    # route's slow-path fallback then serves the data -- correct,
+    # but the materialised fast-path is lost for the fight).
+    # The flush is intentionally local: it does NOT commit; the
+    # outer :func:`process_parse` commits at the end of the
+    # happy path.
+    db.flush()
+
 
 def _prof_id(p: Profession) -> int:
     return int(p.value)
@@ -219,6 +237,178 @@ def _persist_event_blob(
         logger.exception("event blob unavailable for fight %s; deep metrics degraded", fight_id)
         return
 
-    orm_fight = db.execute(select(OrmFight).where(OrmFight.id == fight_id)).scalar_one_or_none()
+    # ``selectinload(OrmFight.agents)`` pre-loads the agents in the
+    # same query so the per-source-side attribution in
+    # ``_persist_player_summaries`` does not pay an extra round-trip.
+    # The pre-load is the canonical fix for the lazy-load
+    # ``orm_fight.agents`` access in the helper below; without it
+    # SQLAlchemy would issue a fresh SELECT when the relationship
+    # is first dereferenced.
+    orm_fight = db.execute(
+        select(OrmFight).where(OrmFight.id == fight_id).options(selectinload(OrmFight.agents)),
+    ).scalar_one_or_none()
     if orm_fight is not None:
         orm_fight.events_blob_uri = blob_uri
+        # v0.8.4: also materialise the per-(fight, account_name) roll-up
+        # so the player routes can serve the per-account view with a
+        # pure SQL aggregation (avoids the O(fights x events) per-request
+        # cost documented in the v0.7.0 CHANGELOG). The summary is
+        # populated from the same ``events`` list the blob was built
+        # from -- one walk, two outputs. The DELETE+INSERT pattern
+        # inside the helper is re-parse safe: re-uploading the same
+        # SHA replaces the per-fight rows atomically before the new
+        # INSERTs land.
+        #
+        # **Best-effort semantics.** A failure here degrades to the
+        # slow-path fallback (the route falls through to the blob
+        # walk for fights without a summary row); the upload still
+        # flips to ``COMPLETED`` with the fight + blob contract
+        # intact. The summary is a perf optimization, not a
+        # correctness invariant -- losing it must not lose the
+        # fight row. The try/except is intentionally narrow: the
+        # summary write only touches a single table (no MinIO, no
+        # S3), so a raise signals either a programming bug or a
+        # transient DB issue.
+        # Narrow ``SQLAlchemyError`` (not bare ``Exception``) so a
+        # programming bug in the helper surfaces during development
+        # instead of being silently swallowed. A broad ``except
+        # Exception`` was hiding a real bug in the selectinload /
+        # flush chain during the v0.8.4 bring-up (round 131 review);
+        # the narrow catch preserves the production resilience for
+        # transient DB issues without silencing future regressions.
+        try:
+            _persist_player_summaries(db, orm_fight, events)
+        except SQLAlchemyError:
+            logger.exception(
+                "player summary materialization failed for fight %s; "
+                "slow-path fallback will serve the player routes",
+                fight_id,
+            )
+
+
+def _persist_player_summaries(
+    db: Session,
+    orm_fight: OrmFight,
+    events: list[Event],
+) -> None:
+    """Materialise the per-(fight, account_name) roll-up from ``events``.
+
+    v0.8.4 perf-debt fix: the player routes (``/api/v1/players``,
+    ``/api/v1/players/{name}``, ``/api/v1/players/{name}/timeline``)
+    previously walked the events blob on every request. The
+    ``fight_player_summaries`` table caches the per-(fight, account)
+    totals so the routes can serve the per-account view with a
+    pure SQL aggregation (O(rows) instead of O(fights x events)).
+
+    Aggregation rules (mirrors :class:`PlayerProfileAggregator`):
+    - ``account_name`` is the source-agent's account_name (the
+      player who generated the events). NPC-only fights (no player
+      agents) produce zero summary rows -- the cross-fight join is
+      keyed on account_name so NPCs cannot contribute to a profile.
+    - ``name`` is the last-seen char-name (the aggregator's contract).
+    - ``profession`` / ``elite_spec`` are first-seen anchors (also
+      the aggregator's contract). Denormalised on the summary row
+      so the player routes don't JOIN ``OrmFightAgent`` on every
+      request.
+    - ``total_damage`` / ``total_healing`` / ``total_buff_removal``
+      are the per-account SUMS of the event magnitudes
+      (``DamageEvent.damage`` / ``HealingEvent.healing`` /
+      ``BuffRemovalEvent.buff_removal``). Zero-init when no events
+      of a given kind target the account.
+
+    Re-parse safety: the function DELETEs the existing rows for
+    ``orm_fight.id`` before INSERTing the new ones. A re-upload of
+    the same SHA (which lands on the same ``OrmFight`` row) replaces
+    the per-fight rows atomically -- the fight_id PK + CASCADE FK
+    keeps the table consistent.
+
+    NPC rows are filtered: only events whose
+    ``source_agent_id`` maps to a player agent (is_player=True AND
+    account_name is non-empty) contribute. This matches the
+    :func:`routes.players._compute_contributions` filter.
+    """
+    # Build the source-agent map for the per-fight agents. The
+    # route's helper uses ``OrmFightAgent.fight_id == fight_id`` so
+    # we mirror that here. ``selectinload(OrmFight.agents)`` is
+    # available on the orm_fight we just queried, so the agents
+    # list is pre-loaded -- no extra round-trip.
+    source_map: dict[int, OrmFightAgent] = {
+        a.agent_id: a for a in orm_fight.agents if a.is_player and a.account_name
+    }
+    if not source_map:
+        # Pure NPC fight (no player agents); nothing to materialise.
+        return
+
+    # Per-account accumulator: ``account_name -> {damage, healing, strip, name, prof, elite}``.
+    # ``name`` is last-seen (overwritten on every event); ``prof`` /
+    # ``elite`` are first-seen (set once on the first event for
+    # the account).
+    per_account: dict[str, dict[str, int | str]] = {}
+    for event in events:
+        agent = source_map.get(event.source_agent_id)
+        if agent is None:
+            # NPC source (or unknown agent) -- silently skip. The
+            # per-target roll-ups still see the event (their filter
+            # is on ``target_agent_id``), but the per-source-side
+            # attribution only counts player agents.
+            continue
+        account = agent.account_name
+        # ``source_map`` filters out agents where ``account_name`` is
+        # falsy (``if a.is_player and a.account_name``), so the
+        # comprehension guarantees ``account_name`` is a non-empty
+        # ``str`` here. mypy doesn't infer this from the
+        # comprehension's filter, so we narrow with an ``assert`` --
+        # the check is type-narrowing only and never fires in
+        # practice (``# noqa: S101`` to silence the assert-detection
+        # lint; the codebase doesn't run with ``python -O`` so the
+        # assert cannot be optimised away in production).
+        assert account is not None  # noqa: S101  # narrowed by the source_map comprehension
+        # Last-seen name (overwrite on every event after the first)
+        # + first-seen profession / elite (initialised on the first
+        # event). The ``account in per_account`` branch is the
+        # subsequent-event path; the else branch is the
+        # first-event path that seeds the bucket. This replaces
+        # the earlier ``bucket["set"]`` sentinel which conflated
+        # "first" and "subsequent" in the same dict as the data.
+        if account in per_account:
+            bucket: dict[str, int | str] = per_account[account]
+            bucket["name"] = agent.name or ""
+        else:
+            bucket = {
+                "damage": 0,
+                "healing": 0,
+                "strip": 0,
+                "name": agent.name or "",
+                "prof": int(agent.profession),
+                "elite": int(agent.elite_spec),
+            }
+            per_account[account] = bucket
+        if isinstance(event, DamageEvent):
+            bucket["damage"] = int(bucket["damage"]) + event.damage
+        elif isinstance(event, HealingEvent):
+            bucket["healing"] = int(bucket["healing"]) + event.healing
+        elif isinstance(event, BuffRemovalEvent):
+            bucket["strip"] = int(bucket["strip"]) + event.buff_removal
+
+    # Re-parse safety: delete the existing rows for this fight_id
+    # before inserting the new ones. The CASCADE FK on fight_id
+    # means the per-fight rows are removed when the fight is
+    # deleted, but a re-upload of the same SHA does NOT delete
+    # the fight -- it reuses the existing ``OrmFight`` row, so
+    # the summary rows MUST be explicitly replaced.
+    db.execute(
+        delete(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == orm_fight.id),
+    )
+    for account_name, bucket in per_account.items():
+        db.add(
+            OrmFightPlayerSummary(
+                fight_id=orm_fight.id,
+                account_name=account_name,
+                name=str(bucket["name"]),
+                profession=int(bucket["prof"]),
+                elite_spec=int(bucket["elite"]),
+                total_damage=int(bucket["damage"]),
+                total_healing=int(bucket["healing"]),
+                total_buff_removal=int(bucket["strip"]),
+            ),
+        )

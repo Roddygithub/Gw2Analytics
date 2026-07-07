@@ -557,7 +557,7 @@ dev = [{ name = "pytest", specifier = ">=8.3" }]
 
 [[package]]
 name = "gw2analytics-api"
-version = "0.7.0"
+version = "0.8.4"
 source = { editable = "apps/api" }
 dependencies = [
     { name = "alembic" },
