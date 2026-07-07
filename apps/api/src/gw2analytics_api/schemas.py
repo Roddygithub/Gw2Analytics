@@ -65,3 +65,26 @@ class UploadCreatedResponse(BaseModel):
     id: uuid.UUID
     sha256: str
     status: str
+
+
+class AccountEnrichedOut(BaseModel):
+    """GET /api/v1/account response.
+
+    Composed in :mod:`gw2analytics_api.routes.account` from two
+    upstream calls (``AsyncGuildWars2Client.account_get`` +
+    ``worlds_get([account.world_id])``) so the client gets a single
+    (world_id, world_name, world_population) tuple per GW2 API key.
+
+    ``world_population`` is the canonical capitalised ``Population``
+    string exactly as the v2 API emits (``"Low" | "Medium" | "High" |
+    "VeryHigh" | "Full"``). Forward-compat is delegated to ``gw2_core``
+    ``Population`` parsing; if the v2 API grows a new bucket, the
+    underlying ``WorldInfo`` validation raises and the route surfaces
+    a 502 rather than silently coercing to a known bucket.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    world_id: int
+    world_name: str
+    world_population: str  # matches gw2_core.Population values

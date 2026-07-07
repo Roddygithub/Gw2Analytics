@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
 
-from gw2analytics_api.routes import fights, uploads
+from gw2analytics_api.routes import account, fights, uploads
 
 app = FastAPI(
     title="GW2Analytics API",
@@ -18,7 +18,7 @@ app = FastAPI(
         "WvW combat-log ingestion + analytics. Wires gw2_evtc_parser behind "
         "a MinIO blob store and Postgres fight tables (Phase 2)."
     ),
-    version="0.1.0",
+    version="0.2.0",
 )
 
 # CORS — wide-open for local dev; tighten in production (Phase 3).
@@ -37,6 +37,7 @@ def healthz() -> dict[str, str]:
 
 app.include_router(uploads.router)
 app.include_router(fights.router)
+app.include_router(account.router)
 
 FastApiMCP(app).mount()
 

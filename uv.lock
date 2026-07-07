@@ -557,12 +557,13 @@ dev = [{ name = "pytest", specifier = ">=8.3" }]
 
 [[package]]
 name = "gw2analytics-api"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "apps/api" }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
     { name = "fastapi-mcp" },
+    { name = "gw2-api-client" },
     { name = "gw2-core" },
     { name = "gw2-evtc-parser" },
     { name = "httpx" },
@@ -577,7 +578,9 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
+    { name = "respx" },
 ]
 
 [package.metadata]
@@ -586,6 +589,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "fastapi-mcp", specifier = ">=0.1" },
     { name = "fastapi-mcp", specifier = ">=0.4" },
+    { name = "gw2-api-client", editable = "libs/gw2_api_client" },
     { name = "gw2-core", editable = "libs/gw2_core" },
     { name = "gw2-evtc-parser", editable = "libs/gw2_evtc_parser" },
     { name = "httpx", specifier = ">=0.27" },
@@ -599,7 +603,11 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3" }]
+dev = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "respx", specifier = ">=0.21" },
+]
 
 [[package]]
 name = "gw2analytics-root"

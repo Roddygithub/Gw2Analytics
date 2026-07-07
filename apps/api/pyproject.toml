@@ -1,7 +1,7 @@
 [project]
 name = "gw2analytics_api"
-version = "0.1.0"
-description = "FastAPI app for GW2Analytics. Wires gw2_core + gw2_evtc_parser behind endpoints."
+version = "0.2.0"
+description = "FastAPI app for GW2Analytics. Wires gw2_core + gw2_evtc_parser + gw2_api_client behind endpoints."
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "GW2Analytics team" }]
@@ -20,12 +20,15 @@ dependencies = [
     "httpx>=0.27",
     "gw2_core",
     "gw2_evtc_parser",
+    "gw2_api_client>=0.1.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
-]
+    "respx>=0.21",
+    "httpx>=0.27",
+] 
 
 [build-system]
 requires = ["hatchling"]
