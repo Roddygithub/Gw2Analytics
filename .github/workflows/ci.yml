@@ -115,13 +115,13 @@ jobs:
       # detailed design notes.
       # ----------------------------------------------------------------
       - name: Health probe baseline (v0.8.7)
-        run: uv run python apps/api/ci_health_gate.py --save-baseline /tmp/health_baseline.json
+        run: uv run python -m gw2analytics_api.scripts.health_gate --save-baseline /tmp/health_baseline.json
 
       - name: Pytest
         run: uv run pytest --tb=line -q
 
       - name: Health probe CI gate (v0.8.7 regression check)
-        run: uv run python apps/api/ci_health_gate.py --check-delta /tmp/health_baseline.json
+        run: uv run python -m gw2analytics_api.scripts.health_gate --check-delta /tmp/health_baseline.json
 
       # The /tmp/health_baseline.json file is ephemeral -- clean it
       # up so a later job in the same runner environment doesn't pick

@@ -123,4 +123,3 @@ asyncio_mode = "strict"
 filterwarnings = [
     "ignore::starlette.exceptions.StarletteDeprecationWarning",
 ]
-
