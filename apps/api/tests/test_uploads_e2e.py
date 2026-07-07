@@ -68,12 +68,19 @@ def _make_cbtevent(
     *,
     is_statechange: int = 0,
     is_nondamage: int = 0,
+    buff_dmg: int = 0,
 ) -> bytes:
     """Pack one 64-byte cbtevent record matching the parser's struct layout.
 
     Field padding (pad61..pad66) is set to zero -- the parser does not
     read them. ``value > 0`` + ``is_statechange == 0`` +
     ``is_nondamage == 0`` produces a yielded ``DamageEvent``.
+
+    Phase 8: ``buff_dmg`` is the ``int32`` arcdps field that surfaces a
+    separate ``BuffRemovalEvent`` from the heal-class event kind. Set
+    to > 0 on a record with ``is_nondamage == 1`` to exercise the
+    same-record dual-emit (heal + strip) or the pure-strip (no heal)
+    case.
     """
     return struct.pack(
         _EVENT_FMT,
@@ -81,7 +88,7 @@ def _make_cbtevent(
         src,  # uint64 src_agent
         dst,  # uint64 dst_agent
         value,  # int32 value
-        0,  # int32 buff_dmg
+        buff_dmg,  # int32 buff_dmg
         0,  # uint32 overstack_value
         skill_id,  # uint32 skillid
         0,  # uint16 src_instid
@@ -200,6 +207,12 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     # DIFFERENT target than the damage roll-up -- exercises the
     # damage-only / heal-only / mixed-fight cases the route has to
     # support independently.
+    # Phase 8: one of the heal records carries ``buff_dmg > 0`` so it
+    # dual-emits a ``HealingEvent`` AND a ``BuffRemovalEvent`` from the
+    # same cbtevent (corrupting / confusion skill -- heals the caster
+    # and strips a boon from the target). One strip-only record
+    # (``is_nondamage == 1``, ``value == 0``, ``buff_dmg > 0``) yields
+    # ONLY a ``BuffRemovalEvent`` -- the pure-strip path.
     events = [
         _make_cbtevent(
             time_ms=1_500,
@@ -220,6 +233,7 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
             src=base_id_b,
             dst=base_id_a,
             value=800,
+            buff_dmg=300,
             skill_id=base_skill_a,
             is_nondamage=1,
         ),
@@ -228,6 +242,19 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
             src=base_id_b,
             dst=base_id_a,
             value=400,
+            skill_id=base_skill_b,
+            is_nondamage=1,
+        ),
+        # Phase 8 pure-strip record: B strips a buff from A, no heal
+        # component. The roll-up lands on target A (alongside the
+        # dual-emit strip from above), exercising the same-target
+        # roll-up invariant for the BPS aggregator.
+        _make_cbtevent(
+            time_ms=2_000,
+            src=base_id_b,
+            dst=base_id_a,
+            value=0,
+            buff_dmg=200,
             skill_id=base_skill_b,
             is_nondamage=1,
         ),
@@ -309,10 +336,14 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     # each carry exactly 1 event.
     assert len(summary["event_windows"]) == 3
     counts = [b["event_count"] for b in summary["event_windows"]]
-    # 1 damage + 1 heal per non-empty bucket (heals land in the
-    # same second-bucket as the corresponding damage on purpose so
-    # the timeline cross-check is observable).
-    assert counts == [0, 2, 2]
+    # Per-bucket event_count: bucket 0 [0,1s) is empty; bucket 1
+    # [1s,2s) carries 1 damage (t=1.5s) + 1 heal (t=1.5s) + 1 strip
+    # (t=1.5s, the dual-emit's strip half) = 3 events; bucket 2
+    # [2s,3s) carries 1 damage (t=2.5s) + 1 heal (t=2.5s) + 1 pure
+    # strip (t=2.0s) = 3 events. The dual-emit at t=1.5s inflates
+    # bucket 1's count by 1 (the strip half) -- without it the
+    # expected would be [0, 2, 3].
+    assert counts == [0, 3, 3]
     damages = [b["damage_total"] for b in summary["event_windows"]]
     assert damages == [0, 1_234, 567]
     healings = [b["healing_total"] for b in summary["event_windows"]]
@@ -327,6 +358,18 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     assert heal_row["target_agent_id"] == base_id_a
     assert heal_row["total_healing"] == 800 + 400
     assert heal_row["hps"] == pytest.approx((800 + 400) / 2.5)
+    # Phase 8: per-target buff-removal roll-up. The dual-emit
+    # record (``is_nondamage == 1``, ``value == 800``,
+    # ``buff_dmg == 300``) yields a strip landing on A; the
+    # pure-strip record (``value == 0``, ``buff_dmg == 200``) also
+    # lands on A. Both strips target A, so the roll-up has one row
+    # with ``total_buff_removal == 300 + 200 = 500`` and
+    # ``bps == 500 / 2.5 = 200.0``.
+    assert len(summary["target_buff_removal"]) == 1
+    strip_row = summary["target_buff_removal"][0]
+    assert strip_row["target_agent_id"] == base_id_a
+    assert strip_row["total_buff_removal"] == 300 + 200
+    assert strip_row["bps"] == pytest.approx((300 + 200) / 2.5)
 
 
 def test_fight_events_404_when_unknown_fight() -> None:

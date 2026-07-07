@@ -117,6 +117,25 @@ class TargetHealingRowOut(BaseModel):
     hps: float
 
 
+class TargetBuffRemovalRowOut(BaseModel):
+    """One buff-removal roll-up row in :class:`FightEventsSummaryOut`.
+
+    Mirrors
+    :class:`gw2_analytics.target_buff_removal.TargetBuffRemovalRow`
+    with the ``strip_count`` field dropped from the API surface
+    (analyst-only signal; UI shows ``total_buff_removal`` + ``bps``
+    only). Strict parallel of :class:`TargetDpsRowOut` /
+    :class:`TargetHealingRowOut` so the trio reads as one design.
+    Phase 8 ships this third roll-up.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    target_agent_id: int
+    total_buff_removal: int
+    bps: float
+
+
 class FightEventsSummaryOut(BaseModel):
     """Combined aggregation payload returned by ``GET /api/v1/fights/{fight_id}/events``.
 
@@ -146,10 +165,26 @@ class FightEventsSummaryOut(BaseModel):
       damage-only / heal-only / mixed-fight cases all surface
       correctly because the route filters at the call site rather
       than branching inside the aggregator.
+    - ``target_buff_removal`` (Phase 8) is the third sibling roll-up,
+      filtered by ``isinstance(e, BuffRemovalEvent)`` and rolled up via
+      :class:`gw2_analytics.target_buff_removal.TargetBuffRemovalAggregator`.
+      The parser yields ``BuffRemovalEvent`` from two distinct paths:
+      (a) a single ``cbtevent`` record with ``is_statechange == 0``,
+      ``is_nondamage > 0``, ``value > 0``, ``buff_dmg > 0`` yields
+      BOTH a ``HealingEvent`` AND a ``BuffRemovalEvent`` (corrupting
+      / confusion skills that heal the caster + strip a boon); (b) a
+      record with ``is_nondamage > 0``, ``value == 0``,
+      ``buff_dmg > 0`` yields ONLY a ``BuffRemovalEvent`` (pure
+      strip). Empty when the parser yielded zero strip events.
     - ``event_windows`` is empty when there are no events. The
       ``EventWindowAggregator`` accepts the full ``Iterable[Event]``
       and accounts damage + healing in one bucket
       (``damage_total`` + ``healing_total`` + ``event_count``).
+      Phase 8 deliberately does NOT extend ``EventBucketOut`` with a
+      ``buff_removal_total`` field -- the per-bucket window contract
+      is locked and the heterogeneous stream passes through unchanged
+      (the aggregator's unknown-event fallback increases
+      ``event_count``).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -158,6 +193,7 @@ class FightEventsSummaryOut(BaseModel):
     duration_s: float
     target_dps: list[TargetDpsRowOut] = []
     target_healing: list[TargetHealingRowOut] = []
+    target_buff_removal: list[TargetBuffRemovalRowOut] = []
     event_windows: list[EventBucketOut] = []  # forwarded Pydantic alias
 
 

@@ -235,14 +235,16 @@ class EventType(StrEnum):
     """Discriminator for synthetic event kinds shipped in Phase 6 v1.
 
     Forward-compat: new ``EventType`` entries can be added alongside
-    ``DAMAGE`` / ``HEALING``; aggregators gate on ``isinstance`` against
-    the matching subclass, so unrecognized types fall through to
-    ``event_count`` without breaking ``damage_total`` / ``healing_total``
+    ``DAMAGE`` / ``HEALING`` / ``BUFF_REMOVAL``; aggregators gate on
+    ``isinstance`` against the matching subclass, so unrecognized types
+    fall through to ``event_count`` without breaking
+    ``damage_total`` / ``healing_total`` / ``buff_removal_total``
     accounting.
     """
 
     DAMAGE = "DAMAGE"
     HEALING = "HEALING"
+    BUFF_REMOVAL = "BUFF_REMOVAL"
 
 
 class BaseEvent(BaseModel):
@@ -277,20 +279,51 @@ class HealingEvent(BaseEvent):
     healing: int = Field(..., ge=0)
 
 
+class BuffRemovalEvent(BaseEvent):
+    """One outgoing buff-strip event. ``buff_removal`` is the per-hit integer value.
+
+    Phase 8 ships the third Event discriminated union member. A single
+    arcdps ``cbtevent`` record can represent BOTH an outgoing heal AND
+    a buff strip (corrupting / confusion skills; ``is_nondamage > 0``
+    + ``buff_dmg > 0``); the parser yields BOTH a
+    :class:`HealingEvent` (with ``healing = value``) AND a
+    :class:`BuffRemovalEvent` (with ``buff_removal = buff_dmg``) from
+    the same record. The "double-counting" concern that deferred this
+    from Phase 7 v2 was about adding ``buff_dmg`` to the
+    ``HealingEvent.healing`` field -- the v0.5.0-parser code did
+    ``magnitude = max(0, value)`` and silently discarded ``buff_dmg``.
+    Phase 8 keeps that conservative choice (the heal amount stays
+    separate from the strip amount) and adds a SECOND yielded event
+    for the strip.
+
+    Pure damage records (``is_nondamage == 0``) with ``buff_dmg > 0``
+    are NOT classified as buff-strip events: arcdps only writes
+    ``buff_dmg`` on the non-damage (heal-class) event kind, so a
+    damage record with non-zero ``buff_dmg`` is a parser-version
+    artefact and is silently dropped.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.BUFF_REMOVAL] = EventType.BUFF_REMOVAL
+    buff_removal: int = Field(..., ge=0)
+
+
 # Discriminated union for forward-compat downstream consumers that
 # accept "any event" (e.g. the EventWindowAggregator buckets damage +
 # healing in one shot without forcing the caller to split the stream)
 # AND for JSONL round-trip in apps/api/services (the per-fight events
-# blob is a heterogeneous stream of damage + healing records
-# written one ``model_dump_json()`` per line). The ``Annotated`` +
-# ``Field(discriminator="event_type")`` combination tells Pydantic v2
-# to dispatch on the ``event_type`` literal at validation time, so a
-# ``TypeAdapter(Event).validate_json(line)`` call materialises the
-# matching subclass with no manual ``isinstance`` ladder. Declared via
-# the PEP 695 ``type`` statement (Python 3.12+) so mypy treats the
-# right-hand side as a type expression without any ``# type: ignore``.
+# blob is a heterogeneous stream of damage + healing + buff-removal
+# records written one ``model_dump_json()`` per line). The
+# ``Annotated`` + ``Field(discriminator="event_type")`` combination
+# tells Pydantic v2 to dispatch on the ``event_type`` literal at
+# validation time, so a ``TypeAdapter(Event).validate_json(line)`` call
+# materialises the matching subclass with no manual ``isinstance``
+# ladder. Declared via the PEP 695 ``type`` statement (Python 3.12+)
+# so mypy treats the right-hand side as a type expression without
+# any ``# type: ignore``.
 type Event = Annotated[
-    DamageEvent | HealingEvent, Field(discriminator="event_type")
+    DamageEvent | HealingEvent | BuffRemovalEvent, Field(discriminator="event_type")
 ]  # PEP 695 type statement; mypy accepts at the type-expression slot
 
 
@@ -343,6 +376,7 @@ __all__ = [
     "AccountInfo",
     "Agent",
     "BaseEvent",
+    "BuffRemovalEvent",
     "DamageEvent",
     "EliteSpec",
     "Event",

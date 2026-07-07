@@ -13,6 +13,7 @@ from gw2_core.models import (
     AccountInfo,
     Agent,
     BaseEvent,
+    BuffRemovalEvent,
     DamageEvent,
     EliteSpec,
     Event,
@@ -27,12 +28,13 @@ from gw2_core.models import (
     WorldInfo,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "AccountInfo",
     "Agent",
     "BaseEvent",
+    "BuffRemovalEvent",
     "DamageEvent",
     "EliteSpec",
     "Event",

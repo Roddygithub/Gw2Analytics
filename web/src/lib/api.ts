@@ -226,6 +226,25 @@ export interface TargetHealingRow {
 }
 
 /**
+ * One per-target buff-removal roll-up row, mirror of
+ * :class:`apps.api.schemas.TargetBuffRemovalRowOut` (apps/api 0.5.0+).
+ *
+ * Phase 8 ships this third roll-up, strict parallel of
+ * :class:`TargetDpsRow` + :class:`TargetHealingRow`. Drops
+ * ``strip_count`` from the API surface for analyst-only parity; the
+ * ``bps`` rate is ``total_buff_removal / duration_s``. A single
+ * cbtevent that dual-emits a ``HealingEvent`` AND a
+ * ``BuffRemovalEvent`` (corrupting / confusion skills) lands in BOTH
+ * ``target_healing`` AND ``target_buff_removal`` -- independent
+ * roll-ups on the same ``duration_s``.
+ */
+export interface TargetBuffRemovalRow {
+  target_agent_id: number;
+  total_buff_removal: number;
+  bps: number;
+}
+
+/**
  * One time-bucketed roll-up window spanning ``[start_ms, end_ms)``,
  * mirror of :class:`apps.api.schemas.EventBucketOut`.
  *
@@ -262,5 +281,6 @@ export interface FightEventsSummaryRow {
   duration_s: number;
   target_dps: TargetDpsRow[];
   target_healing: TargetHealingRow[];
+  target_buff_removal: TargetBuffRemovalRow[];
   event_windows: EventBucket[];
 }

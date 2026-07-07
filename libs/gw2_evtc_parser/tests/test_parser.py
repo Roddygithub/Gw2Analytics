@@ -37,7 +37,7 @@ from pathlib import Path
 
 import pytest
 
-from gw2_core import DamageEvent, EliteSpec, HealingEvent, Profession
+from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, HealingEvent, Profession
 from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
 from gw2_evtc_parser.parser import (
     AGENT_COUNT_OFFSET,
@@ -127,6 +127,7 @@ def _build_event_record(
     is_nondamage: int = 0,
     is_cleanup: int = 0,
     is_offcycle: int = 0,
+    buff_dmg: int = 0,
 ) -> bytes:
     """Build one 64-byte cbtevent record matching the arcdps ``cbtevent`` struct.
 
@@ -146,7 +147,7 @@ def _build_event_record(
         src_agent,
         dst_agent,
         value,
-        0,  # buff_dmg (ignored by Phase 7 v1)
+        buff_dmg,
         0,  # overstack_value (ignored)
         skill_id,
         0,  # src_instid
@@ -1063,6 +1064,258 @@ def test_parse_events_yield_type_is_event_union() -> None:
     # same contract at runtime + is mypy-clean.
     for e in events:
         assert isinstance(e, (DamageEvent, HealingEvent))
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: BuffRemovalEvent extraction tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_events_yields_buff_removal_on_nondamage_with_buff_dmg() -> None:
+    """``is_nondamage > 0 && value > 0 && buff_dmg > 0`` yields TWO events.
+
+    Locks down the same-record dual-emit contract: a single arcdps
+    cbtevent can carry BOTH a heal (``value``) AND a buff-strip
+    (``buff_dmg``). The parser yields a ``HealingEvent`` AND a
+    ``BuffRemovalEvent`` from the same record. This is the canonical
+    case for a corrupting / confusion skill that heals the caster
+    and strips a boon from the target.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Mimic")],
+        events=[
+            _build_event_record(
+                time_ms=42_500,
+                src_agent=1,
+                dst_agent=2,
+                value=8_500,
+                buff_dmg=2_250,
+                is_nondamage=1,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 2
+    heal, strip = events
+    assert isinstance(heal, HealingEvent)
+    assert heal.time_ms == 42_500
+    assert heal.source_agent_id == 1
+    assert heal.target_agent_id == 2
+    assert heal.skill_id == 101
+    assert heal.healing == 8_500
+    assert isinstance(strip, BuffRemovalEvent)
+    assert strip.event_type == "BUFF_REMOVAL"
+    assert strip.time_ms == 42_500
+    assert strip.source_agent_id == 1
+    assert strip.target_agent_id == 2
+    assert strip.skill_id == 101
+    assert strip.buff_removal == 2_250
+
+
+def test_parse_events_yields_buff_removal_only_on_pure_strip() -> None:
+    """``is_nondamage > 0 && value == 0 && buff_dmg > 0`` yields ONLY a BuffRemovalEvent.
+
+    The "no-heal + buff-strip" path is the Phase 8 add for skills
+    that strip a boon from the target WITHOUT a healing component
+    on the caster. The parser must yield a single ``BuffRemovalEvent``
+    (no ``HealingEvent``), and the resulting yield list has length
+    exactly 1.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Strip\uff21ura")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=0,
+                buff_dmg=750,
+                is_nondamage=1,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, BuffRemovalEvent)
+    assert e.buff_removal == 750
+    assert e.skill_id == 101
+    assert e.source_agent_id == 1
+    assert e.target_agent_id == 2
+
+
+def test_parse_events_skips_damage_with_buff_dmg() -> None:
+    """``is_nondamage == 0 && buff_dmg > 0`` is silently dropped (no event).
+
+    Pure damage records with non-zero ``buff_dmg`` are a
+    parser-version artefact: arcdps only writes ``buff_dmg`` on the
+    heal-class event kind, so a damage record with non-zero
+    ``buff_dmg`` is NOT a valid Phase 8 buff-strip signal. The parser
+    yields no event (the record is fully filtered). This locks down
+    the contract that the damage path does NOT inspect ``buff_dmg``
+    (only the heal-class path does).
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Spurious")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=2_500,  # direct damage via value
+                buff_dmg=999,  # spurious: arcdps does not write this on damage records
+                is_nondamage=0,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    e = events[0]
+    # The damage record yields a single ``DamageEvent``; the spurious
+    # ``buff_dmg`` is silently dropped. No ``BuffRemovalEvent`` is
+    # produced from the damage path.
+    assert isinstance(e, DamageEvent)
+    assert e.damage == 2_500
+
+
+def test_parse_events_clamps_negative_buff_dmg_to_zero() -> None:
+    """Negative ``buff_dmg`` is clamped via ``max(0, buff_dmg)`` and the strip is dropped.
+
+    Pydantic ``BuffRemovalEvent.buff_removal: int >= 0`` enforces the
+    invariant; the parser absorbs signed-int32 overflow at the
+    event-block filter boundary so negative sums cannot corrupt
+    downstream buff-removal totals. The corresponding ``value`` field
+    is processed independently.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Heal Skill")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=8_500,
+                buff_dmg=-50,
+                is_nondamage=1,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    # Only the heal is yielded; the negative ``buff_dmg`` clamps to
+    # zero and the strip path is skipped.
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, HealingEvent)
+    assert e.healing == 8_500
+
+
+def test_parse_events_skips_statechange_for_buff_strip() -> None:
+    """Statechange records with buff_dmg > 0 are skipped (no strip emitted).
+
+    Mirrors ``test_parse_events_skips_statechange_for_healing``:
+    regardless of ``is_nondamage`` + ``buff_dmg`` flags,
+    ``is_statechange != 0`` always skips. Locks down the post-Phase-8
+    invariant that buff-apply / defiance-bar / position events are
+    still out of scope.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Skill")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=8_500,
+                buff_dmg=2_250,
+                is_nondamage=1,
+                is_statechange=1,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_parse_events_emits_heterogeneous_damage_heal_strip_stream() -> None:
+    """Mixed damage + heal + strip stream yields the right three subclasses in order.
+
+    Locks down the runtime ``isinstance`` ladder + ordering for a
+    heterogeneous stream. Sequence: D, H+S, D, S-only, H -- the
+    second record dual-emits (H + S), the fourth yields only a strip
+    (value == 0, buff_dmg > 0), the fifth yields only a heal
+    (value > 0, buff_dmg == 0). Total yield count: 6 events.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Skill")],
+        events=[
+            # 1: pure damage
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=100,
+                is_nondamage=0,
+            ),
+            # 2: heal + strip (dual emit)
+            _build_event_record(
+                time_ms=2_000,
+                src_agent=1,
+                dst_agent=2,
+                value=200,
+                buff_dmg=80,
+                is_nondamage=1,
+            ),
+            # 3: pure damage
+            _build_event_record(
+                time_ms=3_000,
+                src_agent=1,
+                dst_agent=2,
+                value=300,
+                is_nondamage=0,
+            ),
+            # 4: pure strip (no heal)
+            _build_event_record(
+                time_ms=4_000,
+                src_agent=1,
+                dst_agent=2,
+                value=0,
+                buff_dmg=50,
+                is_nondamage=1,
+            ),
+            # 5: pure heal (no strip)
+            _build_event_record(
+                time_ms=5_000,
+                src_agent=1,
+                dst_agent=2,
+                value=400,
+                is_nondamage=1,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    # Yield count: 1 (D) + 2 (H+S) + 1 (D) + 1 (S) + 1 (H) = 6.
+    assert len(events) == 6
+    # Per-event ordering: the dual-emit (H+S) keeps the HealingEvent
+    # FIRST, then the BuffRemovalEvent -- the order matches the
+    # arcdps convention (heal column then strip column) and is the
+    # documented contract for same-record dual-emit.
+    assert isinstance(events[0], DamageEvent) and events[0].damage == 100
+    assert isinstance(events[1], HealingEvent) and events[1].healing == 200
+    assert isinstance(events[2], BuffRemovalEvent) and events[2].buff_removal == 80
+    assert isinstance(events[3], DamageEvent) and events[3].damage == 300
+    assert isinstance(events[4], BuffRemovalEvent) and events[4].buff_removal == 50
+    assert isinstance(events[5], HealingEvent) and events[5].healing == 400
 
 
 # ---------------------------------------------------------------------------

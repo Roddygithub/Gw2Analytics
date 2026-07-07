@@ -63,6 +63,7 @@ import {
   formatApiError,
   type TargetDpsRow,
   type TargetHealingRow,
+  type TargetBuffRemovalRow,
   type FightEventsSummaryRow,
 } from "@/lib/api";
 import {
@@ -71,6 +72,7 @@ import {
 } from "@/components/TargetRollupsGrid";
 import { EventWindowsTable } from "@/components/EventWindowsTable";
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
+import { TargetFilter } from "@/components/TargetFilter";
 
 export const dynamic = "force-dynamic";
 
@@ -91,14 +93,30 @@ function parseWindowS(raw: string | undefined): number {
   return n;
 }
 
+/**
+ * Parse the URL ``?target=`` query param into a typed target
+ * agent id, or ``null`` when the param is missing / unparseable /
+ * out of range. ``null`` means "show all targets" (the
+ * unfiltered case). A negative or non-integer value falls back to
+ * ``null`` so an analyst typing ``?target=foo`` lands on the
+ * unfiltered view instead of an error page (mirrors the
+ * ``parseWindowS`` leniency contract).
+ */
+function parseTarget(raw: string | undefined): number | null {
+  if (raw === undefined || raw === "") return null;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
 // Column specs are built once at module-load time, not inside the
 // component body, so the ``TargetRollupsGrid`` useMemo deps stay
 // referentially stable across renders and the grid does not
 // rebuild its column model on every revalidation. The schema is
-// locked by the v0.3.0-api ``TargetDpsRowOut`` /
-// ``TargetHealingRowOut`` shapes; any future roll-up kind (e.g.
-// a Phase 8 ``BuffRemovalRow``) would add a new sibling here
-// without changing this page's render shape.
+// locked by the v0.5.0-api ``TargetDpsRowOut`` /
+// ``TargetHealingRowOut`` / ``TargetBuffRemovalRowOut`` shapes; any
+// future roll-up kind would add a new sibling here without changing
+// this page's render shape.
 const DPS_COLUMNS: TargetRollupColumn<TargetDpsRow>[] = [
   { field: "target_agent_id", headerName: "Target agent", width: 160 },
   { field: "total_damage", headerName: "Total damage", width: 160 },
@@ -109,22 +127,33 @@ const HEALING_COLUMNS: TargetRollupColumn<TargetHealingRow>[] = [
   { field: "total_healing", headerName: "Total healing", width: 160 },
   { field: "hps", headerName: "HPS", decimals: 2, width: 140 },
 ];
+// Phase 8: third sibling roll-up, strict parallel of the DPS +
+// Healing column specs. The schema is locked by the v0.5.0-api
+// ``TargetBuffRemovalRowOut`` shape: ``target_agent_id`` +
+// ``total_buff_removal`` + ``bps``.
+const BUFF_REMOVAL_COLUMNS: TargetRollupColumn<TargetBuffRemovalRow>[] = [
+  { field: "target_agent_id", headerName: "Target agent", width: 160 },
+  { field: "total_buff_removal", headerName: "Total strip", width: 160 },
+  { field: "bps", headerName: "BPS", decimals: 2, width: 140 },
+];
 
 export default async function FightEventsPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ window_s?: string }>;
+  searchParams: Promise<{ window_s?: string; target?: string }>;
 }) {
   // Next.js 15+ delivers both route params AND search params as
-  // Promises; await them to obtain the fight id + window_s. The
-  // ``encodeURIComponent`` on the id is unnecessary for a SHA-256
-  // (already URL-safe) but is the canonical guard against any
-  // future id shape that happens to contain reserved characters.
+  // Promises; await them to obtain the fight id + window_s +
+  // target. The ``encodeURIComponent`` on the id is unnecessary for
+  // a SHA-256 (already URL-safe) but is the canonical guard
+  // against any future id shape that happens to contain reserved
+  // characters.
   const { id } = await params;
-  const { window_s: window_s_raw } = await searchParams;
+  const { window_s: window_s_raw, target: target_raw } = await searchParams;
   const windowS = parseWindowS(window_s_raw);
+  const targetFilter = parseTarget(target_raw);
 
   let summary: FightEventsSummaryRow | null = null;
   // ``fetchError`` carries the user-facing error string (already
@@ -145,13 +174,50 @@ export default async function FightEventsPage({
         <header style={{ marginBottom: 16 }}>
           <h1 style={{ fontSize: 28, marginBottom: 4 }}>Fight {id}</h1>
           <p style={{ opacity: 0.7 }}>
-            Per-target damage + healing roll-up + event windows.
+            Per-target damage + healing + buff-removal roll-up + event windows.
           </p>
         </header>
         <p style={{ color: "var(--accent)" }}>{fetchError}</p>
       </main>
     );
   }
+
+  // Compute the union of unique target_agent_ids across the three
+  // roll-up arrays (DPS + healing + buff-removal). The
+  // ``TargetFilter`` dropdown is populated from this set so the
+  // analyst can pick a target that appears in at least one
+  // roll-up. Sorted ascending for a stable, alphabetical-by-id
+  // dropdown order. Phase 8: includes the third roll-up so a
+  // target that only appears in ``target_buff_removal`` (e.g. a
+  // pure-strip target) is still selectable.
+  const availableTargets = Array.from(
+    new Set<number>([
+      ...summary.target_dps.map((r) => r.target_agent_id),
+      ...summary.target_healing.map((r) => r.target_agent_id),
+      ...summary.target_buff_removal.map((r) => r.target_agent_id),
+    ]),
+  ).sort((a, b) => a - b);
+
+  // Server-side filter: when ``targetFilter`` is set, narrow each
+  // of the three roll-up arrays to that target. The
+  // ``EventWindowsTable`` is intentionally NOT filtered -- the
+  // per-bucket timeline is the "global fight picture" and a
+  // per-target filter on the roll-ups already gives the analyst
+  // the per-target contribution breakdown they want.
+  const filteredDps =
+    targetFilter === null
+      ? summary.target_dps
+      : summary.target_dps.filter((r) => r.target_agent_id === targetFilter);
+  const filteredHealing =
+    targetFilter === null
+      ? summary.target_healing
+      : summary.target_healing.filter((r) => r.target_agent_id === targetFilter);
+  const filteredBuffRemoval =
+    targetFilter === null
+      ? summary.target_buff_removal
+      : summary.target_buff_removal.filter(
+          (r) => r.target_agent_id === targetFilter,
+        );
 
   return (
     <main
@@ -177,14 +243,22 @@ export default async function FightEventsPage({
           </h1>
           <p style={{ opacity: 0.7 }}>
             Duration: {summary.duration_s.toFixed(2)} s
+            {targetFilter !== null ? ` — filtered to target ${targetFilter}` : ""}
           </p>
         </div>
-        <WindowSizeSelector current={windowS} fightId={id} />
+        <div style={{ display: "inline-flex", gap: 16, flexWrap: "wrap" }}>
+          <WindowSizeSelector current={windowS} fightId={id} />
+          <TargetFilter
+            current={targetFilter}
+            availableTargets={availableTargets}
+            fightId={id}
+          />
+        </div>
       </header>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Per-target damage</h2>
-        <TargetRollupsGrid rows={summary.target_dps} columns={DPS_COLUMNS} />
+        <TargetRollupsGrid rows={filteredDps} columns={DPS_COLUMNS} />
       </section>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -192,8 +266,18 @@ export default async function FightEventsPage({
           Per-target healing
         </h2>
         <TargetRollupsGrid
-          rows={summary.target_healing}
+          rows={filteredHealing}
           columns={HEALING_COLUMNS}
+        />
+      </section>
+
+      <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600 }}>
+          Per-target buff removal
+        </h2>
+        <TargetRollupsGrid
+          rows={filteredBuffRemoval}
+          columns={BUFF_REMOVAL_COLUMNS}
         />
       </section>
 

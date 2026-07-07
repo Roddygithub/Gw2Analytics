@@ -61,6 +61,21 @@ vi.mock("@/components/WindowSizeSelector", () => ({
 }));
 
 /**
+ * ``@/components/TargetFilter`` is a small Client Component
+ * (useRouter + usePathname + useSearchParams from ``next/navigation``)
+ * that renders a dropdown for the ``?target=`` query param. The
+ * fight-events-page test imports the page (which transitively imports
+ * the filter), so we mock it as a no-op to keep the page test
+ * focused on the page's own render contract; a dedicated
+ * component-level test in
+ * :file:`web/tests/components/target-filter.test.tsx` exercises the
+ * dropdown + router interaction.
+ */
+vi.mock("@/components/TargetFilter", () => ({
+  TargetFilter: () => null,
+}));
+
+/**
  * next/link is replaced with a plain anchor so jsdom can resolve
  * the href without booting the Next.js runtime. The original
  * ``Link`` accepts ``className`` + child React tree; the shim

@@ -68,6 +68,7 @@ from typing import BinaryIO, Final
 
 from gw2_core import (
     Agent,
+    BuffRemovalEvent,
     DamageEvent,
     EliteSpec,
     Event,
@@ -187,34 +188,46 @@ class PythonEvtcParser:
 
     @staticmethod
     def parse_events(source: BinaryIO | bytes) -> Iterator[Event]:
-        """Yield :class:`DamageEvent` + :class:`HealingEvent` records from the cbtevent block.
+        """Yield DamageEvent + HealingEvent + BuffRemovalEvent records from the cbtevent block.
 
-        Phase 7 v2 ships heterogeneous event-stream extraction. The
-        ``is_statechange`` flag is the primary discriminator: any
-        record with ``is_statechange != 0`` is a statechange /
-        buff-apply / defiance-bar event that we do not classify as
-        damage or healing here (Phase 8 candidate).
+        Phase 7 v2 ships heterogeneous event-stream extraction
+        (``DamageEvent | HealingEvent``). Phase 8 extends the
+        discriminated union with :class:`BuffRemovalEvent` to
+        surface the arcdps ``buff_dmg`` field. The three event kinds
+        share the ``is_statechange == 0`` precondition; the
+        ``is_nondamage`` + ``value`` + ``buff_dmg`` flags pick the
+        kind:
 
-        For records with ``is_statechange == 0``, the ``is_nondamage``
-        flag picks the event kind:
+        - ``is_nondamage == 0`` + ``value > 0``: direct damage.
+          Yields ``DamageEvent`` with ``damage = value``.
+        - ``is_nondamage > 0`` + ``value > 0``: outgoing heal.
+          Yields ``HealingEvent`` with ``healing = value``. If the
+          SAME record also has ``buff_dmg > 0``, yields a SECOND
+          ``BuffRemovalEvent`` (with ``buff_removal = buff_dmg``) --
+          the canonical case is a corrupting / confusion skill that
+          heals the caster and strips a boon from the target. A
+          single cbtevent can yield AT MOST TWO events: one
+          ``HealingEvent`` + one ``BuffRemovalEvent``.
+        - ``is_nondamage > 0`` + ``value == 0`` + ``buff_dmg > 0``:
+          pure buff-strip (no heal magnitude on the same record).
+          Yields ONLY a ``BuffRemovalEvent``. The "no-heal +
+          buff-strip" path is the Phase 8 add for the case where
+          the skill landed without a healing component.
+        - ``is_nondamage == 0`` + ``buff_dmg > 0``: pure damage
+          records with non-zero ``buff_dmg`` are silently dropped
+          -- arcdps only writes ``buff_dmg`` on the heal-class
+          (``is_nondamage > 0``) event kind, so a damage record
+          with non-zero ``buff_dmg`` is a parser-version artefact
+          and is NOT a valid buff-strip signal.
 
-        - ``is_nondamage == 0``: direct damage. ``value`` is the
-          damage taken; we clamp via ``max(0, value)`` to absorb
-          signed-int32 overflow quirks, then yield ``DamageEvent``
-          with ``damage = clamped_value``.
-        - ``is_nondamage > 0``: outgoing-heal (per arcdps community
-          convention A -- the same ``value`` field carries the heal
-          amount when the non-damage flag is set; the Elite Insights
-          parser uses the same convention). We clamp + yield
-          ``HealingEvent`` with ``healing = clamped_value``.
-
-        A single cbtevent record yields AT MOST ONE event. We do
-        NOT also yield a ``HealingEvent`` from ``buff_dmg`` when
-        ``value > 0`` -- doing so would double-count the
-        buff-removal path and inflate downstream healing totals.
-        Forward-compat for the buff-removal / barrier path lands in
-        a Phase 8 follow-up keyed off ``is_statechange == 0`` +
-        ``is_nondamage == 0`` + ``buff_dmg > 0`` records.
+        Negative ``value`` is clamped via ``max(0, value)``; a
+        record whose ``value <= 0`` AND ``buff_dmg <= 0`` (or whose
+        ``buff_dmg <= 0`` in the pure-damage branch) yields no
+        event. ``buff_dmg`` is itself a signed int32 and is clamped
+        the same way (the domain :class:`BuffRemovalEvent` rejects
+        negative ``buff_removal``). Statechange records
+        (``is_statechange != 0``) are skipped entirely -- buff-apply
+        / defiance-bar / position events remain out of scope.
 
         Truncation is lenient: trailing bytes < ``EVENT_SIZE`` stop
         the loop without raising. ``burst`` records (multiple bytes
@@ -231,7 +244,7 @@ class PythonEvtcParser:
                 src_agent,
                 dst_agent,
                 value,
-                _buff_dmg,
+                buff_dmg,
                 _overstack_value,
                 skill_id,
                 _src_instid,
@@ -253,14 +266,16 @@ class PythonEvtcParser:
             cursor += EVENT_SIZE
             if is_statechange != 0:
                 continue
-            # Convention A (Elite Insights parity): ``value`` carries
-            # the magnitude of the event, ``is_nondamage`` picks the
-            # kind. Buffer-removal / barrier via ``buff_dmg`` is out
-            # of scope for v2 (Phase 8).
             magnitude = max(0, value)
-            if magnitude == 0:
-                continue
+            buff_strip = max(0, buff_dmg)
             if is_nondamage == 0:
+                # Pure damage path. ``buff_dmg > 0`` is silently
+                # dropped: arcdps only writes ``buff_dmg`` on the
+                # heal-class event kind, so a damage record with
+                # non-zero ``buff_dmg`` is a parser-version artefact
+                # and is NOT a valid Phase 8 buff-strip signal.
+                if magnitude == 0:
+                    continue
                 yield DamageEvent(
                     time_ms=time_ms,
                     source_agent_id=src_agent,
@@ -274,13 +289,33 @@ class PythonEvtcParser:
                 # ``is_nondamage`` -- some arcdps revisions set it to
                 # 2, 3, etc. for sub-kinds of heal; the aggregator
                 # gets one event per heuristic-clamped heal.
-                yield HealingEvent(
-                    time_ms=time_ms,
-                    source_agent_id=src_agent,
-                    target_agent_id=dst_agent,
-                    skill_id=skill_id,
-                    healing=magnitude,
-                )
+                if magnitude > 0:
+                    yield HealingEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=dst_agent,
+                        skill_id=skill_id,
+                        healing=magnitude,
+                    )
+                # Phase 8 buff-strip emission. Yields a SEPARATE
+                # ``BuffRemovalEvent`` event alongside the heal (or
+                # standalone if the record had no ``value``). This
+                # is the second-half of the same-record dual-emit:
+                # the heal amount (``value``) and the strip amount
+                # (``buff_dmg``) are independent fields on the
+                # arcdps cbtevent record, and a single skill can
+                # both heal the caster AND strip a boon from the
+                # target. A single cbtevent can yield at most TWO
+                # events: one ``HealingEvent`` (above) + one
+                # ``BuffRemovalEvent`` (below).
+                if buff_strip > 0:
+                    yield BuffRemovalEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=dst_agent,
+                        skill_id=skill_id,
+                        buff_removal=buff_strip,
+                    )
 
 
 # ---------------------------------------------------------------------------

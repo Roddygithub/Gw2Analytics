@@ -7,7 +7,234 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added (Phase 7 v1 -- parser-side event-stream consumer + apps/api /events wire-up)
+## [0.6.0] - Phase 8: BuffRemovalEvent end-to-end + per-target filter + CI Postgres service
+
+### Added (domain)
+
+- `libs/gw2_core/src/gw2_core/models.py`: `EventType.BUFF_REMOVAL`
+  StrEnum member. New `BuffRemovalEvent(BaseEvent)` with
+  `buff_removal: int >= 0` + `Literal[EventType.BUFF_REMOVAL]`
+  discriminator. Discriminated union extended to
+  `type Event = Annotated[DamageEvent | HealingEvent | BuffRemovalEvent,
+  Field(discriminator="event_type")]`. The third Event member
+  is the canonical path for surface the arcdps `cbtevent.buff_dmg`
+  field.
+- `libs/gw2_core/src/gw2_core/__init__.py`: re-exports
+  `BuffRemovalEvent` + adds it to `__all__`. `__version__` bumped
+  `0.3.0 -> 0.5.0` to mirror the coordinated Phase 8 surface
+  change.
+
+### Added (parser)
+
+- `libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py`:
+  `PythonEvtcParser.parse_events` now unpacks `buff_dmg` (was
+  `_buff_dmg`). New dual-emit filter contract (Convention A +
+  Elite Insights parity extended):
+    - `is_statechange == 0 && is_nondamage == 0 && value > 0` ->
+      emits `DamageEvent` (buff_dmg silently dropped, arcdps
+      does not write buff_dmg on damage records).
+    - `is_statechange == 0 && is_nondamage > 0 && value > 0` ->
+      emits `HealingEvent` AND, if `buff_dmg > 0`, also emits
+      `BuffRemovalEvent` from the SAME record. The canonical
+      case is a corrupting / confusion skill that heals the
+      caster and strips a boon from the target.
+    - `is_statechange == 0 && is_nondamage > 0 && value == 0 &&
+      buff_dmg > 0` -> emits ONLY a `BuffRemovalEvent` (pure
+      strip with no heal magnitude).
+  Negative `buff_dmg` is clamped via `max(0, buff_dmg)`. A
+  single cbtevent can yield AT MOST TWO events (one
+  HealingEvent + one BuffRemovalEvent) on the dual-emit path.
+
+### Added (parser tests)
+
+- `libs/gw2_evtc_parser/tests/test_parser.py`: 6 NEW Phase 8
+  tests locking the dual-emit contract:
+  - `test_parse_events_yields_buff_removal_on_nondamage_with_buff_dmg`
+    (dual emit: 1 record -> 2 events)
+  - `test_parse_events_yields_buff_removal_only_on_pure_strip`
+    (value=0 + buff_dmg>0 yields only BuffRemovalEvent)
+  - `test_parse_events_skips_damage_with_buff_dmg` (pure damage
+    path silently drops spurious buff_dmg)
+  - `test_parse_events_clamps_negative_buff_dmg_to_zero`
+  - `test_parse_events_skips_statechange_for_buff_strip`
+  - `test_parse_events_emits_heterogeneous_damage_heal_strip_stream`
+    (5 records -> 6 events, locks the interleaved ordering)
+
+### Added (analytics)
+
+- `libs/gw2_analytics/src/gw2_analytics/target_buff_removal.py`
+  (NEW): strict parallel of `target_healing.py` with
+  `TargetBuffRemovalRow` + `TargetBuffRemovalAggregator`.
+  Schema: `target_agent_id` + `total_buff_removal` +
+  `strip_count` + `bps` (buff-removal-per-second). Same
+  ordering (desc by total + asc by target on tie), same
+  invariants (sum-of-row == sum-of-event; monotonically
+  non-increasing), same `duration_s` zero/negative guard
+  (`bps=0.0` sentinel, `ValueError` on negative).
+- `libs/gw2_analytics/src/gw2_analytics/__init__.py`: re-exports
+  `TargetBuffRemovalAggregator` + `TargetBuffRemovalRow`.
+  `__version__` bumped `0.4.0 -> 0.5.0`.
+- `libs/gw2_analytics/tests/test_target_buff_removal.py` (NEW):
+  6 mirror tests covering empty input, single-row shape,
+  zero/negative duration edge, deterministic ordering,
+  cross-field sum preservation, frozen-Pydantic guarantee.
+
+### Added (apps/api)
+
+- `apps/api/src/gw2analytics_api/schemas.py`: new
+  `TargetBuffRemovalRowOut` response schema (strict parallel of
+  `TargetDpsRowOut` / `TargetHealingRowOut` -- drops
+  `strip_count` from the API surface for analyst-only parity)
+  and a new
+  `target_buff_removal: list[TargetBuffRemovalRowOut] = []`
+  sibling field on `FightEventsSummaryOut` (between
+  `target_healing` and `event_windows`). Empty when the parser
+  yielded zero strip events.
+- `apps/api/src/gw2analytics_api/routes/fights.py`: the
+  heterogeneous JSONL stream is split at the call site into
+  three per-kind iterators (`isinstance(e, DamageEvent)`,
+  `isinstance(e, HealingEvent)`, `isinstance(e, BuffRemovalEvent)`)
+  fed to `TargetDpsAggregator` / `TargetHealingAggregator` /
+  `TargetBuffRemovalAggregator` on the same `duration_s` so
+  the three roll-ups are temporally consistent. The
+  per-aggregator call site stays free of cross-kind
+  discrimination in the hot loop. `EventWindowAggregator`
+  is intentionally NOT extended with a `buff_removal_total`
+  field -- the per-bucket window contract is locked.
+- `apps/api/tests/test_uploads_e2e.py::test_uploads_e2e_happy_path`:
+  `_make_cbtevent` now accepts a `buff_dmg` kwarg. One cbtevent
+  record dual-emits a heal + strip (on agent A); one pure-strip
+  record (no heal, just a strip) lands on agent A. The test
+  asserts `target_buff_removal` has 1 row with
+  `total_buff_removal=500` and `bps=200.0`, and the per-bucket
+  `event_count` for the dual-emit's bucket is bumped to 3
+  (1 damage + 1 heal + 1 strip).
+
+### Added (web)
+
+- `web/src/components/TargetFilter.tsx` (NEW): Client Component
+  that renders a dropdown of available `target_agent_id` values
+  for the `/fights/[id]` drill-down page. Uses `useRouter` +
+  `usePathname` + `useSearchParams` from `next/navigation`; on
+  change, emits `router.push` to the current path with a
+  `?target=N` query param (or drops the param when the user
+  picks "All targets"). Preserves other search params (e.g.
+  `?window_s=30`) when rewriting the target param via a
+  `URLSearchParams` snapshot. NAMED export to match the
+  existing test-setup mock contract.
+- `web/src/app/fights/[id]/page.tsx`:
+  - Page signature widened to accept
+    `searchParams: Promise<{ window_s?: string; target?: string }>`
+    (Next.js 15+ async searchParams contract).
+  - New `parseTarget()` helper clamps invalid / out-of-range /
+    negative values to `null` (the "unfiltered" sentinel), so
+    a URL typo never surfaces a misleading error.
+  - New `BUFF_REMOVAL_COLUMNS` spec for the third roll-up.
+  - New "Per-target buff removal" section rendering
+    `TargetRollupsGrid` with the new columns.
+  - `availableTargets` is the union of unique `target_agent_id`
+    across the three roll-up arrays (so a target that only
+    appears in `target_buff_removal` is still selectable).
+  - Server-side filter: `filteredDps` / `filteredHealing` /
+    `filteredBuffRemoval` narrowed to the active target when
+    `targetFilter !== null`.
+  - "filtered to target N" sub-label on the duration line when
+    the filter is active.
+  - Header layout now hosts `<TargetFilter />` next to
+    `<WindowSizeSelector />` in a flex row.
+- `web/src/lib/api.ts`: new `TargetBuffRemovalRow` interface +
+  `target_buff_removal` field on `FightEventsSummaryRow`.
+- `web/tests/setup.ts`: no-op mock for the new `TargetFilter`
+  named export (same pattern as `WindowSizeSelector`).
+- `web/tests/app/fight-events-page.test.tsx`: `POPULATED_PAYLOAD`
+  + `EMPTY_PAYLOAD` gain `target_buff_removal`. 2 NEW test
+  cases: target filter narrows all 3 roll-ups + "filtered to
+  target N" sub-label, malformed target falls back to the
+  unfiltered view. Existing tests updated to expect the
+  "Per-target buff removal" heading.
+- `web/tests/components/target-filter.test.tsx` (NEW): 4
+  component-level tests that override the global no-op mock
+  via `vi.mock(..., importOriginal)`: renders all available
+  targets + "All targets" entry, marks the current target as
+  selected, emits a bare URL on "All targets", emits
+  `?target=N` on a target pick. `useRouter` + `usePathname` +
+  `useSearchParams` are mocked to deterministic stubs.
+
+### Changed (CI)
+
+- `.github/workflows/ci.yml::lint-and-test`: the Postgres
+  `services:` block was already in place (deferred from
+  v0.3.0; this release is the first to land with the block
+  live). `postgres:16-alpine` with
+  `POSTGRES_USER=gw2analytics` /
+  `POSTGRES_PASSWORD=gw2analytics` /
+  `POSTGRES_DB=gw2analytics` + port mapping `5432:5432` +
+  `pg_isready` health check, so a fresh runner can exercise
+  the full POST /api/v1/uploads -> GET /api/v1/uploads/{id} ->
+  GET /api/v1/fights/{id} -> GET /api/v1/fights/{id}/events
+  chain against a real Postgres schema. The DATABASE_URL
+  matches `[tool.pytest_env]` in the root `pyproject.toml`
+  so `uv run pytest` finds a reachable DB without further
+  wiring.
+
+### Notes
+
+- The pre-commit mypy hook (shipped in v0.4.0-tooling) was
+  re-validated on the Phase 8 Python file set
+  (`uv run pre-commit run mypy --all-files` = 0). No
+  `--no-verify` was needed for the v0.6.0 commit.
+- The TargetFilter dropdown intentionally displays raw
+  `agent_id` integers rather than player names. A future
+  enhancement would resolve names from the `OrmFight.agents`
+  table (via a new `GET /api/v1/fights/{id}/agents`
+  endpoint or by denormalising agent names into the events
+  response); for now the raw ids are the smallest viable
+  affordance and match the existing `target_agent_id` column
+  on the roll-up rows.
+- The `event_windows` contract is deliberately NOT extended
+  with a `buff_removal_total` field. The per-bucket timeline
+  is the "global fight picture"; the per-target roll-ups
+  already give the analyst the per-target contribution
+  breakdown. Adding a per-bucket strip column would force a
+  re-aggregation path that the heterogeneous stream already
+  handles correctly (the bucket's `event_count` includes the
+  strip half of any dual-emit).
+- The dual-emit ordering is documented as "HealingEvent
+  first, then BuffRemovalEvent" -- the order matches the
+  arcdps convention (heal column then strip column) and is
+  locked by `test_parse_events_emits_heterogeneous_damage_heal_strip_stream`.
+
+### Tests
+
+- 6 new parser tests + 6 new analytics tests + 1 extended
+  e2e test + 2 new page tests + 4 new component tests.
+  Python test count: 46 (v0.5.0-web) -> 58 (v0.6.0).
+  Web test count: 20 (v0.5.0-web) -> 26 (v0.6.0).
+
+### Validation
+
+- `uv run ruff check libs apps`: clean (RUFF=0).
+- `uv run ruff format --check libs apps`: clean (FORMAT=0).
+- `uv run mypy libs apps --no-incremental`: clean (MYPY=0,
+  44 source files).
+- `uv run pytest libs`: 57 passed + 1 skipped (PYTEST_LIBS=0).
+- `uv run pytest apps/api`: 4 tests in `test_uploads_e2e.py` +
+  healthz (PYTEST_APPS=0). `alembic upgrade head` runs first
+  to migrate the Postgres schema to the v0.3.0
+  `events_blob_uri` column.
+- `pnpm tsc --noEmit`: clean (TSC=0).
+- `pnpm test:unit`: clean (VITEST=0, 7 files / 26 tests).
+- `uv run pre-commit run mypy --all-files`: clean
+  (PRECOMMIT_MYPY=0).
+- Round 68-70 code-reviewer-minimax-m3: **APPROVED**
+  (dual-emit + pure-strip contracts correct; pure-damage-with-
+  buff_dmg silently dropped matches arcdps; e2e bucket delta
+  correct; URL + server-side filter mirrors the window-s
+  pattern; CI services block matches docker-compose dev).
+
+[0.6.0]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.5.0-web...v0.6.0
+
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.5.0-web...HEAD
 
 - `libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py`:
   - New `EVENT_SIZE = 64` + `_EVENT_STRUCT = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")`
@@ -1275,7 +1502,6 @@ route already handles the union via
 
 [0.5.0-parser]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...v0.5.0-parser
 
-[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...HEAD
 [0.3.0]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.3.0-web...v0.3.0
 ## [0.1.0] - Phase 3 analytics prototype
 

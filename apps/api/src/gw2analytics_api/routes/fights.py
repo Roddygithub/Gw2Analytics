@@ -17,9 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from gw2_analytics.event_window import EventWindowAggregator
+from gw2_analytics.target_buff_removal import TargetBuffRemovalAggregator
 from gw2_analytics.target_dps import TargetDpsAggregator
 from gw2_analytics.target_healing import TargetHealingAggregator
-from gw2_core import DamageEvent, Event, HealingEvent
+from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight
 from gw2analytics_api.schemas import (
@@ -28,6 +29,7 @@ from gw2analytics_api.schemas import (
     FightEventsSummaryOut,
     FightOut,
     SkillOut,
+    TargetBuffRemovalRowOut,
     TargetDpsRowOut,
     TargetHealingRowOut,
 )
@@ -202,18 +204,35 @@ def get_fight_events(
         [e for e in events if isinstance(e, HealingEvent)],
         duration_s,
     )
+    # Phase 8: third sibling roll-up, strict parallel of the DPS +
+    # Healing aggregators. ``TargetBuffRemovalAggregator`` consumes
+    # ``BuffRemovalEvent`` specifically (sum-of-row-buff-removal ==
+    # sum-of-event-buff-removal invariant). The heterogeneous
+    # stream passes through ``isinstance`` at the call site; a
+    # single cbtevent that dual-emits a ``HealingEvent`` AND a
+    # ``BuffRemovalEvent`` lands in BOTH target_healing AND
+    # target_buff_removal -- independent roll-ups on the same
+    # ``duration_s``. The pure-strip case (no heal, just a strip)
+    # lands in target_buff_removal only.
+    target_buff_removal = TargetBuffRemovalAggregator().aggregate(
+        [e for e in events if isinstance(e, BuffRemovalEvent)],
+        duration_s,
+    )
     # ``EventWindowAggregator`` accepts ``Iterable[Event]`` directly and
     # discriminates by isinstance internally (damage_total += damage,
     # healing_total += healing), so the heterogeneous stream passes
-    # through unchanged.
+    # through unchanged. Phase 8 deliberately does NOT extend
+    # ``EventBucketOut`` with a ``buff_removal_total`` field -- the
+    # per-bucket window contract is locked.
     event_windows = EventWindowAggregator().aggregate(events, window_s=window_s)
 
     return FightEventsSummaryOut(
         fight_id=fight_id,
         duration_s=duration_s,
         target_dps=[TargetDpsRowOut.model_validate(r.model_dump()) for r in target_dps],
-        target_healing=[
-            TargetHealingRowOut.model_validate(r.model_dump()) for r in target_healing
+        target_healing=[TargetHealingRowOut.model_validate(r.model_dump()) for r in target_healing],
+        target_buff_removal=[
+            TargetBuffRemovalRowOut.model_validate(r.model_dump()) for r in target_buff_removal
         ],
         event_windows=[EventBucketOut.model_validate(b.model_dump()) for b in event_windows],
     )
