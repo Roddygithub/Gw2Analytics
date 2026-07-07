@@ -56,14 +56,14 @@ const BASE = "http://127.0.0.1:3000";
 
 // (label, path, wait-selector?, extra-pre-screenshot-delay-ms)
 const PAGES = [
-  ["01-landing",                       "/",                                        null,   300],
-  ["02-account",                       "/account",                                 null,   200],
-  ["03-upload",                        "/upload",                                  null,   200],
-  ["04-fights",                        "/fights",                                  ".ag-root", 1200],
-  ["05-players",                       "/players",                                 ".ag-root", 1200],
-  ["06-player-profile-with-timeline", "/players/TestAccount.1234",                "svg[aria-label='Per-account historical timeline']", 800],
-  ["07-player-empty-timeline",         "/players/empty-history.5678",              null,   500],
-  ["08-fight-drilldown",               "/fights/fixture-fight-001",                "svg[aria-label='Per-bucket event damage and healing']", 800],
+  ["01-landing",                       "/",                                        null,     0],
+  ["02-account",                       "/account",                                 null,     0],
+  ["03-upload",                        "/upload",                                  null,     0],
+  ["04-fights",                        "/fights",                                  null,     0],
+  ["05-players",                       "/players",                                 null,     0],
+  ["06-player-profile-with-timeline", "/players/TestAccount.1234",                null,     0],
+  ["07-player-empty-timeline",         "/players/empty-history.5678",              null,     0],
+  ["08-fight-drilldown",               "/fights/fixture-fight-001",                null,     0],
 ];
 
 await mkdir(OUT_DIR, { recursive: true });
@@ -84,89 +84,23 @@ try {
     const url = `${BASE}${route}`;
     process.stdout.write(`  -> ${label} (${url}) ... `);
     try {
+      // Match the visual-regression spec's wait strategy exactly:
+      // ``waitUntil: "networkidle"`` + immediate ``page.screenshot()``.
+      // The spec (``web/tests/e2e/visual-regression.spec.ts``) uses
+      // this same pattern and captures the dynamic pages at ~3196px
+      // (the AG Grid / SVG charts are mounted by the time
+      // ``networkidle`` fires). The baselines therefore need to
+      // match the spec's capture dimensions; any additional waits
+      // (a separate ``waitForLoadState``, an ``extraDelay``, a
+      // ``waitForFunction`` stability check) were causing the
+      // script to capture a DIFFERENT state than the spec
+      // (typically a 900px pre-hydration render) and producing
+      // the 900px vs 3196px dimension mismatch the VR suite has
+      // been flagging.
       const resp = await page.goto(url, {
-        waitUntil: "domcontentloaded",
+        waitUntil: "networkidle",
         timeout: 30000,
       });
-      try {
-        await page.waitForLoadState("networkidle", { timeout: 15000 });
-      } catch (_) {
-        // Best-effort; some pages never reach networkidle.
-      }
-      if (waitFor) {
-        try {
-          await page.waitForSelector(waitFor, { timeout: 10000 });
-        } catch (_) {
-          console.log(`(selector '${waitFor}' missing)`);
-        }
-      }
-    if (extraDelay) {
-      await page.waitForTimeout(extraDelay);
-    }
-    // Wait for the page to be at its final, fully-hydrated height
-    // before screenshotting. Without this, the screenshot may capture
-    // a partially-rendered page (e.g. AG Grid still expanding after
-    // the SSR data fetch settles) which would diff against the spec's
-    // fully-hydrated capture (which only waits for ``networkidle``)
-    // as a near-100% mismatch in the visual-regression spec.
-    //
-    // The wait has TWO requirements (both must be met):
-    //   1. The page must have expanded beyond the viewport
-    //      (``scrollHeight > 900``). Without this guard, the
-    //      wait would happily return on a 900px-stable page
-    //      that hasn't started its AG Grid / SVG chart
-    //      expansion yet -- a 900px baseline that diffs as
-    //      100% against the spec's 3196px capture.
-    //   2. The height must be stable for 500ms (2 polls at
-    //      250ms). The window-level closure variables +
-    //      ``Date.now()`` handle the polling; the function
-    //      is re-evaluated every 250ms.
-    //
-    // Each ``page.goto`` above is a full navigation so the
-    // window object is reset between pages; the closure
-    // variables do NOT persist across pages.
-    //
-    // The 30s timeout is the worst-case budget for an
-    // aggressively-rendering dynamic page (e.g. the per-fight
-    // timeline on /fights/[id] which inflates after the
-    // squads + skills fetchers resolve).
-    await page.waitForFunction(
-      () => {
-        const currentHeight = document.documentElement.scrollHeight;
-        // Requirement 1: page must have expanded beyond the
-        // 900px viewport. If the page is still at the
-        // viewport height, the AG Grid / SVG charts have
-        // not yet finished expanding; the wait returns
-        // false (and resets the stability timer on the
-        // next expansion tick).
-        if (currentHeight <= 900) {
-          window.__lastStableHeight = currentHeight;
-          window.__lastStableTime = Date.now();
-          return false;
-        }
-        // Requirement 2: height must be stable for 500ms.
-        if (typeof window.__lastStableHeight === "undefined") {
-          window.__lastStableHeight = currentHeight;
-          window.__lastStableTime = Date.now();
-          return false;
-        }
-        if (currentHeight !== window.__lastStableHeight) {
-          window.__lastStableHeight = currentHeight;
-          window.__lastStableTime = Date.now();
-          return false;
-        }
-        return Date.now() - window.__lastStableTime >= 500;
-      },
-      null,
-      { timeout: 30000, polling: 250 },
-    ).catch(() => {
-      // Best-effort. Pages with live-updating content (e.g. the
-      // SVG timelines, which may re-render on viewport changes)
-      // would time out here; the existing ``waitForLoadState`` +
-      // selector wait + extra delay have already done what they
-      // can, and the screenshot is the same as before this commit
-      // (a possibly-partially-hydrated capture) -- so we proceed.
-    });
     const outPath = resolve(OUT_DIR, `${label}.png`);
       await page.screenshot({ path: outPath, fullPage: true });
       const status = resp ? resp.status() : "?";
