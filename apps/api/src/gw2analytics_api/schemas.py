@@ -399,6 +399,14 @@ class PlayerTimelineOut(BaseModel):
     limit: int
     offset: int
     bucket: Literal["fight", "day"] = "fight"
+    # v0.8.9 of the API: the ``tz`` field echoes the
+    # ``?tz=`` query param so the consumer can see which
+    # TZ was applied to the day-bucketed ``started_at``.
+    # Default ``"UTC"`` preserves the v0.8.1 wire
+    # contract (backward compat for pre-v0.8.9
+    # consumers). Additive -- pre-v0.8.9 wire consumers
+    # ignore the field.
+    tz: str = "UTC"
     points: list[PlayerTimelinePointOut] = []
 
 

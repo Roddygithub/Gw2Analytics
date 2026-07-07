@@ -41,7 +41,19 @@ const { fetchPlayerTimelineMock } = vi.hoisted(() => ({
   fetchPlayerTimelineMock: vi.fn<
     (
       accountName: string,
-      opts: { limit?: number; offset?: number; bucket?: "fight" | "day" },
+      opts: {
+        limit?: number;
+        offset?: number;
+        bucket?: "fight" | "day";
+        /**
+         * v0.8.9: ``?tz=Continent/City`` query param
+         * (defaults to ``"UTC"`` when omitted). The
+         * section's ``loadMore`` + ``changeBucket`` calls
+         * forward the initial timeline's ``tz`` so
+         * subsequent pages stay in the same TZ grouping.
+         */
+        tz?: string;
+      },
     ) => Promise<PlayerTimeline>
   >(),
 }));
@@ -59,6 +71,7 @@ import { PlayerTimelineSection } from "@/components/PlayerTimelineSection";
 function makeInitial(
   points: PlayerTimeline["points"],
   total: number,
+  tz: string = "UTC",
 ): PlayerTimeline {
   return {
     account_name: ":synth.aaa",
@@ -70,6 +83,14 @@ function makeInitial(
     // ``useState<"fight" | "day">(initialTimeline.bucket)``
     // would fail TypeScript's exhaustive literal check.
     bucket: "fight",
+    // v0.8.9: the ``tz`` field is now part of the wire
+    // contract (echoed from the ``?tz=`` query param).
+    // Default ``"UTC"`` preserves the v0.8.1 behaviour
+    // for the existing tests; the v0.8.9 spec adds a new
+    // test case that threads a non-UTC TZ through
+    // ``initialTimeline.tz`` to verify the section's
+    // forwarding contract.
+    tz,
     points,
   };
 }
@@ -153,6 +174,15 @@ describe("PlayerTimelineSection", () => {
         // -- a future refactor that drops the ``bucket``
         // forwarding would fail this test.
         bucket: "fight",
+        // v0.8.9 of web: the route's ``?tz=`` param is
+        // now part of the contract. The initial timeline's
+        // ``tz: "UTC"`` (the default) is forwarded
+        // unchanged. Asserting it here locks the
+        // forwarding contract -- a future refactor that
+        // drops the ``tz`` forwarding would silently
+        // default to UTC on subsequent pages, breaking
+        // the TZ continuity for analysts.
+        tz: "UTC",
       }),
     );
     await waitFor(() =>
@@ -178,6 +208,46 @@ describe("PlayerTimelineSection", () => {
     // user out -- a reload is the recovery path, not a re-click),
     // but the caption still shows 3 of 5 (no points were appended).
     expect(screen.getByText("Showing 3 of 5 fights")).toBeInTheDocument();
+  });
+
+  it("forwards the initial timeline's tz to fetchPlayerTimeline on Load more (v0.8.9)", async () => {
+    // v0.8.9: when the initial timeline carries a non-UTC
+    // TZ, the section's ``loadMore`` forwards the same
+    // TZ on subsequent pages so the day-bucketed
+    // ``started_at`` stays in the analyst's TZ. The
+    // section has no client-side TZ state in v0.8.9 (the
+    // URL ``?tz=`` param is the canonical control); the
+    // forwarding is read-only from ``initialTimeline.tz``.
+    fetchPlayerTimelineMock.mockResolvedValueOnce(
+      makeInitial(
+        [makePoint("f-4", 400), makePoint("f-5", 500)],
+        5,
+        "Europe/Paris",
+      ),
+    );
+    render(
+      <PlayerTimelineSection
+        accountName=":synth.aaa"
+        initialTimeline={makeInitial(
+          [
+            makePoint("f-1", 100),
+            makePoint("f-2", 200),
+            makePoint("f-3", 300),
+          ],
+          5,
+          "Europe/Paris",
+        )}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /load more timeline points/i }));
+    await waitFor(() =>
+      expect(fetchPlayerTimelineMock).toHaveBeenCalledWith(":synth.aaa", {
+        limit: 20,
+        offset: 3,
+        bucket: "fight",
+        tz: "Europe/Paris",
+      }),
+    );
   });
 
   it("deduplicates fight_ids that overlap between the initial page and the next page", async () => {

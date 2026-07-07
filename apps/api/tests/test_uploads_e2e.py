@@ -34,10 +34,12 @@ import time
 import uuid as _uuid
 import zipfile
 from datetime import UTC
+from datetime import date as _date
 from datetime import datetime as _dt
 from datetime import timedelta as _td
 from io import BytesIO
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1238,3 +1240,335 @@ def test_player_timeline_day_bucket_splits_across_days() -> None:
     # most-recent fight_id of the day, which is the only fight
     # of the day here).
     assert {p["fight_id"] for p in payload["points"]} == {fight_id_1, fight_id_2}
+
+
+# ---------------------------------------------------------------------------
+# v0.8.9: ``?tz=Continent/City`` on the player timeline
+# ---------------------------------------------------------------------------
+
+
+def test_player_timeline_tz_default_is_utc() -> None:
+    """v0.8.9: GET .../timeline without ``?tz=`` defaults to UTC.
+
+    Seeds 1 fight and UPDATEs its ``started_at`` to a
+    mid-afternoon UTC timestamp (no DST edge case for either
+    Paris or NY). Asserts the day-bucketed point is at the
+    SAME calendar day in UTC and the response's ``tz`` field
+    echoes the default ``"UTC"`` string.
+
+    The day-bucketed ``started_at`` is at UTC midnight (the
+    ``_combine_day_midnight`` helper), so the response's ISO
+    string is ``"2024-01-15T00:00:00+00:00"`` -- the test
+    parses it back and confirms the UTC date matches the
+    ``started_at`` we set.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+
+    # Pin ``started_at`` to a fixed mid-afternoon UTC timestamp
+    # (winter -- no DST ambiguity for any TZ). The parser wrote
+    # ``datetime.now(UTC)`` at parse time, so the UPDATE is
+    # required to assert a known calendar day.
+    target_utc = _dt(2024, 1, 15, 14, 30, 0, tzinfo=UTC)
+    session = get_sessionmaker()()
+    try:
+        session.execute(
+            update(OrmFight).where(OrmFight.id == fight_id).values(started_at=target_utc)
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    # No ``?tz=`` param: defaults to UTC. ``bucket=day`` to
+    # exercise the day-bucketing branch.
+    resp = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["bucket"] == "day"
+    assert payload["tz"] == "UTC"
+    assert payload["total"] == 1
+    assert len(payload["points"]) == 1
+    # The day-bucketed point's ``started_at`` is at UTC midnight
+    # of the SAME day (2024-01-15). The wire format is UTC
+    # (the ``_combine_day_midnight`` helper serialises the
+    # local-midnight back to UTC), so the ISO string is
+    # ``"2024-01-15T00:00:00+00:00"``.
+    p = payload["points"][0]
+    started_at = _dt.fromisoformat(p["started_at"])
+    assert started_at.astimezone(ZoneInfo("UTC")).date() == _date(2024, 1, 15)
+    # The local-time midnight invariant (strict parallel of
+    # :func:`test_player_timeline_day_bucket_aggregates_per_day`):
+    # at the requested TZ (UTC), the wall-clock time is 00:00:00.
+    assert (started_at.hour, started_at.minute, started_at.second) == (0, 0, 0)
+    # The 1-event total_damage is the seeded value.
+    assert p["total_damage"] == 1_234
+
+
+def test_player_timeline_tz_europe_paris() -> None:
+    """v0.8.9: ``?tz=Europe/Paris`` shifts the day-bucketed point to Paris time.
+
+    Seeds 1 fight at 2024-01-15 23:30:00 UTC. In UTC, this
+    is calendar day 2024-01-15; in Europe/Paris (UTC+1 in
+    winter, no DST on Jan 15), this is 2024-01-16 00:30:00
+    Paris -- so the day-bucketed point should land on
+    2024-01-16 in Paris.
+
+    Asserts:
+      * the response's ``tz`` field echoes ``"Europe/Paris"``
+      * the day-bucketed point's date (in Paris) is 2024-01-16
+      * the day-bucketed point's local wall-clock time is 00:00:00
+        (Paris midnight, serialised back to UTC on the wire as
+        ``"2024-01-15T23:00:00+00:00"``)
+      * the same point, queried WITHOUT ``?tz=``, lands on
+        2024-01-15 UTC -- the cross-TZ day-shift is observable
+        in the response, not just an internal flag.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+
+    # 2024-01-15 23:30:00 UTC = 2024-01-16 00:30:00 Europe/Paris
+    # (UTC+1 in winter). The day-bucketed point should land on
+    # 2024-01-16 in Paris.
+    target_utc = _dt(2024, 1, 15, 23, 30, 0, tzinfo=UTC)
+    session = get_sessionmaker()()
+    try:
+        session.execute(
+            update(OrmFight).where(OrmFight.id == fight_id).values(started_at=target_utc)
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    paris = ZoneInfo("Europe/Paris")
+
+    # With ?tz=Europe/Paris: the day-bucketed point lands on
+    # 2024-01-16 (Paris) -- NOT 2024-01-15 (the UTC day).
+    resp_paris = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day", "tz": "Europe/Paris"},
+    )
+    assert resp_paris.status_code == 200, resp_paris.text
+    payload_paris = resp_paris.json()
+    assert payload_paris["bucket"] == "day"
+    assert payload_paris["tz"] == "Europe/Paris"
+    assert payload_paris["total"] == 1
+    assert len(payload_paris["points"]) == 1
+    p_paris = payload_paris["points"][0]
+    started_at_paris = _dt.fromisoformat(p_paris["started_at"])
+    # The point's date, in Paris, is 2024-01-16.
+    assert started_at_paris.astimezone(paris).date() == _date(2024, 1, 16)
+    # And the local wall-clock time in Paris is midnight
+    # (serialised back to UTC on the wire: 2024-01-15T23:00:00Z).
+    local_paris = started_at_paris.astimezone(paris)
+    assert (local_paris.hour, local_paris.minute, local_paris.second) == (0, 0, 0)
+    # The damage is unchanged (the TZ only affects the bucket
+    # grouping, not the magnitude).
+    assert p_paris["total_damage"] == 1_234
+
+    # Cross-check: the SAME fight, queried WITHOUT ``?tz=``,
+    # lands on 2024-01-15 (UTC). This is the observable
+    # day-shift between the default and the Paris TZ.
+    resp_utc = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day"},
+    )
+    assert resp_utc.status_code == 200, resp_utc.text
+    payload_utc = resp_utc.json()
+    assert payload_utc["tz"] == "UTC"
+    assert payload_utc["total"] == 1
+    p_utc = payload_utc["points"][0]
+    started_at_utc = _dt.fromisoformat(p_utc["started_at"])
+    assert started_at_utc.astimezone(ZoneInfo("UTC")).date() == _date(2024, 1, 15)
+    # The 2 day-bucketed points are 23 hours apart on the wire
+    # (one is 2024-01-15T00:00:00Z, the other is
+    # 2024-01-15T23:00:00Z). This is the structural signature
+    # of the TZ shift: the SAME UTC instant is midnight in
+    # one TZ and 23:00 the previous day in the other, so the
+    # serialised UTC timestamps differ by 23h.
+    assert (started_at_paris - started_at_utc).total_seconds() == 23 * 3600
+
+
+def test_player_timeline_tz_america_new_york() -> None:
+    """v0.8.9: ``?tz=America/New_York`` shifts the day-bucketed point to NY time.
+
+    Seeds 1 fight at 2024-01-15 02:30:00 UTC. In UTC, this
+    is calendar day 2024-01-15; in America/New_York (UTC-5
+    in winter, no DST on Jan 15), this is 2024-01-14 21:30:00
+    NY -- so the day-bucketed point should land on
+    2024-01-14 in NY.
+
+    Strict structural parallel of
+    :func:`test_player_timeline_tz_europe_paris` -- the only
+    differences are the TZ (NY vs Paris) and the calendar
+    direction (NY shifts BACK a day, Paris shifts FORWARD).
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+
+    # 2024-01-15 02:30:00 UTC = 2024-01-14 21:30:00 America/New_York
+    # (UTC-5 in winter). The day-bucketed point should land on
+    # 2024-01-14 in NY.
+    target_utc = _dt(2024, 1, 15, 2, 30, 0, tzinfo=UTC)
+    session = get_sessionmaker()()
+    try:
+        session.execute(
+            update(OrmFight).where(OrmFight.id == fight_id).values(started_at=target_utc)
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    ny = ZoneInfo("America/New_York")
+
+    # With ?tz=America/New_York: the day-bucketed point lands on
+    # 2024-01-14 (NY) -- NOT 2024-01-15 (the UTC day).
+    resp_ny = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day", "tz": "America/New_York"},
+    )
+    assert resp_ny.status_code == 200, resp_ny.text
+    payload_ny = resp_ny.json()
+    assert payload_ny["bucket"] == "day"
+    assert payload_ny["tz"] == "America/New_York"
+    assert payload_ny["total"] == 1
+    assert len(payload_ny["points"]) == 1
+    p_ny = payload_ny["points"][0]
+    started_at_ny = _dt.fromisoformat(p_ny["started_at"])
+    # The point's date, in NY, is 2024-01-14.
+    assert started_at_ny.astimezone(ny).date() == _date(2024, 1, 14)
+    # And the local wall-clock time in NY is midnight
+    # (serialised back to UTC on the wire: 2024-01-14T05:00:00Z,
+    # because NY is UTC-5 in winter).
+    local_ny = started_at_ny.astimezone(ny)
+    assert (local_ny.hour, local_ny.minute, local_ny.second) == (0, 0, 0)
+    assert p_ny["total_damage"] == 1_234
+
+    # Cross-check: the SAME fight, queried WITHOUT ``?tz=``,
+    # lands on 2024-01-15 (UTC). The day shifts BACK in NY
+    # (the opposite direction of the Paris test).
+    resp_utc = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day"},
+    )
+    assert resp_utc.status_code == 200, resp_utc.text
+    payload_utc = resp_utc.json()
+    assert payload_utc["tz"] == "UTC"
+    assert payload_utc["total"] == 1
+    p_utc = payload_utc["points"][0]
+    started_at_utc = _dt.fromisoformat(p_utc["started_at"])
+    assert started_at_utc.astimezone(ZoneInfo("UTC")).date() == _date(2024, 1, 15)
+    # The NY point is 5 hours BEHIND the UTC point (NY is
+    # UTC-5 in winter; the NY midnight of 2024-01-14 is
+    # 2024-01-14T05:00:00Z; the UTC midnight of 2024-01-15 is
+    # 2024-01-15T00:00:00Z; delta = 19h -- but the test asserts
+    # the relative offset from a single instant, not 2 midnights,
+    # so the sign + magnitude are: NY point's UTC time is 5h
+    # BEFORE the UTC point's UTC time).
+    # Actually the 2 points represent different calendar days,
+    # so the relative offset is 19h, not 5h. The structural
+    # invariant is: the NY point's UTC time is BEFORE the UTC
+    # point's UTC time (the day shifted back).
+    assert started_at_ny < started_at_utc
+
+
+def test_player_timeline_tz_422_when_invalid_timezone() -> None:
+    """v0.8.9: ``?tz=Mars/Olympus`` (not a valid IANA name) returns 422.
+
+    Seeds 1 fight for a real account so the 404 check
+    (which fires BEFORE the TZ parse) passes; the
+    handler then reaches the ``ZoneInfo(tz)`` parse
+    block, which raises ``ZoneInfoNotFoundError`` on
+    the unknown IANA name, which the route surfaces as
+    ``HTTP 422 Unprocessable Entity`` to match FastAPI's
+    Query-validation convention (invalid query params
+    are 422, not 400).
+
+    **404-vs-422 ordering invariant.** An UNKNOWN account
+    + valid TZ returns 404 (the 404 check fires first);
+    a KNOWN account + invalid TZ returns 422 (the TZ
+    parse fires second); an UNKNOWN account + invalid
+    TZ also returns 404 (the 404 wins because it fires
+    first). This test exercises the second case. The
+    first case is covered by
+    :func:`test_player_timeline_404_when_account_unknown`
+    -- querying with NO ``?tz=`` on an unknown account
+    returns 404, confirming the 404 check fires before
+    the TZ parse.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+    ]
+    _post_minimal_fight(events, suffix=suffix)
+    # The 404 check needs to PASS so the handler reaches the
+    # ``ZoneInfo(tz)`` parse block. Use the real account_name
+    # (NOT ``"anything"`` -- the 404 would fire first and mask
+    # the 422 we are actually testing).
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+
+    resp = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day", "tz": "Mars/Olympus"},
+    )
+    assert resp.status_code == 422
+    # The error payload includes the rejected TZ string in the
+    # ``detail`` field (matches the existing 422 detail-message
+    # convention used by the limit/offset/bucket validators).
+    body = resp.json()
+    detail_strs = [str(item) for item in body.get("detail", [])]
+    assert any("Mars/Olympus" in s for s in detail_strs), body

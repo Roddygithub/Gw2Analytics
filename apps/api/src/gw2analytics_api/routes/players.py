@@ -34,7 +34,9 @@ import gzip
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import UTC
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error
@@ -362,6 +364,16 @@ def get_player_timeline(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     bucket: Literal["fight", "day"] = Query("fight"),
+    # v0.8.9 of the API: ``?tz=Continent/City`` query param
+    # selects the TZ for the day-bucketed ``started_at``.
+    # Default ``"UTC"`` preserves the v0.8.1 wire contract
+    # (backward compat for pre-v0.8.9 consumers). An invalid
+    # TZ string raises 422 via the try/except below (the
+    # ``zoneinfo.ZoneInfo`` constructor raises
+    # ``ZoneInfoNotFoundError`` on an unknown IANA name).
+    # The ``bucket=fight`` mode is unaffected -- the TZ only
+    # matters for the day-bucketed grouping.
+    tz: str = Query("UTC"),
     db: Session = Depends(get_session),  # noqa: B008
 ) -> PlayerTimelineOut:
     """Return the per-fight historical timeline for one account.
@@ -424,6 +436,22 @@ def get_player_timeline(
     own_contributions = [c for c in contributions if c.account_name == account_name]
     if not own_contributions:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "player not found")
+    # v0.8.9: parse the ``?tz=`` string into a :class:`ZoneInfo`
+    # AFTER the 404 check so an unknown account still returns
+    # 404 (not 422). ``ZoneInfoNotFoundError`` is the canonical
+    # exception for an unknown IANA name; we surface it as 422
+    # to match FastAPI's Query-validation convention (invalid
+    # query params are 422, not 400). The parsed ``ZoneInfo``
+    # threads into both the day-bucketing branch below AND the
+    # ``_combine_day_midnight`` helper so the response's
+    # ``started_at`` is at midnight in the requested TZ.
+    try:
+        parsed_tz: ZoneInfo = ZoneInfo(tz)
+    except ZoneInfoNotFoundError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"unknown IANA timezone: {tz!r}",
+        ) from exc
     fight_id_to_started: dict[str, Any] = {f.id: f.started_at for f in fights}
     # Recency-first: started_at DESC (datetime direct compare
     # preserves microsecond precision; ``.timestamp()`` would
@@ -463,11 +491,15 @@ def get_player_timeline(
     # effectively UTC). ``.date()`` on a naive datetime returns
     # the SERVER's local date, NOT UTC -- which means a fight
     # recorded at 23:30 UTC on day N and parsed on a UTC+2 server
-    # will land in day N+1's bucket. The day-bucketing contract
-    # is "server-local day", and the chart's ``MM/DD`` label is
-    # the server-local day. Cross-timezone consistency requires
-    # either (a) configuring the server timezone, or (b) a future
-    # v0.9 ``?tz=Europe/Paris`` query param.
+    # would land in day N+1's bucket under the v0.8.1 contract.
+    # v0.8.9 closes this gap: the ``?tz=`` query param selects
+    # the analyst's TZ, the day-bucketed point's ``started_at``
+    # is the day-midnight in the requested TZ (serialised as
+    # UTC for wire compat -- the JSON still shows
+    # ``"2024-01-15T00:00:00Z"``), and the day grouping follows
+    # the analyst's TZ rather than the server's local TZ.
+    # ``bucket=fight`` is unaffected -- the TZ only matters for
+    # the day-bucketed grouping.
     if bucket == "day":
         day_totals: dict[str, dict[str, int]] = defaultdict(
             lambda: {"damage": 0, "healing": 0, "strip": 0},
@@ -476,7 +508,13 @@ def get_player_timeline(
         day_first_started: dict[str, Any] = {}
         for c in sorted_contributions:
             started_at = fight_id_to_started[c.fight_id]
-            day_key = started_at.date().isoformat()
+            # Mark the naive ``started_at`` as UTC before
+            # converting (the v0.8.1 contract: naive = effectively
+            # UTC). ``astimezone`` on a naive datetime assumes
+            # the SERVER's local TZ, which would silently
+            # double-convert and break the TZ contract.
+            aware_utc = started_at.replace(tzinfo=UTC) if started_at.tzinfo is None else started_at
+            day_key = aware_utc.astimezone(parsed_tz).date().isoformat()
             day_first_fight.setdefault(day_key, c.fight_id)
             day_first_started.setdefault(day_key, started_at)
             day_totals[day_key]["damage"] += c.total_damage
@@ -485,7 +523,7 @@ def get_player_timeline(
         all_points = [
             PlayerTimelinePointOut(
                 fight_id=day_first_fight[day_key],
-                started_at=_combine_day_midnight(day_first_started[day_key]),
+                started_at=_combine_day_midnight(day_first_started[day_key], parsed_tz),
                 total_damage=day_totals[day_key]["damage"],
                 total_healing=day_totals[day_key]["healing"],
                 total_buff_removal=day_totals[day_key]["strip"],
@@ -511,20 +549,39 @@ def get_player_timeline(
         limit=limit,
         offset=offset,
         bucket=bucket,
+        # v0.8.9: echo the parsed TZ on the response so the
+        # consumer can see which TZ was applied to the
+        # day-bucketed ``started_at``. The original ``tz``
+        # string is forwarded (not the ``ZoneInfo``) so the
+        # field is serialisable on the JSON wire.
+        tz=tz,
         points=page,
     )
 
 
-def _combine_day_midnight(started_at: Any) -> Any:
-    """Return the UTC midnight of ``started_at``'s calendar day.
+def _combine_day_midnight(started_at: Any, tz: ZoneInfo) -> Any:
+    """Return the day-midnight in the requested TZ, serialised as UTC for wire compat.
 
     Pure helper extracted from :func:`get_player_timeline` so the
     day-bucketing branch stays one short loop. The day key is
-    the ``started_at.date()``; we round to ``time.min`` so the
-    chart's X-axis labels are stable (a single canonical
-    ``00:00`` timestamp per day, no microsecond drift).
+    the ``started_at.astimezone(tz).date()``; we round to
+    ``time.min`` in the requested TZ and then convert back to
+    UTC so the wire surface stays UTC-stable (the JSON
+    serialises as ``"2024-01-15T00:00:00Z"`` regardless of the
+    analyst's TZ). The chart's X-axis can then auto-detect the
+    day-aligned UTC timestamps and render ``MM/DD`` without
+    needing to know the analyst's TZ.
+
+    v0.8.9: the ``tz`` param is the ``ZoneInfo`` parsed from
+    the ``?tz=`` query param (default UTC for backward compat
+    with pre-v0.8.9 consumers). The naive ``started_at`` is
+    effectively UTC per the v0.8.1 contract (the parser writes
+    ``datetime.now(UTC)`` when the EVTC blob carries no wall
+    clock), so we mark it as UTC before converting.
     """
-    return started_at.replace(hour=0, minute=0, second=0, microsecond=0)
+    aware_utc = started_at.replace(tzinfo=UTC) if started_at.tzinfo is None else started_at
+    local_midnight = aware_utc.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_midnight.astimezone(UTC)
 
 
 @router.get("/{account_name:path}", response_model=PlayerProfileOut)

@@ -162,6 +162,12 @@ export default async function PlayerProfilePage({
       // appear already-active on a freshly-loaded empty
       // timeline.
       bucket: "fight",
+      // v0.8.9 of web: mirror the v0.8.9 API default
+      // (``tz: "UTC"``) on the empty-state fallback. The
+      // section reads ``initialTimeline.tz`` to thread
+      // through to the timeline fetch, so a missing field
+      // would trip TypeScript strict-mode.
+      tz: "UTC",
       points: [],
     };
 

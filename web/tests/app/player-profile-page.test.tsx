@@ -38,7 +38,19 @@ const { fetchPlayerMock, fetchPlayerTimelineMock } = vi.hoisted(() => ({
   fetchPlayerTimelineMock: vi.fn<
     (
       accountName: string,
-      opts: { limit?: number; offset?: number },
+      opts: {
+        limit?: number;
+        offset?: number;
+        // v0.8.1 + v0.8.9 of the API: the timeline fetcher
+        // accepts ``bucket?`` + ``tz?`` query params. The
+        // page-level tests only assert the render contract
+        // (the page calls ``fetchPlayerTimeline`` with
+        // ``{ limit: 20 }`` on the server); the mock type
+        // is widened to match the new fetcher signature so
+        // tsc stays clean.
+        bucket?: "fight" | "day";
+        tz?: string;
+      },
     ) => Promise<unknown>
   >(),
 }));
@@ -59,6 +71,18 @@ const EMPTY_TIMELINE = {
   total: 0,
   limit: 20,
   offset: 0,
+  // v0.8.1 of web: the v0.8.0 test factory predates the
+  // ``bucket`` field. Without this default the page's
+  // ``<PlayerTimelineSection>`` ``useState(initialTimeline.bucket)``
+  // would fail TypeScript's exhaustive literal check.
+  bucket: "fight" as const,
+  // v0.8.9 of web: the ``tz`` field is now part of the
+  // wire contract (echoed from the ``?tz=`` query param).
+  // Default ``"UTC"`` preserves the v0.8.1 behaviour for
+  // the page-level tests; the new vitest case on the
+  // section component exercises the non-UTC forwarding
+  // path.
+  tz: "UTC",
   points: [],
 };
 

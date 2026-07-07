@@ -200,6 +200,14 @@ export function PlayerTimelineSection({
         limit: timeline.limit,
         offset: timeline.points.length,
         bucket,
+        // v0.8.9: forward the TZ from the initial timeline so
+        // the subsequent page stays in the same TZ grouping.
+        // Read-only (no client-side TZ state) because the v0.8.9
+        // spec doesn't ship a TZ selector UI -- the URL ``?tz=``
+        // param is the canonical control. A future v0.9 cycle
+        // can add a TZ selector + a corresponding ``tz`` state
+        // field.
+        tz: timeline.tz,
       });
       // Defensive de-dup: if the gateway ever returns a
       // fight_id that's already in the in-memory list (e.g.
@@ -234,6 +242,11 @@ export function PlayerTimelineSection({
       const response = await fetchPlayerTimeline(accountName, {
         limit: timeline.limit,
         bucket: next,
+        // v0.8.9: forward the TZ so a bucket-toggle preserves
+        // the analyst's TZ selection (otherwise the server
+        // re-derives a fresh TZ from the (empty) URL param and
+        // defaults to UTC, silently breaking the TZ contract).
+        tz: timeline.tz,
       });
       setTimeline(response);
       setBucket(next);

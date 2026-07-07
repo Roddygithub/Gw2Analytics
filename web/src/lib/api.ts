@@ -530,6 +530,20 @@ export interface PlayerTimeline {
    * X-axis can auto-detect the day alignment.
    */
   bucket: "fight" | "day";
+  /**
+   * v0.8.9 of the API: the TZ string echoed from the
+   * ``?tz=`` query param (default ``"UTC"``). Determines
+   * the calendar-day boundary for ``bucket="day"`` mode;
+   * the day-bucketed point's ``started_at`` is the
+   * day-midnight in the requested TZ (serialised as UTC
+   * for wire compat -- the JSON still shows
+   * ``"2024-01-15T00:00:00Z"``). ``bucket="fight"`` is
+   * unaffected by the ``tz`` value. An invalid ``?tz=``
+   * returns 422 (canonical FastAPI contract for
+   * query-param validation failures, same shape as the
+   * ``limit`` / ``offset`` 422 path).
+   */
+  tz: string;
   points: PlayerTimelinePoint[];
 }
 
@@ -556,12 +570,28 @@ export interface PlayerTimeline {
  */
 export async function fetchPlayerTimeline(
   accountName: string,
-  opts: { limit?: number; offset?: number; bucket?: "fight" | "day" } = {},
+  opts: {
+    limit?: number;
+    offset?: number;
+    bucket?: "fight" | "day";
+    /**
+     * v0.8.9 of the API: ``?tz=Continent/City`` query param
+     * for the day-bucketed ``started_at``. Default ``"UTC"``
+     * (backward compat with pre-v0.8.9 consumers). An
+     * invalid TZ string surfaces as 422 from the gateway;
+     * the fetcher does NOT validate the string client-side
+     * -- the gateway is the source of truth for the TZ
+     * catalog (``zoneinfo.ZoneInfo`` on the server). The
+     * ``bucket="fight"`` mode is unaffected.
+     */
+    tz?: string;
+  } = {},
 ): Promise<PlayerTimeline> {
   const params = new URLSearchParams();
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
   if (opts.offset !== undefined) params.set("offset", String(opts.offset));
   if (opts.bucket !== undefined) params.set("bucket", opts.bucket);
+  if (opts.tz !== undefined) params.set("tz", opts.tz);
   const qs = params.toString();
   const url = `${API_BASE_URL}/api/v1/players/${encodeURIComponent(accountName)}/timeline${
     qs ? `?${qs}` : ""
