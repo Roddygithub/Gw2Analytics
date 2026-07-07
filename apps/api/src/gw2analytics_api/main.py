@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
 
 from gw2analytics_api.config import get_settings
-from gw2analytics_api.routes import account, fights, players, uploads
+from gw2analytics_api.routes import account, fights, health, players, uploads
 
 app = FastAPI(
     title="GW2Analytics API",
@@ -30,7 +30,11 @@ app = FastAPI(
     # serve the per-account view with a pure SQL aggregation
     # (avoids the 5-30s latency for users with 100+ fights
     # documented in the v0.7.0 CHANGELOG).
-    version="0.8.4",
+    # v0.8.6: adds the operational health probe
+    # (GET /api/v1/health/summary) that surfaces the fight-summary
+    # population drift -- the integration point for the
+    # operational cron that runs the v0.8.5 backfill script.
+    version="0.8.6",
 )
 
 # CORS — wide-open by default for local dev (Next.js at :3000,
@@ -57,6 +61,7 @@ app.include_router(uploads.router)
 app.include_router(fights.router)
 app.include_router(players.router)
 app.include_router(account.router)
+app.include_router(health.router)
 
 FastApiMCP(app).mount()
 

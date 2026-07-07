@@ -8,6 +8,6 @@ from __future__ import annotations
 
 from gw2analytics_api.main import app
 
-__version__ = "0.8.4"
+__version__ = "0.8.6"
 
 __all__ = ["__version__", "app"]
