@@ -45,3 +45,6 @@ logs/
 
 # OS
 Thumbs.db
+
+# Codegen artifacts (web/scripts/dump_openapi.py output)
+/openapi.json
