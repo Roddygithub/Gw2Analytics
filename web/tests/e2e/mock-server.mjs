@@ -38,6 +38,24 @@
 //      page exercises the synthetic-empty rendering path)
 // GET /api/v1/players/:name/special/404
 //   -> always 404 (used by the profile-page error test)
+// POST /api/v1/account (v0.2.0-api)
+//   -> stub { world_id, world_name, world_population } (no
+//      fixture file; the stub is hard-coded because the
+//      /account page's E2E only renders the form -- it does
+//      not exercise the POST flow, since a real GW2 v2 API key
+//      would 401 against the gateway's auth chain). The stub
+//      shape mirrors the ``AccountEnrichedOut`` schema in
+//      apps/api/src/gw2analytics_api/schemas.py.
+// POST /api/v1/uploads (v0.3.0-web)
+//   -> stub { id, sha256, status: "pending" } (no fixture
+//      file; same rationale as /account -- the /upload page's
+//      E2E only renders the form, since a real .zevtc blob
+//      would take 5-30s to parse and surface a useless error).
+//      The stub shape mirrors the ``UploadCreatedResponse``
+//      schema (the lean envelope; the full ``UploadOut`` is
+//      fetched later via ``GET /api/v1/uploads/{id}`` -- which
+//      is not exercised by the v0.8.8 e2e suite and therefore
+//      not stubbed here).
 //
 // Lifecycle
 // =========
@@ -97,6 +115,46 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
   const method = req.method ?? "GET";
+
+  // POST /api/v1/account (v0.2.0-api) -- Bearer-protected world
+  // enrichment. Stub shape mirrors the ``AccountEnrichedOut``
+  // schema in apps/api/src/gw2analytics_api/schemas.py. We
+  // intentionally do NOT validate the Bearer token here -- the
+  // /account page's E2E only exercises the SSR + form-rendering
+  // contract, not the POST flow (a real key would 401 against
+  // the gateway's auth chain). Status 200 because the real
+  // route returns 200 on a valid key.
+  if (method === "POST" && path === "/api/v1/account") {
+    return jsonResponse(
+      res,
+      200,
+      JSON.stringify({
+        world_id: 1001,
+        world_name: "Fixture World",
+        world_population: "Medium",
+      }),
+    );
+  }
+
+  // POST /api/v1/uploads (v0.3.0-web) -- multipart form-data
+  // envelope. Stub shape mirrors the ``UploadCreatedResponse``
+  // schema (the lean envelope; the full ``UploadOut`` is fetched
+  // later via ``GET /api/v1/uploads/{id}`` -- which is not
+  // exercised by the v0.8.8 e2e suite and therefore not stubbed
+  // here). Status 201 because the real route returns 201 on a
+  // successful envelope create.
+  if (method === "POST" && path === "/api/v1/uploads") {
+    return jsonResponse(
+      res,
+      201,
+      JSON.stringify({
+        id: "00000000-0000-0000-0000-000000000001",
+        sha256:
+          "0000000000000000000000000000000000000000000000000000000000000000",
+        status: "pending",
+      }),
+    );
+  }
 
   if (method !== "GET") {
     return jsonResponse(res, 405, JSON.stringify({ error: "method not allowed" }));
