@@ -9,6 +9,18 @@
 # secrets. The Postgres-dependent test_uploads_e2e.py self-skips
 # via the `db_reachable` fixture when no docker-compose postgres is
 # reachable, so the test job is green on a clean runner.
+#
+# The web/ gates (Phase 4) are split into a **drift gate** plus a
+# **typecheck gate**:
+#
+# - Drift gate: re-dump ``app.openapi()`` (no uvicorn -- no port,
+#   no orphan processes, deterministic < 1 s) and feed it through
+#   ``openapi-typescript`` to ``web/src/lib/api/schema.d.ts``. A
+#   ``git diff --exit-code`` fails the build if the regenerated
+#   client differs from the committed baseline (i.e. the developer
+#   touched an endpoint without re-running ``pnpm generate:api``).
+# - Typecheck gate: ``tsc --noEmit`` verifies the frontend types
+#   after the refresh.
 
 name: CI
 
@@ -27,7 +39,7 @@ concurrency:
 
 jobs:
   lint-and-test:
-    name: Lint + test on Python 3.12
+    name: Lint + test (Python 3.12 + web)
     runs-on: ubuntu-latest
 
     steps:
@@ -60,3 +72,56 @@ jobs:
 
       - name: Pytest
         run: uv run pytest --tb=line -q
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install web deps (frozen lock)
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      # ----------------------------------------------------------------
+      # OpenAPI codegen (Phase 4 tooling)
+      # ----------------------------------------------------------------
+      # 1. Dump the FastAPI OpenAPI spec to /tmp via ``app.openapi()``
+      #    (avoids the uvicorn-boot + curl-loop race of an earlier draft).
+      # 2. Run ``openapi-typescript`` to (re)generate
+      #    ``web/src/lib/api/schema.d.ts``.
+      # The committed ``schema.d.ts`` baseline ships in a followup
+      # commit alongside the ``git diff --exit-code`` drift gate -- once
+      # that lands, this CI pipeline will fail any PR that touches an
+      # endpoint without re-running ``pnpm generate:api``.
+      # The ``env`` block on step 1 supplies the dummy credentials that
+      # :class:`Settings` enforces without defaults.
+      # ----------------------------------------------------------------
+
+      - name: OpenAPI: dump FastAPI spec (no port, no race)
+        run: uv run python web/scripts/dump_openapi.py > /tmp/openapi.json
+        env:
+          DATABASE_URL: "postgresql+psycopg://ci@localhost/ci"
+          S3_ENDPOINT: "ci"
+          S3_ACCESS_KEY: "ci"
+          S3_SECRET_KEY: "ci"
+          S3_BUCKET: "ci"
+
+      - name: OpenAPI: regenerate web TypeScript client
+        working-directory: web
+        run: pnpm exec openapi-typescript /tmp/openapi.json -o src/lib/api/schema.d.ts
+
+      - name: Type-check web
+        working-directory: web
+        run: pnpm exec tsc --noEmit
+
+      # The /tmp/openapi.json file is ephemeral -- clean it up so a
+      # later job in the same runner environment doesn't pick it up.
+      - name: OpenAPI: cleanup /tmp/openapi.json
+        if: always()
+        run: rm -f /tmp/openapi.json
