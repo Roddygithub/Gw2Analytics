@@ -6,7 +6,15 @@
  * root.
  *
  * Usage:
- *   node web/scripts/screenshots.mjs
+ *   node web/scripts/screenshots.mjs [--persist]
+ *
+ * Flags:
+ *   --persist  Copy the 8 PNGs into ``docs/screenshots/`` at the
+ *              repo root (the directory the README's "Screenshots"
+ *              table reads from). Opt-in; without it, only the
+ *              transient ``/screenshots/`` dir is populated
+ *              (gitignored so casual runs don't clobber the
+ *              committed README artifacts).
  *
  * Requirements:
  *   - The mock server (port 8080) and `pnpm dev` (port 3000)
@@ -24,7 +32,7 @@
 // is. Both packages re-export ``chromium`` so the API is
 // identical.
 import { chromium } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
+import { copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
 // Anchor OUT_DIR to the repo root (the script's parent
@@ -36,6 +44,14 @@ import { resolve } from "node:path";
 // Requires Node 20.11+ for ``import.meta.dirname``
 // (Next.js 16 mandates Node 20+, so we're safe).
 const OUT_DIR = resolve(import.meta.dirname, "..", "..", "screenshots");
+
+// ``--persist`` (read once at startup): mirror each PNG from the
+// gitignored transient dir into the tracked ``docs/screenshots/``
+// after the per-page loop, so the README's "Screenshots" section
+// reads from a tracked directory. Default behavior stays
+// unchanged -- transient ``/screenshots/`` only.
+const PERSIST = process.argv.includes("--persist");
+const DOCS_DIR = resolve(import.meta.dirname, "..", "..", "docs", "screenshots");
 const BASE = "http://127.0.0.1:3000";
 
 // (label, path, wait-selector?, extra-pre-screenshot-delay-ms)
@@ -99,4 +115,19 @@ try {
   await browser.close();
 }
 
-console.log(`\nScreenshots written to ${OUT_DIR}`);
+// Persist pass: copy each PNG into docs/screenshots/ (idempotent).
+if (PERSIST) {
+  await mkdir(DOCS_DIR, { recursive: true });
+  for (const [label] of PAGES) {
+    const src = resolve(OUT_DIR, `${label}.png`);
+    await copyFile(src, resolve(DOCS_DIR, `${label}.png`));
+  }
+  console.log(`\nScreenshots written to ${OUT_DIR}`);
+  console.log(`+ copied (--persist) into ${DOCS_DIR}`);
+} else {
+  console.log(`\nScreenshots written to ${OUT_DIR}`);
+  console.log(
+    `(hint: pass --persist to also copy into docs/screenshots/ ` +
+    `for README consumption)`,
+  );
+}

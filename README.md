@@ -38,6 +38,23 @@ Modern combat analytics platform for **Guild Wars 2 WvW** (World vs World).
 
 ---
 
+## Screenshots
+
+The web's 7 routes captured via `pnpm screenshots` + [Playwright](https://playwright.dev/) (full pages, 1440×900, headless Chrome). Refresh via `pnpm screenshots --persist` after a UI change -- the `--persist` flag copies the 8 PNGs (6 referenced below) into this `docs/screenshots/` directory so they show up on the next commit.
+
+| Route                       | Capture                                                       |
+|-----------------------------|---------------------------------------------------------------|
+| `/`                         | ![Landing](docs/screenshots/01-landing.png)                   |
+| `/account`                  | ![Account resolve](docs/screenshots/02-account.png)           |
+| `/upload`                   | ![Upload flow](docs/screenshots/03-upload.png)                |
+| `/fights`                   | ![Fights grid](docs/screenshots/04-fights.png)                |
+| `/players`                  | ![Players grid](docs/screenshots/05-players.png)              |
+| `/players/[account_name]`   | ![Player profile with timeline](docs/screenshots/06-player-profile-with-timeline.png) |
+
+The script also captures 2 fixture/edge-state PNGs (committed but not displayed): `07-player-empty-timeline.png` (rendered against `/players/empty-history.5678`) + `08-fight-drilldown.png` (rendered against `/fights/fixture-fight-001`). These are reserved for visual regression baselines once their real (non-fixture) counterparts ship.
+
+---
+
 ## Quickstart
 
 ```bash
