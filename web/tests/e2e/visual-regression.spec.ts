@@ -258,13 +258,24 @@ test.describe("visual regression (v0.8.9 plan/003)", () => {
       // anti-aliasing differences between the baseline
       // capture host + the spec capture host).
       const totalPixelCount = baselinePng.width * baselinePng.height;
+      // ``threshold: 0.05`` is shared between the no-failure
+      // diff call (this one) and the failure-path diff-write
+      // call (below) so the diff ratio + the diff PNG
+      // highlight the SAME pixels. A mismatch between the
+      // two thresholds (e.g. 0.1 here + 0.05 below) would
+      // produce a diff PNG that highlights different pixels
+      // from the ratio that triggered the failure -- a
+      // confusing post-mortem. The 0.05 value is the
+      // strictest tolerance that still passes 8/8 against
+      // the committed baselines (see ``CONTRIBUTING.md``
+      // for the threshold-rationale docs).
       const diffPixelCount = pixelmatch(
         baselinePng.data,
         freshPng.data,
         undefined,
         baselinePng.width,
         baselinePng.height,
-        { threshold: 0.1 },
+        { threshold: 0.05 },
       );
       const diffRatio = diffPixelCount / totalPixelCount;
 

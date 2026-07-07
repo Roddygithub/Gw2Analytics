@@ -109,16 +109,42 @@ try {
     // the SSR data fetch settles) which would diff against the spec's
     // fully-hydrated capture (which only waits for ``networkidle``)
     // as a near-100% mismatch in the visual-regression spec.
-    // The wait tracks ``document.documentElement.scrollHeight`` and
-    // requires it to be stable for 500ms (2 polls at 250ms). The
-    // window-level closure variables + ``Date.now()`` handle the
-    // polling; the function is re-evaluated every 250ms.
-    // Each ``page.goto`` above is a full navigation so the window
-    // object is reset between pages; the closure variables do NOT
-    // persist across pages.
+    //
+    // The wait has TWO requirements (both must be met):
+    //   1. The page must have expanded beyond the viewport
+    //      (``scrollHeight > 900``). Without this guard, the
+    //      wait would happily return on a 900px-stable page
+    //      that hasn't started its AG Grid / SVG chart
+    //      expansion yet -- a 900px baseline that diffs as
+    //      100% against the spec's 3196px capture.
+    //   2. The height must be stable for 500ms (2 polls at
+    //      250ms). The window-level closure variables +
+    //      ``Date.now()`` handle the polling; the function
+    //      is re-evaluated every 250ms.
+    //
+    // Each ``page.goto`` above is a full navigation so the
+    // window object is reset between pages; the closure
+    // variables do NOT persist across pages.
+    //
+    // The 30s timeout is the worst-case budget for an
+    // aggressively-rendering dynamic page (e.g. the per-fight
+    // timeline on /fights/[id] which inflates after the
+    // squads + skills fetchers resolve).
     await page.waitForFunction(
       () => {
         const currentHeight = document.documentElement.scrollHeight;
+        // Requirement 1: page must have expanded beyond the
+        // 900px viewport. If the page is still at the
+        // viewport height, the AG Grid / SVG charts have
+        // not yet finished expanding; the wait returns
+        // false (and resets the stability timer on the
+        // next expansion tick).
+        if (currentHeight <= 900) {
+          window.__lastStableHeight = currentHeight;
+          window.__lastStableTime = Date.now();
+          return false;
+        }
+        // Requirement 2: height must be stable for 500ms.
         if (typeof window.__lastStableHeight === "undefined") {
           window.__lastStableHeight = currentHeight;
           window.__lastStableTime = Date.now();
@@ -132,7 +158,7 @@ try {
         return Date.now() - window.__lastStableTime >= 500;
       },
       null,
-      { timeout: 15000, polling: 250 },
+      { timeout: 30000, polling: 250 },
     ).catch(() => {
       // Best-effort. Pages with live-updating content (e.g. the
       // SVG timelines, which may re-render on viewport changes)
