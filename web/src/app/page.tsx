@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { displayedApiBaseUrl } from "@/lib/env";
 import styles from "./page.module.css";
 
 export default function Home() {
@@ -35,7 +36,7 @@ export default function Home() {
 
       <p className={styles.footer}>
         Stateless frontend &middot; data sourced from{" "}
-        <code>{"process.env.API_BASE_URL"}</code>.
+        <code>{displayedApiBaseUrl}</code>.
       </p>
     </div>
   );

@@ -12,8 +12,7 @@
  * without rebuilding the bundle per environment.
  */
 
-const API_BASE_URL =
-  process.env.API_BASE_URL?.replace(/\/+$/, "") ?? "http://localhost:8000";
+import { API_BASE_URL } from "./env";
 
 /**
  * Get the fights list from the gateway.
