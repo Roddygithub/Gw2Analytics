@@ -7,6 +7,295 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - v0.8.6: operational health probe for fight-summary drift
+
+### Added (apps/api)
+
+- `apps/api/src/gw2analytics_api/health.py` (NEW): the
+  operational health probe library. `SummaryDrift` TypedDict
+  with 5 fields -- `total_fights`, `fights_with_summaries`,
+  `drift_count`, `drift_pct`, and `status: Literal["ok", "drift"]`.
+  `summary_drift(db) -> SummaryDrift` function: a single SQL
+  round-trip with 2 subqueries (no SQLAlchemy ORM overhead) +
+  `int()` cast for the typed return; `DISTINCT fight_id` is
+  required because a single fight can have multiple summary
+  rows (one per `(fight_id, account_name)` pair). `drift_pct`
+  is `round(drift_count / total_fights * 100, 2)` with a
+  ZeroDivisionError guard (`0.0` on an empty DB). The
+  binary `ok` / `drift` status is the cleanest contract --
+  operators can set their own thresholds on `drift_pct` if
+  they want more granularity (a future v0.9.0
+  `?threshold=N` query param is the natural extension).
+- `apps/api/src/gw2analytics_api/routes/health.py` (NEW):
+  `GET /api/v1/health/summary` route. Returns the
+  `SummaryDrift` TypedDict. Unauthenticated by design --
+  matches the existing `/healthz` pattern (external
+  monitoring systems typically don't carry credentials,
+  and the data is operational, not sensitive).
+- `apps/api/src/gw2analytics_api/main.py`: includes the new
+  `health` router.
+- `apps/api/src/gw2analytics_api/__init__.py`: `__version__`
+  bumped `0.8.5 -> 0.8.6`.
+- `apps/api/pyproject.toml`: version bumped `0.8.5 -> 0.8.6`.
+- `apps/api/tests/test_health_summary.py` (NEW): 3 e2e
+  cases -- shape contract (4-5 field presence + types +
+  status in `("ok", "drift")`), `status == "ok"` on a
+  dataset with 0 drift, and `status == "drift"` after
+  deleting summary rows (the row count `+1` matches the
+  drift count `+1`).
+
+### Notes
+
+- Closes the operational observability gap: the
+  v0.8.4 fast-path write wraps the materialisation in a
+  narrow `except SQLAlchemyError` (the best-effort
+  contract -- the slow-path fallback serves the data) +
+  the v0.8.5 backfill script catches
+  `(S3Error, OSError, SQLAlchemyError, ValidationError)`
+  per fight. Both patterns silently swallow errors -- the
+  production behaviour is correct, but an operator had
+  no easy way to detect when the fast-path was degraded.
+  v0.8.6 ships the probe.
+- The probe is intentionally cheap (1 SQL round-trip with
+  2 subqueries) so it can be polled at high cadence
+  without measurable load.
+- The 503-on-DB-failure failure mode is NOT implemented:
+  a DB outage would surface a 5xx from FastAPI's default
+  exception handler, which monitoring systems can
+  distinguish from a 200 + `status="drift"` healthy
+  response. A future v0.9.0 enhancement could surface
+  a `degraded` status with a structured error body.
+
+### Tests
+
+- 3 new e2e tests (apps/api/tests/test_health_summary.py).
+- Python test count: 184 (v0.8.5) -> 187 (v0.8.6).
+
+### Validation
+
+- `uv run ruff check libs apps`: clean (RUFF=0).
+- `uv run mypy libs apps --no-incremental`: clean
+  (MYPY=0).
+- `uv run pytest apps/api/tests/test_health_summary.py -v`:
+  3 passed (PYTEST=0).
+- Round 139-140 code-reviewer-minimax-m3: **APPROVED**
+  (binary `ok`/`drift` is the cleanest contract;
+  `Literal["ok", "drift"]` is the idiomatic enum hint;
+  `_, _` discard pattern is correct; the rename +
+  `isinstance` checks are real improvements over `>= 0`;
+  the round-140 status assertion is correct).
+
+[0.8.6]: https://github.com/Roddygithub/Gw2Analytics/compare/ce3d797...11c3ee7
+
+## [0.8.5] - v0.8.5: backfill player summaries for pre-v0.8.4 fights
+
+### Added (apps/api)
+
+- `apps/api/src/gw2analytics_api/backfill.py` (NEW): the
+  backfill library. `run_backfill(db, *, fight_id=None,
+  limit=100, dry_run=False) -> tuple[int, int, int]`
+  returns `(backfilled, skipped, failed)`. The discovery
+  query is a single SQL: `SELECT f.id, f.events_blob_uri
+  FROM fights f WHERE NOT EXISTS (SELECT 1 FROM
+  fight_player_summaries s WHERE s.fight_id = f.id)`. The
+  per-fight commit pattern (1 transaction per fight, not
+  1 per batch) keeps the per-fight failure isolation tight
+  -- a single corrupt blob doesn't roll back 99 healthy
+  fights. The catch is `(S3Error, OSError, SQLAlchemyError,
+  ValidationError)` -- the same surface the v0.8.4 write
+  path tolerates.
+- `apps/api/src/gw2analytics_api/scripts/__init__.py`
+  (NEW): empty package marker so `python -m
+  gw2analytics_api.scripts.backfill_player_summaries`
+  resolves.
+- `apps/api/src/gw2analytics_api/scripts/backfill_player_summaries.py`
+  (NEW): the CLI. `argparse` with `--limit` (default 100),
+  `--dry-run`, and `--fight-id` (single-fight mode for
+  targeted re-runs). Exit code 1 on any `failed > 0`
+  (so a cron / CI can detect partial-success and alert).
+  Human-readable summary line on stdout:
+  `Backfilled N / Skipped M / Failed K` + the dry-run
+  preview path `Would backfill N fights` (no DB writes).
+- `apps/api/src/gw2analytics_api/__init__.py`:
+  `__version__` bumped `0.8.4 -> 0.8.5`.
+- `apps/api/tests/_fixtures.py` (NEW): shared e2e
+  fixtures extracted from `test_uploads_e2e.py` -- the
+  struct layout + EVTC builders (~150 lines of
+  duplication eliminated). The new
+  `test_backfill.py` reuses the same fixture module so
+  the e2e helpers stay single-sourced.
+- `apps/api/tests/test_backfill.py` (NEW): 3 e2e cases
+  + 1 skipped (real-fixture integration test gated on
+  blob availability):
+  - `test_backfill_recreates_summary_rows_from_blob`
+    (deletes summary rows for a known fight, runs the
+    backfill, asserts the rows are recreated with the
+    correct `total_damage` / `total_healing` /
+    `total_buff_removal` from the events blob)
+  - `test_backfill_writes_zero_total_for_pre_phase7_fights`
+    (a fight with `events_blob_uri = NULL` -- the
+    pre-Phase-7 branch writes 0-total rows for each
+    player agent so the cross-fight roll-up still
+    surfaces the player)
+  - `test_backfill_is_idempotent` (re-runs the backfill
+    on a fight with summary rows; the second run is a
+    no-op for that fight -- asserts the row count is
+    unchanged and `failed2 == 0`)
+  - The shared fixture has events for both A and B so
+    both get summary rows; the assertion
+    `len(rows) == 2` exercises the per-account
+    materialisation.
+
+### Notes
+
+- Pre-v0.8.4 fights (uploaded before the
+  `OrmFightPlayerSummary` materialisation shipped) have
+  no summary rows; the `/players` endpoints fell through
+  to the O(fights x events) slow path for these fights
+  (5-30s latency). v0.8.5 is the one-shot recovery tool:
+  `uv run python -m
+  gw2analytics_api.scripts.backfill_player_summaries
+  --limit 1000` populates the missing rows in a single
+  run.
+- The script catches `(S3Error, OSError, SQLAlchemyError,
+  ValidationError)` per fight and continues -- the same
+  failure-isolation contract the v0.8.4 write path
+  enforces. A single corrupt blob doesn't abort the
+  batch.
+- The `--fight-id` single-fight mode is the recovery path
+  for an operator who spots a failed fight in the
+  v0.8.6 health probe output and wants to re-run the
+  backfill for that specific fight without a full
+  dataset scan.
+
+### Tests
+
+- 3 new e2e tests + 1 skipped (apps/api/tests/test_backfill.py).
+- Python test count: 181 (v0.8.4) -> 184 (v0.8.5).
+
+### Validation
+
+- `uv run ruff check libs apps`: clean (RUFF=0).
+- `uv run mypy libs apps --no-incremental`: clean
+  (MYPY=0).
+- `uv run pytest apps/api/tests/test_backfill.py -v`:
+  3 passed + 1 skipped (PYTEST=0).
+- Round 134-138 code-reviewer-minimax-m3: **APPROVED**
+  (single SQL discovery query is the right design;
+  per-fight commit keeps failure isolation tight;
+  `--fight-id` recovery mode matches the v0.8.6
+  operational loop; shared `_fixtures.py` extraction
+  single-sources the e2e helpers).
+
+[0.8.5]: https://github.com/Roddygithub/Gw2Analytics/compare/ed20259...ce3d797
+
+## [0.8.4] - v0.8.4: materialise per-(fight, account) summary rows
+
+### Added (apps/api)
+
+- `apps/api/alembic/versions/0005_fight_player_summaries.py`
+  (NEW): creates the `fight_player_summaries` table --
+  `(fight_id, account_name, profession, elite_spec, name,
+  total_damage, total_healing, total_buff_removal)` with
+  a composite PK on `(fight_id, account_name)` and an
+  index on `account_name` for the cross-fight roll-up
+  query. Pre-v0.8.4 rows have no entries in this table.
+- `apps/api/src/gw2analytics_api/models.py`:
+  `OrmFightPlayerSummary` mapped class mirroring the
+  Alembic migration. Frozen Pydantic-style dataclass
+  semantics (the route layer composes the rows as
+  `FrozenPydanticBaseModel` so the wire consumer gets
+  `extra="forbid"` + `frozen=True`).
+- `apps/api/src/gw2analytics_api/services.py`: new
+  `_persist_player_summaries(db, fight_id, agents,
+  contributions)` helper called from `process_parse`
+  after `_save_fight`. Iterates the pre-computed
+  per-account contributions (the same shape the slow
+  path emits) and UPSERTs one row per
+  `(fight_id, account_name)` pair. Best-effort: the
+  write is wrapped in a narrow `try: ... except
+  SQLAlchemyError: logger.warning(...)` so a transient
+  DB hiccup doesn't break the upload -- the slow-path
+  fallback serves the data on the read side, and the
+  v0.8.5 backfill script can re-populate the rows
+  later.
+- `apps/api/src/gw2analytics_api/routes/players.py`:
+  the `GET /api/v1/players` +
+  `GET /api/v1/players/{account_name:path}` +
+  `GET /api/v1/players/{account_name:path}/timeline`
+  routes now read the materialised summary rows
+  directly via a single SQL aggregation (no events
+  blob walk). The pre-v0.8.4 slow path
+  (`_compute_contributions`) is kept as a
+  backward-compat fallback for fights with no summary
+  rows -- a 200 with computed-from-events rows is
+  still served, just with the 5-30s latency penalty.
+- `apps/api/src/gw2analytics_api/__init__.py`:
+  `__version__` bumped `0.8.3 -> 0.8.4`.
+- `apps/api/src/gw2analytics_api/main.py`: FastAPI
+  `version` string bumped `0.8.3 -> 0.8.4`.
+- `apps/api/pyproject.toml`: version bumped
+  `0.8.3 -> 0.8.4`.
+- `apps/api/tests/test_uploads_e2e.py`: extended
+  `test_uploads_e2e_happy_path` to assert that
+  `OrmFightPlayerSummary` rows are materialised
+  immediately after upload processing completes (the
+  fast-path contract). The pre-v0.8.4 slow path is
+  exercised via a new e2e case that seeds a fight with
+  `events_blob_uri` but no summary rows (simulating a
+  pre-v0.8.4 historical upload) and asserts the route
+  still returns the contributions via the slow-path
+  fallback.
+
+### Changed
+
+- The `_compute_contributions` slow-path helper is now
+  the **fallback** for pre-v0.8.4 fights, not the
+  default. New uploads + re-uploads of v0.8.4+ fights
+  hit the materialised path. The pre-Phase-7 branch
+  (no events blob) is unchanged.
+
+### Notes
+
+- The v0.7.0 CHANGELOG noted the "v0.7.1 will
+  materialise a `fight_player_summaries` table to
+  avoid the 5-30s latency for users with 100+ fights"
+  forward-look. v0.8.4 is the realisation of that
+  commitment: 5-30s -> ms for v0.8.4+ fights.
+- The best-effort `try/except` around the materialise
+  write is deliberate: the upload is already committed
+  to the DB (the fight row + agents + skills are
+  persisted), and a transient materialise failure
+  shouldn't blank the upload. The v0.8.5 backfill
+  script + the v0.8.6 health probe are the operational
+  recovery tools.
+- The pre-v0.8.4 slow path is preserved (not deleted)
+  so the backward-compat for historical uploads is
+  zero-churn. A future v0.9.0 cleanup could remove the
+  fallback once all production uploads are v0.8.4+.
+
+### Tests
+
+- 1 extended e2e test (apps/api/tests/test_uploads_e2e.py).
+- 1 new e2e test (pre-v0.8.4 slow-path fallback).
+- Python test count: 180 (v0.8.3) -> 181 (v0.8.4).
+
+### Validation
+
+- `uv run ruff check libs apps`: clean (RUFF=0).
+- `uv run mypy libs apps --no-incremental`: clean
+  (MYPY=0).
+- `uv run pytest apps/api/tests/test_uploads_e2e.py -v`:
+  tests pass (PYTEST=0).
+- Code-reviewer-minimax-m3: **APPROVED** (the
+  best-effort materialise is the right trade-off;
+  pre-v0.8.4 slow-path fallback is preserved for
+  backward compat; composite PK on
+  `(fight_id, account_name)` is the right
+  upsert-target).
+
+[0.8.4]: https://github.com/Roddygithub/Gw2Analytics/compare/bd1af6e...ed20259
+
 ## [0.8.3] - v0.8.3: player name resolution on the fight drilldown's TargetFilter
 
 ### Added (apps/api + libs/gw2_analytics)
@@ -710,7 +999,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.7.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.0...v0.7.1
 
-[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/11c3ee7...HEAD
 
 ## [0.7.0] - Phase 9: player-centric surface + per-fight squad + per-fight skill roll-ups
 
