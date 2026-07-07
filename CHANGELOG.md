@@ -81,6 +81,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No hardcoded credentials remain anywhere in the source tree.
 
+### Added (Phase 4 -- web/ frontend scaffold)
+
+- `web/package.json`: AG Grid Community, AG Grid React, and
+  `openapi-typescript` joined the dev dependency group. Two new
+  scripts: `pnpm typecheck` runs `tsc --noEmit`; `pnpm generate:api`
+  writes `src/lib/api/schema.d.ts` against a running gateway
+  (`http://localhost:8000/openapi.json`).
+- `web/src/app/layout.tsx`: renamed the page <title> from
+  "Create Next App" to "GW2Analytics" and tightened the metadata
+  description around the WvW framing.
+- `web/src/app/page.tsx`, `page.module.css`, `globals.css`:
+  replaced the `create-next-app` boilerplate with a WvW-themed
+  landing page (brand badge + hero + two CTAs: `/fights` and
+  `/account`). DWvW dark theme (slate background + gold accent)
+  with `prefers-color-scheme: light` opt-out.
+- `web/src/app/fights/page.tsx`: Server Component that
+  SSR-fetches `GET /api/v1/fights` via the lib helper. Marked
+  `dynamic = "force-dynamic"` so the grid never serves stale.
+- `web/src/components/FightsGrid.tsx`: Client Component wrapping
+  AG Grid Community, registering `AllCommunityModule` once at
+  module load (v33+ tree-shaken build), dark Quartz theme,
+  sortable + filterable columns, 25-row pagination.
+- `web/src/app/account/page.tsx`: Client Component with a
+  password input that submits the GW2 API key as
+  `Authorization: Bearer <key>` to `/api/v1/account` and renders
+  the resolved ``(world_id, world_name, world_population)`` triple
+  (or surfaces the upstream error).
+- `web/src/lib/api.ts`: env-driven fetcher helpers for RSC +
+  Client Components; honours `API_BASE_URL` (defaults to
+  `http://localhost:8000`). Declares `FightRow` and
+  `AccountEnrichedRow` local types.
+- `web/.env.example`: declares `API_BASE_URL`.
+- `web/README.md`: replaces the `create-next-app` README with a
+  concise frontend description (routes, scripts, codegen, auth
+  caveats).
+- `.github/workflows/ci.yml`: appended two steps to
+  `lint-and-test` -- `pnpm/action-setup@v4` + Node 20 setup,
+  `pnpm install --frozen-lockfile`, and `pnpm exec tsc --noEmit`.
+  The web/ type surface is now part of the merge gate.
+
+### Added (Phase 5 -- apps/api `GET /api/v1/account`)
+
+- `apps/api/pyproject.toml`: depends on `gw2_api_client>=0.1.0`.
+  `dev` group gains `respx>=0.21` and `httpx>=0.27` (no longer
+  reaches the TestClient via the top-level root dev extras).
+  Version bumped `0.1.0 -> 0.2.0`.
+- `apps/api/src/gw2analytics_api/schemas.py`: new response
+  schema `AccountEnrichedOut` (``world_id``, ``world_name``,
+  ``world_population``). ``world_population`` is a plain string
+  so future v2 Population buckets don't break the round-trip -- if
+  the upstream grows a new value, ``WorldInfo`` validation raises
+  and the route surfaces 502 rather than silently coercing.
+- `apps/api/src/gw2analytics_api/routes/account.py` (NEW): GET
+  `/api/v1/account` -- a thin endpoint that composes
+  ``AsyncGuildWars2Client.account_get`` + ``worlds_get([world_id])``
+  to return a single deterministic world triple. Auth via
+  `HTTPBearer(auto_error=False)`. Error mapping: missing/empty
+  bearer -> 401 (with `WWW-Authenticate: Bearer`), upstream 401
+  -> 401 (key was rejected), upstream 429 retry exhaustion -> 503,
+  upstream 5xx / network -> 502, generic -> 502. Pure GET, no
+  persistent state effects.
+- `apps/api/src/gw2analytics_api/main.py`: includes the new
+  `account` router; FastAPI `version` string bumped
+  `0.1.0 -> 0.2.0`.
+- `apps/api/tests/test_account.py` (NEW): 9 respx-mocked tests
+  covering happy path, missing/empty/whitespace bearer, upstream
+  401 -> 401, upstream 5xx -> 502, upstream 429 -> 503 after 3
+  retries, 1x 429 + 200 succeeds on retry 2, empty `worlds_get`
+  -> 502.
+
+### Changed
+
+- `uv.lock`: bumped to reflect `gw2_api_client` becoming a
+  workspace member consumed by apps/api (apps/api 0.2.0).
+- `web/pnpm-lock.yaml`: bumped to reflect AG Grid Community,
+  AG Grid React, and `openapi-typescript` resolutions.
+
 ## [0.2.0] - gw2_core 0.2.0: API-data models (Phase 4 prep)
 
 ### Added
