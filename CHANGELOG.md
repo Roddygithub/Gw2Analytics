@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - v0.8.7: wire the v0.8.6 health probe into CI as a regression gate
+
+### Added (apps/api)
+
+- `apps/api/ci_health_gate.py` (NEW): the CI gate
+  script. 2 CLI modes:
+  - ``--save-baseline PATH``: capture the current
+    probe response to ``PATH`` as JSON. The CI workflow
+    runs this BEFORE the e2e suite.
+  - ``--check-delta PATH``: compare the current probe
+    response to the baseline at ``PATH``. The CI
+    workflow runs this AFTER the e2e suite. Returns
+    non-zero if ``drift_count`` delta >=
+    ``MAX_DRIFT_DELTA = 2``.
+  In-process TestClient (no uvicorn boot, no port
+  binding, no race condition; < 1 s on a typical CI
+  runner). ``_fetch_drift() -> SummaryDrift`` uses
+  ``cast(SummaryDrift, response.json())`` so the
+  response shape is typed at the boundary (the
+  ``test_health_summary_shape_contract`` test pins
+  the contract). ``Path.open()`` (PEP 736) instead of
+  bare ``open()``.
+
+- `.github/workflows/ci.yml`: 3 new steps
+  surrounding the existing "Pytest" step:
+  - "Health probe baseline (v0.8.7)" -- runs BEFORE
+    pytest: captures the probe response to
+    ``/tmp/health_baseline.json``.
+  - "Health probe CI gate (v0.8.7 regression check)"
+    -- runs AFTER pytest: compares the post-e2e
+    probe to the baseline; fails the build on delta
+    >= ``MAX_DRIFT_DELTA``.
+  - "Health probe: cleanup /tmp/health_baseline.json"
+    (with ``if: always()``) -- removes the baseline
+    file, mirroring the existing "OpenAPI: cleanup"
+    pattern.
+
+### Notes
+
+- The v0.8.6 probe's ``status`` field is a strict
+  binary (``ok`` when ``drift_count == 0`` else
+  ``drift``). A strict-binary CI gate would
+  false-positive on every e2e run that legitimately
+  leaves the test database in a drift-y state (the
+  ``test_health_summary_surfaces_drift_after_summary_deletion``
+  test deliberately deletes summary rows). v0.8.7's
+  **delta check** is baseline-agnostic: the
+  ``drift_count`` delta between the pre-e2e baseline
+  and the post-e2e probe must be <=
+  ``MAX_DRIFT_DELTA = 2``. The expected e2e delta is
+  +1 (one test deletes summary rows); a v0.8.4
+  materialise regression would add +1 more (a second
+  e2e test that creates a fight without summaries),
+  so the regression delta is +2.
+- The ``>=`` comparison (vs ``>``) is the off-by-one
+  fix: with ``> MAX`` and ``MAX = 2``, a single-fight
+  regression (delta = 2) would pass (false negative).
+  With ``>= MAX``, the regression correctly fails.
+- The script's `MAX_DRIFT_DELTA` is a hardcoded
+  constant; a future enhancement could lift it to an
+  env var (`GW2_HEALTH_GATE_MAX_DELTA`) if operators
+  want to tune the threshold per environment.
+
+### Tests
+
+- 0 new pytest tests (the existing 3 tests in
+  `apps/api/tests/test_health_summary.py` cover the
+  probe's contract; the CI gate is the operational
+  regression check, not a unit test).
+- The script was validated end-to-end locally: a
+  synthetic +2 baseline bump (simulating a regression)
+  correctly returned exit code 1.
+
+### Validation
+
+- `uv run ruff check apps/api/ci_health_gate.py`:
+  clean (RUFF=0).
+- `uv run ruff format --check ci_health_gate.py`:
+  clean.
+- `uv run mypy ci_health_gate.py`: clean (MYPY=0).
+- `uv run pytest apps/api/tests/test_health_summary.py`:
+  3 passed (PYTEST=0).
+- Round 142-144 code-reviewer-minimax-m3: **APPROVED**
+  (the delta check is the correct design; ``>= MAX=2``
+  correctly catches the +2 regression;
+  ``cast(SummaryDrift, ...)`` is the idiomatic
+  mypy-friendly pattern; in-process TestClient is the
+  canonical hermetic approach; step ordering + cleanup
+  mirror the existing OpenAPI drift gate).
+
+[0.8.7]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.6...v0.8.7
+
 ## [0.8.6] - v0.8.6: operational health probe for fight-summary drift
 
 ### Added (apps/api)
@@ -999,7 +1091,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.7.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.0...v0.7.1
 
-[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.7...HEAD
 
 ## [0.7.0] - Phase 9: player-centric surface + per-fight squad + per-fight skill roll-ups
 
