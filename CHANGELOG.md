@@ -80,14 +80,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - No hardcoded credentials remain anywhere in the source tree.
+- CORS is no longer hardcoded to ``allow_origins=["*"]``. A new
+  optional ``Settings.cors_allowed_origins`` field reads the
+  comma-separated ``CORS_ALLOWED_ORIGINS`` env var (defaults to
+  ``["*"]`` for local dev); ``apps/api/.../main.py`` reads it once
+  on app init. Operators tighten the gateway for public deploy
+  by setting the env var to the real domains. The pre-existing
+  inline warning comment is updated to reflect that the override
+  is now wired (no longer future work).
+
+### Fixed
+
+- `web/src/app/page.tsx`: the hero footer was rendering the literal
+  string ``process.env.API_BASE_URL`` because the JSX expression
+  was wrapped in quotes (`<code>{"process.env.API_BASE_URL"}</code>`).
+  Removed the quotes and replaced with a shared
+  ``displayedApiBaseUrl`` helper imported from
+  ``web/src/lib/api.ts`` so the SSR'd landing cannot drift from the
+  trimmed URL the gateway fetcher uses.
+- `README.md` + `CHANGELOG.md`: post-release drift corrections
+  (test counts, the v0.2.0-api tag status flipping from `pending`
+  to `shipped`, the test-file count updating to 8, the openapi
+  codegen mechanism description corrected to reflect
+  `web/scripts/dump_openapi.py`).
 
 ### Added (Phase 4 -- web/ frontend scaffold)
 
 - `web/package.json`: AG Grid Community, AG Grid React, and
   `openapi-typescript` joined the dev dependency group. Two new
   scripts: `pnpm typecheck` runs `tsc --noEmit`; `pnpm generate:api`
-  writes `src/lib/api/schema.d.ts` against a running gateway
-  (`http://localhost:8000/openapi.json`).
+  writes `src/lib/api/schema.d.ts` from `web/scripts/dump_openapi.py`
+  (in-process `app.openapi()` JSON piped through `openapi-typescript`;
+  no running gateway required).
 - `web/src/app/layout.tsx`: renamed the page <title> from
   "Create Next App" to "GW2Analytics" and tightened the metadata
   description around the WvW framing.
@@ -145,10 +169,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apps/api/src/gw2analytics_api/main.py`: includes the new
   `account` router; FastAPI `version` string bumped
   `0.1.0 -> 0.2.0`.
-- `apps/api/tests/test_account.py` (NEW): 9 respx-mocked tests
-  covering happy path, missing/empty/whitespace bearer, upstream
-  401 -> 401, upstream 5xx -> 502, upstream 429 -> 503 after 3
-  retries, 1x 429 + 200 succeeds on retry 2, empty `worlds_get`
+- `apps/api/tests/test_account.py` (NEW): 11 respx-mocked tests
+  covering happy path, missing bearer, empty bearer,
+  whitespace-only bearer, lowercase Bearer scheme (some proxies
+  normalise the scheme to lowercase and the route must still
+  accept it), upstream 401 -> 401, upstream 5xx -> 502, upstream
+  429 -> 503 after 3 retries, 1x 429 + 200 succeeds on retry 2,
+  `httpx.ConnectTimeout` transport -> 502, and empty `worlds_get`
   -> 502.
 
 ### Changed

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
 
-**Status:** 84 tests across 3 libraries + 1 app / 5 test files · 5 release tags shipped (`v0.2.0-api` pending tag) · strict CI lint-and-test + pnpm typecheck gate active.
+**Status:** 87 tests across 4 libraries + 1 app / 8 test files (86 passing + 1 conditionally skipped: `apps/api/tests/test_uploads_e2e.py` self-skips when no docker-compose Postgres is reachable) · 6 release tags shipped (incl. `v0.2.0-api`) · strict CI lint-and-test + pnpm typecheck gate active.
 
 Modern combat analytics platform for **Guild Wars 2 WvW** (World vs World).
 
@@ -78,7 +78,7 @@ pnpm dev   # http://localhost:3000
 | `v0.2.0-analytics-prototype` | `gw2_analytics`    | Multi-fight rollup support across an iterable of fights      |
 | `v0.2.0-core`                | `gw2_core`         | v2 REST API data models (`AccountInfo`, `WorldInfo`, `Population`) |
 | `v0.1.0-api-client`          | `gw2_api_client`   | Typed async httpx wrapper for the GW2 v2 REST API surface    |
-| `v0.2.0-api` *(pending)*     | `apps/api`         | `GET /api/v1/account` Bearer-protected world enrichment (Phase 5) |
+| `v0.2.0-api`                 | `apps/api`         | `GET /api/v1/account` Bearer-protected world enrichment (Phase 5) |
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the per-commit history and the linking notes between releases.
 
@@ -91,7 +91,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the per-commit history and the linking no
 ✅ **Phase 2** — FastAPI gateway + Alembic migrations + MinIO content-addressed `.zevtc` blob storage + V1.3 `gw2_core` combat schemas. Env-driven credentials via `pydantic-settings` + `pytest-env`.
 ✅ **Phase 3** — `gw2_analytics` aggregations. `SingleFightAggregator` + `MultiFightAggregator` with strict frozen pydantic shapes + cross-field invariant validation. Tagged `v0.1.0-analytics-prototype` and `v0.2.0-analytics-prototype`.
 ✅ **Phase 4** — `web/` Next.js 16 frontend scaffolded. AG Grid Community tables (`FightsGrid`), `openapi-typescript` codegen, `pnpm typecheck` step in CI. Server Components SSR-fetch the gateway through an env-driven `src/lib/api.ts` helper.
-✅ **Phase 5** — `GET /api/v1/account` Bearer-protected world enrichment. Composes `AsyncGuildWars2Client.account_get` + `worlds_get([world_id])` into a deterministic ``(world_id, world_name, world_population)`` triple. Tagged pending: `v0.2.0-api`.
+✅ **Phase 5** — `GET /api/v1/account` Bearer-protected world enrichment. Composes `AsyncGuildWars2Client.account_get` + `worlds_get([world_id])` into a deterministic ``(world_id, world_name, world_population)`` triple. Tagged `v0.2.0-api`.
 
 ---
 
