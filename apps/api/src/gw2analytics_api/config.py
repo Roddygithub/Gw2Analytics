@@ -19,9 +19,10 @@ ignored.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -32,6 +33,14 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # ``populate_by_name=True`` lets callers pass Settings(
+        #     cors_allowed_origins=[...]) by the Python field name while
+        # keeping ``validation_alias="CORS_ALLOWED_ORIGINS"`` for env
+        # input. Without this, the Python name is rejected (the field
+        # only accepts the alias), and Settings(kw=...) silently
+        # falls back to the field default. The env-var path keeps
+        # working because ``validation_alias`` is consulted first.
+        populate_by_name=True,
     )
 
     # ``database_url`` and the ``minio_*`` fields are *required*: no
@@ -50,15 +59,38 @@ class Settings(BaseSettings):
     # overrides in the current scope.
     minio_secure: bool = False
     parser_version: str = "0.5.0"
-    # ``cors_allowed_origins`` defaults to wide-open for local dev
-    # (the Next.js frontend at :3000 + curl from any origin). Set
-    # ``CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com``
-    # in deployment env to tighten. Comma-separated env input is
-    # parsed by pydantic-settings into a list.
-    cors_allowed_origins: list[str] = Field(
+    # ``cors_allowed_origins`` defaults to wide-open (``["*"]``) for
+    # local dev (the Next.js frontend at :3000 + curl from any origin).
+    # ``NoDecode`` short-circuits pydantic-settings' default JSON
+    # parsing of list-valued env vars (a bare ``*`` is not valid JSON
+    # and would otherwise raise ``SettingsError`` on startup); the
+    # ``_split_cors_origins`` validator below splits the raw env string
+    # on commas (``CORS_ALLOWED_ORIGINS=https://a,https://b`` -> 2
+    # entries) and recognises ``*`` as the wide-open shortcut.
+    cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
         default=["*"],
         validation_alias="CORS_ALLOWED_ORIGINS",
     )
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, v: object) -> list[str]:
+        # ``Annotated[list[str], NoDecode]`` short-circuits pydantic-settings'
+        # ``env_ignore_empty=True`` default for this field -- once the
+        # env source is bypassed (NoDecode), the raw env string flows
+        # straight to this validator regardless of emptiness. So the
+        # empty-string branch below is **reachable** (and required):
+        # ``CORS_ALLOWED_ORIGINS=`` arrives here as ``""`` and must be
+        # treated as "no constraint" rather than ``[""]``.
+        if isinstance(v, str):
+            v = v.strip()
+            if v in ("", "*"):
+                return ["*"]
+            return [s.strip() for s in v.split(",") if s.strip()]
+        if isinstance(v, list):
+            return v
+        msg = f"cors_allowed_origins env value must be a string or list, got {type(v).__name__}"
+        raise ValueError(msg)
 
 
 @lru_cache
