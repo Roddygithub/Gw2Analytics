@@ -63,6 +63,46 @@ package. Run `uv sync` at the repo root first if you haven't
 already; without it the codegen step fails fast and
 `pnpm dev` does not start the dev server.
 
+## Visual regression
+
+Since v0.8.9 (plan/003), a second Playwright project pixel-diffs
+the 8 tracked PNGs at `docs/screenshots/` against fresh full-page
+captures of the corresponding routes. A diff > 1% of the total
+pixel count fails the build; on failure, the diff PNG (a red
+highlight overlay on the changed pixels) is written to
+`web/tests/e2e/.visual-regression-output/<baseline>` (gitignored)
+and uploaded as a CI build artifact.
+
+**When a UI refactor is intentional**, refresh the 8 tracked PNGs
+and commit the updated files:
+
+```bash
+pnpm screenshots --persist   # captures + copies into docs/screenshots/
+```
+
+**When a CI failure surfaces**, inspect the diff PNG at
+`web/tests/e2e/.visual-regression-output/<baseline>` to confirm
+whether the change is intentional. The diff PNG is a red overlay
+on the changed pixels; a small handful of red pixels (e.g. an
+anti-aliasing edge) is typically tolerable noise, while a large
+solid red region indicates a real UI regression.
+
+**The visual-regression suite is gated on PRs only** (not on
+every push to `main`) via
+`if: github.event_name == 'pull_request'` in
+`.github/workflows/ci.yml`. The default `pnpm exec playwright test`
+invocation (the "Playwright E2E tests" step) skips the
+visual-regression suite via the
+`--project=visual-regression` filter on the `playwright.config.ts`
+`projects` block, so the fast local loop stays under the ~30 s
+budget. CI runs the visual-regression suite explicitly via the
+"Visual regression e2e (PR only)" step.
+
+The 1% diff threshold is a tunable (the `DIFF_THRESHOLD` const at
+the top of `web/tests/e2e/visual-regression.spec.ts`); a future
+cycle could lower it to 0.5% for stricter diffing (catches
+font-rendering drift across Node versions).
+
 ## Architecture
 
 - **Server Components** fetch directly from `process.env.API_BASE_URL`

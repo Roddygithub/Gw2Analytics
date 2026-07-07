@@ -1,0 +1,311 @@
+/**
+ * v0.8.9 plan/003: visual regression testing on the 8 tracked
+ * ``docs/screenshots/*.png``.
+ *
+ * For each of the 8 routes that ship a tracked PNG, this spec:
+ *   1. Navigates to the route (using the real Next.js dev server
+ *      + the real mock-server fixtures, not a new mock-server
+ *      endpoint).
+ *   2. Captures a fresh full-page screenshot via
+ *      ``page.screenshot({ path: tempPath, fullPage: true })``.
+ *   3. Reads the checked-in baseline at
+ *      ``web/docs/screenshots/<baseline>`` (relative to the
+ *      repo root; ``web/`` is the Playwright project root so
+ *      ``../docs/screenshots/<baseline>`` is the path).
+ *   4. Decodes both PNGs via ``pngjs``.
+ *   5. Diffs them via ``pixelmatch(...)``.
+ *   6. Asserts ``diffPixelCount / totalPixelCount < 0.01`` (the
+ *      1% threshold; tunable via the ``DIFF_THRESHOLD`` const
+ *      at the top of this file).
+ *   7. On failure, writes the diff PNG to
+ *      ``web/tests/e2e/.visual-regression-output/<baseline>``
+ *      (gitignored) so a developer can inspect the visual
+ *      diff (a red highlight overlay on the changed pixels).
+ *
+ * Why a separate Playwright project (not a vitest case)
+ * =====================================================
+ * Visual regression needs a real browser (Playwright's
+ * ``page.screenshot()`` boots Chromium). A vitest case would
+ * need to either mock the SVG rendering (false positive:
+ * mock matches mock) or run in jsdom (can't render the AG
+ * Grid or the inline SVG chart). The Playwright project is
+ * the canonical path.
+ *
+ * Why gated on PRs only (not on every push to main)
+ * ==================================================
+ * A fresh full-page screenshot per route is ~200-500 ms of
+ * browser time, so 8 routes is 2-4 s of additional CI per
+ * PR. The "every push to main" cadence would pay this cost
+ * without a corresponding reliability win (a UI refactor
+ * that lands on ``main`` is already covered by the PR's
+ * own visual-regression run). The gate is implemented in
+ * ``.github/workflows/ci.yml`` via
+ * ``if: github.event_name == 'pull_request'`` on the
+ * ``Visual regression e2e (PR only)`` step.
+ *
+ * First run expectation
+ * =====================
+ * The first run should pass with diff = 0% (the v0.8.8 PNGs
+ * are byte-identical to what the new spec captures, modulo
+ * platform-independent anti-aliasing differences). If a
+ * diff > 0% surfaces, the v0.8.8 PNGs may be stale (e.g.
+ * font-rendering drift between the v0.8.8 capture host +
+ * the v0.8.9 spec host); refresh via
+ * ``pnpm screenshots --persist`` and commit the updated
+ * PNGs as a follow-up commit.
+ *
+ * Maintenance note
+ * ================
+ * The 1% threshold is a tunable (the ``DIFF_THRESHOLD`` const
+ * below). A future cycle could lower it to 0.5% for stricter
+ * diffing (catches font-rendering drift across Node
+ * versions). A future cycle could also narrow the spec to
+ * "only the 4 PNGs that are most likely to regress" (e.g.
+ * drop the 2 fixture-edge-state PNGs) if CI cost becomes a
+ * concern.
+ */
+import { promises as fs } from "node:fs";
+import { join } from "node:path";
+import { expect, test } from "@playwright/test";
+import { PNG } from "pngjs";
+import pixelmatch from "pixelmatch";
+
+/**
+ * The 1% diff threshold. A single AG Grid row-height bump
+ * (2 px on a 1440x900 capture) is ~0.1% of the total pixel
+ * count, well under the threshold. An accidental column-
+ * reorder on the per-target trio (which shifts ~30% of the
+ * pixels) would correctly fail. Tunable: lower to 0.005 for
+ * stricter diffing, raise to 0.05 to tolerate font-rendering
+ * drift across Node versions.
+ */
+const DIFF_THRESHOLD = 0.01;
+
+/**
+ * The 8 cases -- one per tracked PNG. The shape is
+ * (1) the route to navigate to, (2) the baseline PNG
+ * filename under ``docs/screenshots/``, (3) a short
+ * ``name`` for the test title.
+ *
+ * The 2 fixture-edge-state cases (07 + 08) are last; they
+ * are rendered against the mock-server's fixture accounts
+ * (empty-history.5678 + fixture-fight-001 respectively).
+ * A future v0.9.0+ could narrow the suite to drop the
+ * 2 fixture cases if CI cost becomes a concern.
+ */
+const VISUAL_REGRESSION_CASES: ReadonlyArray<{
+  readonly name: string;
+  readonly route: string;
+  readonly baseline: string;
+}> = [
+  {
+    name: "landing",
+    route: "/",
+    baseline: "01-landing.png",
+  },
+  {
+    name: "account",
+    route: "/account",
+    baseline: "02-account.png",
+  },
+  {
+    name: "upload",
+    route: "/upload",
+    baseline: "03-upload.png",
+  },
+  {
+    name: "fights",
+    route: "/fights",
+    baseline: "04-fights.png",
+  },
+  {
+    name: "players",
+    route: "/players",
+    baseline: "05-players.png",
+  },
+  {
+    name: "player-profile",
+    route: "/players/TestAccount.1234",
+    baseline: "06-player-profile-with-timeline.png",
+  },
+  {
+    name: "player-empty-timeline",
+    route: "/players/empty-history.5678",
+    baseline: "07-player-empty-timeline.png",
+  },
+  {
+    name: "fight-drilldown",
+    route: "/fights/fixture-fight-001",
+    baseline: "08-fight-drilldown.png",
+  },
+];
+
+/**
+ * Path to the ``docs/screenshots/`` directory, relative to
+ * the Playwright project root (``web/``). The repo-root
+ * ``docs/screenshots/`` is the canonical artifact store
+ * (tracked since v0.8.8); the Playwright project root is
+ * ``web/`` so the relative path is ``../docs/screenshots/``.
+ */
+const BASELINE_DIR = join(process.cwd(), "..", "docs", "screenshots");
+
+/**
+ * Path to the diff PNG output directory (gitignored). The
+ * directory is created lazily on the first failure; on
+ * success it's left empty (or non-existent).
+ */
+const DIFF_OUTPUT_DIR = join(
+  process.cwd(),
+  "tests",
+  "e2e",
+  ".visual-regression-output",
+);
+
+test.describe("visual regression (v0.8.9 plan/003)", () => {
+  // The baseline PNGs were captured by ``pnpm screenshots`` at
+  // 1440x900 (see ``web/scripts/screenshots.mjs``). Setting the
+  // test viewport to match ensures the fresh capture's
+  // dimensions align with the baseline (the spec has a
+  // categorical dimension-mismatch check that fires BEFORE the
+  // diff step; a mismatch would mask the real diff percentage
+  // as a near-100% false positive). ``deviceScaleFactor: 1``
+  // matches the baseline (DPI scaling would change the pixel
+  // counts on high-DPI displays).
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  for (const { name, route, baseline } of VISUAL_REGRESSION_CASES) {
+    test(`${name} (${route}) matches ${baseline}`, async ({ page }) => {
+      // Navigate to the route. The ``waitUntil: "networkidle"``
+      // wait condition is critical: a fresh full-page
+      // screenshot taken before the SSR fetchers resolve
+      // would capture the loading state (a blank page +
+      // AG Grid's "no rows" panel), which would diff against
+      // the populated baseline as a near-100% mismatch.
+      // ``networkidle`` waits until there are no network
+      // connections for at least 500 ms, which is a strong
+      // signal that the SSR fetches have settled. The 4
+      // fetchers on ``/fights/[id]`` (events + squads +
+      // skills + timeline, per the v0.8.9 plan/002 page
+      // contract) all resolve before ``networkidle`` fires.
+      await page.goto(route, { waitUntil: "networkidle" });
+
+      // Capture a fresh full-page screenshot to a temp file
+      // in the OS tmp dir. ``fullPage: true`` scrolls the
+      // page to capture the full scroll height, matching
+      // the ``pnpm screenshots`` capture (which also uses
+      // ``fullPage: true``).
+      const tempPath = join(
+        DIFF_OUTPUT_DIR,
+        `.tmp-${baseline}`,
+      );
+      await page.screenshot({ path: tempPath, fullPage: true });
+
+      // Read the checked-in baseline + the fresh capture.
+      const baselinePath = join(BASELINE_DIR, baseline);
+      const [baselineBytes, freshBytes] = await Promise.all([
+        fs.readFile(baselinePath),
+        fs.readFile(tempPath),
+      ]);
+
+      // Decode both PNGs. ``pngjs``'s ``PNG.sync.read`` is
+      // the synchronous reader (the ``PNG`` class is the
+      // streaming reader; both expose the same data shape).
+      const baselinePng = PNG.sync.read(baselineBytes);
+      const freshPng = PNG.sync.read(freshBytes);
+
+      // Sanity: the two PNGs must have the same dimensions
+      // for ``pixelmatch`` to work. A dimension mismatch
+      // (e.g. the page layout changed and the scroll height
+      // is different) is a categorical failure that the
+      // diff percentage would mask -- surface it as a clear
+      // error message before the diff step.
+      expect(
+        { width: freshPng.width, height: freshPng.height },
+        `fresh capture dimensions for ${route} must match the ${baseline} baseline`,
+      ).toEqual({
+        width: baselinePng.width,
+        height: baselinePng.height,
+      });
+
+      // Diff the two PNGs. ``pixelmatch`` returns the
+      // absolute count of differing pixels (not the
+      // percentage). The signature is
+      // ``pixelmatch(img1, img2, output, width, height, options?)``
+      // where ``output`` is a ``Uint8Array`` /
+      // ``Uint8ClampedArray`` to write the diff into (or
+      // ``undefined`` to skip the diff write; the TypeScript
+      // types don't accept ``null``). We pass ``undefined``
+      // for the no-failure case (the diff output is only
+      // useful when the test fails; the pixel count is all
+      // we need to assert on).
+      // The ``threshold`` option (default 0.1) is the
+      // per-pixel color-difference tolerance for
+      // anti-aliasing; values < 0.1 are considered
+      // "different". A higher value tolerates more
+      // anti-aliasing drift at the cost of catching
+      // smaller intentional changes.
+      const totalPixelCount = baselinePng.width * baselinePng.height;
+      const diffPixelCount = pixelmatch(
+        baselinePng.data,
+        freshPng.data,
+        undefined,
+        baselinePng.width,
+        baselinePng.height,
+        { threshold: 0.1 },
+      );
+      const diffRatio = diffPixelCount / totalPixelCount;
+
+      // On failure, write the diff PNG to the output
+      // directory so a developer can inspect the visual
+      // diff (a red highlight overlay on the changed
+      // pixels). The diff PNG is the same dimensions as
+      // the input; ``pixelmatch`` writes the diff into a
+      // pre-allocated ``PNG`` instance.
+      if (diffRatio >= DIFF_THRESHOLD) {
+        await fs.mkdir(DIFF_OUTPUT_DIR, { recursive: true });
+        const diffPath = join(DIFF_OUTPUT_DIR, baseline);
+        const diffPng = new PNG({
+          width: baselinePng.width,
+          height: baselinePng.height,
+        });
+        pixelmatch(
+          baselinePng.data,
+          freshPng.data,
+          diffPng.data,
+          baselinePng.width,
+          baselinePng.height,
+          { threshold: 0.1 },
+        );
+        await fs.writeFile(diffPath, PNG.sync.write(diffPng));
+        // Clean up the temp capture -- it's no longer needed
+        // (the diff PNG is the canonical failure artifact).
+        await fs.unlink(tempPath).catch(() => {
+          // best-effort cleanup; the temp file is in a
+          // gitignored directory so a stale file is harmless.
+        });
+        // Surface the diff ratio + the diff PNG path in the
+        // failure message so the developer can find the
+        // artifact without grepping the CI logs.
+        throw new Error(
+          `visual regression: ${route} differs from ${baseline} by ${(diffRatio * 100).toFixed(2)}% ` +
+            `(threshold: ${(DIFF_THRESHOLD * 100).toFixed(2)}%, ${diffPixelCount} of ${totalPixelCount} pixels). ` +
+            `Diff PNG written to ${diffPath}.`,
+        );
+      }
+
+      // Clean up the temp capture on success.
+      await fs.unlink(tempPath).catch(() => {
+        // best-effort cleanup; same as above.
+      });
+
+      // The assertion is a no-op when the threshold is met
+      // (the throw above fires when it isn't). The explicit
+      // ``expect`` is here for the test report: it pins
+      // the diff ratio in the test output so a developer
+      // scanning the CI logs can see the exact percentage
+      // (e.g. "0.03%" for a near-baseline render) without
+      // having to add a ``console.log`` to the spec.
+      expect(diffRatio).toBeLessThan(DIFF_THRESHOLD);
+    });
+  }
+});

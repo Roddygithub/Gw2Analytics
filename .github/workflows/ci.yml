@@ -245,3 +245,38 @@ jobs:
       - name: "OpenAPI: cleanup /tmp/openapi.json"
         if: always()
         run: rm -f /tmp/openapi.json
+
+      # ----------------------------------------------------------------
+      # Visual regression e2e (v0.8.9 plan/003)
+      # ----------------------------------------------------------------
+      # Pixel-diffs the 8 tracked PNGs at ``docs/screenshots/`` against
+      # fresh full-page captures of the corresponding routes. Gated
+      # on PRs only (``github.event_name == 'pull_request'``) so
+      # pushes to ``main`` don't pay the extra ~2-4 s of browser
+      # time for the 8 full-page screenshots. The
+      # ``--project=visual-regression`` filter on the
+      # ``playwright.config.ts`` ``projects`` block isolates the
+      # spec so the default ``pnpm exec playwright test`` invocation
+      # (the "Playwright E2E tests" step above) doesn't run it. A
+      # diff > 1% of the total pixel count fails the build; the
+      # diff PNG is written to
+      # ``web/tests/e2e/.visual-regression-output/<baseline>`` (on
+      # failure only) and uploaded as a build artifact below.
+      # ----------------------------------------------------------------
+      - name: "Visual regression e2e (PR only)"
+        if: github.event_name == 'pull_request'
+        working-directory: web
+        run: pnpm exec playwright test --project=visual-regression
+
+      # Upload the diff PNGs on failure so the post-mortem is in
+      # the GitHub Actions artifacts tab. The diff PNGs are the
+      # canonical visual diff (a red highlight overlay on the
+      # changed pixels); a developer can open the artifact in any
+      # image viewer to see exactly which pixels regressed.
+      - name: "Upload visual regression diffs on failure"
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-diffs
+          path: web/tests/e2e/.visual-regression-output/
+          retention-days: 7

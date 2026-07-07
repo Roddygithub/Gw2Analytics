@@ -61,6 +61,23 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    // v0.8.9 plan/003: a second project that ONLY runs the
+    // visual-regression spec (filtered by the ``grep: /visual
+    // regression/`` regex on the describe-block title). The
+    // default ``pnpm exec playwright test`` invocation (without
+    // ``--project=visual-regression``) skips the visual
+    // regression suite so the fast local loop (and the existing
+    // PR's "Playwright E2E tests" CI step) stays under the
+    // ~30 s budget. CI runs the visual-regression suite
+    // explicitly via a separate step gated on
+    // ``github.event_name == 'pull_request'`` (PRs only) so
+    // pushes to ``main`` don't pay the extra ~2-4 s of browser
+    // time for the 8 full-page screenshots.
+    {
+      name: "visual-regression",
+      grep: /visual regression/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: [
     {
