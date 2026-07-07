@@ -114,3 +114,13 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
+# Starlette 0.50+ emits ``StarletteDeprecationWarning`` from
+# ``starlette.testclient`` advising a future ``httpx2`` swap. Our dev
+# dependency is ``httpx>=0.27`` (the latest stable line); the warning
+# is upstream and not actionable from this repo without bumping the
+# FastAPI/starlette runtime. Ignore it project-wide so the pytest
+# ``-W error`` gate stays clean without forcing a starlette bump.
+filterwarnings = [
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]
+
