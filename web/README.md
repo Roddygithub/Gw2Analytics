@@ -31,13 +31,17 @@ and `/account`.
 
 ## Scripts
 
-| Script                | Purpose                                                                  |
-|-----------------------|--------------------------------------------------------------------------|
-| `pnpm dev`            | Start the Next.js dev server.                                            |
-| `pnpm build`          | Production build (`next build`).                                         |
-| `pnpm start`          | Start the production build (`next start`).                               |
-| `pnpm typecheck`      | `tsc --noEmit` against `tsconfig.json` (CI gate).                        |
-| `pnpm generate:api`   | Regenerate `src/lib/api/schema.d.ts` from the running gateway's OpenAPI. |
+| Script                  | Purpose                                                                  |
+|-------------------------|--------------------------------------------------------------------------|
+| `pnpm dev`              | Start the Next.js dev server.                                            |
+| `pnpm build`            | Production build (`next build`).                                         |
+| `pnpm start`            | Start the production build (`next start`).                               |
+| `pnpm typecheck`        | `tsc --noEmit` against `tsconfig.json` (CI gate).                        |
+| `pnpm test`             | Vitest in watch mode (interactive).                                      |
+| `pnpm test:unit`        | Vitest single-run (CI gate).                                             |
+| `pnpm test:e2e`         | Playwright e2e suite (headless).                                         |
+| `pnpm test:e2e:headed`  | Playwright e2e suite (headed, for debugging).                            |
+| `pnpm generate:api`     | Regenerate `src/lib/api/schema.d.ts` from the running gateway's OpenAPI. |
 
 ## OpenAPI regeneration
 
