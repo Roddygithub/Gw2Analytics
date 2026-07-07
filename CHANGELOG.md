@@ -267,7 +267,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   treated as cosmetic noise; future pnpm bumps may resolve
   it silently.
 
-## [0.2.0] - gw2_core 0.2.0: API-data models (Phase 4 prep)
+### Added (Phase 5 followup -- web upload UI)
+
+- `web/src/app/upload/page.tsx` (NEW): Client Component that
+  posts a `.zevtc` combat log as `multipart/form-data` to
+  `POST /api/v1/uploads`. Renders the lightweight envelope
+  (``id`` + ``sha256`` + ``status``) returned synchronously +
+  points the user at `/fights` for the parsed encounter once
+  the background parser finishes. Intentionally does NOT
+  poll upload status here -- the gating concern is the parsed
+  fight surfacing on `/fights` (already `force-dynamic` +
+  `cache: "no-store"`), so the upload page stays a thin
+  envelope renderer. Client-side rejects non-`.zevtc` files
+  with a `role="alert"` error message **before** any network
+  call (cheap; avoids polluting the network tab on bad input).
+- `web/src/app/upload/page.module.css` (NEW): CSS module for
+  the upload page mirroring the landing aesthetic (gradient
+  title, dashed file-picker chip with `color-mix` accent
+  overlay on hover, pending-status badge tinted with the
+  accent variable). Uses `var(--accent)` / `var(--surface)` /
+  `var(--border)` / `var(--font-geist-mono)` -- no hardcoded
+  colours.
+- `web/src/lib/api.ts`: new `uploadLog(file: File)` async
+  helper + `UploadCreatedRow` interface (``id`` + ``sha256``
+  + ``status``). Sends FormData + fetch POST; intentionally
+  does NOT set ``Content-Type`` so the browser computes the
+  multipart boundary from the FormData body.
+- `web/src/app/page.tsx`: landing page nav gains a third
+  card `/upload` alongside `/fights` and `/account`, with
+  copy matching the existing card triplet aesthetic (sans
+  serif title + monospace `<code>` snippet + arrow CTA).
+- `web/tests/app/upload-page.test.tsx` (NEW): 5 vitest + RTL
+  tests covering (a) empty state (heading + "No file
+  selected" chip + disabled submit), (b) client-side
+  `.zevtc` extension rejection before any network call,
+  (c) happy-path upload + result card render with a real
+  `UploadCreatedRow`, (d) `ApiError` formatting ("Upstream
+  error: 502: ..."), and (e) bare-`Error` network-failure
+  pass-through. The whole `@/lib/api` module is mocked so
+  the page is testable in isolation without booting a real
+  RSC.
+- `web/tests/setup.ts`: no change required; the existing
+  global mock shim for `next/link` already covers the
+  anchors in the upload page.
 
 ### Added
 

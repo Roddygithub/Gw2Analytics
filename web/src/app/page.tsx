@@ -24,6 +24,15 @@ export default function Home() {
           </span>
           <span className={styles.cardArrow}>Open &rarr;</span>
         </Link>
+        <Link className={styles.card} href="/upload">
+          <span className={styles.cardTitle}>Upload replay</span>
+          <span className={styles.cardBody}>
+            Send a <code>.zevtc</code> combat log to{" "}
+            <code>/api/v1/uploads</code>; the parsed fight lands on{" "}
+            <code>/fights</code> when the background parser finishes.
+          </span>
+          <span className={styles.cardArrow}>Open &rarr;</span>
+        </Link>
         <Link className={styles.card} href="/account">
           <span className={styles.cardTitle}>Resolve API key</span>
           <span className={styles.cardBody}>

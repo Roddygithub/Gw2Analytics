@@ -16,7 +16,7 @@
 
 import { useState } from "react";
 
-import { ApiError, resolveAccount, type AccountEnrichedRow } from "@/lib/api";
+import { formatApiError, resolveAccount, type AccountEnrichedRow } from "@/lib/api";
 
 export default function AccountPage() {
   const [apiKey, setApiKey] = useState("");
@@ -40,13 +40,8 @@ export default function AccountPage() {
       // signals to the user that the form is "spent".
       setApiKey("");
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? `${err.status}: ${err.message}`
-          : err instanceof Error
-            ? err.message
-            : String(err),
-      );
+      // Same canonical formatter as /upload -- see formatApiError.
+      setError(formatApiError(err));
     } finally {
       setSubmitting(false);
     }

@@ -57,6 +57,56 @@ export async function resolveAccount(
   return (await resp.json()) as AccountEnrichedRow;
 }
 
+/**
+ * POST a combat log to the gateway's multipart ingestion endpoint.
+ *
+ * Mirrors ``POST /api/v1/uploads`` in
+ * :mod:`apps.api.routes.uploads`. The gateway hashes the bytes,
+ * stores the raw blob in MinIO, queue-spawns a background parser
+ * task, and returns the canonical ``UploadCreatedRow`` envelope
+ * (id + sha256 + status=pending). The parsed fight eventually
+ * materialises on ``GET /api/v1/fights`` once the parser commits.
+ *
+ * ``Content-Type`` is intentionally NOT set: the browser computes
+ * ``multipart/form-data; boundary=...`` from the FormData body and
+ * we lose that boundary if we override the header.
+ */
+export async function uploadLog(file: File): Promise<UploadCreatedRow> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const resp = await fetch(`${API_BASE_URL}/api/v1/uploads`, {
+    method: "POST",
+    body: fd,
+    cache: "no-store",
+  });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as UploadCreatedRow;
+}
+
+/**
+ * Format any thrown value into the canonical error string we show
+ * the user in Client Components. Shared between ``/account`` +
+ * ``/upload`` so the upstream diagnostics stay consistent.
+ *
+ *   ApiError(502, "upstream gateway")
+ *     -> "Upstream error: 502: 502: upstream gateway"
+ *   new Error("Network unreachable")
+ *     -> "Network unreachable"
+ *   "anything else"
+ *     -> "anything else" (string-coerced)
+ */
+export function formatApiError(err: unknown): string {
+  if (err instanceof ApiError) {
+    return `Upstream error: ${err.status}: ${err.message}`;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -79,4 +129,27 @@ export interface AccountEnrichedRow {
   world_id: number;
   world_name: string;
   world_population: string;
+}
+
+/**
+ * Lightweight envelope from ``POST /api/v1/uploads``.
+ *
+ * The gateway returns this synchronously (HTTP 201) before the
+ * background parser runs; ``status`` will be ``"pending"`` on a
+ * fresh upload and either ``"completed"`` or ``"failed"`` on a
+ * re-upload of an already-seen sha256. The parsed fight surfaces
+ * on ``/fights`` once ``status`` flips to ``"completed"``.
+ */
+export interface UploadCreatedRow {
+  /** Authoritative upload id (UUID v4, string-serialised). */
+  id: string;
+  /** SHA-256 of the raw bytes — the upload idempotency key. */
+  sha256: string;
+  /**
+   * Backend uses "pending" / "completed" / "failed". The trailing
+   * ``(string & {})`` keeps forward-compat for new buckets the v2
+   * API might introduce while still giving IDEs autocomplete for
+   * the three known values today.
+   */
+  status: "pending" | "completed" | "failed" | (string & {});
 }
