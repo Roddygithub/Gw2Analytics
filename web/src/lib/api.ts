@@ -438,13 +438,24 @@ export interface FightSkills {
  * underlying fight set, so the response is stable across page
  * boundaries (a player who was page-1 row 5 last request is
  * page-1 row 5 this request).
+ *
+ * v0.9.0 of the API: the optional ``profession`` arg maps to
+ * the ``?profession=ProfessionName`` query param (e.g.
+ * ``?profession=MESMER``). The value is the enum name
+ * (uppercase, e.g. ``"MESMER"``) -- the gateway's
+ * :class:`Profession` Pydantic enum accepts both the enum
+ * name and the integer value, but the web surface uses the
+ * name for URL-readability. The filter is applied AFTER the
+ * cross-fight roll-up + BEFORE the offset/limit, so
+ * pagination is consistent on the filtered set.
  */
 export async function fetchPlayers(
-  opts: { limit?: number; offset?: number } = {},
+  opts: { limit?: number; offset?: number; profession?: string } = {},
 ): Promise<PlayerListRow[]> {
   const params = new URLSearchParams();
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
   if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  if (opts.profession !== undefined) params.set("profession", opts.profession);
   const qs = params.toString();
   const url = `${API_BASE_URL}/api/v1/players${qs ? `?${qs}` : ""}`;
   const resp = await fetch(url, { cache: "no-store" });

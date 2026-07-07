@@ -35,14 +35,39 @@
 
 import { fetchPlayers, formatApiError } from "@/lib/api";
 import { PlayersGrid } from "@/components/PlayersGrid";
+import { ProfessionFilter } from "@/components/ProfessionFilter";
 
 export const dynamic = "force-dynamic";
 
-export default async function PlayersPage() {
+/**
+ * v0.9.0 of the page: the page is now async + accepts
+ * ``searchParams`` so the ``?profession=`` filter flows from
+ * the URL to the gateway without a client-side round-trip
+ * on the first paint.
+ *
+ * Next.js 15+ delivers ``searchParams`` as a ``Promise``
+ * (matches the ``params`` async contract documented in
+ * :mod:`web/src/lib/api.ts`); the page awaits it BEFORE
+ * forwarding the value to ``fetchPlayers``. An invalid
+ * ``?profession=`` value surfaces as 422 from the
+ * gateway's :class:`Profession` enum validation, and the
+ * existing ``catch (err)`` block renders the upstream-error
+ * card. The ``ProfessionFilter`` Client Component is the
+ * only client-side island on the page; it reads the same
+ * ``searchParams.profession`` and provides the dropdown
+ * UI for the user to change the value.
+ */
+export default async function PlayersPage(props: {
+  searchParams: Promise<{ profession?: string }>;
+}) {
+  const searchParams = await props.searchParams;
+  const professionFilter = searchParams.profession;
   let rows: Awaited<ReturnType<typeof fetchPlayers>> = [];
   let fetchError: string | null = null;
   try {
-    rows = await fetchPlayers();
+    rows = await fetchPlayers(
+      professionFilter ? { profession: professionFilter } : {},
+    );
   } catch (err) {
     fetchError = formatApiError(err);
   }
@@ -64,6 +89,8 @@ export default async function PlayersPage() {
           jump to a specific account.
         </p>
       </header>
+
+      <ProfessionFilter currentValue={professionFilter} />
 
       {fetchError ? (
         <p style={{ color: "var(--accent)" }}>{fetchError}</p>

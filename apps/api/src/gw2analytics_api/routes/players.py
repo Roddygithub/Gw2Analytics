@@ -319,6 +319,31 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
 def list_players(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    # v0.9.0: ``?profession=`` query param filters the response
+    # to only players whose modal profession matches. The
+    # :class:`Profession` enum is an :class:`IntEnum` (the
+    # wire format is the integer value), but the URL surface
+    # is the enum NAME (e.g. ``?profession=MESMER``) for
+    # URL-readability. We accept a raw ``str`` + parse it
+    # manually so both the name (case-insensitive) and the
+    # integer value are accepted; an unrecognised value
+    # surfaces as 422 with a clear error message (matches
+    # the existing :func:`get_player_timeline` ``?tz=``
+    # custom-422 pattern). The default empty string is
+    # treated as "no filter" -- preserves the pre-v0.9.0
+    # wire contract (no ``?profession=`` -> all players).
+    # The filter is applied AFTER the cross-fight roll-up
+    # (so it sees the aggregated modal profession, not the
+    # per-fight value) and BEFORE the offset/limit (so
+    # pagination is consistent on the filtered set).
+    profession: str = Query(
+        "",
+        description=(
+            "Filter to players whose modal profession matches the enum name "
+            "(e.g. ?profession=MESMER) or integer value (e.g. ?profession=7). "
+            "Default (empty / no param) returns all players."
+        ),
+    ),
     db: Session = Depends(get_session),  # noqa: B008
 ) -> list[PlayerListRowOut]:
     """Return up to ``limit`` players (skipping the first ``offset``).
@@ -330,7 +355,13 @@ def list_players(
     response stable across page boundaries: a player who was
     page-1 row 5 last request is page-1 row 5 this request (the
     cross-fight roll-up is deterministic).
+
+    v0.9.0: the optional ``?profession=`` filter is applied
+    between the cross-fight roll-up + the offset/limit. An
+    invalid name (or integer) surfaces as 422 via the
+    :func:`_parse_profession_filter` helper.
     """
+    parsed_profession = _parse_profession_filter(profession)
     fights = (
         db.execute(
             select(OrmFight)
@@ -342,6 +373,15 @@ def list_players(
     )
     contributions = _compute_contributions(db, fights)
     profiles = PlayerProfileAggregator().aggregate(contributions)
+    if parsed_profession is not None:
+        # Post-aggregation filter on the modal profession (the
+        # aggregator's contract: the modal profession is the most
+        # common profession across the player's attended fights).
+        # The filter preserves the deterministic-ordering
+        # contract (the aggregator's output is already sorted by
+        # total_damage DESC, so the filtered list is also
+        # sorted by total_damage DESC).
+        profiles = [p for p in profiles if p.profession == parsed_profession]
     page = profiles[offset : offset + limit]
     return [
         PlayerListRowOut(
@@ -660,6 +700,60 @@ def get_player(
 # ---------------------------------------------------------------------------
 # Stringification helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_profession_filter(value: str) -> Profession | None:
+    """Parse the ``?profession=`` query param into a :class:`Profession` enum.
+
+    The :class:`Profession` enum is an :class:`IntEnum` (the wire
+    format is the integer value), but the URL surface accepts
+    BOTH the enum NAME (e.g. ``"MESMER"``, case-insensitive for
+    URL-tolerance) AND the integer value (e.g. ``"7"``) for
+    canonical-wire-compat. An empty string is the "no filter"
+    sentinel (the query param default). An unrecognised value
+    surfaces as 422 with a clear error message -- matches the
+    existing :func:`get_player_timeline` ``?tz=`` custom-422
+    pattern (the canonical FastAPI query-param validation
+    contract).
+
+    Lookup order
+    ------------
+    1. Name lookup (``Profession["MESMER"]``) -- the URL
+       surface is the enum name for readability.
+    2. Integer parse (``int(value)`` -> ``Profession(int)``) --
+       the wire format is the integer value.
+    3. Both fail -> 422 with the rejected value in the detail.
+
+    The name lookup is tried FIRST so the URL surface is the
+    canonical "human-readable" form; the integer fallback is
+    the wire-compat shim. ``Profession.UNKNOWN`` (value 0) is
+    NOT in the cross-fight roll-up (the aggregator's contract
+    silently drops players with no profession), so the name
+    ``"UNKNOWN"`` would match zero rows -- that's expected and
+    is NOT treated as a 422.
+    """
+    if not value:
+        return None
+    # Name lookup (case-insensitive). ``Profession["MESMER"]``
+    # works because IntEnum preserves its member names as
+    # attributes; the bracketed access is the canonical
+    # name -> member lookup. ``KeyError`` signals an unknown
+    # name -> fall through to the integer parse.
+    try:
+        return Profession[value.upper()]
+    except KeyError:
+        pass
+    # Integer value lookup (wire-compat). ``int(value)`` raises
+    # ``ValueError`` for non-numeric strings; the exception
+    # message includes the rejected value so the 422 detail
+    # names the bad value.
+    try:
+        return Profession(int(value))
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"unknown profession: {value!r} (expected name like 'MESMER' or integer 0-9)",
+        ) from exc
 
 
 def _profession_label(profession: Profession) -> str:

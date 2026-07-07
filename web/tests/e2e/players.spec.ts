@@ -52,6 +52,39 @@ test.describe("/players (v0.7.1)", () => {
       page.getByRole("heading", { name: "Test Char" }),
     ).toBeVisible();
   });
+
+  // v0.9.0 plan/002: the profession filter is mounted on
+  // the page as a Client Component. The dropdown is visible
+  // + its value is pre-selected from the URL. Selecting
+  // "Mesmer" updates the URL with ``?profession=MESMER`` and
+  // the page re-renders with the filtered rows (the mock
+  // server returns the same 3 fixture rows for any query;
+  // the e2e scope is the URL+UI contract, not the server-
+  // side filter).
+  test("renders the profession filter dropdown with all 10 options", async ({ page }) => {
+    await page.goto("/players");
+    const select = page.getByTestId("profession-filter");
+    await expect(select).toBeVisible();
+    // 1 "All professions" + 9 base professions (GUARDIAN /
+    // WARRIOR / ENGINEER / RANGER / THIEF / ELEMENTALIST /
+    // MESMER / NECROMANCER / REVENANT) = 10 options.
+    const options = select.locator("option");
+    await expect(options).toHaveCount(10);
+  });
+
+  test("selecting a profession updates the URL and re-fetches with the filter", async ({ page }) => {
+    await page.goto("/players");
+    const select = page.getByTestId("profession-filter");
+    await expect(select).toHaveValue("");
+    // Select "Mesmer" -> URL gains ``?profession=MESMER``.
+    await select.selectOption("MESMER");
+    await expect(page).toHaveURL(/\/players\?profession=MESMER$/);
+    // The page re-renders with the new URL; the grid still
+    // renders the fixture rows (the mock server returns the
+    // same 3 rows regardless of filter -- the e2e contract
+    // is the URL round-trip, not the server-side filter).
+    await expect(page.getByRole("link", { name: "TestAccount.1234" })).toBeVisible();
+  });
 });
 
 test.describe("/players/[account_name] (v0.7.1)", () => {

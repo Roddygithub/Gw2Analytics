@@ -72,9 +72,19 @@ describe("/players page", () => {
     fetchPlayersMock.mockReset();
   });
 
+  // v0.9.0 plan/002: the page is now async + accepts a
+  // ``searchParams: Promise<{ profession?: string }>`` prop
+  // (Next.js 15+ async searchParams contract). The tests
+  // pass a resolved empty-Promise to mimic the Next.js
+  // RSC runtime's "no filter on first load" case. The
+  // "filter applied" case is covered by the e2e suite
+  // (web/tests/e2e/players.spec.ts) -- the page-level
+  // smoke is the no-filter rendering contract.
+  const emptySearchParams = Promise.resolve({});
+
   it("renders the populated list (heading + sub-line)", async () => {
     fetchPlayersMock.mockResolvedValueOnce(POPULATED);
-    const tree = await PlayersPage();
+    const tree = await PlayersPage({ searchParams: emptySearchParams });
     const html = JSON.stringify(tree);
     expect(html).toContain("Players");
     // The pluralised sub-line ``{rows.length} player{...}s`` is
@@ -89,7 +99,7 @@ describe("/players page", () => {
 
   it("renders the empty-state sub-line when the list is empty", async () => {
     fetchPlayersMock.mockResolvedValueOnce([]);
-    const tree = await PlayersPage();
+    const tree = await PlayersPage({ searchParams: emptySearchParams });
     const html = JSON.stringify(tree);
     // Same React children-flattening caveat as the populated
     // test above -- the literal string "0 players" never
@@ -101,15 +111,29 @@ describe("/players page", () => {
 
   it("renders the upstream-error card on a 502 from the gateway", async () => {
     fetchPlayersMock.mockRejectedValueOnce(new ApiError(502, "upstream gateway"));
-    const tree = await PlayersPage();
+    const tree = await PlayersPage({ searchParams: emptySearchParams });
     const html = JSON.stringify(tree);
     expect(html).toContain("Upstream error: 502: 502: upstream gateway");
   });
 
   it("renders the upstream-error card on a 404 from the gateway", async () => {
     fetchPlayersMock.mockRejectedValueOnce(new ApiError(404, "upstream 404"));
-    const tree = await PlayersPage();
+    const tree = await PlayersPage({ searchParams: emptySearchParams });
     const html = JSON.stringify(tree);
     expect(html).toContain("Upstream error: 404: 404: upstream 404");
+  });
+
+  it("forwards ?profession= searchParams to fetchPlayers", async () => {
+    // v0.9.0 plan/002: the page threads the URL's
+    // ``?profession=`` value into ``fetchPlayers`` so the
+    // gateway can apply the filter server-side. The mock
+    // captures the opts arg; the assertion checks the
+    // profession is forwarded (the gateway filter logic is
+    // covered by the api-side pytest suite).
+    fetchPlayersMock.mockResolvedValueOnce(POPULATED);
+    await PlayersPage({
+      searchParams: Promise.resolve({ profession: "MESMER" }),
+    });
+    expect(fetchPlayersMock).toHaveBeenCalledWith({ profession: "MESMER" });
   });
 });
