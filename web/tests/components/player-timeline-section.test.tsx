@@ -41,7 +41,7 @@ const { fetchPlayerTimelineMock } = vi.hoisted(() => ({
   fetchPlayerTimelineMock: vi.fn<
     (
       accountName: string,
-      opts: { limit?: number; offset?: number },
+      opts: { limit?: number; offset?: number; bucket?: "fight" | "day" },
     ) => Promise<PlayerTimeline>
   >(),
 }));
@@ -65,6 +65,11 @@ function makeInitial(
     total,
     limit: 20,
     offset: 0,
+    // v0.8.1 of web: the v0.8.0 test factory predates the
+    // ``bucket`` field. Without this default the section's
+    // ``useState<"fight" | "day">(initialTimeline.bucket)``
+    // would fail TypeScript's exhaustive literal check.
+    bucket: "fight",
     points,
   };
 }
@@ -140,6 +145,14 @@ describe("PlayerTimelineSection", () => {
       expect(fetchPlayerTimelineMock).toHaveBeenCalledWith(":synth.aaa", {
         limit: 20,
         offset: 3,
+        // v0.8.1 of web: the route's ``?bucket=`` param is
+        // now part of the contract. The initial timeline
+        // carries ``bucket: "fight"`` (the section's
+        // default), so the Load more call forwards it
+        // unchanged. Asserting it here locks the contract
+        // -- a future refactor that drops the ``bucket``
+        // forwarding would fail this test.
+        bucket: "fight",
       }),
     );
     await waitFor(() =>

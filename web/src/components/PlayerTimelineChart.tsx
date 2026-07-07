@@ -57,6 +57,13 @@ const CHART_HEIGHT = 220;
 const CHART_PADDING = { top: 16, right: 16, bottom: 36, left: 48 };
 const POINT_RADIUS_PX = 3;
 const X_LABEL_SAMPLE_PX = 120;
+// v0.8.2 of web: cap on the number of logarithmic Y-axis
+// ticks. The 48px left padding can fit ~8 decade labels
+// (1, 10, 100, 1k, 10k, 100k, 1M, 10M) before they start
+// overlapping. A global max of 1B would otherwise draw 10
+// ticks (0 + 9 decades) and overflow the padding. Extracted
+// to a constant so the cap is tunable in one place.
+const MAX_LOG_TICKS = 8;
 const EMPTY_STYLE: React.CSSProperties = {
   padding: "12px 16px",
   border: "1px solid var(--border)",
@@ -106,8 +113,33 @@ const X_AXIS_DAY_LABEL_FORMAT = new Intl.DateTimeFormat("en-US", {
  * without rendering). Returns the per-series max + the X
  * positions for each point (1:1 with the input). The caller
  * draws the polylines + dots.
+ *
+ * ``scale`` picks the Y-axis strategy:
+ *
+ * - ``"linear"`` (default): per-series 0-100% normalisation.
+ *   Each of the 3 series is scaled to its own max so a
+ *   1M-damage and a 50-strip render at the same visual
+ *   height. Best for TREND reading (per-series shape).
+ *
+ * - ``"log"``: SHARED log Y-axis across all 3 series. The
+ *   global max is ``max(max_damage, max_healing, max_strip)``
+ *   and each value is mapped via ``log10(v + 1) / log10(
+ *   global_max + 1)``. Best for MAGNITUDE reading -- a
+ *   damage=1M (at log10~6) and a strip=50 (at log10~1.7) are
+ *   both visible on the same axis. The ``+ 1`` offset keeps
+ *   zero values at the baseline (``log10(0 + 1) = 0``). The
+ *   ``+ 1`` on the denominator keeps the global max at the
+ *   top of the chart (``log10(global_max + 1) / log10(
+ *   global_max + 1) = 1``). Y-axis ticks are generated at
+ *   each decade (1, 10, 100, 1k, 10k, 100k, 1M, ...) up to
+ *   the global max, plus a 0 baseline.
  */
-export function buildTimelineLayout(points: PlayerTimelinePoint[]) {
+export type TimelineScale = "linear" | "log";
+
+export function buildTimelineLayout(
+  points: PlayerTimelinePoint[],
+  scale: TimelineScale = "linear",
+) {
   if (points.length === 0) {
     return null;
   }
@@ -123,8 +155,99 @@ export function buildTimelineLayout(points: PlayerTimelinePoint[]) {
     points.length === 1
       ? innerW / 2
       : (innerW * i) / (points.length - 1);
-  const yFor = (v: number, max: number) => innerH * (1 - v / max);
+
+  if (scale === "log") {
+    // Shared log Y-axis: the global max is the highest value
+    // across all 3 series, so the Y-axis is calibrated to the
+    // tallest series. The other 2 series render at lower
+    // positions on the same axis (visible but below the top).
+    const globalMax = Math.max(maxDamage, maxHealing, maxStrip);
+    const logMax = Math.log10(globalMax + 1);
+    // v0.8.2: the second ``_max`` arg is unused in log mode
+    // but the signature is widened to match the linear-mode
+    // ``yFor`` so the return type of this function is a
+    // single overload rather than a union. Without this,
+    // TypeScript widens the return type to the LAST branch
+    // (the linear-mode 2-arg signature) and the test's
+    // ``yFor(0)`` call (1 arg, log mode) fails the
+    // ``TS2554: Expected 2 arguments, but got 1`` check.
+    // The result is clamped to ``[0, innerH]`` for the same
+    // reason as the linear branch -- a missing-arg call
+    // would otherwise produce a negative ``y`` for
+    // ``v > globalMax`` (e.g. a test that hard-codes
+    // ``v = 2 * globalMax`` would render above the chart).
+    // v0.8.2 also guards against ``NaN`` inputs: a
+    // non-finite ``v`` (e.g. a future feature that divides
+    // by zero upstream) would make ``Math.log10`` return
+    // ``NaN``, the ``Math.max``/``Math.min`` comparisons
+    // return ``false``, and the final result is ``NaN`` --
+    // SVG renders ``NaN`` as a non-finite coordinate and
+    // silently drops the point. The ``Number.isFinite``
+    // short-circuit pins the point to the baseline.
+    const yFor = (v: number, _max?: number) => {
+      if (!Number.isFinite(v)) {
+        return innerH;
+      }
+      return Math.max(
+        0,
+        Math.min(innerH, innerH * (1 - Math.log10(v + 1) / logMax)),
+      );
+    };
+    // Logarithmic ticks: 0 baseline + each decade up to
+    // globalMax. Decades are 1, 10, 100, 1k, 10k, 100k, 1M,
+    // 10M, ... up to the ceiling of logMax. We cap the tick
+    // count at ``MAX_LOG_TICKS`` (see above) to avoid
+    // cluttering the axis for very wide ranges.
+    const ticks: number[] = [0];
+    const maxExp = Math.ceil(logMax);
+    for (let exp = 0; exp <= maxExp && ticks.length < MAX_LOG_TICKS; exp++) {
+      const v = Math.pow(10, exp);
+      if (v <= globalMax) {
+        ticks.push(v);
+      }
+    }
+    return {
+      scale,
+      maxDamage,
+      maxHealing,
+      maxStrip,
+      globalMax,
+      innerW,
+      innerH,
+      xFor,
+      yFor,
+      ticks,
+    };
+  }
+
+  // Linear (per-series normalised) mode: each series is
+  // scaled to its own max. ``yFor`` takes the per-series max
+  // as the second argument so the caller picks the right
+  // denominator per polyline. The ``_max`` arg in the log
+  // branch keeps the return type a single overload -- the
+  // default of 1 is the all-zero sentinel (``max=1`` after
+  // the ``Math.max(1, ...values)`` clamp above), so a
+  // missing-arg call from the test or a future caller
+  // degrades to the baseline rather than NaN. The result is
+  // clamped to ``[0, innerH]`` so a caller that forgets
+  // ``max`` (and so divides by the sentinel 1) cannot
+  // produce a negative ``y`` that would render ABOVE the
+  // chart's top edge -- the canonical SVG silent-bug trap.
+  // v0.8.2 also guards against ``NaN`` inputs: a
+  // non-finite ``v`` would make the division return
+  // ``NaN``, the ``Math.max``/``Math.min`` comparisons
+  // return ``false``, and the final result is ``NaN`` --
+  // SVG renders ``NaN`` as a non-finite coordinate and
+  // silently drops the point. The ``Number.isFinite``
+  // short-circuit pins the point to the baseline.
+  const yFor = (v: number, max: number = 1) => {
+    if (!Number.isFinite(v)) {
+      return innerH;
+    }
+    return Math.max(0, Math.min(innerH, innerH * (1 - v / max)));
+  };
   return {
+    scale,
     maxDamage,
     maxHealing,
     maxStrip,
@@ -132,15 +255,53 @@ export function buildTimelineLayout(points: PlayerTimelinePoint[]) {
     innerH,
     xFor,
     yFor,
+    ticks: [0, 1],
   };
+}
+
+/**
+ * Format a Y-axis tick value for the ``"log"`` scale.
+ *
+ * - 0 -> ``"0"`` (baseline)
+ * - 1 -> ``"1"`` (no suffix)
+ * - 1_000 -> ``"1k"``
+ * - 1_500 -> ``"1.5k"``
+ * - 1_000_000 -> ``"1M"``
+ * - 1_500_000 -> ``"1.5M"``
+ *
+ * Returns the raw integer string for values < 1000. Compact
+ * enough that 8 ticks fit in the 48px left padding without
+ * truncation.
+ */
+export function formatLogTick(v: number): string {
+  if (v === 0) return "0";
+  if (v < 1000) return v.toString();
+  if (v < 1_000_000) {
+    const k = v / 1000;
+    return k === Math.floor(k) ? `${k}k` : `${k.toFixed(1)}k`;
+  }
+  if (v < 1_000_000_000) {
+    const m = v / 1_000_000;
+    return m === Math.floor(m) ? `${m}M` : `${m.toFixed(1)}M`;
+  }
+  // v0.8.2 of web: B-suffix branch for values >= 1B. Without
+  // this, a 1.5B damage renders as ``1500M`` which is
+  // technically correct but harder to read at a glance.
+  const b = v / 1_000_000_000;
+  return b === Math.floor(b) ? `${b}B` : `${b.toFixed(1)}B`;
 }
 
 export function PlayerTimelineChart({
   points,
+  scale = "linear",
 }: {
   points: PlayerTimelinePoint[];
+  scale?: TimelineScale;
 }) {
-  const layout = useMemo(() => buildTimelineLayout(points), [points]);
+  const layout = useMemo(
+    () => buildTimelineLayout(points, scale),
+    [points, scale],
+  );
 
   // v0.8.1 of the API: day-bucketed points carry ``started_at`` at
   // UTC midnight, so the X-axis can render ``MM/DD`` only. The
@@ -167,13 +328,26 @@ export function PlayerTimelineChart({
     return <div style={EMPTY_STYLE}>No timeline data available.</div>;
   }
 
-  const { maxDamage, maxHealing, maxStrip, innerW, innerH, xFor, yFor } =
+  const { maxDamage, maxHealing, maxStrip, innerW, innerH, xFor, yFor, ticks } =
     layout;
+
+  // v0.8.2 of web: in ``"log"`` mode the 3 polylines share a
+  // single Y-axis, so the ``max`` argument is unused -- the
+  // ``yFor`` returned by ``buildTimelineLayout`` ignores it.
+  // In ``"linear"`` mode the per-series max picks the right
+  // denominator. Both branches accept the same 2-arg
+  // signature (the log-mode ``_max`` is unused) so the
+  // return type of ``buildTimelineLayout`` is a single
+  // overload.
+  const isLog = layout.scale === "log";
 
   // Build the polyline ``d`` strings: one ``M`` + N ``L``s.
   const buildD = (values: number[], max: number): string =>
     values
-      .map((v, i) => `${i === 0 ? "M" : "L"}${xFor(i).toFixed(2)},${yFor(v, max).toFixed(2)}`)
+      .map(
+        (v, i) =>
+          `${i === 0 ? "M" : "L"}${xFor(i).toFixed(2)},${yFor(v, max).toFixed(2)}`,
+      )
       .join(" ");
 
   const damageD = buildD(
@@ -243,28 +417,53 @@ export function PlayerTimelineChart({
           {/* Y-axis baseline + max tick (single set, since 3 series share a 0-100% scale) */}
           <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="var(--border)" />
           <line x1={0} y1={0} x2={0} y2={innerH} stroke="var(--border)" />
-          <text
-            x={-8}
-            y={0}
-            textAnchor="end"
-            dominantBaseline="middle"
-            fontSize={10}
-            fill="var(--foreground)"
-            opacity={0.7}
-          >
-            100%
-          </text>
-          <text
-            x={-8}
-            y={innerH}
-            textAnchor="end"
-            dominantBaseline="middle"
-            fontSize={10}
-            fill="var(--foreground)"
-            opacity={0.7}
-          >
-            0
-          </text>
+          {/* v0.8.2 of web: Y-axis labels. In ``"linear"`` mode
+              the axis is per-series normalised so the labels
+              are ``0`` + ``100%`` (the series max). In
+              ``"log"`` mode the axis is shared + logarithmic
+              so the labels are decades (``0`` + ``1`` + ``10``
+              + ... up to ``globalMax``). */}
+          {isLog
+            ? ticks.map((tick) => (
+                <text
+                  key={`y-${tick}`}
+                  x={-8}
+                  y={yFor(tick)}
+                  textAnchor="end"
+                  dominantBaseline="middle"
+                  fontSize={10}
+                  fill="var(--foreground)"
+                  opacity={0.7}
+                >
+                  {formatLogTick(tick)}
+                </text>
+              ))
+            : (
+                <>
+                  <text
+                    x={-8}
+                    y={0}
+                    textAnchor="end"
+                    dominantBaseline="middle"
+                    fontSize={10}
+                    fill="var(--foreground)"
+                    opacity={0.7}
+                  >
+                    100%
+                  </text>
+                  <text
+                    x={-8}
+                    y={innerH}
+                    textAnchor="end"
+                    dominantBaseline="middle"
+                    fontSize={10}
+                    fill="var(--foreground)"
+                    opacity={0.7}
+                  >
+                    0
+                  </text>
+                </>
+              )}
 
           {/* 3 polylines: damage (accent), healing (foreground @ 0.7), strip (warm orange) */}
           <path
@@ -293,7 +492,8 @@ export function PlayerTimelineChart({
               {/* Per-group ``<title>`` surfaces the absolute
                   values on hover for ANY of the 3 sibling
                   dots (the y-axis is normalized to 0-100%
-                  per series, so the raw magnitudes are
+                  per series in linear mode, or shared-log in
+                  log mode, so the raw magnitudes are
                   otherwise invisible). SVG ``<title>`` is
                   the canonical lightweight tooltip -- no
                   React state, no portal, no client-side

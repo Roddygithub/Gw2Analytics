@@ -134,3 +134,100 @@ describe("buildTimelineLayout", () => {
     expect(layout?.maxStrip).toBe(10);
   });
 });
+
+describe("buildTimelineLayout (log scale, v0.8.2)", () => {
+  it("returns a layout with the global max across all 3 series", () => {
+    // The original ROADMAP use case: damage=1M dwarfs
+    // strip=50. In log mode the global max is 1M (damage),
+    // and the strip at 50 is still visible because log10(51)
+    // is much larger than 0 (the baseline).
+    const layout = buildTimelineLayout(
+      [
+        makePoint("f-1", "2025-01-01T12:00:00Z", 1_000_000, 100, 50),
+        makePoint("f-2", "2025-01-02T12:00:00Z", 500_000, 200, 30),
+      ],
+      "log",
+    );
+    expect(layout).not.toBeNull();
+    expect(layout?.scale).toBe("log");
+    expect(layout?.globalMax).toBe(1_000_000);
+    // globalMax sits at the TOP of the chart (y=0).
+    expect(layout?.yFor(1_000_000)).toBe(0);
+    // 0 sits at the BOTTOM of the chart (y=innerH).
+    expect(layout?.yFor(0)).toBe(layout ? layout.innerH : 0);
+    // Strip=50 is well above the baseline on a log scale
+    // (log10(51) / log10(1_000_001) ≈ 0.40, so y ≈ 0.60
+    // * innerH -- visible).
+    const yAt50 = layout?.yFor(50) ?? 0;
+    const yAt0 = layout?.yFor(0) ?? 0;
+    expect(yAt50).toBeLessThan(yAt0);
+    expect(yAt50).toBeGreaterThan(0);
+  });
+
+  it("generates logarithmic Y-axis ticks (decades up to globalMax)", () => {
+    // globalMax=10_000 -> ticks are 0, 1, 10, 100, 1000, 10_000.
+    const layout = buildTimelineLayout(
+      [
+        makePoint("f-1", "2025-01-01T12:00:00Z", 10_000, 100, 50),
+        makePoint("f-2", "2025-01-02T12:00:00Z", 5_000, 200, 30),
+      ],
+      "log",
+    );
+    expect(layout).not.toBeNull();
+    expect(layout?.ticks).toEqual([0, 1, 10, 100, 1_000, 10_000]);
+  });
+
+  it("caps the tick count at 8 for very wide ranges", () => {
+    // globalMax=10_000_000_000 (10B) would otherwise draw
+    // 10 ticks (0 + 1 + 10 + 100 + 1k + 10k + 100k + 1M +
+    // 10M + 100M + 1B + 10B = 12). The implementation caps
+    // at 8 to avoid axis clutter.
+    const layout = buildTimelineLayout(
+      [makePoint("f-1", "2025-01-01T12:00:00Z", 10_000_000_000, 0, 0)],
+      "log",
+    );
+    expect(layout).not.toBeNull();
+    expect(layout?.ticks.length).toBeLessThanOrEqual(8);
+  });
+
+  it("treats all-zero values as the baseline (log(0+1)=0)", () => {
+    // All zeros -> globalMax=1 (clamped by Math.max(1, ...)),
+    // ticks=[0, 1], yFor(0)=innerH, yFor(1)=0.
+    const layout = buildTimelineLayout(
+      [makePoint("f-1", "2025-01-01T12:00:00Z", 0, 0, 0)],
+      "log",
+    );
+    expect(layout).not.toBeNull();
+    expect(layout?.globalMax).toBe(1);
+    expect(layout?.ticks).toEqual([0, 1]);
+    expect(layout?.yFor(0)).toBe(layout ? layout.innerH : 0);
+    expect(layout?.yFor(1)).toBe(0);
+  });
+});
+
+describe("PlayerTimelineChart (log scale prop, v0.8.2)", () => {
+  it("renders logarithmic Y-axis labels when scale='log'", () => {
+    // Mixed-magnitude fixture: damage in millions, strip in
+    // dozens. In log mode the chart should render the
+    // decade tick labels (0, 1, 10, 100, 1k, 10k, 100k, 1M)
+    // instead of the "0" + "100%" pair from linear mode.
+    const { container } = render(
+      <PlayerTimelineChart
+        points={[
+          makePoint("f-1", "2025-01-01T12:00:00Z", 1_000_000, 100, 50),
+          makePoint("f-2", "2025-01-02T12:00:00Z", 500_000, 200, 30),
+        ]}
+        scale="log"
+      />,
+    );
+    // 6 ticks (0, 1, 10, 100, 1k, 10k, 100k, 1M) -> 8
+    // y-axis <text> elements. The "100%" label from linear
+    // mode must NOT appear.
+    const textContents = Array.from(container.querySelectorAll("text")).map(
+      (t) => t.textContent ?? "",
+    );
+    expect(textContents).toContain("0");
+    expect(textContents).toContain("1M");
+    expect(textContents).not.toContain("100%");
+  });
+});

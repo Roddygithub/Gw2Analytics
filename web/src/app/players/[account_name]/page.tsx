@@ -153,6 +153,15 @@ export default async function PlayerProfilePage({
       total: 0,
       limit: 20,
       offset: 0,
+      // v0.8.1 of web: the empty-state timeline carries
+      // ``bucket: "fight"`` to match the default the route
+      // returns. The toggle in :class:`PlayerTimelineSection`
+      // reads ``initialTimeline.bucket`` to initialise its
+      // own state, so a missing field would trip TypeScript
+      // and (worse) make the section's "Per day" button
+      // appear already-active on a freshly-loaded empty
+      // timeline.
+      bucket: "fight",
       points: [],
     };
 

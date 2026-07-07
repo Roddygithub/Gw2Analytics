@@ -39,9 +39,9 @@
  *   hides the "Load more" button via the ``hasMore`` flag.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { fetchPlayerTimeline, formatApiError, type PlayerTimeline } from "@/lib/api";
-import { PlayerTimelineChart } from "@/components/PlayerTimelineChart";
+import { PlayerTimelineChart, type TimelineScale } from "@/components/PlayerTimelineChart";
 
 const BUTTON_STYLE: React.CSSProperties = {
   padding: "8px 16px",
@@ -97,6 +97,35 @@ const BUCKET_BUTTON_DISABLED_STYLE: React.CSSProperties = {
   cursor: "not-allowed",
 };
 
+// v0.8.2 of web: the scale toggle (Linear / Log). Same
+// visual style as the bucket toggle (BUCKET_BUTTON_STYLE +
+// BUCKET_BUTTON_ACTIVE_STYLE) so the two affordances read
+// as siblings. The Linear mode is the existing per-series
+// 0-100% normalisation; the Log mode is a shared log
+// Y-axis so a 1M damage and a 50 strip are both visible on
+// the same axis (the original ROADMAP item).
+const SCALE_TOGGLE_STORAGE_KEY = "gw2analytics:timeline-scale";
+
+function readStoredScale(): TimelineScale {
+  if (typeof window === "undefined") {
+    return "linear";
+  }
+  try {
+    const raw = window.localStorage.getItem(SCALE_TOGGLE_STORAGE_KEY);
+    if (raw === "linear" || raw === "log") {
+      return raw;
+    }
+  } catch (_) {
+    // ``localStorage`` can throw in private-browsing mode or
+    // when the user has disabled it -- fall through to the
+    // default. The try/catch is intentionally narrow
+    // (``SecurityError`` / ``QuotaExceededError``); anything
+    // else is a real bug and we let it propagate.
+  }
+  return "linear";
+}
+void readStoredScale; // re-exported for unit testability below
+
 export function PlayerTimelineSection({
   accountName,
   initialTimeline,
@@ -116,8 +145,46 @@ export function PlayerTimelineSection({
   // re-fetch when the analyst switches to ``"day"``).
   const [timeline, setTimeline] = useState<PlayerTimeline>(initialTimeline);
   const [bucket, setBucket] = useState<"fight" | "day">(initialTimeline.bucket);
+  // v0.8.2 of web: the scale toggle is client-only state
+  // (no URL param, no server fetch) because changing scale
+  // is a pure re-render of the same data points -- the
+  // ``PlayerTimelineChart`` re-derives the Y-axis layout
+  // from the existing points array. We initialise to
+  // ``"linear"`` (the safe default) and then read the
+  // stored value in a ``useEffect`` after mount so the
+  // initial render always matches the server output (the
+  // server has no ``window`` so it can't read
+  // ``localStorage``). This avoids the SSR hydration
+  // mismatch that a direct ``useState(readStoredScale)``
+  // would cause -- the client would render with the stored
+  // value while the server rendered with ``"linear"``,
+  // triggering a React warning + a flash of wrong content.
+  // The one-extra-render cost is cheaper than the
+  // hydration mismatch.
+  const [scale, setScale] = useState<TimelineScale>("linear");
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // v0.8.2 of web: read the stored scale AFTER mount
+  // (SSR-safe) and write it on every change. The
+  // mount-effect runs exactly once (empty deps) and
+  // synchronously reads ``localStorage``; the write-effect
+  // runs on every ``scale`` change.
+  useEffect(() => {
+    setScale(readStoredScale());
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(SCALE_TOGGLE_STORAGE_KEY, scale);
+    } catch (_) {
+      // Same swallow as the reader -- private-browsing
+      // mode / disabled storage is non-fatal. The state
+      // still updates for the current session.
+    }
+  }, [scale]);
 
   const hasMore = timeline.points.length < timeline.total;
   const unit = bucket === "day" ? "days" : "fights";
@@ -193,48 +260,90 @@ export function PlayerTimelineSection({
       >
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Historical timeline</h2>
         <div
-          style={{ display: "flex", alignItems: "center", gap: 12 }}
+          style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}
           role="group"
-          aria-label="Timeline bucketing"
+          aria-label="Timeline controls"
         >
           <span style={CAPTION_STYLE}>
             Showing {timeline.points.length} of {timeline.total} {unit}
           </span>
-          <button
-            type="button"
-            onClick={() => changeBucket("fight")}
-            disabled={isLoading || bucket === "fight"}
-            style={
-              isLoading
-                ? BUCKET_BUTTON_DISABLED_STYLE
-                : bucket === "fight"
+          {/* v0.8.2 of web: bucketing toggle (Per fight / Per day). */}
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 4 }}
+            role="group"
+            aria-label="Timeline bucketing"
+          >
+            <button
+              type="button"
+              onClick={() => changeBucket("fight")}
+              disabled={isLoading || bucket === "fight"}
+              style={
+                isLoading
+                  ? BUCKET_BUTTON_DISABLED_STYLE
+                  : bucket === "fight"
+                    ? BUCKET_BUTTON_ACTIVE_STYLE
+                    : BUCKET_BUTTON_STYLE
+              }
+              aria-label="Per-fight bucketing"
+              aria-pressed={bucket === "fight"}
+            >
+              Per fight
+            </button>
+            <button
+              type="button"
+              onClick={() => changeBucket("day")}
+              disabled={isLoading || bucket === "day"}
+              style={
+                isLoading
+                  ? BUCKET_BUTTON_DISABLED_STYLE
+                  : bucket === "day"
+                    ? BUCKET_BUTTON_ACTIVE_STYLE
+                    : BUCKET_BUTTON_STYLE
+              }
+              aria-label="Per-day bucketing"
+              aria-pressed={bucket === "day"}
+            >
+              Per day
+            </button>
+          </div>
+          {/* v0.8.2 of web: scale toggle (Linear / Log). Pure
+              client-side re-render of the same data points --
+              no server fetch. The toggle is always enabled
+              (no loading state needed) because switching
+              scale is a synchronous O(n) re-derivation. */}
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 4 }}
+            role="group"
+            aria-label="Timeline Y-axis scale"
+          >
+            <button
+              type="button"
+              onClick={() => setScale("linear")}
+              style={
+                scale === "linear"
                   ? BUCKET_BUTTON_ACTIVE_STYLE
                   : BUCKET_BUTTON_STYLE
-            }
-            aria-label="Per-fight bucketing"
-            aria-pressed={bucket === "fight"}
-          >
-            Per fight
-          </button>
-          <button
-            type="button"
-            onClick={() => changeBucket("day")}
-            disabled={isLoading || bucket === "day"}
-            style={
-              isLoading
-                ? BUCKET_BUTTON_DISABLED_STYLE
-                : bucket === "day"
-                  ? BUCKET_BUTTON_ACTIVE_STYLE
-                  : BUCKET_BUTTON_STYLE
-            }
-            aria-label="Per-day bucketing"
-            aria-pressed={bucket === "day"}
-          >
-            Per day
-          </button>
+              }
+              aria-label="Linear Y-axis scale (per-series normalised)"
+              aria-pressed={scale === "linear"}
+            >
+              Linear
+            </button>
+            <button
+              type="button"
+              onClick={() => setScale("log")}
+              style={
+                scale === "log" ? BUCKET_BUTTON_ACTIVE_STYLE : BUCKET_BUTTON_STYLE
+              }
+              aria-label="Logarithmic Y-axis scale (shared across all 3 series)"
+              aria-pressed={scale === "log"}
+            >
+              Log
+            </button>
+          </div>
         </div>
       </div>
-      <PlayerTimelineChart points={timeline.points} />
+      <PlayerTimelineChart points={timeline.points} scale={scale} />
       <div
         style={{
           display: "flex",
