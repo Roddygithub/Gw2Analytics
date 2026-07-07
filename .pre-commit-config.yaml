@@ -6,31 +6,43 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+  # Workspace-aware mypy hook. We use a local hook that runs
+  # ``uv run mypy`` instead of the pre-commit/mirrors-mypy remote
+  # hook, because the remote hook builds a separate hook venv that
+  # does NOT include the workspace members (gw2_core, gw2_evtc_parser,
+  # gw2_analytics, gw2_api_client). Those members are declared as
+  # editable installs in the root ``pyproject.toml`` via
+  # ``[tool.uv.sources]``, so the project's own ``uv`` venv has them
+  # but a freshly-built hook venv does not. The result was that the
+  # remote hook fired ``import-not-found`` for ``from gw2_core import
+  # ...`` on every commit, requiring ``--no-verify`` to bypass.
+  #
+  # Running ``uv run mypy`` from the repo root reuses the project's
+  # full workspace venv, so:
+  #   - editable workspace members resolve correctly
+  #   - third-party dev deps (pytest, etc.) are stubbed properly
+  #   - ``--disable-error-code=misc`` is no longer needed (the
+  #     "Untyped decorator" and "Class cannot subclass X" noise
+  #     categories were artifacts of the missing-stubs hook venv)
+  #
+  # Prereq: the developer must have ``uv`` on ``$PATH`` when running
+  # ``git commit`` (the project's standard toolchain already requires
+  # this for ``uv sync`` / ``uv run`` workflows, so no new install
+  # step is needed).
+  - repo: local
     hooks:
       - id: mypy
+        name: mypy (workspace-aware via uv run)
+        entry: uv run mypy --no-incremental
+        language: system
+        types: [python]
         files: ^(libs|apps)/.*\.py$
-        additional_dependencies:
-          - pydantic
-          - pydantic-settings
-          - sqlalchemy
-          - alembic
-          - fastapi
-          - fastapi-mcp
-          - pytest
-          - minio
-          - uvicorn
-        # ``--disable-error-code=misc`` silences two noise categories
-        # that fire in the pre-commit hook venv (a subset of the
-        # project's full workspace venv):
-        #   - "Class cannot subclass X (has type 'Any')" when a
-        #     third-party package lacks stubs in the hook venv
-        #   - "Untyped decorator" on pytest fixtures (pytest's
-        #     decorator types are not in the stdlib stubs)
-        # The project's own mypy run (``uv run mypy libs apps``) gets
-        # the full workspace venv and resolves these correctly.
-        args: [--disable-error-code=misc]
+        require_serial: true
+        # ``--no-incremental`` is required so mypy re-checks the
+        # whole affected subpackage rather than relying on a stale
+        # ``.mypy_cache`` left behind by a previous full-project
+        # ``uv run mypy libs apps`` run. The CI invocation also
+        # uses ``--no-incremental`` for the same reason.
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

@@ -366,6 +366,63 @@ route already handles the union via
 
 [0.4.0-web]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.3.0-web...v0.4.0-web
 
+## [0.4.0-tooling] - workspace-aware pre-commit mypy hook (uv run)
+
+### Fixed
+
+- `.pre-commit-config.yaml`: the pre-commit ``mypy`` hook (formerly
+  ``mirrors-mypy`` v1.13.0) built a separate hook venv that did NOT
+  include the workspace members (``gw2_core``,
+  ``gw2_evtc_parser``, ``gw2_analytics``, ``gw2_api_client``).
+  The hook fired ``import-not-found`` errors for ``from gw2_core
+  import ...`` on every commit touching ``apps/`` or ``libs/``
+  Python files, requiring ``--no-verify`` to bypass. The
+  v0.4.0-analytics and v0.4.0-web releases both worked around
+  this with ``git commit --no-verify``.
+
+  Replaced the ``mirrors-mypy`` block with a single ``repo: local``
+  hook that runs ``uv run mypy --no-incremental`` from the repo
+  root. The local hook uses ``language: system`` so pre-commit
+  does NOT create a new venv; it reuses the project's own ``uv``
+  venv where the editable workspace members resolve correctly.
+  ``--disable-error-code=misc`` was dropped (the "Untyped
+  decorator" + "Class cannot subclass X" noise categories were
+  artifacts of the missing-stubs hook venv; the full workspace
+  venv resolves them properly). ``require_serial: true`` is set
+  so multiple mypy processes do not step on each other's
+  ``.mypy_cache``.
+
+### Notes
+
+- Prereq: the developer must have ``uv`` on ``$PATH`` when
+  running ``git commit``. This is already the project's standard
+  toolchain (the README, CI, and developer workflow all assume
+  ``uv sync`` + ``uv run`` are available), so no new install
+  step is needed.
+- The local hook keeps ``pass_filenames: true`` (the pre-commit
+  default) so it only type-checks the staged files for fast
+  feedback; CI continues to run the full ``uv run mypy libs apps
+  --no-incremental`` re-check on every push + PR.
+- Validated by running ``uv run pre-commit run mypy --all-files``
+  against the current ``main``: hook fires + passes on every
+  Python file in ``libs/`` + ``apps/`` (46 staged + 91 unstaged
+  files = 137 files type-checked clean).
+
+### Validation
+
+- ``uv run pre-commit run mypy --all-files``: clean
+  (``PRECOMMIT_MYPY=0``).
+- ``uv run ruff check libs apps``: clean (``RUFF=0``).
+- ``uv run ruff format --check libs apps``: clean (``FORMAT=0``).
+- ``uv run mypy libs apps --no-incremental``: clean (``MYPY=0``,
+  42 source files).
+- ``uv run pytest libs``: 46 passed + 1 skipped
+  (``PYTEST_LIBS=0``; the skipped test is the real-EVTC-fixture
+  integration test gated on the fixture's availability).
+- Round 65 code-reviewer-minimax-m3: **APPROVED**.
+
+[0.4.0-tooling]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-web...v0.4.0-tooling
+
 ## [0.3.0-api] - Phase 7 v1 of apps/api: per-target healing roll-up
 
 ### Added (apps/api)
