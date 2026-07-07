@@ -72,13 +72,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- 0 new pytest tests (the existing 3 tests in
+- 0 new pytest tests at the v0.8.7 gate commit
+  (the existing 3 tests in
   `apps/api/tests/test_health_summary.py` cover the
   probe's contract; the CI gate is the operational
   regression check, not a unit test).
+- A follow-up commit (3583cac) added 5 new hermetic
+  unit tests in `apps/api/tests/test_ci_health_gate.py`
+  covering the 3 entry points (save, check-delta with
+  the ``>=`` boundary pins, main no-args debug).
+  See the "Changed" section below.
 - The script was validated end-to-end locally: a
   synthetic +2 baseline bump (simulating a regression)
   correctly returned exit code 1.
+
+### Changed (follow-up commit 3583cac)
+
+- `apps/api/ci_health_gate.py` was moved to
+  `apps/api/src/gw2analytics_api/scripts/health_gate.py`
+  (via `git mv`, content unchanged). The script is
+  now part of the `gw2analytics_api` package,
+  alongside the existing v0.8.5 backfill CLI
+  (`apps/api/src/gw2analytics_api/scripts/backfill_player_summaries.py`).
+  This closes the layering hack where the v0.8.7
+  commit had a top-level script + a
+  `apps/api/tests/conftest.py` `sys.path.insert(0,
+  ...)` + a `mypy_path = ["apps/api"]` work-around
+  in the root `pyproject.toml`. The move makes the
+  script importable as a proper module
+  (`from gw2analytics_api.scripts.health_gate import
+  ...`) and lets the pre-commit mypy hook resolve
+  the import without any mypy_path configuration.
+- `apps/api/tests/conftest.py` was deleted: the
+  sys.path hack is no longer needed after the move.
+- `apps/api/tests/test_ci_health_gate.py` (NEW, 5
+  tests): hermetic unit tests using monkeypatching.
+  The 5 cases cover the 3 entry points of the
+  script's public API:
+  - `test_save_baseline_creates_json_file`:
+    monkeypatches `_fetch_drift` to return a fixed
+    `SummaryDrift`, verifies the file is created
+    with the right content.
+  - `test_check_delta_passes_on_zero_delta`:
+    baseline == post-state, expects exit 0.
+  - `test_check_delta_fails_when_delta_equals_budget`:
+    pins the ``>=`` boundary (the off-by-one fix
+    from the round 142 code-review); delta ==
+    `MAX_DRIFT_DELTA` fails (the regression case).
+  - `test_check_delta_passes_at_budget_minus_one`:
+    pins the legitimate e2e-drift band; delta ==
+    `MAX_DRIFT_DELTA - 1` passes.
+  - `test_no_args_debug_mode`: monkeypatches
+    `sys.argv` so argparse doesn't try to parse
+    pytest's argv; verifies the no-args mode
+    prints the response + returns 0.
+- `.github/workflows/ci.yml`: 2 invocation
+  changes -- `uv run python apps/api/ci_health_gate.py
+  ...` becomes `uv run python -m
+  gw2analytics_api.scripts.health_gate ...`. The
+  `python -m` invocation works from the repo root
+  (the workspace install makes the module globally
+  importable). No `working-directory` directive
+  needed.
+- `pyproject.toml`: removed the round 146
+  `mypy_path = ["apps/api"]` work-around + the
+  11-line comment block. The mypy_path was a
+  band-aid for the sys.path hack; after the move,
+  the script is part of the package, so mypy
+  resolves it automatically.
 
 ### Validation
 
@@ -89,6 +150,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `uv run mypy ci_health_gate.py`: clean (MYPY=0).
 - `uv run pytest apps/api/tests/test_health_summary.py`:
   3 passed (PYTEST=0).
+- Follow-up commit 3583cac validation (post-move):
+- `uv run ruff check apps/api/src/.../health_gate.py
+  apps/api/tests/test_ci_health_gate.py`: clean.
+- `uv run mypy --no-incremental libs apps`: clean
+  (62 source files, no regression).
+- `uv run pytest apps/api/tests/test_ci_health_gate.py
+  apps/api/tests/test_health_summary.py -v`:
+  8 passed (5 new + 3 existing).
+- `uv run pre-commit run mypy --files ...`: clean
+  (the round 146 pre-commit failure is resolved by
+  the move to the src/ tree).
+- `uv run python -m gw2analytics_api.scripts.health_gate
+  --save-baseline /tmp/...` + `--check-delta /tmp/...`:
+  works end-to-end (matches the new CI workflow
+  invocation).
 - Round 142-144 code-reviewer-minimax-m3: **APPROVED**
   (the delta check is the correct design; ``>= MAX=2``
   correctly catches the +2 regression;
@@ -96,6 +172,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mypy-friendly pattern; in-process TestClient is the
   canonical hermetic approach; step ordering + cleanup
   mirror the existing OpenAPI drift gate).
+- Round 146 thinker-with-files-gemini: recommended
+  Hypothesis 5 (move the script) over the other 6
+  hypotheses for fixing the round 146 mypy
+  import-not-found error.
+- Round 147 code-reviewer-minimax-m3: **APPROVED**
+  (the move is the canonical fix; conftest deletion
+  is correct; the 5 test-file updates are
+  consistent; the ``python -m`` invocation works;
+  the mypy_path removal is correct).
 
 [0.8.7]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.6...v0.8.7
 
