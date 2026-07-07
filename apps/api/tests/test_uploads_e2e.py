@@ -15,6 +15,9 @@ suffix into ``agent_id``, ``name``, the build string, and the skill
 ``id``s so the ``fight_agents (fight_id, agent_id)`` PK, the
 ``fight_skills (fight_id, skill_id)`` PK and the ``fights.id`` are
 unique per invocation. No CASCADE truncate needed.
+
+See ``apps/api/README.md`` for how to bring up the upstream Postgres
+dependency locally + in CI.
 """
 
 from __future__ import annotations
