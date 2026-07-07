@@ -53,6 +53,77 @@ _EVENT_TYPE_ADAPTER: TypeAdapter[Event] = TypeAdapter(Event)
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
 
 
+# ---------------------------------------------------------------------------
+# Shared blob-load + decompress + event-split helper
+# ---------------------------------------------------------------------------
+
+
+def _load_fight_events(
+    db: Session,
+    fight_id: str,
+) -> list[Event]:
+    """Load + decompress + parse the events blob for one fight.
+
+    Centralises the blob-load + decompress + event-split pattern
+    that :func:`get_fight_events`, :func:`get_fight_squads`, and
+    :func:`get_fight_skills` all share. The helper enforces the
+    canonical 404 / 502 contract:
+
+    - ``404 Not Found``: fight id is unknown OR
+      ``events_blob_uri is None`` OR the blob is missing in MinIO
+      (``S3Error`` -- closes the loop if the upload succeeded but
+      the MinIO write failed silently or was evicted).
+    - ``404 Not Found``: the events list is empty after the
+      ``jsonl.splitlines()`` pass. Defensive: the parser writes
+      no empty blobs, but a 0-byte blob (manual PUT, replication
+      drift) still honours the "no event data available" contract
+      so the response never confuses "parser ran, nothing
+      happened" with "data unavailable".
+    - ``502 Bad Gateway``: the blob is present but
+      ``gzip.decompress`` failed. A fight row with a corrupt blob
+      is still a valid row; this is a blob-store consistency issue
+      rather than a client error.
+
+    Returns the parsed :class:`Event` list so the caller can split
+    by ``isinstance`` at the call site and feed the per-kind
+    streams to the aggregators (the v0.7.0 SquadRollup + SkillUsage
+    aggregators accept paired single-typed streams; the per-target
+    trio each accept one single-typed stream).
+    """
+    fight = db.get(OrmFight, fight_id)
+    if fight is None or fight.events_blob_uri is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
+
+    try:
+        gz_bytes = get_events(fight.events_blob_uri)
+    except S3Error:
+        logger.warning(
+            "events blob %s missing in MinIO for fight %s",
+            fight.events_blob_uri,
+            fight_id,
+        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable") from None
+
+    try:
+        jsonl = gzip.decompress(gz_bytes)
+    except OSError as exc:
+        logger.exception("events blob %s not gzip-decodable", fight.events_blob_uri)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "events blob corrupt") from exc
+
+    # ``TypeAdapter(Event).validate_json(line)`` is the canonical
+    # Pydantic v2 entry point for discriminated-union round-trip;
+    # it materialises the matching subclass via the ``event_type``
+    # literal carried on every line. The adapter instance is
+    # module-level so the discriminator validation table is built
+    # once at import time.
+    events: list[Event] = [
+        _EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line
+    ]
+    if not events:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable")
+    return events
+
+
 @router.get("", response_model=list[FightOut])
 def list_fights(
     limit: int = Query(50, ge=1, le=500),
@@ -144,47 +215,15 @@ def get_fight_events(
       still valid; this is a blob-store consistency issue, not a
       client error.
     """
-    fight = db.get(OrmFight, fight_id)
-    if fight is None or fight.events_blob_uri is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
-
-    try:
-        gz_bytes = get_events(fight.events_blob_uri)
-    except S3Error:
-        logger.warning(
-            "events blob %s missing in MinIO for fight %s",
-            fight.events_blob_uri,
-            fight_id,
-        )
-        # Treat a missing blob the same as a non-existent blob: 404.
-        # This closes the loop if the upload succeeded but the
-        # MinIO write ''failed'' silently or was evicted.
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable") from None
-
-    try:
-        jsonl = gzip.decompress(gz_bytes)
-    except OSError as exc:
-        logger.exception("events blob %s not gzip-decodable", fight.events_blob_uri)
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "events blob corrupt") from exc
-
     # Phase 7 v2: the JSONL is a heterogeneous stream of damage +
-    # healing records. ``TypeAdapter(Event).validate_json(line)`` is
-    # the canonical Pydantic v2 entry point for discriminated-union
-    # round-trip; it materialises the matching subclass via the
-    # ``event_type`` literal carried on every line. ``Event`` is
-    # annotated with ``Annotated[..., Field(discriminator="event_type")]``
-    # so the dispatch is structural, not a manual ``isinstance``
-    # ladder. The adapter instance is module-level so the
-    # discriminator validation table is built once at import time.
-    events: list[Event] = [
-        _EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line
-    ]
-
-    if not events:
-        # Defensive: the parser writes no empty blobs, but if a 0-byte
-        # blob sneaks through (manual PUT, replication drift) we still
-        # honour the contract: 404, NOT 200-empty.
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable")
+    # healing + buff-removal records. ``_load_fight_events`` is the
+    # shared helper that handles the blob load + decompress + event
+    # split + 404 / 502 error contract; the per-target trio (DPS +
+    # Healing + BuffRemoval) and the per-bucket ``EventWindowAggregator``
+    # all consume the returned events list. The TypeAdapter
+    # validation is structural (``Annotated[..., Field(
+    # discriminator="event_type")]``) so the dispatch is automatic.
+    events = _load_fight_events(db, fight_id)
 
     duration_s = max(e.time_ms for e in events) / 1000.0
     # ``TargetDpsAggregator`` consumes DamageEvent specifically
@@ -276,31 +315,11 @@ def get_fight_squads(
     Response codes match :func:`get_fight_events` exactly
     (``404`` for missing fight / blob / corrupt blob).
     """
-    fight = db.get(OrmFight, fight_id)
-    if fight is None or fight.events_blob_uri is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
-
-    try:
-        gz_bytes = get_events(fight.events_blob_uri)
-    except S3Error:
-        logger.warning(
-            "events blob %s missing in MinIO for fight %s",
-            fight.events_blob_uri,
-            fight_id,
-        )
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable") from None
-
-    try:
-        jsonl = gzip.decompress(gz_bytes)
-    except OSError as exc:
-        logger.exception("events blob %s not gzip-decodable", fight.events_blob_uri)
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "events blob corrupt") from exc
-
-    events: list[Event] = [
-        _EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line
-    ]
-    if not events:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable")
+    # Shared helper handles the blob load + decompress + event
+    # split + 404 / 502 error contract (the per-target trio +
+    # EventWindowAggregator share the same pattern in
+    # :func:`get_fight_events`).
+    events = _load_fight_events(db, fight_id)
 
     # Build the agent_id -> subgroup map. ``OrmFightAgent`` is
     # pre-loaded by the route caller (not in this function) to
@@ -366,31 +385,11 @@ def get_fight_skills(
     skill-usage aggregator does not compute per-second rates; see
     the module docstring for the rationale).
     """
-    fight = db.get(OrmFight, fight_id)
-    if fight is None or fight.events_blob_uri is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
-
-    try:
-        gz_bytes = get_events(fight.events_blob_uri)
-    except S3Error:
-        logger.warning(
-            "events blob %s missing in MinIO for fight %s",
-            fight.events_blob_uri,
-            fight_id,
-        )
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable") from None
-
-    try:
-        jsonl = gzip.decompress(gz_bytes)
-    except OSError as exc:
-        logger.exception("events blob %s not gzip-decodable", fight.events_blob_uri)
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "events blob corrupt") from exc
-
-    events: list[Event] = [
-        _EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line
-    ]
-    if not events:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable")
+    # Shared helper handles the blob load + decompress + event
+    # split + 404 / 502 error contract (same pattern as the
+    # per-target trio + EventWindowAggregator in
+    # :func:`get_fight_events`).
+    events = _load_fight_events(db, fight_id)
 
     # Build the skill_id -> skill_name map. An empty skill name
     # is a valid value (the parser surfaces it for unknown
