@@ -60,17 +60,27 @@
 
 import {
   fetchFightEvents,
+  fetchFightSquads,
+  fetchFightSkills,
   formatApiError,
   type TargetDpsRow,
   type TargetHealingRow,
   type TargetBuffRemovalRow,
   type FightEventsSummaryRow,
+  type SquadRollupRow,
+  type SkillUsageRow,
 } from "@/lib/api";
 import {
   TargetRollupsGrid,
   type TargetRollupColumn,
 } from "@/components/TargetRollupsGrid";
+import {
+  SquadRollupsGrid,
+  type SquadRollupColumn,
+} from "@/components/SquadRollupsGrid";
 import { EventWindowsTable } from "@/components/EventWindowsTable";
+import { EventWindowsChart } from "@/components/EventWindowsChart";
+import { SkillUsageTable } from "@/components/SkillUsageTable";
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
 import { TargetFilter } from "@/components/TargetFilter";
 
@@ -137,6 +147,22 @@ const BUFF_REMOVAL_COLUMNS: TargetRollupColumn<TargetBuffRemovalRow>[] = [
   { field: "bps", headerName: "BPS", decimals: 2, width: 140 },
 ];
 
+// v0.7.1 of web: per-subgroup roll-up column spec. Keyed on the
+// ``subgroup`` string (NOT ``target_agent_id`` -- the row shape
+// differs from the per-target trio). The rate columns
+// (``dps`` / ``hps`` / ``bps``) all use 2-decimal fixed
+// formatting so the analyst can spot a high-rate squad at a
+// glance.
+const SQUAD_COLUMNS: SquadRollupColumn<SquadRollupRow>[] = [
+  { field: "subgroup", headerName: "Subgroup", width: 200 },
+  { field: "total_damage", headerName: "Total damage", width: 140 },
+  { field: "total_healing", headerName: "Total healing", width: 140 },
+  { field: "total_buff_removal", headerName: "Total strip", width: 140 },
+  { field: "dps", headerName: "DPS", decimals: 2, width: 120 },
+  { field: "hps", headerName: "HPS", decimals: 2, width: 120 },
+  { field: "bps", headerName: "BPS", decimals: 2, width: 120 },
+];
+
 export default async function FightEventsPage({
   params,
   searchParams,
@@ -156,16 +182,39 @@ export default async function FightEventsPage({
   const targetFilter = parseTarget(target_raw);
 
   let summary: FightEventsSummaryRow | null = null;
+  // v0.7.1 of web: also fetch the per-subgroup + per-skill
+  // roll-ups in parallel via ``Promise.allSettled`` so the page
+  // renders the 5 roll-up sections (per-target damage + healing
+  // + buff-removal + per-subgroup + per-skill) from a single
+  // round-trip. ``Promise.allSettled`` (NOT ``Promise.all``) so
+  // a single fetcher failure does not cascade -- the per-target
+  // trio is the primary surface and a transient squads/skills
+  // failure should not blank the whole page. The common
+  // upstream-blob failure mode (S3Error on /events) still
+  // surfaces the unified error card below.
+  let squads: import("@/lib/api").FightSquads | null = null;
+  let skills: import("@/lib/api").FightSkills | null = null;
   // ``fetchError`` carries the user-facing error string (already
   // formatted via :func:`formatApiError` so the page renders the
   // exact same text a Client Component would). The body of the
   // error card just inlines the string verbatim -- no extra
   // ``Upstream error:`` prefix is needed.
   let fetchError: string | null = null;
-  try {
-    summary = await fetchFightEvents(id, { windowS });
-  } catch (err) {
-    fetchError = formatApiError(err);
+  const results = await Promise.allSettled([
+    fetchFightEvents(id, { windowS }),
+    fetchFightSquads(id),
+    fetchFightSkills(id),
+  ]);
+  if (results[0].status === "fulfilled") {
+    summary = results[0].value;
+  } else {
+    fetchError = formatApiError(results[0].reason);
+  }
+  if (results[1].status === "fulfilled") {
+    squads = results[1].value;
+  }
+  if (results[2].status === "fulfilled") {
+    skills = results[2].value;
   }
 
   if (fetchError || !summary) {
@@ -282,7 +331,23 @@ export default async function FightEventsPage({
       </section>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600 }}>
+          Per-subgroup (squad)
+        </h2>
+        <SquadRollupsGrid
+          rows={squads?.squads ?? []}
+          columns={SQUAD_COLUMNS}
+        />
+      </section>
+
+      <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600 }}>Per-skill</h2>
+        <SkillUsageTable rows={skills?.skills ?? []} />
+      </section>
+
+      <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Event windows</h2>
+        <EventWindowsChart buckets={summary.event_windows} />
         <EventWindowsTable buckets={summary.event_windows} />
       </section>
     </main>

@@ -118,3 +118,58 @@ vi.mock("@/lib/env", () => ({
   API_BASE_URL,
   displayedApiBaseUrl: API_BASE_URL,
 }));
+
+/**
+ * v0.7.1 of web: ``@/components/EventWindowsChart`` is a small
+ * Client Component (inline SVG) for the per-fight event windows.
+ * The page-level Server Component tests transitively import it,
+ * so we mock it as a no-op to keep the page test focused on the
+ * page's own render contract.
+ */
+vi.mock("@/components/EventWindowsChart", () => ({
+  EventWindowsChart: () => null,
+}));
+
+/**
+ * v0.7.1 of web: ``@/components/SquadRollupsGrid`` is the AG Grid
+ * Community wrapper for the per-subgroup roll-up. Mocked as a
+ * no-op so the page-level tests can render the wrapper without
+ * dragging :file:`node_modules/ag-grid-react` into the vitest
+ * resolver.
+ */
+vi.mock("@/components/SquadRollupsGrid", () => ({
+  SquadRollupsGrid: () => null,
+}));
+
+/**
+ * v0.7.1 of web: ``@/components/SkillUsageTable`` is a plain HTML
+ * table (no AG Grid). Mocked as a no-op so the page-level tests
+ * can assert on the table's presence/absence without coupling to
+ * the table's exact HTML shape.
+ */
+vi.mock("@/components/SkillUsageTable", () => ({
+  SkillUsageTable: () => null,
+}));
+
+/**
+ * v0.7.1 of web: ``@/components/PlayersGrid`` is the AG Grid
+ * Community wrapper for the ``/players`` paginated list. Mocked
+ * as a no-op so the page-level tests can render the wrapper
+ * without dragging AG Grid's runtime into jsdom.
+ */
+vi.mock("@/components/PlayersGrid", () => ({
+  PlayersGrid: () => null,
+}));
+
+/**
+ * v0.7.1 of web: ``@/components/PlayerSearchBar`` is a small
+ * Client Component (useRouter + useState) that renders the
+ * header-bar search input. The layout test transitively imports
+ * it, so we mock it as a no-op; a dedicated component-level
+ * test in
+ * :file:`web/tests/components/player-search-bar.test.tsx`
+ * exercises the form submit + router interaction.
+ */
+vi.mock("@/components/PlayerSearchBar", () => ({
+  PlayerSearchBar: () => null,
+}));

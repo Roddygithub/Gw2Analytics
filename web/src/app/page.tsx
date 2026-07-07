@@ -41,6 +41,16 @@ export default function Home() {
           </span>
           <span className={styles.cardArrow}>Open &rarr;</span>
         </Link>
+        <Link className={styles.card} href="/players">
+          <span className={styles.cardTitle}>Browse players</span>
+          <span className={styles.cardBody}>
+            Cross-fight roll-up of every account in the dataset
+            (fights attended + total damage + healing + buff
+            removal). Use the header search to jump to a specific
+            account.
+          </span>
+          <span className={styles.cardArrow}>Open &rarr;</span>
+        </Link>
       </nav>
 
       <p className={styles.footer}>

@@ -57,22 +57,36 @@ import { vi } from "vitest";
 
 // Partial-mock the @/lib/api module: keep the real ``ApiError`` class
 // (the test uses it to construct the upstream-error fixture) while
-// replacing ``fetchFightEvents`` with a vi.fn() so each test can
-// stub its return value. ``importOriginal`` is the canonical vitest
+// replacing ``fetchFightEvents`` + ``fetchFightSquads`` +
+// ``fetchFightSkills`` with vi.fn() so each test can stub its
+// return value. ``importOriginal`` is the canonical vitest
 // pattern for "mock one named export, leave the rest alone"; the
 // alternative -- re-declaring the ApiError class inline in the mock
 // factory -- drifts from the production shape the moment the
 // constructor signature changes.
+//
+// v0.7.1 of web: the page now fires 3 parallel fetchers via
+// ``Promise.allSettled``; if any of the 3 is unmocked the test
+// would try to make a real HTTP call and time out at the 5s
+// vitest default. The 2 new fetchers need the same vi.fn()
+// treatment as the original.
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
     fetchFightEvents: vi.fn(),
+    fetchFightSquads: vi.fn(),
+    fetchFightSkills: vi.fn(),
   };
 });
 
 import FightEventsPage from "@/app/fights/[id]/page";
-import { fetchFightEvents, ApiError } from "@/lib/api";
+import {
+  fetchFightEvents,
+  fetchFightSquads,
+  fetchFightSkills,
+  ApiError,
+} from "@/lib/api";
 
 const FIGHT_ID = "abc123def456";
 
@@ -98,6 +112,35 @@ const POPULATED_PAYLOAD = {
   ],
 };
 
+// v0.7.1 of web: parallel squad + skill roll-up payloads
+// returned by the (now-mocked) ``fetchFightSquads`` + ``fetchFightSkills``
+// fetchers. Each test must call the .mockResolvedValue on the
+// corresponding vi.fn() or the page will see ``undefined`` and
+// render the "No squad roll-up rows" / "No skill roll-up rows"
+// empty-state panels.
+const POPULATED_SQUADS = {
+  fight_id: FIGHT_ID,
+  duration_s: 12.5,
+  squads: [
+    {
+      subgroup: "",
+      total_damage: 1234,
+      total_healing: 567,
+      total_buff_removal: 333,
+      dps: 1234 / 12.5,
+      hps: 567 / 12.5,
+      bps: 333 / 12.5,
+    },
+  ],
+};
+const POPULATED_SKILLS = {
+  fight_id: FIGHT_ID,
+  skills: [
+    { skill_id: 100, skill_name: "Whirlwind", hit_count: 1, total_damage: 1234, total_healing: 0, total_buff_removal: 0 },
+    { skill_id: 200, skill_name: "Heal", hit_count: 1, total_damage: 0, total_healing: 567, total_buff_removal: 333 },
+  ],
+};
+
 const EMPTY_PAYLOAD = {
   fight_id: FIGHT_ID,
   duration_s: 0,
@@ -108,6 +151,11 @@ const EMPTY_PAYLOAD = {
 };
 
 describe("FightEventsPage", () => {
+  beforeEach(() => {
+    vi.mocked(fetchFightSquads).mockResolvedValue(POPULATED_SQUADS);
+    vi.mocked(fetchFightSkills).mockResolvedValue(POPULATED_SKILLS);
+  });
+
   it("renders the header + section headings when fetchFightEvents returns a populated payload", async () => {
     vi.mocked(fetchFightEvents).mockResolvedValue(POPULATED_PAYLOAD);
     const tree = await FightEventsPage({
@@ -127,6 +175,19 @@ describe("FightEventsPage", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { level: 2, name: "Per-target buff removal" }),
+    ).toBeInTheDocument();
+    // v0.7.1 of web: two new sibling sections (per-subgroup +
+    // per-skill) added below the per-target trio. The mocked
+    // component stubs render nothing, so we lock the section
+    // heading presence here and the component-level renders
+    // are covered by the SquadRollupsGrid / SkillUsageTable
+    // component tests (to be added in a follow-up if the AG
+    // Grid runtime can be booted in jsdom).
+    expect(
+      screen.getByRole("heading", { level: 2, name: /Per-subgroup/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Per-skill" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { level: 2, name: "Event windows" }),
@@ -163,7 +224,7 @@ describe("FightEventsPage", () => {
       screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Duration: 0.00 s/)).toBeInTheDocument();
-    // The four section headings always render -- the per-component
+    // The six section headings always render -- the per-component
     // empty-state message lives inside the stubbed child components.
     expect(
       screen.getByRole("heading", { level: 2, name: "Per-target damage" }),
@@ -173,6 +234,12 @@ describe("FightEventsPage", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { level: 2, name: "Per-target buff removal" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: /Per-subgroup/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Per-skill" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { level: 2, name: "Event windows" }),
@@ -250,7 +317,7 @@ describe("FightEventsPage", () => {
     // is rendered for the analyst. Locks down the parseTarget
     // -> "filtered to target" wiring on the duration line.
     expect(screen.getByText(/filtered to target 1/)).toBeInTheDocument();
-    // All four section headings still render (the per-target
+    // All six section headings still render (the per-target
     // filter narrows the rows inside, not the sections).
     expect(
       screen.getByRole("heading", { level: 2, name: "Per-target damage" }),
@@ -260,6 +327,12 @@ describe("FightEventsPage", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { level: 2, name: "Per-target buff removal" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: /Per-subgroup/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Per-skill" }),
     ).toBeInTheDocument();
   });
 
