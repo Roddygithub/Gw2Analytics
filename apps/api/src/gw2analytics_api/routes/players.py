@@ -30,7 +30,7 @@ import gzip
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error
@@ -269,6 +269,7 @@ def get_player_timeline(
     account_name: str,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    bucket: Literal["fight", "day"] = Query("fight"),
     db: Session = Depends(get_session),  # noqa: B008
 ) -> PlayerTimelineOut:
     """Return the per-fight historical timeline for one account.
@@ -346,13 +347,58 @@ def get_player_timeline(
         ),
         reverse=True,
     )
-    page = sorted_contributions[offset : offset + limit]
-    return PlayerTimelineOut(
-        account_name=account_name,
-        total=len(own_contributions),
-        limit=limit,
-        offset=offset,
-        points=[
+
+    # v0.8.1 of the API: ``?bucket=day`` collapses all fights
+    # sharing a calendar day into one point whose totals are
+    # the SUM of the day's fights. The ``started_at`` of the
+    # day-bucketed point is the day's UTC midnight so the chart's
+    # X-axis can detect the day-aligned timestamps and render
+    # ``MM/DD`` instead of ``MM/DD HH:MM`` (zero extra props).
+    # The ``fight_id`` of the day-bucketed point is the
+    # most-recent fight_id of the day (the deterministic
+    # tiebreaker: the recency-first sort ensures the FIRST
+    # encounter in the loop is the most recent, so we capture
+    # it via ``setdefault``). The chart's React key is on
+    # ``fight_id`` so the day-bucketed points are uniquely
+    # keyed.
+    #
+    # **Timezone assumption.** ``OrmFight.started_at`` is stored
+    # as a naive datetime (the parser writes ``datetime.now(UTC)``
+    # when the EVTC blob carries no wall clock, so the value is
+    # effectively UTC). ``.date()`` on a naive datetime returns
+    # the SERVER's local date, NOT UTC -- which means a fight
+    # recorded at 23:30 UTC on day N and parsed on a UTC+2 server
+    # will land in day N+1's bucket. The day-bucketing contract
+    # is "server-local day", and the chart's ``MM/DD`` label is
+    # the server-local day. Cross-timezone consistency requires
+    # either (a) configuring the server timezone, or (b) a future
+    # v0.9 ``?tz=Europe/Paris`` query param.
+    if bucket == "day":
+        day_totals: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"damage": 0, "healing": 0, "strip": 0},
+        )
+        day_first_fight: dict[str, str] = {}
+        day_first_started: dict[str, Any] = {}
+        for c in sorted_contributions:
+            started_at = fight_id_to_started[c.fight_id]
+            day_key = started_at.date().isoformat()
+            day_first_fight.setdefault(day_key, c.fight_id)
+            day_first_started.setdefault(day_key, started_at)
+            day_totals[day_key]["damage"] += c.total_damage
+            day_totals[day_key]["healing"] += c.total_healing
+            day_totals[day_key]["strip"] += c.total_buff_removal
+        all_points = [
+            PlayerTimelinePointOut(
+                fight_id=day_first_fight[day_key],
+                started_at=_combine_day_midnight(day_first_started[day_key]),
+                total_damage=day_totals[day_key]["damage"],
+                total_healing=day_totals[day_key]["healing"],
+                total_buff_removal=day_totals[day_key]["strip"],
+            )
+            for day_key in day_totals  # preserves insertion order (most recent first)
+        ]
+    else:
+        all_points = [
             PlayerTimelinePointOut(
                 fight_id=c.fight_id,
                 started_at=fight_id_to_started[c.fight_id],
@@ -360,9 +406,30 @@ def get_player_timeline(
                 total_healing=c.total_healing,
                 total_buff_removal=c.total_buff_removal,
             )
-            for c in page
-        ],
+            for c in sorted_contributions
+        ]
+
+    page = all_points[offset : offset + limit]
+    return PlayerTimelineOut(
+        account_name=account_name,
+        total=len(all_points),
+        limit=limit,
+        offset=offset,
+        bucket=bucket,
+        points=page,
     )
+
+
+def _combine_day_midnight(started_at: Any) -> Any:
+    """Return the UTC midnight of ``started_at``'s calendar day.
+
+    Pure helper extracted from :func:`get_player_timeline` so the
+    day-bucketing branch stays one short loop. The day key is
+    the ``started_at.date()``; we round to ``time.min`` so the
+    chart's X-axis labels are stable (a single canonical
+    ``00:00`` timestamp per day, no microsecond drift).
+    """
+    return started_at.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 @router.get("/{account_name:path}", response_model=PlayerProfileOut)

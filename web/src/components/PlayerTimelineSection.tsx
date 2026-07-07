@@ -71,6 +71,32 @@ const ERROR_STYLE: React.CSSProperties = {
   color: "var(--accent)",
 };
 
+// v0.8.1 of web: the bucket toggle (Per fight / Per day). The
+// inactive style matches the Load-more button so the two
+// affordances read as siblings; the active style swaps the
+// background to the accent colour so the analyst sees which
+// bucketing is currently rendered.
+const BUCKET_BUTTON_STYLE: React.CSSProperties = {
+  padding: "4px 12px",
+  fontSize: 12,
+  border: "1px solid var(--accent)",
+  borderRadius: 4,
+  background: "transparent",
+  color: "var(--accent)",
+  cursor: "pointer",
+  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+};
+const BUCKET_BUTTON_ACTIVE_STYLE: React.CSSProperties = {
+  ...BUCKET_BUTTON_STYLE,
+  background: "var(--accent)",
+  color: "var(--background)",
+};
+const BUCKET_BUTTON_DISABLED_STYLE: React.CSSProperties = {
+  ...BUCKET_BUTTON_STYLE,
+  opacity: 0.5,
+  cursor: "not-allowed",
+};
+
 export function PlayerTimelineSection({
   accountName,
   initialTimeline,
@@ -80,12 +106,21 @@ export function PlayerTimelineSection({
 }) {
   // The initial data comes from the Server Component (parent page).
   // We track ``timeline`` in state so "Load more" can append pages
-  // without re-fetching the first page.
+  // without re-fetching the first page. ``bucket`` tracks the
+  // active grouping (Per fight / Per day); v0.8.1 of web wires the
+  // toggle so the analyst can switch groupings without leaving the
+  // page. Initialised from ``initialTimeline.bucket`` so the
+  // section renders on first paint with the correct unit in the
+  // caption (the Server Component fetched the first page with the
+  // default ``"fight"`` bucket; the toggle then drives a
+  // re-fetch when the analyst switches to ``"day"``).
   const [timeline, setTimeline] = useState<PlayerTimeline>(initialTimeline);
+  const [bucket, setBucket] = useState<"fight" | "day">(initialTimeline.bucket);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const hasMore = timeline.points.length < timeline.total;
+  const unit = bucket === "day" ? "days" : "fights";
 
   const loadMore = async () => {
     if (isLoading || !hasMore) {
@@ -97,6 +132,7 @@ export function PlayerTimelineSection({
       const next = await fetchPlayerTimeline(accountName, {
         limit: timeline.limit,
         offset: timeline.points.length,
+        bucket,
       });
       // Defensive de-dup: if the gateway ever returns a
       // fight_id that's already in the in-memory list (e.g.
@@ -116,6 +152,31 @@ export function PlayerTimelineSection({
     }
   };
 
+  // v0.8.1 of web: switch the bucketing on the same page. The
+  // route is offset-based so the first page of the new bucket
+  // is the canonical starting point (no offset to forward --
+  // the route's offset/limit apply to the bucketed points list,
+  // not the underlying fight set).
+  const changeBucket = async (next: "fight" | "day") => {
+    if (next === bucket || isLoading) {
+      return;
+    }
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const response = await fetchPlayerTimeline(accountName, {
+        limit: timeline.limit,
+        bucket: next,
+      });
+      setTimeline(response);
+      setBucket(next);
+    } catch (err) {
+      setLoadError(formatApiError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <section
       style={{ display: "flex", flexDirection: "column", gap: 12 }}
@@ -127,12 +188,51 @@ export function PlayerTimelineSection({
           alignItems: "center",
           justifyContent: "space-between",
           gap: 8,
+          flexWrap: "wrap",
         }}
       >
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Historical timeline</h2>
-        <span style={CAPTION_STYLE}>
-          Showing {timeline.points.length} of {timeline.total} fights
-        </span>
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 12 }}
+          role="group"
+          aria-label="Timeline bucketing"
+        >
+          <span style={CAPTION_STYLE}>
+            Showing {timeline.points.length} of {timeline.total} {unit}
+          </span>
+          <button
+            type="button"
+            onClick={() => changeBucket("fight")}
+            disabled={isLoading || bucket === "fight"}
+            style={
+              isLoading
+                ? BUCKET_BUTTON_DISABLED_STYLE
+                : bucket === "fight"
+                  ? BUCKET_BUTTON_ACTIVE_STYLE
+                  : BUCKET_BUTTON_STYLE
+            }
+            aria-label="Per-fight bucketing"
+            aria-pressed={bucket === "fight"}
+          >
+            Per fight
+          </button>
+          <button
+            type="button"
+            onClick={() => changeBucket("day")}
+            disabled={isLoading || bucket === "day"}
+            style={
+              isLoading
+                ? BUCKET_BUTTON_DISABLED_STYLE
+                : bucket === "day"
+                  ? BUCKET_BUTTON_ACTIVE_STYLE
+                  : BUCKET_BUTTON_STYLE
+            }
+            aria-label="Per-day bucketing"
+            aria-pressed={bucket === "day"}
+          >
+            Per day
+          </button>
+        </div>
       </div>
       <PlayerTimelineChart points={timeline.points} />
       <div
@@ -157,7 +257,9 @@ export function PlayerTimelineSection({
             ? "Loading\u2026"
             : hasMore
               ? "Load more"
-              : "All fights loaded"}
+              : bucket === "day"
+                ? "All days loaded"
+                : "All fights loaded"}
         </button>
         {loadError && <span style={ERROR_STYLE}>{loadError}</span>}
       </div>

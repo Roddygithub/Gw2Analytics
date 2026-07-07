@@ -33,13 +33,19 @@ import struct
 import time
 import uuid as _uuid
 import zipfile
+from datetime import UTC
+from datetime import datetime as _dt
+from datetime import timedelta as _td
 from io import BytesIO
 from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 
+from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app
+from gw2analytics_api.models import OrmFight
 
 client = TestClient(app)
 
@@ -857,3 +863,243 @@ def test_player_timeline_422_when_offset_negative() -> None:
         params={"offset": -1},
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# v0.8.1: per-day bucketing on the timeline
+# ---------------------------------------------------------------------------
+
+
+def test_player_timeline_default_bucket_is_fight() -> None:
+    """v0.8.1: GET .../timeline without ``bucket`` returns ``bucket="fight"``
+    and one point per attended fight (``total >= 1``). The
+    ``fight_id`` of each point is the actual fight id, the
+    ``started_at`` is the original parser-derived wall-clock time.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+    ]
+    _post_minimal_fight(events, suffix=suffix)
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+    resp = client.get(f"/api/v1/players/{encoded}/timeline")
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["bucket"] == "fight"
+    assert payload["total"] >= 1
+    assert len(payload["points"]) >= 1
+    # The first point's ``started_at`` is NOT at midnight (the
+    # parser writes a real wall-clock timestamp).
+    started_at = _dt.fromisoformat(payload["points"][0]["started_at"])
+    assert (started_at.hour, started_at.minute, started_at.second) != (0, 0, 0)
+
+
+def test_player_timeline_day_bucket_aggregates_per_day() -> None:
+    """v0.8.1: ``?bucket=day`` collapses fights sharing a calendar day
+    into one point. Seed 1 fight; the response has 1 point whose
+    ``started_at`` is the day's UTC midnight (the canonical
+    day-aligned timestamp) and whose ``bucket`` is ``"day"``.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=567,
+            skill_id=base_skill_a,
+        ),
+    ]
+    _post_minimal_fight(events, suffix=suffix)
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+    resp = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["bucket"] == "day"
+    assert payload["total"] == len(payload["points"])
+    assert payload["total"] >= 1
+    # Every point's ``started_at`` is at UTC midnight (the chart's
+    # X-axis auto-detects this to render ``MM/DD``).
+    for p in payload["points"]:
+        started_at = _dt.fromisoformat(p["started_at"])
+        assert (started_at.hour, started_at.minute, started_at.second) == (0, 0, 0)
+        # The 3 totals are non-negative (the day-bucketed point
+        # sums all fights of the day; an empty bucket would
+        # not surface a row).
+        assert p["total_damage"] >= 0
+        assert p["total_healing"] >= 0
+        assert p["total_buff_removal"] >= 0
+    # The day-bucketed point's total_damage is the sum of the
+    # seeded events (1_234 + 567 = 1_801).
+    assert payload["points"][0]["total_damage"] == 1_234 + 567
+
+
+def test_player_timeline_422_when_bucket_invalid() -> None:
+    """v0.8.1: ``?bucket=week`` (not in the Literal["fight", "day"]
+    set) returns 422 BEFORE the handler runs. FastAPI's
+    Query-validation pattern is identical to the existing
+    ``limit`` / ``offset`` 422 tests.
+    """
+    resp = client.get(
+        "/api/v1/players/anything/timeline",
+        params={"bucket": "week"},
+    )
+    assert resp.status_code == 422
+
+
+def test_player_timeline_day_bucket_splits_across_days() -> None:
+    """v0.8.1: ``?bucket=day`` collapses fights sharing a calendar
+    day AND emits 1 point per distinct calendar day. Seeds 2
+    fights for the same account, then UPDATEs the second
+    fight's ``started_at`` to a different calendar day via a
+    direct SQLAlchemy UPDATE (the parser writes ``datetime.
+    now(UTC)`` at parse time, so the 2 fights would otherwise
+    share a day). Asserts the response has exactly 2 points
+    with the right per-day ``total_damage``.
+
+    The 2nd fight's POST is inlined (not via
+    :func:`_post_minimal_fight`) so the 2 fights share the
+    same ``base_id_a`` / ``base_id_b`` agent IDs and therefore
+    the same ``account_name = :synth.<base_id_a>``. Reusing
+    ``_post_minimal_fight`` for the 2nd fight would force a
+    fresh uuid-derived ``base_id_a_2`` and the cbtevent
+    records' source/dst IDs would NOT match the 2nd fight's
+    agent table, silently dropping the events and leaving
+    the 2nd fight with 0 contributions (the route's
+    source-side attribution would return ``None`` for every
+    event). This is the same inlined-POST pattern used by
+    :func:`test_player_timeline_returns_paginated_recency_first_points`.
+
+    The UPDATE goes through :func:`get_sessionmaker` so it
+    shares the same connection pool as the route's
+    :func:`get_session` dependency -- no DDL or migration is
+    required, just a row-level ``UPDATE`` that the route
+    observes on its next read.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+
+    # Fight 1: standard 1-event fight, A damages B for 1_234.
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+    ]
+    fight_id_1 = _post_minimal_fight(events, suffix=suffix)
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+
+    # Fight 2: inline a custom POST so the 2 fights share
+    # ``base_id_a`` / ``base_id_b`` (and therefore the same
+    # ``account_name``). A damages B for 2_000 with a
+    # different skill to keep the skill table disjoint.
+    suffix_2 = _uuid.uuid4().hex[:8]
+    base_skill_b = 2_000_000 + (int(suffix_2[:4], 16) if len(suffix_2) >= 4 else 0)
+    events_2 = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,  # A (same as fight 1)
+            dst=base_id_b,  # B (same as fight 1)
+            value=2_000,
+            skill_id=base_skill_b,
+        ),
+    ]
+    blob_2 = _make_minimal_zevtc(
+        [
+            (base_id_a, 2, 18, f"V81 Warrior {suffix_2}", True),
+            (base_id_b, 1, 27, f"V81 Guard {suffix_2}", True),
+        ],
+        build=f"2025{suffix_2[:4]}",
+        skills=[(base_skill_b, f"V81 Skill {suffix_2}")],
+        events=events_2,
+    )
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("sample.zevtc", blob_2, "application/octet-stream")},
+    )
+    assert resp.status_code == 201, resp.text
+    fight_id_2 = _wait_for_upload_completion(resp.json()["id"])
+    assert fight_id_1 != fight_id_2
+
+    # Rewind fight 2's started_at by 2 calendar days so the 2
+    # fights land on distinct calendar days. The parser wrote
+    # ``datetime.now(UTC)`` for both, so without the UPDATE
+    # they'd share a day and the day-bucketed response would
+    # collapse them into 1 point.
+    session = get_sessionmaker()()
+    try:
+        # ``OrmFight.started_at`` is ``DateTime(timezone=True)`` --
+        # a TZ-AWARE column. We must pass a TZ-AWARE datetime or
+        # SQLAlchemy raises on the bind. ``datetime.now(UTC)``
+        # returns a TZ-aware UTC datetime; ``datetime.utcnow()``
+        # is NAIVE and would fail the column type check.
+        new_started = _dt.now(UTC) - _td(days=2)
+        session.execute(
+            update(OrmFight).where(OrmFight.id == fight_id_2).values(started_at=new_started)
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    resp = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["bucket"] == "day"
+    # Exactly 2 day-bucketed points: today + 2 days ago.
+    assert payload["total"] == 2
+    assert len(payload["points"]) == 2
+    # Recency-first: today's point wins.
+    started_ats = [_dt.fromisoformat(p["started_at"]) for p in payload["points"]]
+    assert started_ats == sorted(started_ats, reverse=True)
+    # The 2 day-bucketed points are exactly 2 days apart (UTC).
+    assert (started_ats[0] - started_ats[1]).days == 2
+    # Per-day totals: the recency-first point carries 1_234
+    # damage (today), the second point carries 2_000 damage
+    # (2 days ago). We use a list-based comparison instead of
+    # a dict keyed on ``started_at`` because the response's
+    # ISO string format (``2026-07-07T00:00:00+00:00``) can
+    # drift from ``datetime.isoformat()`` output (microsecond
+    # truncation, ``Z`` vs ``+00:00``, etc.) and produce a
+    # spurious ``KeyError``. The recency-first ordering is
+    # already verified by the earlier ``sorted(..., reverse=True)``
+    # assertion, so positional access is sufficient.
+    assert payload["points"][0]["total_damage"] == 1_234  # today
+    assert payload["points"][1]["total_damage"] == 2_000  # 2 days ago
+    # The 2 day-bucketed ``fight_id``s are the actual fight_ids
+    # of the 2 underlying fights (the day bucket stores the
+    # most-recent fight_id of the day, which is the only fight
+    # of the day here).
+    assert {p["fight_id"] for p in payload["points"]} == {fight_id_1, fight_id_2}

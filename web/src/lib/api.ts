@@ -509,6 +509,16 @@ export interface PlayerTimeline {
   total: number;
   limit: number;
   offset: number;
+  /**
+   * v0.8.1 of the API: the bucketing kind echoed from the
+   * request. ``"fight"`` (default): one point per attended
+   * fight, ``started_at`` is the parser-derived wall-clock
+   * time. ``"day"``: one point per UTC calendar day, with
+   * the 3 totals summed across the day's fights and
+   * ``started_at`` rounded to UTC midnight so the chart's
+   * X-axis can auto-detect the day alignment.
+   */
+  bucket: "fight" | "day";
   points: PlayerTimelinePoint[];
 }
 
@@ -535,11 +545,12 @@ export interface PlayerTimeline {
  */
 export async function fetchPlayerTimeline(
   accountName: string,
-  opts: { limit?: number; offset?: number } = {},
+  opts: { limit?: number; offset?: number; bucket?: "fight" | "day" } = {},
 ): Promise<PlayerTimeline> {
   const params = new URLSearchParams();
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
   if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  if (opts.bucket !== undefined) params.set("bucket", opts.bucket);
   const qs = params.toString();
   const url = `${API_BASE_URL}/api/v1/players/${encodeURIComponent(accountName)}/timeline${
     qs ? `?${qs}` : ""

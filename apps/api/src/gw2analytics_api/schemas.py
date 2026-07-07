@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -359,6 +360,19 @@ class PlayerTimelineOut(BaseModel):
     profile + per-fight breakdown via ``Promise.allSettled`` --
     a single bound response would force the page to refetch the
     full per-fight breakdown just to learn ``total``.
+
+    v0.8.1 of the API: the ``bucket`` field exposes the per-fight
+    (``"fight"``, default) vs per-day (``"day"``) grouping
+    contract. ``"day"`` collapses all fights sharing a calendar
+    day into one point whose ``total_damage`` / ``total_healing``
+    / ``total_buff_removal`` are the SUM of the day's fights.
+    The ``started_at`` of a day-bucketed point is the day's
+    midnight (UTC) so the chart's X-axis can detect the
+    day-aligned timestamps and render ``MM/DD`` instead of
+    ``MM/DD HH:MM``. The ``fight_id`` of a day-bucketed point
+    is the most-recent fight_id of the day (the deterministic
+    tiebreaker; the chart keys on ``fight_id`` so the React
+    reconciler is happy).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -367,6 +381,7 @@ class PlayerTimelineOut(BaseModel):
     total: int
     limit: int
     offset: int
+    bucket: Literal["fight", "day"] = "fight"
     points: list[PlayerTimelinePointOut] = []
 
 

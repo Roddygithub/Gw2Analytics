@@ -109,8 +109,18 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
         raise ValueError(msg)
 
     head = cf.header
-    # Use upload's UTCnow — the EVTC blob does not carry a wall clock.
-    started_at = cf.started_at if cf.started_at.tzinfo else datetime.now(UTC)
+    # EVTC blobs do not carry a wall clock. ``cf.started_at`` defaults
+    # to the Unix epoch sentinel (``datetime(1970, 1, 1, tzinfo=UTC)``
+    # in :class:`gw2_core.Fight`), so we MUST override with the
+    # server's wall clock at parse time. The previous
+    # ``cf.started_at if cf.started_at.tzinfo else datetime.now(UTC)``
+    # guard was a bug: the epoch sentinel HAS tzinfo (UTC), so the
+    # guard fell through and every fight landed on 1970-01-01
+    # midnight UTC, breaking the v0.8.0 timeline chart (all points
+    # stack at the leftmost X-axis slot). v0.8.1 unconditionally
+    # uses ``datetime.now(UTC)``; a future v0.9 could parse the
+    # EVTC build field (``yyyymmdd``) to get a date anchor.
+    started_at = datetime.now(UTC)
 
     orm_fight = OrmFight(
         id=cf.id,

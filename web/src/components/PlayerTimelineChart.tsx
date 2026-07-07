@@ -81,12 +81,24 @@ const STRIP_STROKE = "#f59e0b"; // warm orange; matches the per-target strip rol
  * on one side and ``"07/07/2026, 12:00 pm"`` on the other.
  * The tooltip's ``toLocaleString()`` calls below follow the
  * same convention.
+ *
+ * v0.8.1 of the API: the day-bucketed timeline points carry
+ * ``started_at`` rounded to UTC midnight (the route's
+ * ``_combine_day_midnight`` helper). The chart auto-detects
+ * the day-aligned timestamps and renders ``MM/DD`` instead
+ * of ``MM/DD HH:MM`` so the X-axis stays compact when the
+ * analyst switches to ``?bucket=day``. No new prop: the
+ * detection is a single ``.every()`` walk over the points.
  */
 const X_AXIS_LABEL_FORMAT = new Intl.DateTimeFormat("en-US", {
   month: "2-digit",
   day: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
+});
+const X_AXIS_DAY_LABEL_FORMAT = new Intl.DateTimeFormat("en-US", {
+  month: "2-digit",
+  day: "2-digit",
 });
 
 /**
@@ -129,6 +141,27 @@ export function PlayerTimelineChart({
   points: PlayerTimelinePoint[];
 }) {
   const layout = useMemo(() => buildTimelineLayout(points), [points]);
+
+  // v0.8.1 of the API: day-bucketed points carry ``started_at`` at
+  // UTC midnight, so the X-axis can render ``MM/DD`` only. The
+  // detection is a single ``.every()`` walk -- cheap (O(n) on
+  // the points list, bounded by the route's ``limit <= 100``).
+  // Empty arrays keep the full ``MM/DD HH:MM`` format (no chart
+  // to render anyway).
+  const xAxisFormat = useMemo(() => {
+    if (points.length === 0) {
+      return X_AXIS_LABEL_FORMAT;
+    }
+    const allAtMidnight = points.every((p) => {
+      const d = new Date(p.started_at);
+      return (
+        d.getUTCHours() === 0
+        && d.getUTCMinutes() === 0
+        && d.getUTCSeconds() === 0
+      );
+    });
+    return allAtMidnight ? X_AXIS_DAY_LABEL_FORMAT : X_AXIS_LABEL_FORMAT;
+  }, [points]);
 
   if (points.length === 0 || !layout) {
     return <div style={EMPTY_STYLE}>No timeline data available.</div>;
@@ -274,7 +307,7 @@ export function PlayerTimelineChart({
                   an array") and inflate the DOM with
                   reconciliation wrappers. */}
               <title>
-                {`${p.fight_id} · ${X_AXIS_LABEL_FORMAT.format(new Date(p.started_at))}\n` +
+                {`${p.fight_id} · ${xAxisFormat.format(new Date(p.started_at))}\n` +
                   `Damage: ${p.total_damage.toLocaleString("en-US")}\n` +
                   `Healing: ${p.total_healing.toLocaleString("en-US")}\n` +
                   `Strip: ${p.total_buff_removal.toLocaleString("en-US")}`}
@@ -314,7 +347,7 @@ export function PlayerTimelineChart({
                 fill="var(--foreground)"
                 opacity={0.6}
               >
-                {X_AXIS_LABEL_FORMAT.format(new Date(p.started_at))}
+                {xAxisFormat.format(new Date(p.started_at))}
               </text>
             );
           })}
