@@ -132,13 +132,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Known issue (web e2e - visual-regression baselines)
 
 - The 5 dynamic-page baselines (`04-fights.png` through
-  `08-fight-drilldown.png`) are STILL 1440x900 (the v0.8.9
-  pre-hydration-fix state). The screenshots.mjs fix should make
-  the next `pnpm screenshots --persist` run produce 1440x3196
-  captures, but the actual baseline refresh is deferred to a
-  followup commit. The dimension-mismatch check in the spec
-  fires BEFORE the diff step, so the VR suite currently fails
-  on the 5 dynamic pages until the baselines are refreshed.
+  `08-fight-drilldown.png`) are STILL 1440x900 (the
+  pre-hydration-fix state). The v0.9.0 followup commit
+  `882edff` simplified `web/scripts/screenshots.mjs` to match
+  the spec's wait strategy exactly (`page.goto` with
+  `waitUntil: "networkidle"` + immediate `page.screenshot()`),
+  AND `pnpm screenshots --persist` was re-run against the
+  live dev + mock servers. The script STILL captures at
+  1440x900 while the spec captures at 1440x3196 on the same
+  routes, despite identical wait strategies + identical
+  `fullPage: true` + identical dev server + identical mock
+  server + identical chromium headless. The dimension-mismatch
+  check in the spec fires BEFORE the diff step, so the VR
+  suite currently fails on the 5 dynamic pages.
+
+  The most likely root cause is a Playwright test-runner vs
+  `chromium.launch()` behavioural difference: the spec uses
+  the playwright test runner (which sets additional browser
+  args or context options), while the script uses
+  `chromium.launch({ headless: true })` directly. A secondary
+  hypothesis is a Next.js dev-overlay interaction that inflates
+  the spec's capture but not the script's (the overlay is in a
+  fixed container; `fullPage: true` may or may not include it
+  depending on the browser args). A future cycle should:
+  (a) compare the browser args / context options between the
+  spec and the script, (b) attempt the refresh against a
+  production build (`pnpm build && pnpm start`) where the
+  dev overlay is disabled, or (c) update the spec to drop
+  the dimension check and rely solely on the pixel-diff.
 
 ### Tests
 
