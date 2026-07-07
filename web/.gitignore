@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Generated OpenAPI spec (re-derived from `app.openapi()` on every
+# codegen run; never commit). Use `pnpm generate:api` to refresh.
+openapi.json
