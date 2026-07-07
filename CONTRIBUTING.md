@@ -163,6 +163,85 @@ on the runner.
 - Reuse existing `_build_*_record` helpers in test files whenever
   available. Don't reinvent fixture assembly in a new test.
 
+## Visual regression
+
+The `web/tests/e2e/visual-regression.spec.ts` spec pixel-diffs
+the 8 tracked PNGs at `docs/screenshots/` against fresh full-page
+captures of the corresponding routes (shipped in v0.8.9
+plan/003). The CI gate is **PR-only** ("Visual regression e2e
+(PR only)" step in `.github/workflows/ci.yml`); pushes to `main`
+don't pay the ~2-4 s of browser time.
+
+### When to refresh the baselines
+
+Refresh the 8 PNGs at `docs/screenshots/` whenever an intentional
+UI change would otherwise fail the diff (e.g. a new colour on the
+landing page, a layout shift on `/fights`, a re-rendered AG Grid
+column, a new SVG asset on the player timeline). The procedure:
+
+```bash
+# 1. From web/, start the mock server (port 8080) + Next dev
+#    server (port 3000). The pnpm dev script auto-regenerates
+#    the OpenAPI client first.
+(cd web && pnpm dev)
+
+# 2. In another terminal, refresh + persist the baselines:
+(cd web && pnpm screenshots --persist)
+# This writes 8 PNGs to screenshots/ at the repo root
+# (gitignored) AND mirrors them into docs/screenshots/
+# (tracked) via the --persist flag.
+
+# 3. Visually skim the 8 PNGs to confirm the change is
+#    intentional + looks correct (open them in your image
+#    viewer). Then commit them:
+git add docs/screenshots/*.png
+git commit -m "test(e2e): refresh 6 stale visual-regression baselines"
+```
+
+### Threshold rationale
+
+Two tunable values, both in `web/tests/e2e/visual-regression.spec.ts`:
+
+| Constant                      | Value  | Meaning                                                |
+|-------------------------------|--------|--------------------------------------------------------|
+| `DIFF_THRESHOLD`              | `0.01` | Total diff budget (1% of total pixel count).           |
+| `pixelmatch({ threshold })`   | `0.05` | Per-pixel color-difference tolerance (anti-aliasing).   |
+
+The 0.05 per-pixel tolerance was chosen empirically as the
+strictest value that still passes 8/8 against the committed
+baselines. A lower value (e.g. 0.02) would catch finer
+font-rendering drift at the cost of more false-positive CI
+failures from sub-pixel anti-aliasing differences between the
+baseline capture host + the spec capture host. A higher value
+(e.g. 0.1, pixelmatch's default) tolerates more drift but masks
+smaller intentional UI changes. See the spec's "Maintenance
+note" docstring for the full discussion.
+
+### Debugging a failure
+
+When the spec fails:
+
+1. The Playwright report logs the diff ratio + diff pixel count
+   for each case, e.g. `landing differs from 01-landing.png by
+   1.34% (threshold: 1.00%, 17,356 of 1,296,000 pixels)`.
+2. A diff PNG (a red highlight overlay on the changed pixels)
+   is written to `web/tests/e2e/.visual-regression-output/<baseline>`
+   (gitignored). The path is included in the failure message
+   for direct access from the CI logs.
+3. On CI, the same dir is uploaded as the
+   `visual-regression-diffs` artifact (7-day retention; gated on
+   `failure() && github.event_name == 'pull_request'`). Download
+   it from the Actions run page → Artifacts section.
+4. Compare the diff PNG to the committed baseline side-by-side
+   to confirm whether the change is intentional (refresh
+   baselines) or a regression (revert the offending commit).
+
+If a diff > 0% surfaces on a **non-PR** run (i.e. locally
+without changing any UI code), the most likely cause is
+font-rendering drift between the capture host + the spec host.
+Run `pnpm screenshots --persist` to re-baseline from the same
+host the spec runs on, then commit the updated PNGs.
+
 ## Pull request workflow
 
 1. Branch off `main`.

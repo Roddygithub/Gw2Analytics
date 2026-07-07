@@ -56,13 +56,19 @@
  *
  * Maintenance note
  * ================
- * The 1% threshold is a tunable (the ``DIFF_THRESHOLD`` const
- * below). A future cycle could lower it to 0.5% for stricter
- * diffing (catches font-rendering drift across Node
- * versions). A future cycle could also narrow the spec to
- * "only the 4 PNGs that are most likely to regress" (e.g.
- * drop the 2 fixture-edge-state PNGs) if CI cost becomes a
- * concern.
+ * The 1% total-diff threshold is a tunable (the
+ * ``DIFF_THRESHOLD`` const below). The per-pixel color
+ * tolerance is also a tunable (the ``threshold: 0.05`` arg
+ * to ``pixelmatch``); lower = stricter (catches
+ * font-rendering drift across Node versions at the cost
+ * of more false positives on anti-aliasing). The current
+ * values were chosen empirically: ``pnpm exec playwright
+ * test --project=visual-regression`` returns diff = 0% on
+ * the 8 committed baselines; see ``CONTRIBUTING.md`` for
+ * the refresh procedure + threshold-rationale docs.
+ * A future cycle could narrow the spec to "only the 4 PNGs
+ * that are most likely to regress" (e.g. drop the 2
+ * fixture-edge-state PNGs) if CI cost becomes a concern.
  */
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
@@ -238,12 +244,19 @@ test.describe("visual regression (v0.8.9 plan/003)", () => {
       // for the no-failure case (the diff output is only
       // useful when the test fails; the pixel count is all
       // we need to assert on).
-      // The ``threshold`` option (default 0.1) is the
-      // per-pixel color-difference tolerance for
-      // anti-aliasing; values < 0.1 are considered
-      // "different". A higher value tolerates more
-      // anti-aliasing drift at the cost of catching
-      // smaller intentional changes.
+      // The ``threshold`` option (0.05 here; pixelmatch's
+      // default is 0.1) is the per-pixel color-difference
+      // tolerance for anti-aliasing. Pixels with a color
+      // difference BELOW the threshold are considered
+      // matching and are NOT counted in the diff. A higher
+      // value tolerates more anti-aliasing drift at the
+      // cost of catching smaller intentional changes. The
+      // value 0.05 was chosen empirically as the strictest
+      // tolerance that still passes 8/8 against the
+      // committed baselines (a stricter value would risk
+      // false-positive CI failures from sub-pixel
+      // anti-aliasing differences between the baseline
+      // capture host + the spec capture host).
       const totalPixelCount = baselinePng.width * baselinePng.height;
       const diffPixelCount = pixelmatch(
         baselinePng.data,
@@ -274,7 +287,7 @@ test.describe("visual regression (v0.8.9 plan/003)", () => {
           diffPng.data,
           baselinePng.width,
           baselinePng.height,
-          { threshold: 0.1 },
+          { threshold: 0.05 },
         );
         await fs.writeFile(diffPath, PNG.sync.write(diffPng));
         // Clean up the temp capture -- it's no longer needed
