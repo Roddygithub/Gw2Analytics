@@ -7,6 +7,184 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - Phase 9: player-centric surface + per-fight squad + per-fight skill roll-ups
+
+### Added (analytics)
+
+- `libs/gw2_analytics/src/gw2_analytics/player_profile.py` (NEW):
+  `PlayerProfileAggregator.aggregate(contributions: Iterable[FightContribution]) -> list[PlayerProfile]`.
+  Cross-fight join keyed on `account_name`; first-seen
+  profession/elite anchor; last-seen `name`; dedup on
+  `(account_name, fight_id)`. Rows sorted deterministic by
+  `(-total_damage, account_name)`. `FightsAttended` is the
+  length of the dedup'd `attended_fight_ids` set (one per
+  fight, not one per contribution). All totals
+  (`total_damage` / `total_healing` / `total_buff_removal`)
+  sum the per-fight contributions, NOT the raw events
+  (matches the route's source-side attribution contract).
+- `libs/gw2_analytics/src/gw2_analytics/squad_rollup.py` (NEW):
+  `SquadRollupAggregator.aggregate(events, agents, duration_s)
+  -> list[SquadRollupRow]`. Source-side per-subgroup roll-up;
+  every event's `source_agent_id` looks up the source's
+  `subgroup` in the agent map (NOT the target's subgroup --
+  damage-flow attribution, not hit-flow). Rows sorted by
+  `(-total_damage, subgroup)`. `bps` (= total_buff_removal /
+  duration_s) and `hps` (= total_healing / duration_s) use
+  the same zero/negative `duration_s` guard as the per-target
+  roll-ups.
+- `libs/gw2_analytics/src/gw2_analytics/skill_usage.py` (NEW):
+  `SkillUsageAggregator.aggregate(events, skills, duration_s)
+  -> list[SkillUsageRow]`. Per-skill roll-up keyed on
+  `skill_id`; `hit_count` is the SUM of the per-event hit
+  counts across all 3 event kinds (damage + healing + strip
+  = 1 each per event). The route surfaces `hit_count` on the
+  API surface (the per-target roll-ups deliberately drop it
+  as analyst-only metadata); the per-skill roll-up keeps it
+  because analysts use it to spot "low-damage high-frequency"
+  skill patterns.
+- `libs/gw2_analytics/src/gw2_analytics/__init__.py`: re-exports
+  the 3 new aggregators + their row models. `__version__` bumped
+  `0.5.0 -> 0.7.0` to mirror the coordinated Phase 9 surface
+  change.
+- `libs/gw2_analytics/tests/test_player_profile.py` (NEW): 7
+  pytest cases covering empty input, single-fight single-player
+  shape, multi-fight first-seen profession, multi-fight
+  last-seen name, dedup on `(account_name, fight_id)`, mixed
+  multi-fight ordering, and frozen-Pydantic guarantee.
+- `libs/gw2_analytics/tests/test_squad_rollup.py` (NEW): 7
+  pytest cases covering empty input, single-subgroup shape,
+  source-vs-target subgroup attribution, multi-subgroup
+  ordering, dual-emit (heal + strip from same record), the
+  zero/negative `duration_s` guard, and frozen-Pydantic
+  guarantee.
+- `libs/gw2_analytics/tests/test_skill_usage.py` (NEW): 7
+  pytest cases covering empty input, single-skill shape,
+  multi-skill hit-count accounting, dual-emit (damage + heal
+  + strip from same record), skill-name resolution from
+  the `SkillCatalogEntry` map, the zero/negative `duration_s`
+  guard, and frozen-Pydantic guarantee.
+
+### Added (apps/api)
+
+- `apps/api/src/gw2analytics_api/schemas.py`: 7 new Pydantic
+  response schemas -- `PlayerListRowOut` + `PerFightBreakdownRowOut`
+  + `PlayerProfileOut` (for the player-centric surface),
+  `SquadRollupRowOut` + `FightSquadsOut` (for the per-fight
+  squad roll-up), and `SkillUsageRowOut` + `FightSkillsOut`
+  (for the per-fight skill roll-up). All use the same
+  `PROF(<id>)` / `ELITE(<id>)` / `BASE` / `UNKNOWN` string
+  label contract as the pre-existing `/fights` response.
+- `apps/api/src/gw2analytics_api/routes/players.py` (NEW):
+  `GET /api/v1/players` (paginated cross-fight roll-up, default
+  50 / max 500) and `GET /api/v1/players/{account_name:path}`
+  (full profile + per-fight breakdown, ordered by
+  `started_at DESC`). Both routes load all `OrmFight` rows
+  (ordered by `started_at DESC`, `selectinload(OrmFight.agents)`),
+  pre-batch-load all `OrmFightAgent` rows for the fight set
+  (one IN-clause query -- not N+1), then walk each fight's
+  events blob via a single shared `_compute_contributions`
+  helper. The helper degrades gracefully for fights with
+  `events_blob_uri is None` (creates 0-total contributions
+  for each player agent in the fight so the cross-fight
+  roll-up still includes the player) and tolerates
+  S3-gone / gzip-corrupt blobs via `logger.warning` + `continue`
+  (the fight is silently dropped from the roll-up, matching
+  the pre-Phase-9 contract). 404 contract: an unknown
+  `account_name` raises `HTTPException(404, "player not found")`
+  so analysts can distinguish "no data" from "API error".
+- `apps/api/src/gw2analytics_api/routes/fights.py`:
+  `GET /api/v1/fights/{id}/squads` + `GET /api/v1/fights/{id}/skills`
+  extensions of the pre-existing per-fight events surface.
+  Both share the same blob-load + decompress + event-split
+  pattern as `/events` (DRY refactor deferred to v0.7.1 --
+  code-reviewer flagged the duplication in Round 72; the
+  route signature stays unchanged across the refactor).
+- `apps/api/src/gw2analytics_api/main.py`: includes the new
+  `players` router; FastAPI `version` string bumped
+  `0.6.0 -> 0.7.0`.
+- `apps/api/pyproject.toml`: version bumped `0.6.0 -> 0.7.0`.
+- `apps/api/src/gw2analytics_api/__init__.py`: `__version__`
+  bumped `0.6.0 -> 0.7.0`.
+- `apps/api/tests/test_uploads_e2e.py`: 7 NEW self-contained
+  e2e tests for the Phase 9 surface:
+  - `test_players_list_returns_accounts_present_in_fight`
+  - `test_player_detail_returns_profile_with_per_fight_breakdown`
+  - `test_player_detail_404_when_account_unknown`
+  - `test_fight_squads_returns_per_subgroup_rollup`
+  - `test_fight_squads_404_when_fight_unknown`
+  - `test_fight_skills_returns_per_skill_rollup`
+  - `test_fight_skills_404_when_fight_unknown`
+  Each test POSTs its own `.zevtc` fixture so the test order
+  is irrelevant. The Phase 8 DUAL-EMIT case
+  (`is_nondamage=1` + `value>0` + `buff_dmg>0` on a single
+  cbtevent record) is exercised end-to-end through the
+  squad + skill roll-ups. The new `_post_minimal_fight`
+  helper accepts an optional `suffix` kwarg so callers can
+  thread their own uuid-derived suffix through the .zevtc
+  fixture, aligning the cbtevent's `source_agent_id` with
+  the parser-assigned agent table IDs (without this
+  alignment, the route's source-side attribution silently
+  drops every event and the cross-fight roll-up returns 0
+  contributions for the fixture's accounts).
+
+### Notes
+
+- The v0.7.0 release ships the BACKEND only. The web layer
+  (2 new pages `/players` + `/players/[account_name]`, plus
+  the `EventWindowsChart` + `SquadRollupsGrid` + `SkillUsageTable`
+  client components, plus the `PlayerSearchBar` in the layout
+  + the home page nav update) is deferred to v0.7.1.
+- The O(fights x events) per-request cost is acceptable for
+  v0.7.0 (a handful of fights in the local-dev dataset). v0.7.1
+  will materialise a `fight_player_summaries` table to avoid
+  the 5-30s latency for users with 100+ fights (the schema is
+  trivial: `fight_id`, `account_name`, `total_damage`,
+  `total_healing`, `total_buff_removal` -- the route layer
+  becomes a pure SQL aggregation).
+- The `_compute_contributions` helper's `noqa: PLR0912` is
+  a deliberate trade-off: the function is a single-pass
+  walk over the heterogeneous event stream, so splitting it
+  into smaller helpers would scatter the hot loop across
+  multiple call sites without making it easier to reason
+  about. A future refactor (v0.7.1+) can split it once the
+  `fight_player_summaries` table eliminates the per-request
+  re-walk.
+- The `_post_minimal_fight` helper's `suffix` kwarg is the
+  single source of truth for the test-side ID alignment
+  contract. Any future e2e test that seeds its own events
+  MUST either thread its own `suffix` through the helper OR
+  use a default-suffix `_post_minimal_fight()` call (no
+  events). The helper docstring documents the bug rationale
+  (parser-assigned agent_id vs cbtevent `source_agent_id`).
+
+### Tests
+
+- 21 new analytics tests (7 player_profile + 7 squad_rollup +
+  7 skill_usage).
+- 7 new e2e tests (4 new endpoints + 3 404 contracts).
+- Python test count: 58 (v0.6.0) -> 86 (v0.7.0).
+
+### Validation
+
+- `uv run ruff check libs apps`: clean (RUFF=0).
+- `uv run ruff format --check libs apps`: clean (FORMAT=0).
+- `uv run mypy libs apps --no-incremental`: clean (MYPY=0).
+- `uv run pytest libs`: 78 passed + 1 skipped (PYTEST_LIBS=0).
+- `uv run pytest apps/api`: 11 tests in `test_uploads_e2e.py`
+  + healthz (PYTEST_APPS=0).
+- Round 72-80 code-reviewer-minimax-m3: **APPROVED**
+  (suffix threading fix correctly aligns test-side event IDs
+  with helper-side agent IDs; `_compute_contributions`
+  helper's blob=None fallback + blob-walk branch both
+  exercised; PlayerProfile / SquadRollup / SkillUsage
+  aggregators follow the same source-side attribution
+  contract; 404 contract is consistent across the new
+  endpoints).
+
+[0.7.0]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.6.0...v0.7.0
+
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.0...HEAD
+
 ## [0.6.0] - Phase 8: BuffRemovalEvent end-to-end + per-target filter + CI Postgres service
 
 ### Added (domain)

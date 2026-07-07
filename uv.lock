@@ -497,7 +497,7 @@ wheels = [
 
 [[package]]
 name = "gw2-analytics"
-version = "0.2.0"
+version = "0.7.0"
 source = { editable = "libs/gw2_analytics" }
 dependencies = [
     { name = "gw2-core" },
@@ -523,7 +523,7 @@ requires-dist = [{ name = "httpx", specifier = ">=0.27" }]
 
 [[package]]
 name = "gw2-core"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "libs/gw2_core" }
 dependencies = [
     { name = "pydantic" },
@@ -557,12 +557,13 @@ dev = [{ name = "pytest", specifier = ">=8.3" }]
 
 [[package]]
 name = "gw2analytics-api"
-version = "0.2.0"
+version = "0.7.0"
 source = { editable = "apps/api" }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
     { name = "fastapi-mcp" },
+    { name = "gw2-analytics" },
     { name = "gw2-api-client" },
     { name = "gw2-core" },
     { name = "gw2-evtc-parser" },
@@ -589,6 +590,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "fastapi-mcp", specifier = ">=0.1" },
     { name = "fastapi-mcp", specifier = ">=0.4" },
+    { name = "gw2-analytics", editable = "libs/gw2_analytics" },
     { name = "gw2-api-client", editable = "libs/gw2_api_client" },
     { name = "gw2-core", editable = "libs/gw2_core" },
     { name = "gw2-evtc-parser", editable = "libs/gw2_evtc_parser" },

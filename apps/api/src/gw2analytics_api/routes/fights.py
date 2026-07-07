@@ -17,18 +17,24 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from gw2_analytics.event_window import EventWindowAggregator
+from gw2_analytics.skill_usage import SkillUsageAggregator
+from gw2_analytics.squad_rollup import SquadRollupAggregator
 from gw2_analytics.target_buff_removal import TargetBuffRemovalAggregator
 from gw2_analytics.target_dps import TargetDpsAggregator
 from gw2_analytics.target_healing import TargetHealingAggregator
 from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 from gw2analytics_api.database import get_session
-from gw2analytics_api.models import OrmFight
+from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightSkill
 from gw2analytics_api.schemas import (
     AgentOut,
     EventBucketOut,
     FightEventsSummaryOut,
     FightOut,
+    FightSkillsOut,
+    FightSquadsOut,
     SkillOut,
+    SkillUsageRowOut,
+    SquadRollupRowOut,
     TargetBuffRemovalRowOut,
     TargetDpsRowOut,
     TargetHealingRowOut,
@@ -235,6 +241,179 @@ def get_fight_events(
             TargetBuffRemovalRowOut.model_validate(r.model_dump()) for r in target_buff_removal
         ],
         event_windows=[EventBucketOut.model_validate(b.model_dump()) for b in event_windows],
+    )
+
+
+# ---------------------------------------------------------------------------
+# v0.7.0: per-subgroup (squad) and per-skill roll-ups
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{fight_id}/squads",
+    response_model=FightSquadsOut,
+)
+def get_fight_squads(
+    fight_id: str,
+    db: Session = Depends(get_session),  # noqa: B008
+) -> FightSquadsOut:
+    """Return the per-subgroup (squad) roll-up for one fight.
+
+    v0.7.0 ships this as a SEPARATE endpoint (not folded into
+    :func:`get_fight_events`) so the per-fight drill-down page can
+    fetch it in parallel with the per-target roll-ups via
+    ``Promise.all``; folding it into the existing payload would
+    force the page to refetch the full event blob even when only
+    the squad view is requested.
+
+    The route decompresses the same events blob the per-target
+    trio uses, splits by ``isinstance`` at the call site, loads
+    the per-fight agents to build the ``agent_id -> subgroup``
+    map, and invokes
+    :class:`gw2_analytics.squad_rollup.SquadRollupAggregator` on
+    the same ``duration_s``.
+
+    Response codes match :func:`get_fight_events` exactly
+    (``404`` for missing fight / blob / corrupt blob).
+    """
+    fight = db.get(OrmFight, fight_id)
+    if fight is None or fight.events_blob_uri is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
+
+    try:
+        gz_bytes = get_events(fight.events_blob_uri)
+    except S3Error:
+        logger.warning(
+            "events blob %s missing in MinIO for fight %s",
+            fight.events_blob_uri,
+            fight_id,
+        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable") from None
+
+    try:
+        jsonl = gzip.decompress(gz_bytes)
+    except OSError as exc:
+        logger.exception("events blob %s not gzip-decodable", fight.events_blob_uri)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "events blob corrupt") from exc
+
+    events: list[Event] = [
+        _EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line
+    ]
+    if not events:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable")
+
+    # Build the agent_id -> subgroup map. ``OrmFightAgent`` is
+    # pre-loaded by the route caller (not in this function) to
+    # avoid the N+1 query problem -- but a single fight's agent
+    # table is small (typically 5-50 rows), so the lazy load here
+    # is acceptable. An empty subgroup is a valid value that
+    # surfaces in the empty-string bucket.
+    agent_id_to_subgroup: dict[int, str] = {
+        a.agent_id: (a.subgroup or "")
+        for a in db.execute(
+            select(OrmFightAgent).where(OrmFightAgent.fight_id == fight_id),
+        )
+        .scalars()
+        .all()
+    }
+
+    duration_s = max(e.time_ms for e in events) / 1000.0
+    squad_rows = SquadRollupAggregator().aggregate(
+        [e for e in events if isinstance(e, DamageEvent)],
+        [e for e in events if isinstance(e, HealingEvent)],
+        [e for e in events if isinstance(e, BuffRemovalEvent)],
+        agent_id_to_subgroup,
+        duration_s,
+    )
+
+    return FightSquadsOut(
+        fight_id=fight_id,
+        duration_s=duration_s,
+        squads=[
+            SquadRollupRowOut.model_validate(
+                {
+                    "subgroup": r.subgroup,
+                    "total_damage": r.total_damage,
+                    "total_healing": r.total_healing,
+                    "total_buff_removal": r.total_buff_removal,
+                    "dps": r.dps,
+                    "hps": r.hps,
+                    "bps": r.bps,
+                },
+            )
+            for r in squad_rows
+        ],
+    )
+
+
+@router.get(
+    "/{fight_id}/skills",
+    response_model=FightSkillsOut,
+)
+def get_fight_skills(
+    fight_id: str,
+    db: Session = Depends(get_session),  # noqa: B008
+) -> FightSkillsOut:
+    """Return the per-skill roll-up for one fight.
+
+    v0.7.0 ships this as a SEPARATE endpoint (not folded into
+    :func:`get_fight_events`); same rationale as
+    :func:`get_fight_squads`. The route loads the per-fight
+    ``OrmFightSkill`` rows to build the ``skill_id -> skill_name``
+    map and invokes
+    :class:`gw2_analytics.skill_usage.SkillUsageAggregator` on the
+    split event streams. No ``duration_s`` is passed (the
+    skill-usage aggregator does not compute per-second rates; see
+    the module docstring for the rationale).
+    """
+    fight = db.get(OrmFight, fight_id)
+    if fight is None or fight.events_blob_uri is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
+
+    try:
+        gz_bytes = get_events(fight.events_blob_uri)
+    except S3Error:
+        logger.warning(
+            "events blob %s missing in MinIO for fight %s",
+            fight.events_blob_uri,
+            fight_id,
+        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable") from None
+
+    try:
+        jsonl = gzip.decompress(gz_bytes)
+    except OSError as exc:
+        logger.exception("events blob %s not gzip-decodable", fight.events_blob_uri)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "events blob corrupt") from exc
+
+    events: list[Event] = [
+        _EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line
+    ]
+    if not events:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable")
+
+    # Build the skill_id -> skill_name map. An empty skill name
+    # is a valid value (the parser surfaces it for unknown
+    # skills); the aggregator renders it as ``skill_name=""``.
+    skill_id_to_name: dict[int, str] = {
+        s.skill_id: (s.name or "")
+        for s in db.execute(
+            select(OrmFightSkill).where(OrmFightSkill.fight_id == fight_id),
+        )
+        .scalars()
+        .all()
+    }
+
+    skill_rows = SkillUsageAggregator().aggregate(
+        [e for e in events if isinstance(e, DamageEvent)],
+        [e for e in events if isinstance(e, HealingEvent)],
+        [e for e in events if isinstance(e, BuffRemovalEvent)],
+        skill_id_to_name,
+    )
+
+    return FightSkillsOut(
+        fight_id=fight_id,
+        skills=[SkillUsageRowOut.model_validate(r.model_dump()) for r in skill_rows],
     )
 
 

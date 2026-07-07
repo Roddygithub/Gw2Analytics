@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
 
 from gw2analytics_api.config import get_settings
-from gw2analytics_api.routes import account, fights, uploads
+from gw2analytics_api.routes import account, fights, players, uploads
 
 app = FastAPI(
     title="GW2Analytics API",
@@ -19,7 +19,13 @@ app = FastAPI(
         "WvW combat-log ingestion + analytics. Wires gw2_evtc_parser behind "
         "a MinIO blob store and Postgres fight tables (Phase 2)."
     ),
-    version="0.3.0",
+    # v0.7.0: adds the player-centric surface (GET /api/v1/players +
+    # GET /api/v1/players/{account_name}) and the per-fight squad
+    # (GET /api/v1/fights/{id}/squads) + skill (GET /api/v1/fights/{id}/skills)
+    # roll-ups. The per-target damage + healing + buff-removal trio
+    # and the per-bucket event windows stay locked at the 0.3.0
+    # contract.
+    version="0.7.0",
 )
 
 # CORS — wide-open by default for local dev (Next.js at :3000,
@@ -44,6 +50,7 @@ def healthz() -> dict[str, str]:
 
 app.include_router(uploads.router)
 app.include_router(fights.router)
+app.include_router(players.router)
 app.include_router(account.router)
 
 FastApiMCP(app).mount()

@@ -1,6 +1,6 @@
 [project]
 name = "gw2analytics_api"
-version = "0.3.0"
+version = "0.7.0"
 description = "FastAPI app for GW2Analytics. Wires gw2_core + gw2_evtc_parser + gw2_api_client behind endpoints."
 requires-python = ">=3.12"
 license = { text = "MIT" }

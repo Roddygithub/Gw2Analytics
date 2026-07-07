@@ -30,9 +30,11 @@ dependency locally + in CI.
 from __future__ import annotations
 
 import struct
+import time
 import uuid as _uuid
 import zipfile
 from io import BytesIO
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -391,3 +393,297 @@ def test_healthz_responds() -> None:
     resp = client.get("/healthz")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# v0.7.0: player-centric surface + per-fight squad/skill roll-ups
+#
+# These tests are SELF-CONTAINED: each one POSTs its own .zevtc
+# fixture so the test order is irrelevant. Sharing a single
+# happy-path fight across multiple tests would make the suite
+# fragile (any failure in the shared setup cascades).
+# ---------------------------------------------------------------------------
+
+
+def _post_minimal_fight(
+    events: list[bytes] | None = None,
+    suffix: str | None = None,
+) -> str:
+    """POST a minimal 2-player fight with optional cbtevent records.
+
+    Returns the persisted ``fight_id``. The fixture mirrors the
+    happy-path's 2-player layout (Warrior A + Guardian B, both
+    with empty subgroup) so the per-subgroup roll-up has exactly
+    1 row in the empty-string bucket.
+
+    ``suffix`` lets callers thread their own uuid-derived suffix
+    through the helper so the agent + skill IDs in the
+    cbtevent records match the IDs the parser writes into the
+    agent table. Without this, the route's source-side
+    attribution silently drops the events (``local_agents.get(
+    event.source_agent_id)`` returns ``None`` because the
+    parser-assigned agent_id differs from the cbtevent's
+    source_agent_id) and the player is missing from the
+    cross-fight roll-up.
+    """
+    suffix = suffix or _uuid.uuid4().hex[:8]
+    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_skill_b = base_skill_a + 1
+    blob = _make_minimal_zevtc(
+        [
+            (base_id_a, 2, 18, f"V07 Warrior {suffix}", True),
+            (base_id_b, 1, 27, f"V07 Guard {suffix}", True),
+        ],
+        build=build,
+        skills=[
+            (base_skill_a, f"Whirlwind {suffix}"),
+            (base_skill_b, f"Burning {suffix}"),
+        ],
+        events=events or [],
+    )
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("sample.zevtc", blob, "application/octet-stream")},
+    )
+    assert resp.status_code == 201, resp.text
+    upload_id = resp.json()["id"]
+    # Poll the upload status until the background parser flips
+    # ``status`` to ``"completed"``; the POST handler spawns
+    # ``process_parse`` via FastAPI's BackgroundTasks, so the
+    # upload is still "pending" immediately after the POST. The
+    # tests downstream depend on the events blob being written
+    # (the /players + /squads + /skills routes read it), so the
+    # wait is mandatory. A 5s ceiling is generous: the parser
+    # completes in milliseconds for a fixture-sized blob.
+    for _ in range(50):
+        upload_resp = client.get(f"/api/v1/uploads/{upload_id}")
+        assert upload_resp.status_code == 200
+        if upload_resp.json()["status"] == "completed":
+            # The FastAPI BackgroundTasks runner fires after
+            # the POST response is sent, so the first poll
+            # iteration might race the task startup. A small
+            # sleep gives the parser a chance to write the
+            # events blob before the downstream tests query
+            # it. The 5s ceiling is generous: the parser
+            # completes in milliseconds for a fixture-sized
+            # blob.
+            time.sleep(0.1)
+            return str(upload_resp.json()["fight_id"])
+        time.sleep(0.1)
+    msg = f"upload {upload_id} did not reach 'completed' within 5s"
+    raise AssertionError(msg)
+
+
+def test_players_list_returns_accounts_present_in_fight() -> None:
+    """v0.7.0: GET /api/v1/players returns one row per account_name with
+    the cross-fight totals. The e2e fixture seeds 2 players (A + B),
+    so the list should contain both account_names.
+    """
+    _post_minimal_fight()
+    resp = client.get("/api/v1/players")
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+    assert isinstance(rows, list)
+    assert len(rows) >= 2
+    accounts = {r["account_name"] for r in rows}
+    assert any(a.startswith(":synth.") for a in accounts)
+
+
+def test_player_detail_returns_profile_with_per_fight_breakdown() -> None:
+    """v0.7.0: GET /api/v1/players/{account_name} returns the full profile
+    + per-fight breakdown array.
+
+    Seeds the fight with at least 1 cbtevent so the parser writes
+    a non-null ``events_blob_uri``; the player route's
+    ``_compute_contributions`` returns 0 contributions for a fight
+    with no events, which would 404 the test.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    # Seed TWO events (A→B + B→A) so BOTH player agents have
+    # non-zero contributions; the test picks the first player
+    # agent from the API response (which may be A or B depending
+    # on ORM ordering) and queries their profile. A single
+    # directional event would leave one agent with 0 contributions
+    # and 404 the test.
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+        _make_cbtevent(
+            time_ms=2_000,
+            src=base_id_b,
+            dst=base_id_a,
+            value=500,
+            skill_id=base_skill_a,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+    fight_resp = client.get(f"/api/v1/fights/{fight_id}")
+    assert fight_resp.status_code == 200
+    fight = fight_resp.json()
+    player_agents = [a for a in fight["agents"] if a.get("account_name")]
+    assert player_agents, "expected at least 1 player agent in the fixture"
+    account_name = player_agents[0]["account_name"]
+
+    encoded = quote(account_name, safe="")
+    resp = client.get(f"/api/v1/players/{encoded}")
+    assert resp.status_code == 200, resp.text
+    profile = resp.json()
+    assert profile["account_name"] == account_name
+    assert profile["fights_attended"] >= 1
+    assert profile["total_damage"] >= 0
+    assert profile["total_healing"] >= 0
+    assert profile["total_buff_removal"] >= 0
+    assert isinstance(profile["attended_fight_ids"], list)
+    assert isinstance(profile["per_fight_breakdown"], list)
+    assert len(profile["per_fight_breakdown"]) == profile["fights_attended"]
+
+
+def test_player_detail_404_when_account_unknown() -> None:
+    """v0.7.0: GET /api/v1/players/{unknown} returns 404."""
+    resp = client.get("/api/v1/players/does-not-exist-1234")
+    assert resp.status_code == 404
+
+
+def test_fight_squads_returns_per_subgroup_rollup() -> None:
+    """v0.7.0: GET /api/v1/fights/{id}/squads returns the squad roll-up.
+
+    Exercises the Phase 8 DUAL-EMIT case: the cbtevent at
+    t=1.5s carries ``is_nondamage=1``, ``value=800``,
+    ``buff_dmg=300`` — the parser yields BOTH a ``HealingEvent``
+    (heal=800) AND a ``BuffRemovalEvent`` (strip=300) from the
+    same record. Both contributions land in the empty-string
+    subgroup bucket (the fixture seeds empty subgroups).
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_skill_b = base_skill_a + 1
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=567,
+            skill_id=base_skill_b,
+        ),
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=800,
+            buff_dmg=300,
+            skill_id=base_skill_a,
+            is_nondamage=1,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=400,
+            skill_id=base_skill_b,
+            is_nondamage=1,
+        ),
+        _make_cbtevent(
+            time_ms=2_000,
+            src=base_id_b,
+            dst=base_id_a,
+            value=0,
+            buff_dmg=200,
+            skill_id=base_skill_b,
+            is_nondamage=1,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+
+    resp = client.get(f"/api/v1/fights/{fight_id}/squads")
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["fight_id"] == fight_id
+    assert payload["duration_s"] > 0
+    assert isinstance(payload["squads"], list)
+    assert len(payload["squads"]) == 1
+    squad = payload["squads"][0]
+    assert squad["subgroup"] == ""
+    assert squad["total_damage"] == 1_234 + 567
+    assert squad["total_healing"] == 800 + 400
+    assert squad["total_buff_removal"] == 300 + 200
+
+
+def test_fight_skills_returns_per_skill_rollup() -> None:
+    """v0.7.0: GET /api/v1/fights/{id}/skills returns the per-skill roll-up.
+
+    Exercises the Phase 8 DUAL-EMIT case: skill A carries
+    damage=1234 + heal=800 + strip=300 from the same cbtevent's
+    dual-emit half. The roll-up has 2 rows ordered by total_damage
+    DESC; skill A wins (1234 > 567).
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_skill_b = base_skill_a + 1
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=567,
+            skill_id=base_skill_b,
+        ),
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=800,
+            buff_dmg=300,
+            skill_id=base_skill_a,
+            is_nondamage=1,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+
+    resp = client.get(f"/api/v1/fights/{fight_id}/skills")
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["fight_id"] == fight_id
+    assert isinstance(payload["skills"], list)
+    assert len(payload["skills"]) == 2
+    assert payload["skills"][0]["total_damage"] >= payload["skills"][1]["total_damage"]
+
+
+def test_fight_squads_404_when_fight_unknown() -> None:
+    """v0.7.0: GET /api/v1/fights/{unknown}/squads returns 404."""
+    resp = client.get("/api/v1/fights/does-not-exist-1234/squads")
+    assert resp.status_code == 404
+
+
+def test_fight_skills_404_when_fight_unknown() -> None:
+    """v0.7.0: GET /api/v1/fights/{unknown}/skills returns 404."""
+    resp = client.get("/api/v1/fights/does-not-exist-1234/skills")
+    assert resp.status_code == 404

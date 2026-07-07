@@ -197,6 +197,163 @@ class FightEventsSummaryOut(BaseModel):
     event_windows: list[EventBucketOut] = []  # forwarded Pydantic alias
 
 
+class SquadRollupRowOut(BaseModel):
+    """One per-subgroup roll-up row in :class:`FightSquadsOut`.
+
+    Mirrors :class:`gw2_analytics.squad_rollup.SquadRollupRow` with
+    the ``hit_count`` field dropped from the API surface
+    (analyst-only signal; UI shows ``total_damage`` +
+    ``total_healing`` + ``total_buff_removal`` + the three
+    per-second rates only). v0.7.0 ships this fourth roll-up,
+    source-side (the subgroup is the actor's, not the target's).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    subgroup: str
+    total_damage: int
+    total_healing: int
+    total_buff_removal: int
+    dps: float
+    hps: float
+    bps: float
+
+
+class FightSquadsOut(BaseModel):
+    """Combined payload from ``GET /api/v1/fights/{fight_id}/squads``.
+
+    v0.7.0 ships the squad-rollup as a separate endpoint (not
+    folded into :class:`FightEventsSummaryOut`) so the per-fight
+    drill-down page can fetch it in parallel with the per-target
+    roll-ups via ``Promise.all``; folding it into the existing
+    payload would force the page to refetch the full event blob
+    even when only the squad view is requested. The route
+    decompresses the same events blob, splits by ``isinstance``,
+    and invokes
+    :class:`gw2_analytics.squad_rollup.SquadRollupAggregator` on
+    the same ``duration_s`` used by the per-target trio.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fight_id: str
+    duration_s: float
+    squads: list[SquadRollupRowOut] = []
+
+
+class SkillUsageRowOut(BaseModel):
+    """One per-skill roll-up row in :class:`FightSkillsOut`.
+
+    Mirrors :class:`gw2_analytics.skill_usage.SkillUsageRow`; the
+    ``hit_count`` field is kept on the API surface (it's the
+    per-skill event frequency, the only per-skill signal that
+    doesn't depend on a duration). v0.7.0 ships this fifth
+    roll-up.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    skill_id: int
+    skill_name: str
+    hit_count: int
+    total_damage: int
+    total_healing: int
+    total_buff_removal: int
+
+
+class FightSkillsOut(BaseModel):
+    """Combined payload from ``GET /api/v1/fights/{fight_id}/skills``.
+
+    v0.7.0 ships the skill-usage roll-up as a separate endpoint
+    (not folded into :class:`FightEventsSummaryOut`); same
+    rationale as :class:`FightSquadsOut`. The route loads the
+    fight's ``OrmFightSkill`` rows to build the
+    ``skill_id -> skill_name`` map and invokes
+    :class:`gw2_analytics.skill_usage.SkillUsageAggregator` on
+    the split event streams.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fight_id: str
+    skills: list[SkillUsageRowOut] = []
+
+
+class PlayerListRowOut(BaseModel):
+    """One row of the cross-fight player roll-up returned by ``GET /api/v1/players``.
+
+    Lean schema for the list endpoint: the analyst scans a
+    paginated AG Grid of accounts. The full per-fight breakdown
+    lives on :class:`PlayerProfileOut` (returned by the detail
+    endpoint).
+
+    ``account_name`` is the operational identity (stable across
+    uploads). ``name`` is the last-seen char-name (cosmetic
+    identity). The three totals are summed across every fight the
+    account attended.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    account_name: str
+    name: str
+    profession: str
+    elite_spec: str
+    fights_attended: int
+    total_damage: int
+    total_healing: int
+    total_buff_removal: int
+
+
+class PerFightBreakdownRowOut(BaseModel):
+    """One row of the per-fight breakdown on :class:`PlayerProfileOut`.
+
+    The route computes one of these per ``(fight_id, account_name)``
+    pair by walking the fight's events blob and accumulating
+    magnitudes where ``event.source_agent_id`` maps to
+    ``account_name`` via :class:`OrmFightAgent`.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fight_id: str
+    started_at: datetime
+    total_damage: int
+    total_healing: int
+    total_buff_removal: int
+
+
+class PlayerProfileOut(BaseModel):
+    """Full player profile returned by ``GET /api/v1/players/{account_name}``.
+
+    Mirrors :class:`gw2_analytics.player_profile.PlayerProfile`
+    with the addition of the per-fight breakdown array
+    (``per_fight_breakdown``) and the ``started_at`` timestamps
+    on each fight row. v0.7.0 ships the player-centric view of
+    the dataset; the route joins on ``OrmFightAgent.account_name``
+    to build the cross-fight roll-up.
+
+    ``account_name`` is URL-encoded in the request path because
+    arcdps prefixes the value with ``:`` (e.g. ``:account.1234``);
+    FastAPI's path-parameter parser handles the decoding. The
+    route raises ``404 Not Found`` when no agent in any fight
+    carries the requested ``account_name``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    account_name: str
+    name: str
+    profession: str
+    elite_spec: str
+    fights_attended: int
+    total_damage: int
+    total_healing: int
+    total_buff_removal: int
+    attended_fight_ids: list[str] = []
+    per_fight_breakdown: list[PerFightBreakdownRowOut] = []
+
+
 class AccountEnrichedOut(BaseModel):
     """GET /api/v1/account response.
 

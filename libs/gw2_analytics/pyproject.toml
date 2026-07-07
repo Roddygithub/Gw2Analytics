@@ -1,6 +1,6 @@
 [project]
 name = "gw2_analytics"
-version = "0.4.0"
+version = "0.7.0"
 description = "Multi-level WvW combat analytics (single / multi-fight / per-player)."
 requires-python = ">=3.12"
 license = { text = "MIT" }
