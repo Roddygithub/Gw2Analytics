@@ -49,6 +49,7 @@ import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 
 import "./ag-grid-setup";
+import { CsvDownloadButton } from "./CsvDownloadButton";
 
 const GRID_THEME = "ag-theme-quartz-dark";
 const GRID_HEIGHT_PX = 320;
@@ -79,12 +80,21 @@ export interface TargetRollupsGridProps<TRow> {
    * rendered -- the page-level ``<h2>`` carries the label.
    */
   caption?: string;
+  /**
+   * Optional output filename for the "Download CSV" button. When
+   * set, a button is rendered next to the grid (hidden when
+   * ``rows`` is empty). The CSV column spec reuses the grid's
+   * ``columns`` prop, so the downloaded file matches the
+   * on-screen column order + decimal formatting exactly.
+   */
+  filename?: string;
 }
 
 export function TargetRollupsGrid<TRow extends { target_agent_id: number }>({
   rows,
   columns,
   caption,
+  filename,
 }: TargetRollupsGridProps<TRow>) {
   const colDefs = useMemo<ColDef<TRow>[]>(
     () =>
@@ -149,16 +159,23 @@ export function TargetRollupsGrid<TRow extends { target_agent_id: number }>({
   }
 
   return (
-    <div
-      className={GRID_THEME}
-      style={{ height: GRID_HEIGHT_PX, width: "100%" }}
-    >
-      <AgGridReact<TRow>
-        rowData={rows}
-        columnDefs={colDefs}
-        defaultColDef={defaultColDef}
-        animateRows
-      />
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+      {filename ? (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <CsvDownloadButton rows={rows} columns={columns} filename={filename} />
+        </div>
+      ) : null}
+      <div
+        className={GRID_THEME}
+        style={{ height: GRID_HEIGHT_PX, width: "100%" }}
+      >
+        <AgGridReact<TRow>
+          rowData={rows}
+          columnDefs={colDefs}
+          defaultColDef={defaultColDef}
+          animateRows
+        />
+      </div>
     </div>
   );
 }

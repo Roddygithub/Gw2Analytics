@@ -1,0 +1,37 @@
+{
+  "fight_id": "fixture-fight-001",
+  "skills": [
+    {
+      "skill_id": 9099,
+      "skill_name": "Meteor Shower",
+      "hit_count": 3,
+      "total_damage": 15000,
+      "total_healing": 0,
+      "total_buff_removal": 0
+    },
+    {
+      "skill_id": 5546,
+      "skill_name": "Chaos Storm",
+      "hit_count": 12,
+      "total_damage": 9000,
+      "total_healing": 0,
+      "total_buff_removal": 0
+    },
+    {
+      "skill_id": 21668,
+      "skill_name": "Well of Blood",
+      "hit_count": 4,
+      "total_damage": 0,
+      "total_healing": 6500,
+      "total_buff_removal": 0
+    },
+    {
+      "skill_id": 30142,
+      "skill_name": "Strip Shot",
+      "hit_count": 6,
+      "total_damage": 0,
+      "total_healing": 0,
+      "total_buff_removal": 12
+    }
+  ]
+}

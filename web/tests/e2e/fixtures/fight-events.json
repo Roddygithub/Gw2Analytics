@@ -1,0 +1,20 @@
+{
+  "fight_id": "fixture-fight-001",
+  "duration_s": 12.5,
+  "target_dps": [
+    { "target_agent_id": 1001, "total_damage": 50000, "dps": 4000.0 },
+    { "target_agent_id": 1002, "total_damage": 35000, "dps": 2800.0 }
+  ],
+  "target_healing": [
+    { "target_agent_id": 2001, "total_healing": 12000, "hps": 960.0 },
+    { "target_agent_id": 2002, "total_healing": 8000, "hps": 640.0 }
+  ],
+  "target_buff_removal": [
+    { "target_agent_id": 3001, "total_buff_removal": 50, "bps": 4.0 }
+  ],
+  "event_windows": [
+    { "start_ms": 0, "end_ms": 5000, "damage_total": 25000, "healing_total": 6000, "event_count": 120 },
+    { "start_ms": 5000, "end_ms": 10000, "damage_total": 40000, "healing_total": 9000, "event_count": 180 },
+    { "start_ms": 10000, "end_ms": 12500, "damage_total": 20000, "healing_total": 5000, "event_count": 95 }
+  ]
+}

@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
     "generate:api": "uv run python scripts/dump_openapi.py > openapi.json && pnpm exec openapi-typescript openapi.json -o ./src/lib/api/schema.d.ts && rm openapi.json"
   },
   "dependencies": {
@@ -17,6 +19,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^20",

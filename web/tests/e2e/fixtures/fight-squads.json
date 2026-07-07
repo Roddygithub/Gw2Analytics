@@ -1,0 +1,24 @@
+{
+  "fight_id": "fixture-fight-001",
+  "duration_s": 12.5,
+  "squads": [
+    {
+      "subgroup": "alpha",
+      "total_damage": 45000,
+      "total_healing": 8000,
+      "total_buff_removal": 30,
+      "dps": 3600.0,
+      "hps": 640.0,
+      "bps": 2.4
+    },
+    {
+      "subgroup": "beta",
+      "total_damage": 40000,
+      "total_healing": 12000,
+      "total_buff_removal": 20,
+      "dps": 3200.0,
+      "hps": 960.0,
+      "bps": 1.6
+    }
+  ]
+}

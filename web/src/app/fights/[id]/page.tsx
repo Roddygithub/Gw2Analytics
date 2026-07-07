@@ -307,7 +307,7 @@ export default async function FightEventsPage({
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Per-target damage</h2>
-        <TargetRollupsGrid rows={filteredDps} columns={DPS_COLUMNS} />
+        <TargetRollupsGrid rows={filteredDps} columns={DPS_COLUMNS} filename={`${id}-damage.csv`} />
       </section>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -317,6 +317,7 @@ export default async function FightEventsPage({
         <TargetRollupsGrid
           rows={filteredHealing}
           columns={HEALING_COLUMNS}
+          filename={`${id}-healing.csv`}
         />
       </section>
 
@@ -327,6 +328,7 @@ export default async function FightEventsPage({
         <TargetRollupsGrid
           rows={filteredBuffRemoval}
           columns={BUFF_REMOVAL_COLUMNS}
+          filename={`${id}-buff-removal.csv`}
         />
       </section>
 
@@ -337,12 +339,13 @@ export default async function FightEventsPage({
         <SquadRollupsGrid
           rows={squads?.squads ?? []}
           columns={SQUAD_COLUMNS}
+          filename={`${id}-squads.csv`}
         />
       </section>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Per-skill</h2>
-        <SkillUsageTable rows={skills?.skills ?? []} />
+        <SkillUsageTable rows={skills?.skills ?? []} filename={`${id}-skills.csv`} />
       </section>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>

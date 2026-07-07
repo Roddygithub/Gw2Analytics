@@ -1,0 +1,27 @@
+{
+  "account_name": "TestAccount.1234",
+  "name": "Test Char",
+  "profession": "ELEMENTALIST",
+  "elite_spec": "ELITE(68)",
+  "fights_attended": 42,
+  "total_damage": 1200000,
+  "total_healing": 250000,
+  "total_buff_removal": 300,
+  "attended_fight_ids": ["fixture-fight-001", "fixture-fight-002"],
+  "per_fight_breakdown": [
+    {
+      "fight_id": "fixture-fight-001",
+      "started_at": "2026-07-07T12:00:00+00:00",
+      "total_damage": 85000,
+      "total_healing": 12000,
+      "total_buff_removal": 50
+    },
+    {
+      "fight_id": "fixture-fight-002",
+      "started_at": "2026-07-07T13:30:00+00:00",
+      "total_damage": 0,
+      "total_healing": 0,
+      "total_buff_removal": 0
+    }
+  ]
+}

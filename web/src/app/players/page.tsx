@@ -68,7 +68,7 @@ export default async function PlayersPage() {
       {fetchError ? (
         <p style={{ color: "var(--accent)" }}>{fetchError}</p>
       ) : (
-        <PlayersGrid rows={rows} />
+        <PlayersGrid rows={rows} filename="players.csv" />
       )}
     </main>
   );

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "fixture-fight-001",
+    "build_version": " Gw2-1.3",
+    "encounter_id": 17948,
+    "agent_count": 10,
+    "started_at": "2026-07-07T12:00:00+00:00",
+    "game_type": 4
+  },
+  {
+    "id": "fixture-fight-002",
+    "build_version": " Gw2-1.3",
+    "encounter_id": 19292,
+    "agent_count": 12,
+    "started_at": "2026-07-07T13:30:00+00:00",
+    "game_type": 4
+  }
+]

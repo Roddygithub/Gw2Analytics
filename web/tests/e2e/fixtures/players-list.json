@@ -1,0 +1,32 @@
+[
+  {
+    "account_name": "TestAccount.1234",
+    "name": "Test Char",
+    "profession": "ELEMENTALIST",
+    "elite_spec": "ELITE(68)",
+    "fights_attended": 42,
+    "total_damage": 1200000,
+    "total_healing": 250000,
+    "total_buff_removal": 300
+  },
+  {
+    "account_name": "TestAccount.5678",
+    "name": "Alt Char",
+    "profession": "MESMER",
+    "elite_spec": "BASE",
+    "fights_attended": 7,
+    "total_damage": 180000,
+    "total_healing": 0,
+    "total_buff_removal": 450
+  },
+  {
+    "account_name": "TestAccount.9999",
+    "name": "Third Char",
+    "profession": "GUARDIAN",
+    "elite_spec": "ELITE(62)",
+    "fights_attended": 3,
+    "total_damage": 0,
+    "total_healing": 90000,
+    "total_buff_removal": 0
+  }
+]

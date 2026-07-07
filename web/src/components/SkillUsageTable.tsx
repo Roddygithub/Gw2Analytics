@@ -31,6 +31,24 @@
  */
 
 import type { SkillUsageRow } from "@/lib/api";
+import type { CsvColumn } from "@/lib/csv";
+import { CsvDownloadButton } from "./CsvDownloadButton";
+
+/**
+ * CSV column spec for the per-skill roll-up. Order matches the
+ * on-screen table; ``hit_count`` + the 3 totals are unformatted
+ * integers (raw values). The skill_id + skill_name pair is the
+ * canonical join key for analysts who want to look up the
+ * official description on the wiki.
+ */
+const CSV_COLUMNS: CsvColumn<SkillUsageRow>[] = [
+  { field: "skill_id", headerName: "Skill id" },
+  { field: "skill_name", headerName: "Skill name" },
+  { field: "hit_count", headerName: "Hit count" },
+  { field: "total_damage", headerName: "Total damage" },
+  { field: "total_healing", headerName: "Total healing" },
+  { field: "total_buff_removal", headerName: "Total strip" },
+];
 
 const TABLE_STYLE: React.CSSProperties = {
   width: "100%",
@@ -65,13 +83,32 @@ const EMPTY_STYLE: React.CSSProperties = {
   fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
 };
 
-export function SkillUsageTable({ rows }: { rows: SkillUsageRow[] }) {
+export function SkillUsageTable({
+  rows,
+  filename,
+}: {
+  rows: SkillUsageRow[];
+  /**
+   * Optional output filename for the "Download CSV" button. When
+   * set, a button is rendered above the table (hidden when
+   * ``rows`` is empty). The CSV column spec is the inline
+   * ``CSV_COLUMNS`` constant above so the downloaded file
+   * matches the on-screen column order.
+   */
+  filename?: string;
+}) {
   if (rows.length === 0) {
     return <div style={EMPTY_STYLE}>No skill roll-up rows.</div>;
   }
 
   return (
-    <table style={TABLE_STYLE}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {filename ? (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <CsvDownloadButton rows={rows} columns={CSV_COLUMNS} filename={filename} />
+        </div>
+      ) : null}
+      <table style={TABLE_STYLE}>
       <thead>
         <tr>
           <th style={TH_STYLE}>Skill id</th>
@@ -97,5 +134,6 @@ export function SkillUsageTable({ rows }: { rows: SkillUsageRow[] }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
