@@ -64,6 +64,10 @@ from gw2_analytics.multi_fight import (
     MultiFightAggregate,
     MultiFightAggregator,
 )
+from gw2_analytics.per_fight_timeline import (
+    PerFightTimelineAggregator,
+    PerFightTimelineRow,
+)
 from gw2_analytics.player_profile import (
     FightContribution,
     PlayerProfile,
@@ -90,6 +94,8 @@ __all__ = [
     "GroupSummary",
     "MultiFightAggregate",
     "MultiFightAggregator",
+    "PerFightTimelineAggregator",
+    "PerFightTimelineRow",
     "PlayerProfile",
     "PlayerProfileAggregator",
     "SingleFightAggregator",

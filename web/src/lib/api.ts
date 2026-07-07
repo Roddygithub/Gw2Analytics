@@ -647,3 +647,85 @@ export async function fetchFightSkills(
   }
   return (await resp.json()) as FightSkills;
 }
+
+/**
+ * One per-fight timeline point from
+ * ``GET /api/v1/fights/{fight_id}/timeline``, mirror of
+ * :class:`apps.api.schemas.PerFightTimelinePointOut`
+ * (apps/api 0.8.9+).
+ *
+ * The ``window_start_ms`` + ``window_end_ms`` straddle the
+ * half-open ``[start, end)`` bucket range (the per-bucket
+ * aggregation is contiguous). The 3 totals are the SUM of
+ * the bucket's events. The chart's X-axis labels the buckets
+ * by their ``window_start_ms / 1000`` in ``M:SS`` format
+ * (relative time, not absolute date+time -- the per-fight
+ * timeline is the "what happened in this fight" use case).
+ */
+export interface PerFightTimelinePoint {
+  window_start_ms: number;
+  window_end_ms: number;
+  total_damage: number;
+  total_healing: number;
+  total_buff_removal: number;
+}
+
+/**
+ * Per-fight timeline payload from
+ * ``GET /api/v1/fights/{fight_id}/timeline``, mirror of
+ * :class:`apps.api.schemas.PerFightTimelineOut`
+ * (apps/api 0.8.9+).
+ *
+ * The ``points`` array is sorted ascending by
+ * ``window_start_ms`` (the aggregator's deterministic-
+ * ordering contract). ``window_s`` + ``duration_s`` echo
+ * the request params + the parser's max(time_ms) / 1000.0
+ * so the chart can render a "Showing N buckets (M-second
+ * window, X-second duration)" caption without a second
+ * lookup.
+ */
+export interface FightTimeline {
+  fight_id: string;
+  window_s: number;
+  duration_s: number;
+  points: PerFightTimelinePoint[];
+}
+
+/**
+ * Get the per-fight timeline (damage + healing + buff-removal
+ * over time) for one fight.
+ *
+ * Mirrors ``GET /api/v1/fights/{fight_id}/timeline`` in
+ * :mod:`apps.api.routes.fights`. ``windowS`` defaults to 5
+ * (the gateway default; matches the per-fight events
+ * endpoint's bucketing convention). Throws :class:`ApiError`
+ * on any non-2xx so the Server Component can render the
+ * canonical upstream-error card (404: fight unknown OR
+ * events blob missing; 422: windowS out of range; 502: blob
+ * corrupt).
+ *
+ * The per-fight timeline is a separate endpoint from
+ * :func:`fetchFightEvents` (not folded into the events
+ * payload) for the same reason the squads + skills endpoints
+ * are separate: a single bound response would force the
+ * page to refetch the full event blob even when only the
+ * per-fight timeline is requested.
+ */
+export async function fetchFightTimeline(
+  fightId: string,
+  opts: { windowS?: number } = {},
+): Promise<FightTimeline> {
+  const params = new URLSearchParams();
+  if (opts.windowS !== undefined) {
+    params.set("window_s", String(opts.windowS));
+  }
+  const qs = params.toString();
+  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/timeline${
+    qs ? `?${qs}` : ""
+  }`;
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as FightTimeline;
+}

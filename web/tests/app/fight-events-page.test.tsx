@@ -70,6 +70,13 @@ import { vi } from "vitest";
 // would try to make a real HTTP call and time out at the 5s
 // vitest default. The 2 new fetchers need the same vi.fn()
 // treatment as the original.
+//
+// v0.8.9 of web (plan/002): the page now fires 4 parallel
+// fetchers; the 4th (``fetchFightTimeline``) is the per-fight
+// timeline section. A transient timeline failure degrades to a
+// section-level caption WITHOUT blanking the page, but the test
+// must still mock the 4th fetcher so the page doesn't try to
+// make a real HTTP call in jsdom.
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -77,6 +84,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     fetchFightEvents: vi.fn(),
     fetchFightSquads: vi.fn(),
     fetchFightSkills: vi.fn(),
+    fetchFightTimeline: vi.fn(),
   };
 });
 
@@ -85,6 +93,7 @@ import {
   fetchFightEvents,
   fetchFightSquads,
   fetchFightSkills,
+  fetchFightTimeline,
   ApiError,
 } from "@/lib/api";
 
@@ -143,6 +152,20 @@ const POPULATED_SKILLS = {
     { skill_id: 200, skill_name: "Heal", hit_count: 1, total_damage: 0, total_healing: 567, total_buff_removal: 333 },
   ],
 };
+// v0.8.9 of web (plan/002): per-fight timeline payload
+// returned by the (now-mocked) ``fetchFightTimeline`` fetcher.
+// 3 buckets of 5s each mirrors the mock-server's inline stub so
+// the page test + the e2e test exercise the same shape.
+const POPULATED_TIMELINE = {
+  fight_id: FIGHT_ID,
+  window_s: 5,
+  duration_s: 15.0,
+  points: [
+    { window_start_ms: 0, window_end_ms: 5_000, total_damage: 1_000, total_healing: 200, total_buff_removal: 50 },
+    { window_start_ms: 5_000, window_end_ms: 10_000, total_damage: 3_000, total_healing: 100, total_buff_removal: 75 },
+    { window_start_ms: 10_000, window_end_ms: 15_000, total_damage: 2_000, total_healing: 300, total_buff_removal: 25 },
+  ],
+};
 
 const EMPTY_PAYLOAD = {
   fight_id: FIGHT_ID,
@@ -157,6 +180,11 @@ describe("FightEventsPage", () => {
   beforeEach(() => {
     vi.mocked(fetchFightSquads).mockResolvedValue(POPULATED_SQUADS);
     vi.mocked(fetchFightSkills).mockResolvedValue(POPULATED_SKILLS);
+    // v0.8.9 of web (plan/002): the 4th fetcher defaults to a
+    // populated 3-bucket timeline so the section renders the
+    // chart. Tests that exercise the transient-failure path
+    // (.mockRejectedValue) override this in their body.
+    vi.mocked(fetchFightTimeline).mockResolvedValue(POPULATED_TIMELINE);
   });
 
   it("renders the header + section headings when fetchFightEvents returns a populated payload", async () => {
@@ -195,6 +223,15 @@ describe("FightEventsPage", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "Event windows" }),
     ).toBeInTheDocument();
+    // v0.8.9 of web (plan/002): the per-fight timeline is the
+    // 7th section, mounted below the per-bucket event windows.
+    // The section component is stubbed out by the setup.ts
+    // global mock (returns ``null``), so we cannot assert the
+    // heading here -- the section-level rendering is covered
+    // by the e2e test in web/tests/e2e/fights.spec.ts which
+    // runs against the real components. The 4th-fetcher mock
+    // here just confirms the page does not crash on a
+    // populated timeline payload.
   });
 
   it("renders the upstream-error card when fetchFightEvents throws", async () => {
@@ -247,6 +284,11 @@ describe("FightEventsPage", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "Event windows" }),
     ).toBeInTheDocument();
+    // v0.8.9 of web (plan/002): the per-fight timeline section
+    // is stubbed out by the setup.ts global mock (the section
+    // component returns ``null``), so we do not assert the
+    // heading here. The 4th-fetcher mock returns a populated
+    // payload by default; the page does not crash.
   });
 
   it("forwards searchParams.window_s to fetchFightEvents (window-s selector wiring)", async () => {

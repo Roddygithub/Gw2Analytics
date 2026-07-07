@@ -462,3 +462,67 @@ class AccountEnrichedOut(BaseModel):
     world_id: int
     world_name: str
     world_population: str  # matches gw2_core.Population values
+
+
+class PerFightTimelinePointOut(BaseModel):
+    """One row of the per-fight timeline on :class:`PerFightTimelineOut`.
+
+    v0.8.9 ships this lean schema for the new per-fight timeline
+    chart: ``window_start_ms`` + ``window_end_ms`` (the
+    half-open ``[start, end)`` range) + the 3 totals. The chart
+    consumes only the 3 totals per bucket (no rate columns, no
+    per-target roll-ups). Mirrors the wire shape of
+    :class:`EventBucketOut` (the per-bucket row on the existing
+    ``/events`` endpoint) but with ``window_start_ms`` /
+    ``window_end_ms`` instead of ``start_ms`` / ``end_ms`` so the
+    two endpoints' row shapes are visually distinct (the
+    per-fight timeline is its own wire surface, not a folded-in
+    extension of the events payload).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    window_start_ms: int
+    window_end_ms: int
+    total_damage: int
+    total_healing: int
+    total_buff_removal: int
+
+
+class PerFightTimelineOut(BaseModel):
+    """Response from ``GET /api/v1/fights/{fight_id}/timeline``.
+
+    v0.8.9 ships this as a SEPARATE endpoint (not folded into
+    :class:`FightEventsSummaryOut`) for the same reason the
+    squads + skills endpoints are separate: a single bound
+    response would force the page to refetch the full event
+    blob even when only the per-fight timeline is requested.
+    The route reuses :func:`_load_fight_events` (the same
+    shared helper the per-target trio + squads + skills
+    endpoints use) and invokes
+    :class:`gw2_analytics.per_fight_timeline.PerFightTimelineAggregator`
+    on the parsed events.
+
+    - ``fight_id`` echoes the path param so the wire consumer
+      can verify which fight the timeline belongs to.
+    - ``window_s`` echoes the query param so the consumer can
+      verify the bucket size the route applied (matches the
+      ``window_s`` contract on :func:`get_fight_events`).
+    - ``duration_s`` mirrors the same scalar on
+      :class:`FightEventsSummaryOut` (computed natively as
+      ``max(event.time_ms) / 1000.0`` because the V1.3 EVTC
+      header does not carry a wall-clock duration).
+    - ``points`` is the list of :class:`PerFightTimelinePointOut`
+      rows, sorted ascending by ``window_start_ms``. Empty
+      when the parser yielded zero events (a defensive empty
+      list -- the per-fight timeline is the "what happened
+      in this fight" use case, and a 0-event fight has no
+      timeline to show).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fight_id: str
+    window_s: int
+    duration_s: float
+    points: list[PerFightTimelinePointOut] = []

@@ -199,6 +199,57 @@ const server = createServer(async (req, res) => {
       return jsonResponse(res, 200, body);
     }
 
+    // /api/v1/fights/:id/timeline?window_s=N  (v0.8.9 plan/002).
+    // Stub payload: 3 buckets of 5s each, total 15s of fight.
+    // The hard-coded inline stub mirrors the canonical
+    // ``PerFightTimelineOut`` shape: ``fight_id`` +
+    // ``window_s`` + ``duration_s`` + ``points`` array of
+    // ``{window_start_ms, window_end_ms, total_damage,
+    // total_healing, total_buff_removal}``. We intentionally
+    // do NOT load a fixture file (the schema is small + the
+    // page-level E2E only asserts the section heading's
+    // presence; the per-bucket content is covered by the
+    // vitest unit tests).
+    const fightTimelineMatch = path.match(/^\/api\/v1\/fights\/([^/]+)\/timeline$/);
+    if (fightTimelineMatch) {
+      const fightId = decodeURIComponent(fightTimelineMatch[1]);
+      if (!KNOWN_FIGHTS.has(fightId)) {
+        return jsonResponse(res, 404, JSON.stringify({ error: "fight not found" }));
+      }
+      return jsonResponse(
+        res,
+        200,
+        JSON.stringify({
+          fight_id: fightId,
+          window_s: 5,
+          duration_s: 15.0,
+          points: [
+            {
+              window_start_ms: 0,
+              window_end_ms: 5_000,
+              total_damage: 1_000,
+              total_healing: 200,
+              total_buff_removal: 50,
+            },
+            {
+              window_start_ms: 5_000,
+              window_end_ms: 10_000,
+              total_damage: 3_000,
+              total_healing: 100,
+              total_buff_removal: 75,
+            },
+            {
+              window_start_ms: 10_000,
+              window_end_ms: 15_000,
+              total_damage: 2_000,
+              total_healing: 300,
+              total_buff_removal: 25,
+            },
+          ],
+        }),
+      );
+    }
+
     if (path === "/api/v1/players") {
       const body = await loadFixture("players-list.json");
       return jsonResponse(res, 200, body);

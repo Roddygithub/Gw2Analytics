@@ -62,11 +62,13 @@ import {
   fetchFightEvents,
   fetchFightSquads,
   fetchFightSkills,
+  fetchFightTimeline,
   formatApiError,
   type TargetDpsRow,
   type TargetHealingRow,
   type TargetBuffRemovalRow,
   type FightEventsSummaryRow,
+  type FightTimeline,
   type SquadRollupRow,
   type SkillUsageRow,
 } from "@/lib/api";
@@ -81,6 +83,7 @@ import {
 import { EventWindowsTable } from "@/components/EventWindowsTable";
 import { EventWindowsChart } from "@/components/EventWindowsChart";
 import { SkillUsageTable } from "@/components/SkillUsageTable";
+import { PerFightTimelineSection } from "@/components/PerFightTimelineSection";
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
 import { TargetFilter } from "@/components/TargetFilter";
 
@@ -192,8 +195,18 @@ export default async function FightEventsPage({
   // failure should not blank the whole page. The common
   // upstream-blob failure mode (S3Error on /events) still
   // surfaces the unified error card below.
+  //
+  // v0.8.9 of web (plan/002): the per-fight timeline
+  // (``fetchFightTimeline``) joins the parallel fetch in the
+  // 4th slot. A transient timeline failure (502 blob corrupt,
+  // 404 unknown fight) degrades to a section-level "Per-fight
+  // timeline unavailable" caption WITHOUT blanking the page --
+  // the per-target trio + per-subgroup + per-skill sections
+  // are still rendered. Only the /events failure (slot 0) flips
+  // the page to the unified error card above.
   let squads: import("@/lib/api").FightSquads | null = null;
   let skills: import("@/lib/api").FightSkills | null = null;
+  let timeline: FightTimeline | null = null;
   // ``fetchError`` carries the user-facing error string (already
   // formatted via :func:`formatApiError` so the page renders the
   // exact same text a Client Component would). The body of the
@@ -204,6 +217,7 @@ export default async function FightEventsPage({
     fetchFightEvents(id, { windowS }),
     fetchFightSquads(id),
     fetchFightSkills(id),
+    fetchFightTimeline(id, { windowS }),
   ]);
   if (results[0].status === "fulfilled") {
     summary = results[0].value;
@@ -215,6 +229,9 @@ export default async function FightEventsPage({
   }
   if (results[2].status === "fulfilled") {
     skills = results[2].value;
+  }
+  if (results[3].status === "fulfilled") {
+    timeline = results[3].value;
   }
 
   if (fetchError || !summary) {
@@ -389,6 +406,17 @@ export default async function FightEventsPage({
         <EventWindowsChart buckets={summary.event_windows} />
         <EventWindowsTable buckets={summary.event_windows} />
       </section>
+
+      {/* v0.8.9 of web (plan/002): the per-fight timeline lives
+          at the bottom of the page, BELOW the per-bucket event
+          windows section. The per-bucket event windows are the
+          "raw" view (absolute damage + healing per bucket from
+          the existing ``EventWindowAggregator``); the per-fight
+          timeline is the "normalised" view (3 stacked line
+          series for trend reading). Showing both side-by-side
+          lets the analyst correlate the absolute bucket
+          magnitudes with the per-series trend lines. */}
+      <PerFightTimelineSection timeline={timeline} />
     </main>
   );
 }

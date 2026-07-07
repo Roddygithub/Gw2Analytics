@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from gw2_analytics.event_window import EventWindowAggregator
+from gw2_analytics.per_fight_timeline import PerFightTimelineAggregator
 from gw2_analytics.skill_usage import SkillUsageAggregator
 from gw2_analytics.squad_rollup import SquadRollupAggregator
 from gw2_analytics.target_buff_removal import TargetBuffRemovalAggregator
@@ -32,6 +33,8 @@ from gw2analytics_api.schemas import (
     FightOut,
     FightSkillsOut,
     FightSquadsOut,
+    PerFightTimelineOut,
+    PerFightTimelinePointOut,
     SkillOut,
     SkillUsageRowOut,
     SquadRollupRowOut,
@@ -139,6 +142,122 @@ def list_fights(
         .all()
     )
     return [_to_fight_out(f) for f in rows]
+
+
+# ---------------------------------------------------------------------------
+# v0.8.9: per-fight timeline (damage + healing + buff-removal over time)
+#
+# Declaration order matters: this route is declared BEFORE the
+# ``/{fight_id}`` catch-all ``get_fight`` below as a defensive guard
+# against any future refactor that widens the catch-all to
+# ``/{fight_id:path}``. With the path-style converter, FastAPI would
+# match ``/api/v1/fights/{id}/timeline`` against the catch-all with
+# ``fight_id="{id}/timeline"`` and return 404 before this route ever
+# fires. The current per-segment ``{fight_id}`` matching means the
+# order does not matter in practice, but the defensive ordering
+# pins the contract so a future refactor doesn't silently break
+# the timeline endpoint. Same pattern as the v0.8.0 player
+# timeline route's documentation.
+# ---------------------------------------------------------------------------
+
+
+# Default ``window_s`` of 5 seconds matches the per-fight events
+# endpoint's contract (1 s is noisy for DPS graphs; 10 s hides
+# burst variance). ``Query(..., ge=1, le=600)`` enforces a 1
+# second minimum (the ``PerFightTimelineAggregator`` invariant)
+# and a 10 minute ceiling (sanity bound so a misconfigured client
+# cannot ask for 24h buckets). The bounds mirror the
+# ``_EVENTS_DEFAULT_WINDOW_S`` / ``_EVENTS_MAX_WINDOW_S`` constants
+# above.
+_TIMELINE_DEFAULT_WINDOW_S: int = 5
+_TIMELINE_MAX_WINDOW_S: int = 600
+
+
+@router.get(
+    "/{fight_id}/timeline",
+    response_model=PerFightTimelineOut,
+)
+def get_fight_timeline(
+    fight_id: str,
+    window_s: int = Query(
+        _TIMELINE_DEFAULT_WINDOW_S,
+        ge=1,
+        le=_TIMELINE_MAX_WINDOW_S,
+        description=(
+            "Time-bucket size for the per-fight timeline roll-up. "
+            "Defaults to 5 seconds; bounded 1 <= window_s <= 600 "
+            "(10 minutes)."
+        ),
+    ),
+    db: Session = Depends(get_session),  # noqa: B008
+) -> PerFightTimelineOut:
+    """Return the per-fight timeline (damage + healing + buff-removal over time) for one fight.
+
+    v0.8.9 ships this as a SEPARATE endpoint (not folded into
+    :func:`get_fight_events`) so the per-fight drill-down page
+    can fetch it in parallel with the per-target trio + squads +
+    skills via ``Promise.allSettled``; folding it into the
+    existing ``FightEventsSummaryOut`` would force the page to
+    refetch the full event blob even when only the per-fight
+    timeline is requested. The route reuses
+    :func:`_load_fight_events` (the same shared helper the
+    per-target trio + squads + skills endpoints use) and invokes
+    :class:`gw2_analytics.per_fight_timeline.PerFightTimelineAggregator`
+    on the parsed events.
+
+    The aggregator's ``agents`` + ``duration_s`` parameters are
+    accepted for signature parity with the per-target trio +
+    squads + skills aggregators but NOT consumed by the
+    per-bucket aggregation (the per-bucket skeleton is
+    target-agnostic + duration-agnostic). The route passes
+    ``agents=[]`` + the computed ``duration_s`` (derived from
+    ``max(event.time_ms) / 1000.0`` to match the contract on
+    :func:`get_fight_events`).
+
+    Response codes match :func:`get_fight_events` exactly:
+
+    - ``404 Not Found``: fight id is unknown OR the events
+      blob is missing (pre-Phase 7 row OR the parser pass
+      yielded zero events after filtering). ``NULL``
+      ``events_blob_uri`` is the ground-truth signal for "no
+      event data available"; we deliberately do NOT return
+      ``200 OK`` with empty arrays because that would
+      conflate "parser ran, nothing happened" with "data
+      unavailable".
+    - ``422 Unprocessable Entity``: ``window_s`` is outside
+      ``[1, 600]``. Handled by FastAPI before this handler
+      runs.
+    - ``502 Bad Gateway``: events blob is present but
+      corrupt (gzip decompression failure or non-JSON
+      payload). The fight row is still valid; this is a
+      blob-store consistency issue, not a client error.
+    """
+    # Shared helper handles the blob load + decompress + event
+    # split + 404 / 502 error contract (the per-target trio +
+    # squads + skills endpoints share the same pattern).
+    events = _load_fight_events(db, fight_id)
+
+    # ``duration_s`` is computed natively from
+    # ``max(event.time_ms) / 1000.0`` to match the contract on
+    # :func:`get_fight_events` (the V1.3 EVTC header does not
+    # carry a wall-clock duration scalar). The aggregator
+    # accepts it for signature parity but does not consume
+    # it -- the per-bucket bucket count is derived from the
+    # events stream directly.
+    duration_s = max(e.time_ms for e in events) / 1000.0
+    rows = PerFightTimelineAggregator().aggregate(
+        events,
+        [],
+        duration_s,
+        window_s=window_s,
+    )
+
+    return PerFightTimelineOut(
+        fight_id=fight_id,
+        window_s=window_s,
+        duration_s=duration_s,
+        points=[PerFightTimelinePointOut.model_validate(r.model_dump()) for r in rows],
+    )
 
 
 @router.get("/{fight_id}", response_model=FightOut)

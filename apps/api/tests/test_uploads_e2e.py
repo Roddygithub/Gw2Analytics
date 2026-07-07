@@ -1572,3 +1572,159 @@ def test_player_timeline_tz_422_when_invalid_timezone() -> None:
     body = resp.json()
     detail_strs = [str(item) for item in body.get("detail", [])]
     assert any("Mars/Olympus" in s for s in detail_strs), body
+
+
+# ---------------------------------------------------------------------------
+# v0.8.9: per-fight timeline (``GET /api/v1/fights/{id}/timeline``)
+#
+# The per-fight timeline is a thin wrapper over the existing
+# events-blob decompress + per-kind isinstance filter pattern
+# from :func:`get_fight_events`. The new aggregator
+# :class:`PerFightTimelineAggregator` re-iterates the events
+# stream to build the per-bucket (damage + healing + buff-removal)
+# roll-up. The 4 tests below exercise the 4 contract corners:
+# happy path (3 events in 1 bucket), 404 on unknown fight, 422
+# on out-of-range ``window_s`` (both bounds).
+# ---------------------------------------------------------------------------
+
+
+def test_fight_timeline_returns_per_bucket_totals_for_known_fight() -> None:
+    """v0.8.9: ``GET /fights/{id}/timeline?window_s=1`` returns one row
+    per bucket with the correct per-kind totals (damage +
+    healing + buff-removal) for a known fight.
+
+    Seeds 3 cbtevent records at distinct ``time_ms`` values
+    within a 3-second window (1 damage, 1 heal, 1 strip) +
+    asserts the response has the expected per-bucket
+    totals. Uses ``window_s=1`` so each event lands in its
+    own 1-second bucket.
+
+    The aggregator's ``agents`` + ``duration_s`` parameters
+    are accepted for signature parity but NOT consumed by
+    the per-bucket aggregation -- the test only asserts
+    the wire shape (per-bucket totals + ``window_s`` echo
+    + ``duration_s``), not the internal route plumbing.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    # 3 events: 1 damage at t=1.5s (bucket 1), 1 heal at
+    # t=2.5s (bucket 2), 1 strip at t=1.5s (bucket 1, the
+    # pure-strip path: value=0 + buff_dmg=200). window_s=1
+    # -> 3 contiguous buckets: 0 (zero), 1 (damage + strip),
+    # 2 (heal).
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=800,
+            skill_id=base_skill_a,
+            is_nondamage=1,
+        ),
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=0,
+            buff_dmg=200,
+            skill_id=base_skill_a,
+            is_nondamage=1,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+
+    resp = client.get(
+        f"/api/v1/fights/{fight_id}/timeline",
+        params={"window_s": 1},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    # The wire shape mirrors the e2e plan: fight_id + window_s
+    # + duration_s + points (per-bucket rows sorted ascending
+    # by window_start_ms).
+    assert payload["fight_id"] == fight_id
+    assert payload["window_s"] == 1
+    # ``duration_s`` is the parser's max(time_ms) / 1000.0 --
+    # the same scalar the /events endpoint uses (V1.3 EVTC
+    # header doesn't carry a wall-clock duration).
+    assert payload["duration_s"] == pytest.approx(2.5)
+    # 3 contiguous 1-second buckets: 0 (zero), 1 (damage + strip),
+    # 2 (heal). The continuous-fill invariant mirrors the
+    # v0.6.0 EventWindowAggregator contract.
+    assert len(payload["points"]) == 3
+    # Bucket 0: zero-filled (no events at t < 1s).
+    p0 = payload["points"][0]
+    assert p0["window_start_ms"] == 0
+    assert p0["window_end_ms"] == 1_000
+    assert p0["total_damage"] == 0
+    assert p0["total_healing"] == 0
+    assert p0["total_buff_removal"] == 0
+    # Bucket 1: damage (1_234 at t=1.5s) + strip (200 at t=1.5s,
+    # the pure-strip half).
+    p1 = payload["points"][1]
+    assert p1["window_start_ms"] == 1_000
+    assert p1["window_end_ms"] == 2_000
+    assert p1["total_damage"] == 1_234
+    assert p1["total_healing"] == 0
+    assert p1["total_buff_removal"] == 200
+    # Bucket 2: heal (800 at t=2.5s).
+    p2 = payload["points"][2]
+    assert p2["window_start_ms"] == 2_000
+    assert p2["window_end_ms"] == 3_000
+    assert p2["total_damage"] == 0
+    assert p2["total_healing"] == 800
+    assert p2["total_buff_removal"] == 0
+
+
+def test_fight_timeline_404_when_unknown_fight() -> None:
+    """v0.8.9: ``GET /fights/{unknown}/timeline`` returns 404.
+
+    Same 404 contract as :func:`get_fight_events`: the shared
+    ``_load_fight_events`` helper raises 404 when the fight
+    id is unknown (the route inherits the contract for free
+    via the helper).
+    """
+    resp = client.get("/api/v1/fights/does-not-exist-1234/timeline")
+    assert resp.status_code == 404
+
+
+def test_fight_timeline_422_when_window_s_too_small() -> None:
+    """v0.8.9: ``?window_s=0`` returns 422 (the FastAPI
+    ``Query(ge=1)`` validator fires BEFORE the handler).
+
+    Symmetric counterpart to the
+    :func:`test_fight_events_422_when_window_s_too_small`
+    test -- the per-fight timeline shares the same
+    ``window_s`` bounds (``[1, 600]``) as the events endpoint.
+    """
+    resp = client.get(
+        "/api/v1/fights/anything/timeline",
+        params={"window_s": 0},
+    )
+    assert resp.status_code == 422
+
+
+def test_fight_timeline_422_when_window_s_too_large() -> None:
+    """v0.8.9: ``?window_s=601`` returns 422 (the FastAPI
+    ``Query(le=600)`` validator fires BEFORE the handler).
+
+    The upper bound ``600`` mirrors the per-fight events
+    endpoint (10 minutes is the canonical ceiling for
+    per-fight bucket roll-ups -- a longer window would
+    yield a single bucket for most fights, which defeats
+    the purpose of the timeline visualisation).
+    """
+    resp = client.get(
+        "/api/v1/fights/anything/timeline",
+        params={"window_s": 601},
+    )
+    assert resp.status_code == 422

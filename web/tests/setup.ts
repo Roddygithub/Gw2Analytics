@@ -187,3 +187,41 @@ vi.mock("@/components/PlayerSearchBar", () => ({
 vi.mock("@/components/PlayerTimelineSection", () => ({
   PlayerTimelineSection: () => null,
 }));
+
+/**
+ * v0.8.9 of web (plan/002): ``@/components/PerFightTimelineSection``
+ * is the Server Component wrapper for the per-fight timeline
+ * section on the ``/fights/[id]`` page. The page-level Server
+ * Component tests transitively import it, so we mock it as a
+ * no-op to keep the page test focused on the page's own render
+ * contract; a dedicated component-level test in
+ * :file:`web/tests/components/per-fight-timeline-chart.test.tsx`
+ * exercises the chart's pure-helper output. The page-level
+ * presence/absence assertion lives in
+ * :file:`web/tests/e2e/fights.spec.ts`.
+ */
+vi.mock("@/components/PerFightTimelineSection", () => ({
+  PerFightTimelineSection: () => null,
+}));
+
+/**
+ * v0.8.9 of web (plan/002): ``@/components/PerFightTimelineChart``
+ * is the inline-SVG Client Component for the per-fight timeline
+ * chart. We do NOT mock it here: the page-level Server
+ * Component tests mock ``@/components/PerFightTimelineSection``
+ * (the section wrapper) as ``() => null`` (see above), which
+ * prevents the chart from ever rendering in page-level tests
+ * regardless of whether the chart itself is mocked. Leaving the
+ * chart unmocked lets the dedicated component-level test in
+ * :file:`web/tests/components/per-fight-timeline-chart.test.tsx`
+ * render the real SVG and exercise the pure helpers
+ * (``buildPerFightTimelineLayout`` + ``formatPerFightLogTick``)
+ * directly. A previous version of this setup mocked the chart
+ * with ``importOriginal`` to keep the pure helpers available,
+ * but that approach replaced the React component with
+ * ``() => null`` -- which silently broke the component-level
+ * test (it rendered nothing, so ``querySelectorAll("text")``
+ * returned an empty array). The fix is to mock the section
+ * wrapper (which is the actual page-level concern) and let the
+ * chart be tested directly at the component level.
+ */
