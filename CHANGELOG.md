@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (apps/api - v0.9.0 plan/002: profession filter on /players)
+
+- `apps/api/src/gw2analytics_api/routes/players.py`: `list_players` now accepts
+  `profession: str = Query("")` + a new `_parse_profession_filter` helper
+  that accepts BOTH the enum name (case-insensitive, e.g. `MESMER`) and
+  the integer value (e.g. `7`). Unknown values return 422 with the
+  rejected value in the detail (matches the existing `?tz=` custom-422
+  pattern from the timeline route). The filter is applied after the
+  cross-fight roll-up and before the offset/limit, so pagination is
+  consistent on the filtered set.
+- `apps/api/tests/test_players.py`: 7 new pytest cases covering the
+  full contract (no-filter, name filter, no-match, integer-value, 422
+  for unknown values, pagination consistency, detail-endpoint
+  ignored). Self-contained fixtures (a unique `base_id_a` per test
+  via `1_000_000_000 + int(suffix, 16)` + `limit=500` in all GET
+  requests) to be robust against cross-test DB pollution.
+
+### Added (web - v0.9.0 plan/002: profession filter on /players)
+
+- `web/src/components/ProfessionFilter.tsx`: Client Component with
+  10 hardcoded options (1 "All professions" + 9 base professions).
+  The dropdown is wired with `data-testid="profession-filter"` for
+  e2e lookup. Selecting a value mutates the URL via Next.js
+  `useRouter().push()`.
+- `web/src/lib/api.ts`: `fetchPlayers` signature extended with
+  `opts: { limit?, offset?, profession? }` + the `?profession=` URL
+  param.
+- `web/src/app/players/page.tsx`: now async + accepts
+  `searchParams: Promise<{ profession?: string }>` (Next.js 15+
+  async contract); reads the URL filter, forwards to `fetchPlayers`,
+  mounts `<ProfessionFilter>`.
+
+### Fixed (web e2e - visual-regression spec)
+
+- `web/tests/e2e/visual-regression.spec.ts`: fixed a threshold
+  mismatch between the 2 `pixelmatch` calls. The no-failure diff
+  call used `threshold: 0.1` (residual from a prior partial
+  commit), the failure-path diff-write call used `threshold: 0.05`.
+  They should be the same value so the diff ratio + the diff PNG
+  highlight the SAME pixels. Both now use `threshold: 0.05`.
+
+### Changed (web - screenshots.mjs hydration guard)
+
+- `web/scripts/screenshots.mjs`: the `waitForFunction` for page
+  hydration stability now has TWO requirements (both must be met):
+  (1) the page must have expanded beyond the 900px viewport
+  (`scrollHeight <= 900` returns false); (2) the height must be
+  stable for 500ms. The previous version returned on a 900px-stable
+  page (before AG Grid / SVG chart expansion) which produced
+  stale baselines that diffed at near-100% against the spec's
+  3196px captures. Timeout bumped from 15s to 30s.
+
+### Known issue (web e2e - visual-regression baselines)
+
+- The 5 dynamic-page baselines (`04-fights.png` through
+  `08-fight-drilldown.png`) are STILL 1440x900 (the v0.8.9
+  pre-hydration-fix state). The screenshots.mjs fix should make
+  the next `pnpm screenshots --persist` run produce 1440x3196
+  captures, but the actual baseline refresh is deferred to a
+  followup commit. The dimension-mismatch check in the spec
+  fires BEFORE the diff step, so the VR suite currently fails
+  on the 5 dynamic pages until the baselines are refreshed.
+
+### Tests
+
+- 7 new pytest tests in `apps/api/tests/test_players.py`.
+- 2 new vitest cases in
+  `web/tests/components/ProfessionFilter.test.tsx` (moved from
+  `web/src/components/ProfessionFilter.test.tsx` to match the
+  vitest include pattern; switched from `@testing-library/user-event`
+  to `fireEvent` to avoid an install).
+- 1 new vitest case in
+  `web/tests/app/players-page.test.tsx` (forwards
+  `?profession=MESMER` to `fetchPlayers`).
+- 2 new e2e cases in `web/tests/e2e/players.spec.ts` (dropdown
+  renders 10 options; selecting Mesmer updates the URL).
+- 4 existing vitest cases in
+  `web/tests/app/players-page.test.tsx` updated to pass
+  `{ searchParams: Promise.resolve({}) }` (the page is now async).
+- Test totals: 210 -> 217 pytest (+7), 79 -> 82 vitest (+3),
+  14 -> 16 playwright (+2). Total: 303 tests (was 289 before
+  v0.9.0 plan/002).
+
 ## [0.8.9] - v0.8.9: per-account timeline gains ?tz=Continent/City
 
 ### Added (apps/api)
