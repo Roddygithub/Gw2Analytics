@@ -100,10 +100,48 @@ try {
           console.log(`(selector '${waitFor}' missing)`);
         }
       }
-      if (extraDelay) {
-        await page.waitForTimeout(extraDelay);
-      }
-      const outPath = resolve(OUT_DIR, `${label}.png`);
+    if (extraDelay) {
+      await page.waitForTimeout(extraDelay);
+    }
+    // Wait for the page to be at its final, fully-hydrated height
+    // before screenshotting. Without this, the screenshot may capture
+    // a partially-rendered page (e.g. AG Grid still expanding after
+    // the SSR data fetch settles) which would diff against the spec's
+    // fully-hydrated capture (which only waits for ``networkidle``)
+    // as a near-100% mismatch in the visual-regression spec.
+    // The wait tracks ``document.documentElement.scrollHeight`` and
+    // requires it to be stable for 500ms (2 polls at 250ms). The
+    // window-level closure variables + ``Date.now()`` handle the
+    // polling; the function is re-evaluated every 250ms.
+    // Each ``page.goto`` above is a full navigation so the window
+    // object is reset between pages; the closure variables do NOT
+    // persist across pages.
+    await page.waitForFunction(
+      () => {
+        const currentHeight = document.documentElement.scrollHeight;
+        if (typeof window.__lastStableHeight === "undefined") {
+          window.__lastStableHeight = currentHeight;
+          window.__lastStableTime = Date.now();
+          return false;
+        }
+        if (currentHeight !== window.__lastStableHeight) {
+          window.__lastStableHeight = currentHeight;
+          window.__lastStableTime = Date.now();
+          return false;
+        }
+        return Date.now() - window.__lastStableTime >= 500;
+      },
+      null,
+      { timeout: 15000, polling: 250 },
+    ).catch(() => {
+      // Best-effort. Pages with live-updating content (e.g. the
+      // SVG timelines, which may re-render on viewport changes)
+      // would time out here; the existing ``waitForLoadState`` +
+      // selector wait + extra delay have already done what they
+      // can, and the screenshot is the same as before this commit
+      // (a possibly-partially-hydrated capture) -- so we proceed.
+    });
+    const outPath = resolve(OUT_DIR, `${label}.png`);
       await page.screenshot({ path: outPath, fullPage: true });
       const status = resp ? resp.status() : "?";
       console.log(`OK (HTTP ${status} -> ${outPath})`);
