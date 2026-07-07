@@ -37,6 +37,47 @@ export async function fetchFights(): Promise<FightRow[]> {
 }
 
 /**
+ * Get the per-target damage + per-target healing + time-bucketed
+ * events roll-up for one fight.
+ *
+ * Mirrors ``GET /api/v1/fights/{fight_id}/events`` in
+ * :mod:`apps.api.routes.fights`. ``windowS`` defaults to 5 (the
+ * gateway default; matches the standard GW2 toolchain bucketing
+ * convention). Throws :class:`ApiError` on any non-2xx so the
+ * Server Component can render the canonical upstream-error card
+ * (404: fight unknown OR events blob missing; 422: windowS out of
+ * range; 502: blob corrupt).
+ *
+ * Phase 7 v1 of web: the v0.3.0-api response now exposes both
+ * ``target_dps`` and ``target_healing`` roll-ups side-by-side, plus
+ * the per-bucket ``event_windows`` (which carries both
+ * ``damage_total`` and ``healing_total`` via the discriminated
+ * ``Event`` union). This helper surfaces all three on the HTTP
+ * boundary.
+ */
+export async function fetchFightEvents(
+  fightId: string,
+  opts: { windowS?: number } = {},
+): Promise<FightEventsSummaryRow> {
+  const params = new URLSearchParams();
+  if (opts.windowS !== undefined) {
+    params.set("window_s", String(opts.windowS));
+  }
+  const qs = params.toString();
+  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/events${
+    qs ? `?${qs}` : ""
+  }`;
+  const resp = await fetch(url, {
+    // Server Components re-execute per request; the cache is opt-in.
+    cache: "no-store",
+  });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as FightEventsSummaryRow;
+}
+
+/**
  * Resolve a GW2 API key against the gateway.
  *
  * Mirrors ``GET /api/v1/account`` in :mod:`apps.api.routes.account`,
@@ -152,4 +193,74 @@ export interface UploadCreatedRow {
    * the three known values today.
    */
   status: "pending" | "completed" | "failed" | (string & {});
+}
+
+/**
+ * One per-target damage roll-up row, mirror of
+ * :class:`apps.api.schemas.TargetDpsRowOut` (apps/api 0.3.0+).
+ *
+ * The aggregator-side ``attack_count`` field is dropped from the
+ * API surface (analyst-only signal; the UI shows ``total_damage`` +
+ * ``dps`` only). The ``dps`` rate is computed by the gateway from
+ * ``total_damage / duration_s``; ``duration_s`` itself is on
+ * :class:`FightEventsSummaryRow`.
+ */
+export interface TargetDpsRow {
+  target_agent_id: number;
+  total_damage: number;
+  dps: number;
+}
+
+/**
+ * One per-target healing roll-up row, mirror of
+ * :class:`apps.api.schemas.TargetHealingRowOut` (apps/api 0.3.0+).
+ *
+ * Strict parallel of :class:`TargetDpsRow`: drops ``heal_count``
+ * from the API surface for analyst-only parity; the ``hps`` rate
+ * is ``total_healing / duration_s``.
+ */
+export interface TargetHealingRow {
+  target_agent_id: number;
+  total_healing: number;
+  hps: number;
+}
+
+/**
+ * One time-bucketed roll-up window spanning ``[start_ms, end_ms)``,
+ * mirror of :class:`apps.api.schemas.EventBucketOut`.
+ *
+ * The Phase 7 v2 :class:`Event` discriminated union lets
+ * ``EventWindowAggregator`` account both damage AND healing in one
+ * bucket, so the bucket's ``damage_total`` + ``healing_total`` +
+ * ``event_count`` always sum correctly (event_count includes
+ * damage + healing + future kinds).
+ */
+export interface EventBucket {
+  start_ms: number;
+  end_ms: number;
+  damage_total: number;
+  healing_total: number;
+  event_count: number;
+}
+
+/**
+ * Combined aggregation payload from
+ * ``GET /api/v1/fights/{fight_id}/events``, mirror of
+ * :class:`apps.api.schemas.FightEventsSummaryOut` (apps/api 0.3.0+).
+ *
+ * Phase 7 v1 of web (apps/api 0.3.0 / v0.3.0-api wire-up): the
+ * per-target healing roll-up (``target_healing``) is now a sibling
+ * of the damage roll-up (``target_dps``), and the discriminated
+ * union round-trip via :class:`TypeAdapter[Event].validate_json`
+ * lets the gateway stream both kinds in one JSONL blob. The
+ * ``duration_s`` field is computed from
+ * ``max(event.time_ms) / 1000.0`` because the V1.3 EVTC header
+ * does not carry a wall-clock duration scalar.
+ */
+export interface FightEventsSummaryRow {
+  fight_id: string;
+  duration_s: number;
+  target_dps: TargetDpsRow[];
+  target_healing: TargetHealingRow[];
+  event_windows: EventBucket[];
 }

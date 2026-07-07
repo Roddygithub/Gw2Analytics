@@ -231,6 +231,141 @@ route already handles the union via
 [0.5.0-parser]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...v0.5.0-parser
 
 [Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...HEAD
+## [0.4.0-web] - Phase 7 v1 of web: /fights/[id] drill-down page (per-target damage + healing + event windows)
+
+### Added (web)
+
+- `web/src/app/fights/[id]/page.tsx` (NEW): dynamic Server Component
+  that SSR-fetches the v0.3.0-api per-fight events payload via
+  `fetchFightEvents(fightId)` and renders the per-target damage
+  roll-up + per-target healing roll-up + time-bucketed event
+  windows on a single page. `params: Promise<{ id: string }>` is
+  awaited per Next.js 15+ async route params convention; the page
+  is `force-dynamic` + `cache: "no-store"` so the roll-up
+  reflects the latest parsed fight state. Empty roll-ups render
+  the canonical "no rows" panel via the per-component empty
+  state; `ApiError` (404, 5xx, etc.) renders the canonical
+  upstream-error card with the gateway's error body. The page is
+  a single Server Component that hands the data to three small
+  client-rendered sub-views (no waterfall round-trips for the
+  same underlying JSONL blob).
+
+- `web/src/components/TargetRollupsGrid.tsx` (NEW): reusable
+  generic AG Grid Community wrapper for the per-target damage +
+  healing roll-up tables. A single Client Component covers both
+  roll-up kinds via a `TargetRollupColumn<TRow>[]` column spec
+  (page-level builds the spec for each kind). Renders a styled
+  "no rows" panel on empty input so the page-level error path
+  is reserved for true upstream errors (404, 5xx).
+
+- `web/src/components/EventWindowsTable.tsx` (NEW): plain HTML
+  table (no AG Grid) for the per-bucket roll-up. The bucket
+  count is bounded by `duration_s / window_s` so the table stays
+  human-scannable without pagination; the natural sort order is
+  by `start_ms` (which is monotonic in the response). The
+  `healing_total` column is tinted with the `var(--accent)`
+  colour to keep the read-out visually cohesive with the AG Grid
+  dark theme on the two roll-up grids above it.
+
+- `web/src/components/ag-grid-setup.ts` (NEW): side-effect-only
+  module that calls `ModuleRegistry.registerModules([AllCommunityModule])`
+  exactly once across the whole module graph. AG Grid Community
+  33+ ships in tree-shaken mode and requires the explicit
+  registration; centralising it here removes the ordering
+  hazard of a user navigating directly to a fight-detail page
+  (and never visiting `/fights`) seeing an unstyled grid.
+
+- `web/src/lib/api.ts`: new `fetchFightEvents(fightId, opts?: { windowS?: number }): Promise<FightEventsSummaryRow>`
+  helper (mirrors `GET /api/v1/fights/{fight_id}/events` in
+  apps/api 0.3.0+; `windowS` defaults to 5, the gateway
+  default). Throws the existing `ApiError` on any non-2xx so
+  the Server Component can render the canonical upstream-error
+  card.
+
+- `web/src/lib/api.ts`: 4 new TypeScript interfaces
+  (`TargetDpsRow`, `TargetHealingRow`, `EventBucket`,
+  `FightEventsSummaryRow`) hand-written alongside the existing
+  `FightRow` / `AccountEnrichedRow` / `UploadCreatedRow` types
+  (consistent with the lib's no-codegen policy for response
+  types; the OpenAPI `schema.d.ts` is the codegen path for
+  future-generated types, not these hand-written shapes).
+
+### Changed
+
+- `web/src/components/FightsGrid.tsx`: the `id` column is now
+  rendered as an anchor (`<a href="/fights/{id}">{id}</a>`) so a
+  single click on the row carries the analyst to the new
+  drill-down page. The cellRenderer is intentionally a plain
+  `<a>` (not `next/link`) -- AG Grid renders the cell out of the
+  React tree, so the client-side router prefetch is not
+  available, and a full-page navigation is acceptable for the
+  `force-dynamic` + `cache: "no-store"` drill-down target.
+  The grid's `ModuleRegistry.registerModules` call is replaced
+  by a side-effect import of `./ag-grid-setup` (single
+  registration across the whole module graph).
+
+- `web/tests/setup.ts`: global mocks for the new components
+  (`TargetRollupsGrid`, `EventWindowsTable`) added alongside
+  the existing `FightsGrid` mock so the page-level Server
+  Component tests can transitively import the new page +
+  components without dragging `ag-grid-react` into the vitest
+  runtime.
+
+- `web/src/app/fights/[id]/page.tsx` (new) + `web/package.json`
+  (no change; the page is rendered via the existing Next.js 16
+  app-router conventions) + `web/pnpm-lock.yaml` (no change;
+  no new dependencies).
+
+### Notes
+
+- The two roll-up grids are independent: a damage-only fight
+  yields an empty heal grid, a heal-only fight yields an empty
+  damage grid, and a mixed fight yields one row per target
+  across both. The page's per-component empty-state handles
+  each case gracefully -- no error path is taken on
+  legitimately-empty roll-ups.
+- `EventWindowsTable` is a plain `<table>` rather than an AG
+  Grid because the bucket roll-up is a TIMELINE visualisation
+  (chronological order, no sort/filter needs) and the bucket
+  count is bounded by `duration_s / window_s` so pagination
+  is unnecessary. AG Grid's affordances would be wasted on
+  this view.
+- The new page is a forward-compat drop: any new `Event`
+  subclass added in the future (e.g. a Phase 8
+  `BuffRemovalEvent`) will surface here as a new sibling
+  roll-up section + a new column on the per-bucket
+  `event_windows` table. `TargetRollupsGrid` is generic so
+  the page only needs to add a new column spec; no new
+  Client Component required.
+
+### Tests
+
+- `web/tests/app/fight-events-page.test.tsx` (NEW): 3 vitest
+  cases mirroring the existing `fights-page.test.tsx` CI-smoke
+  pattern -- the Server Component is invoked as a plain async
+  function, not inside Next.js's RSC runtime. Cases:
+  - happy path: populated payload (1 target_dps row + 1
+    target_healing row + 3 event_windows) renders the header
+    (fight_id + duration_s) + all 3 section headings.
+  - upstream 404: `fetchFightEvents` rejects with
+    `new ApiError(404, "fight not found")`; the page renders
+    the upstream-error card.
+  - empty roll-ups: `fetchFightEvents` returns a payload with
+    empty target_dps + target_healing + event_windows; the
+    page renders the header + the 3 section headings (the
+    per-component empty-state is asserted at the component
+    level, not here).
+
+### Validation
+
+- `pnpm tsc --noEmit` clean (Next.js 16 + React 19 + AG Grid
+  Community 34 type surface).
+- `pnpm test:unit` clean (3 new fight-events-page tests + the
+  existing 11 vitest tests across the app: 14 total).
+- Code-reviewer: APPROVED.
+
+[0.4.0-web]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.3.0-web...v0.4.0-web
+
 ## [0.3.0-api] - Phase 7 v1 of apps/api: per-target healing roll-up
 
 ### Added (apps/api)

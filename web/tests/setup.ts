@@ -13,12 +13,36 @@ import "@testing-library/jest-dom/vitest";
  * vitest resolver. AG Grid itself is still installed (real dev
  * server, real build) -- only the test runtime substitutes it.
  *
- * NOTE: ``FightsGrid`` is a NAMED export (``export function
- * FightsGrid(...)``), not a default export, so the mock shape
- * must mirror that -- not ``{ default: () => null }``.
+ * ``@/components/TargetRollupsGrid`` is the AG Grid Community
+ * wrapper for the per-target damage + healing roll-up tables on
+ * the new ``/fights/[id]`` drill-down page (Phase 7 v1 of web).
+ * The fight-events-page test transitively imports it, so it gets
+ * the same no-op stub treatment here.
+ *
+ * ``@/components/EventWindowsTable`` is a plain HTML table (no
+ * AG Grid), but we still mock it here so the page-level tests
+ * can assert on the table's presence/absence without coupling
+ * the assertions to the table's exact HTML shape (a future
+ * styling refactor would otherwise force the test to be edited
+ * in lockstep).
+ *
+ * NOTE: every mocked component here is a NAMED export
+ * (``export function FightsGrid(...)`` /
+ * ``export function TargetRollupsGrid(...)`` /
+ * ``export function EventWindowsTable(...)``), not a default
+ * export, so the mock shapes must mirror that -- not
+ * ``{ default: () => null }``.
  */
 vi.mock("@/components/FightsGrid", () => ({
   FightsGrid: () => null,
+}));
+
+vi.mock("@/components/TargetRollupsGrid", () => ({
+  TargetRollupsGrid: () => null,
+}));
+
+vi.mock("@/components/EventWindowsTable", () => ({
+  EventWindowsTable: () => null,
 }));
 
 /**
