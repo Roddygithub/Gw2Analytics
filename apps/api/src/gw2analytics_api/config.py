@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     # overrides in the current scope.
     minio_secure: bool = False
     parser_version: str = "0.5.0"
+    # ``cors_allowed_origins`` defaults to wide-open for local dev
+    # (the Next.js frontend at :3000 + curl from any origin). Set
+    # ``CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com``
+    # in deployment env to tighten. Comma-separated env input is
+    # parsed by pydantic-settings into a list.
+    cors_allowed_origins: list[str] = Field(
+        default=["*"],
+        validation_alias="CORS_ALLOWED_ORIGINS",
+    )
 
 
 @lru_cache
