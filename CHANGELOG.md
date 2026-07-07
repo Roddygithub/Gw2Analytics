@@ -103,6 +103,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to `shipped`, the test-file count updating to 8, the openapi
   codegen mechanism description corrected to reflect
   `web/scripts/dump_openapi.py`).
+- `apps/api/tests/test_uploads_e2e.py`: dropped the runtime
+  ``db_reachable`` fixture + the conditional ``pytest.skip`` block.
+  The test now runs unconditionally against any environment that has
+  a Postgres reachable at ``DATABASE_URL`` (the suite auto-loads the
+  docker-compose dev credentials via ``pytest-env``). The module
+  docstring reframes the requirement as positive
+  ("``docker compose up -d gw2a-postgres`` first") instead of a skip
+  hint. CI on a fresh runner must bring up the Postgres service
+  before ``pytest`` runs (deferred to a followup -- add a
+  ``services:`` block to ``.github/workflows/ci.yml::lint-and-test``).
+  Orphaned ``from sqlalchemy import create_engine, text`` import
+  cleaned up.
 
 ### Added (Phase 4 -- web/ frontend scaffold)
 

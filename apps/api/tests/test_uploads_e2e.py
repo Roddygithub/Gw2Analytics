@@ -5,8 +5,10 @@ mimic the arcdps layout), POSTs it through the public API, then
 queries GET /uploads and GET /fights to verify the schema is wired
 correctly.
 
-Requires the Postgres container from ``docker-compose.yml`` to be
-running. Skipped on environments where Postgres is not reachable.
+Requires a Postgres server reachable at the ``DATABASE_URL`` declared
+in ``pyproject.toml`` / ``.env``. Run ``docker compose up -d
+gw2a-postgres`` first if your local environment does not already
+expose Postgres on port 5432.
 
 The test is **idempotent** by design: each run injects a uuid-derived
 suffix into ``agent_id``, ``name``, the build string, and the skill
@@ -22,11 +24,8 @@ import uuid as _uuid
 import zipfile
 from io import BytesIO
 
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
 
-from gw2analytics_api.config import get_settings
 from gw2analytics_api.main import app
 
 client = TestClient(app)
@@ -110,21 +109,7 @@ def _make_minimal_zevtc(
     return buf.getvalue()
 
 
-@pytest.fixture(scope="module")
-def db_reachable() -> bool:
-    try:
-        eng = create_engine(get_settings().database_url, future=True)
-        with eng.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
-
-
-def test_uploads_e2e_happy_path(db_reachable: bool) -> None:
-    if not db_reachable:
-        pytest.skip("Postgres not reachable; docker compose up gw2a-postgres first")
-
+def test_uploads_e2e_happy_path() -> None:
     # Per-run uuid suffix keeps fights.id, fight_agents (fight_id,
     # agent_id) and fight_skills (fight_id, skill_id) unique across
     # re-runs, so no CASCADE truncate is required.
