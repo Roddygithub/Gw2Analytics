@@ -145,6 +145,19 @@ jobs:
         working-directory: web
         run: pnpm exec tsc --noEmit
 
+      # ----------------------------------------------------------------
+      # Vitest unit tests (Phase 4 unit-test scaffolding)
+      # ----------------------------------------------------------------
+      # Runs the 3 component tests under tests/app/*.test.tsx with
+      # jsdom + @testing-library/react + jest-dom. Mocks next/link,
+      # next/font/google, and @/lib/env globally via tests/setup.ts
+      # so the suite is hermetic and the CI sandbox does not need
+      # network egress or a running gateway.
+      # ----------------------------------------------------------------
+      - name: Web unit tests (vitest)
+        working-directory: web
+        run: pnpm exec vitest run --reporter=verbose
+
       # The /tmp/openapi.json file is ephemeral -- clean it up so a
       # later job in the same runner environment doesn't pick it up.
       - name: OpenAPI: cleanup /tmp/openapi.json
