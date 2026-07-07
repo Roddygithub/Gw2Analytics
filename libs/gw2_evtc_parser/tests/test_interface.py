@@ -14,7 +14,7 @@ from typing import BinaryIO
 
 import pytest
 
-from gw2_core import EvtcHeader, Fight, GameType
+from gw2_core import DamageEvent, EvtcHeader, Fight, GameType
 from gw2_evtc_parser import EvtcParser
 
 # ---------------------------------------------------------------------------
@@ -41,6 +41,11 @@ class _GoodFakeParser:
                 skill_count=0,
             ),
         )
+
+    @staticmethod
+    def parse_events(source: BinaryIO | bytes) -> Iterator[DamageEvent]:
+        """Phase 7 v1 conformance: empty iterator (no damage events emitted)."""
+        return iter(())
 
 
 class _BadFakeParser:

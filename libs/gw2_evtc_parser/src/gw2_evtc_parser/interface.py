@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import BinaryIO, Protocol, runtime_checkable
 
-from gw2_core import Fight
+from gw2_core import DamageEvent, Fight
 
 
 @runtime_checkable
@@ -32,6 +32,25 @@ class EvtcParser(Protocol):
 
     def parse(self, source: BinaryIO | bytes) -> Iterator[Fight]:
         """Yield every :class:`~gw2_core.Fight` contained in this raw EVTC stream.
+
+        Args:
+            source: Either raw EVTC bytes, or any seekable/readable
+                binary IO object exposing :py:meth:`read`.
+        """
+        ...
+
+    def parse_events(self, source: BinaryIO | bytes) -> Iterator[DamageEvent]:
+        """Yield every :class:`~gw2_core.DamageEvent` contained in this raw EVTC stream.
+
+        Phase 7 v1 emits damage events only (``is_statechange == 0`` AND
+        ``is_nondamage == 0`` AND ``value > 0``). ``HealingEvent``
+        extraction is a Phase 7 v2 followup. The byte cursor is advanced
+        past the header, agent table, and skill table; the remainder of
+        the input is interpreted as 64-byte ``cbtevent`` records.
+
+        Truncation is lenient: trailing bytes narrower than 64 yield no
+        event and produce no exception. Callers should check the yielded
+        count against the expected arcdps fight length.
 
         Args:
             source: Either raw EVTC bytes, or any seekable/readable

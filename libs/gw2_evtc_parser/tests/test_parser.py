@@ -37,13 +37,14 @@ from pathlib import Path
 
 import pytest
 
-from gw2_core import EliteSpec, Profession
+from gw2_core import DamageEvent, EliteSpec, Profession
 from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
 from gw2_evtc_parser.parser import (
     AGENT_COUNT_OFFSET,
     AGENT_NAME_SIZE,
     AGENT_PREFIX_SIZE,
     AGENT_SIZE,
+    EVENT_SIZE,
     HEADER_SIZE,
     MAX_SKILL_NAME_BYTES,
     SKILL_COUNT_OFFSET,
@@ -115,25 +116,80 @@ def _build_skill_record(skill_id: int, name: str) -> bytes:
     return header + name_bytes + b"\x00"
 
 
+def _build_event_record(
+    time_ms: int,
+    src_agent: int,
+    dst_agent: int,
+    value: int,
+    skill_id: int = 42,
+    *,
+    is_statechange: int = 0,
+    is_nondamage: int = 0,
+    is_cleanup: int = 0,
+    is_offcycle: int = 0,
+) -> bytes:
+    """Build one 64-byte cbtevent record matching the arcdps ``cbtevent`` struct.
+
+    Layout (per ``arcdps.h``):
+    ``<QQQiiIIHHHbbbbbbbbIIbb`` -- ``time``, ``src_agent``,
+    ``dst_agent``, ``value``, ``buff_dmg``, ``overstack_value``,
+    ``skillid``, ``src_instid``, ``dst_instid``, ``translocated``,
+    ``is_cleanup``, ``is_nondamage``, ``is_statechange``,
+    ``is_flanking``, ``is_shields``, ``is_offcycle``, ``pad61``,
+    ``pad62``, ``pad63`` (uint32), ``pad64`` (uint32), ``pad65``,
+    ``pad66``.
+    Total: 24 + 8 + 8 + 6 + 8 + 8 + 2 = 64 bytes.
+    """
+    fmt = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
+    return fmt.pack(
+        time_ms,
+        src_agent,
+        dst_agent,
+        value,
+        0,  # buff_dmg (ignored by Phase 7 v1)
+        0,  # overstack_value (ignored)
+        skill_id,
+        0,  # src_instid
+        0,  # dst_instid
+        0,  # translocated
+        is_cleanup,
+        is_nondamage,
+        is_statechange,
+        0,  # is_flanking
+        0,  # is_shields
+        is_offcycle,
+        0,  # pad61
+        0,  # pad62
+        0,  # pad63 (uint32)
+        0,  # pad64 (uint32)
+        0,  # pad65
+        0,  # pad66
+    )
+
+
 def _build_minimal_evtc(
     agents: list[tuple[int, int, int, str, bool]],
     *,
     build: str = "20250925",
     encounter_id: int = 0,
     skills: list[tuple[int, str]] | None = None,
+    events: list[bytes] | None = None,
 ) -> bytes:
-    """Build a synthetic EVTC binary with the given agents and skills.
+    """Build a synthetic EVTC binary with the given agents, skills, and events.
 
     Header layout is 25 bytes (see :data:`HEADER_SIZE`): magic + build
     (8 ASCII) + rev + encounter_id + unused + agent_count + skill_count
     + language. Each agent tuple is ``(id, profession_id, elite_id,
-    name, is_player)``. Each skill tuple is ``(skill_id, name)``.
+    name, is_player)``. Each skill tuple is ``(skill_id, name)``. Each
+    event is a full 64-byte cbtevent record pre-built by the caller.
     """
     if len(build) != 8:
         msg = f"build must be exactly 8 ASCII chars (yyyymmdd), got {len(build)}"
         raise ValueError(msg)
     if skills is None:
         skills = []
+    if events is None:
+        events = []
     header = struct.pack(
         "<4s8sBHBI IB",
         b"EVTC",
@@ -161,6 +217,9 @@ def _build_minimal_evtc(
         body += rec
     for skill_id, skill_name in skills:
         body += _build_skill_record(skill_id, skill_name)
+    for ev in events:
+        assert len(ev) == EVENT_SIZE, f"each event record must be exactly {EVENT_SIZE} bytes"
+        body += ev
     return header + bytes(body)
 
 
@@ -317,6 +376,7 @@ def test_layout_constants_match_arcdps_v1() -> None:
     assert AGENT_PREFIX_SIZE == 28
     assert AGENT_NAME_SIZE == 68
     assert AGENT_SIZE == 96
+    assert EVENT_SIZE == 64
 
 
 def test_account_name_without_colon_is_accepted_as_player() -> None:
@@ -547,8 +607,203 @@ def test_read_zevtc_bytes_raises_on_empty_zip() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 7 v1: parse_events (cbtevent stream consumer) tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_events_empty_event_block_yields_nothing() -> None:
+    """Header + agent + skill with NO appending events -> 0 events yielded."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "G", True)],
+        skills=[(101, "Whirlwind")],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_parse_events_single_damage_round_trips() -> None:
+    """One damage record round-trips into a DamageEvent with all fields preserved."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record(
+                time_ms=42_500,
+                src_agent=1,
+                dst_agent=2,
+                value=1_337,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, DamageEvent)
+    assert e.time_ms == 42_500
+    assert e.source_agent_id == 1
+    assert e.target_agent_id == 2
+    assert e.skill_id == 101
+    assert e.damage == 1_337
+
+
+def test_parse_events_truncated_trailing_record_exits_cleanly() -> None:
+    """A trailing record whose bytes are shorter than 64 yields a clean stop.
+
+    Layout has TWO events so the first is fully present (yields) and
+    the second is partially written (parser stops cleanly without
+    raising).
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record(time_ms=1_000, src_agent=1, dst_agent=2, value=100),
+            _build_event_record(time_ms=2_000, src_agent=1, dst_agent=2, value=200),
+        ],
+    )
+    # Drop 30 bytes from the end -- truncates the second event; the first still fits.
+    truncated = evtc[:-30]
+    events = list(PythonEvtcParser().parse_events(truncated))
+    assert len(events) == 1
+    assert events[0].time_ms == 1_000
+
+
+def test_parse_events_negative_value_is_clamped_to_zero() -> None:
+    """Negative ``value`` is clamped via ``max(0, value)`` and yields no event.
+
+    Real arcdps data occasionally surfaces signed-int overflow quirks
+    (extreme damage totals wrapping negative). Domain :class:`DamageEvent`
+    invariants reject ``damage < 0``; the parser handles this at the
+    event-block filter boundary rather than letting negative sums
+    corrupt downstream aggregate sums.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=-100,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_parse_events_clamps_overflow_val_to_zero() -> None:
+    """Signed-int-32 minimum (``-2**31``) clamps to ``damage=0`` and is filtered.
+
+    Locks down the validator's ``max(0, value)`` boundary at the
+    int32 edge so a future refactor that lifts the clamp cannot silently
+    regress to negative aggregate sums.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=-2_147_483_648,  # INT32_MIN sentinel
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_parse_events_zero_value_yields_nothing() -> None:
+    """Mirrors ``test_parse_events_negative_value_is_clamped_to_zero``: val=0 skips."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=0,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_parse_events_filters_statechange_skips_damage() -> None:
+    """Sequence: statechange record then damage record yields 1 event."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=99,
+                is_statechange=1,
+            ),  # filtered (state change)
+            _build_event_record(
+                time_ms=2_000,
+                src_agent=1,
+                dst_agent=2,
+                value=42,
+            ),  # yielded
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    assert events[0].damage == 42
+    assert events[0].time_ms == 2_000
+
+
+def test_parse_events_skips_statechange_records() -> None:
+    """Records with ``is_statechange != 0`` (buff apply / position log) are filtered."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=999,
+                is_statechange=1,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_parse_events_skips_nondamage_records() -> None:
+    """Records with ``is_nondamage != 0`` (healing-style flags) are filtered."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=999,
+                is_nondamage=1,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+# ---------------------------------------------------------------------------
 # Real-file integration (skipped if fixture absent)
 # ---------------------------------------------------------------------------
+
 
 _REAL_FIXTURE = Path("/tmp/inner_20251002-213519")  # noqa: S108 (test-only diagnostic fixture)
 

@@ -68,6 +68,7 @@ from typing import BinaryIO, Final
 
 from gw2_core import (
     Agent,
+    DamageEvent,
     EliteSpec,
     EvtcHeader,
     Fight,
@@ -124,6 +125,20 @@ _AGENT_STRUCT: Final[struct.Struct] = struct.Struct(f"<QIIhhhhhh{AGENT_NAME_SIZE
 #: (``skill_id`` + ``name_len``). The variable-size name follows.
 _SKILL_HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<II")
 
+#: Total size of one cbtevent record on disk (arcdps EVTC event record).
+EVENT_SIZE: Final[int] = 64
+
+#: ``struct`` format for one cbtevent record.
+#: arcdps ``cbtevent`` layout (per ``arcdps.h``):
+#:   uint64 time; agent* src_agent; agent* dst_agent;
+#:   int32 value; int32 buff_dmg; uint32 overstack_value; uint32 skillid;
+#:   uint16 src_instid; uint16 dst_instid; uint16 translocated;
+#:   uint8 is_cleanup; is_nondamage; is_statechange;
+#:   uint8 is_flanking; is_shields; is_offcycle;
+#:   uint8 pad61; uint8 pad62; uint32 pad63; uint32 pad64; uint8 pad65; uint8 pad66.
+#: Total: 24 + 8 + 8 + 6 + 8 + 8 + 2 = 64 bytes.
+_EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
+
 #: Sanity bound on agent_count to defend against pathological sources.
 MAX_AGENTS: Final[int] = 10_000
 
@@ -167,6 +182,63 @@ class PythonEvtcParser:
         """
         data = _read_all(source)
         return _iter_fights(data)
+
+    @staticmethod
+    def parse_events(source: BinaryIO | bytes) -> Iterator[DamageEvent]:
+        """Yield :class:`DamageEvent` records from the cbtevent block.
+
+        Phase 7 v1 ships damage events only (``is_statechange == 0``
+        AND ``is_nondamage == 0`` AND ``value > 0``). ``HealingEvent``
+        extraction is a Phase 7 v2 followup.
+
+        Truncation is lenient: if the trailing bytes are less than one
+        cbtevent record wide, the parser stops without raising and
+        logs a warning. ``value`` is clamped via ``max(0, value)`` to
+        absorb signed-int32 overflow quirks that surface as negative
+        damage totals (see validator in :file:`libs/gw2_analytics`).
+        """
+        data = _read_all(source)
+        offset = _compute_post_skills_offset(data)
+        end = len(data)
+        cursor = offset
+        while cursor + EVENT_SIZE <= end:
+            (
+                time_ms,
+                src_agent,
+                dst_agent,
+                value,
+                _buff_dmg,
+                _overstack_value,
+                skill_id,
+                _src_instid,
+                _dst_instid,
+                _translocated,
+                _is_cleanup,
+                is_nondamage,
+                is_statechange,
+                _is_flanking,
+                _is_shields,
+                _is_offcycle,
+                _pad61,
+                _pad62,
+                _pad63,
+                _pad64,
+                _pad65,
+                _pad66,
+            ) = _EVENT_STRUCT.unpack_from(data, cursor)
+            cursor += EVENT_SIZE
+            if is_statechange != 0 or is_nondamage != 0:
+                continue
+            damage = max(0, value)
+            if damage == 0:
+                continue
+            yield DamageEvent(
+                time_ms=time_ms,
+                source_agent_id=src_agent,
+                target_agent_id=dst_agent,
+                skill_id=skill_id,
+                damage=damage,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +383,37 @@ def _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
         name = name_bytes.decode("utf-8", errors="replace")
         yield Skill(id=skill_id, name=name)
         cursor += record_size
+
+
+def _compute_post_skills_offset(data: bytes) -> int:
+    """Return the byte offset where the event stream starts.
+
+    Mirrors :func:`_iter_skills` cursor logic without yielding Skill
+    records, so :meth:`PythonEvtcParser.parse_events` can advance past
+    the skill table deterministically. Truncation behaviour matches
+    :func:`_iter_skills`: stops at the cursor it would have stopped at
+    when iterating, returning either the start of the event block OR
+    ``len(data)`` if the skill table ate the entire blob.
+    """
+    if len(data) < HEADER_SIZE:
+        return len(data)
+    unpacked_header = _HEADER_STRUCT.unpack_from(data, 0)
+    agent_count = int(unpacked_header[5])
+    skill_count = int(unpacked_header[6])
+    cursor = HEADER_SIZE + agent_count * AGENT_SIZE
+    end = len(data)
+    for _ in range(skill_count):
+        if cursor + _SKILL_HEADER_STRUCT.size > end:
+            return cursor
+        unpacked_skill = _SKILL_HEADER_STRUCT.unpack_from(data, cursor)
+        name_len = int(unpacked_skill[1])
+        if name_len > MAX_SKILL_NAME_BYTES:
+            return cursor
+        record_size = _SKILL_HEADER_STRUCT.size + name_len + 1
+        if cursor + record_size > end:
+            return cursor
+        cursor += record_size
+    return cursor
 
 
 def _decode_agent(data: bytes, offset: int) -> Agent:
