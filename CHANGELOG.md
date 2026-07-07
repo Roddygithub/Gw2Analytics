@@ -156,6 +156,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   damage" with "data unavailable", and consumers would have
   no signal to re-upload.
 
+## [0.5.0-web] - Phase 7 v2 of web: window-s selector on /fights/[id]
+
+### Added (web)
+
+- `web/src/components/WindowSizeSelector.tsx` (NEW): Client
+  Component that renders a dropdown of preset time-bucket sizes
+  (``[1, 5, 30, 60, 300]`` seconds) for the ``/fights/[id]``
+  drill-down page. Uses ``useRouter`` + ``usePathname`` from
+  ``next/navigation``; on change, emits a ``router.push`` to the
+  current path with a ``?window_s=N`` query param (or a bare path
+  when the user picks the gateway default 5s, so the URL stays
+  canonical). The default is referenced via
+  ``String(WINDOW_S_PRESETS[1])`` (not the literal "5") so a
+  future preset-list reorder only needs to change the constant,
+  not two call sites. NAMED export to match the existing
+  test-setup mock contract.
+
+- `web/src/app/fights/[id]/page.tsx`: page signature widened to
+  accept ``searchParams: Promise<{ window_s?: string }>`` (the
+  Next.js 15+ async searchParams contract). The page awaits
+  searchParams, parses the raw string via the new
+  ``parseWindowS()`` helper, and passes ``{ windowS: parsed }`` to
+  ``fetchFightEvents`` so the URL drives the time-bucket size.
+  ``parseWindowS()`` clamps out-of-range / non-integer / negative
+  values to the gateway default (5s) so a URL typo never surfaces
+  a misleading 422 from the gateway -- the analyst lands on the
+  canonical 5s view instead. The page header is now a flex row
+  (display:flex + alignItems:baseline + justifyContent:space-
+  between + flexWrap:wrap) so the new
+  ``<WindowSizeSelector />`` sits to the right of the fight_id +
+  duration sub-header (wraps below on mobile).
+
+- `web/tests/setup.ts`: added a no-op mock for the new
+  ``WindowSizeSelector`` named export (same pattern as the
+  existing ``TargetRollupsGrid`` + ``EventWindowsTable`` mocks
+  so the page-level Server Component test focuses on the page's
+  own render contract).
+
+- `web/tests/app/fight-events-page.test.tsx`: all 3 existing test
+  cases updated to pass ``searchParams: Promise.resolve({})``.
+  Two new test cases:
+    - ``window_s=30`` is forwarded to ``fetchFightEvents`` with
+      ``{ windowS: 30 }`` (locks down the URL -> fetch wiring).
+    - ``window_s=9999`` (out of the gateway's ``[1, 600]``
+      range) is clamped to the default 5 (locks down the
+      ``parseWindowS`` clamping behaviour; the gateway never
+      sees a bogus value).
+
+- `web/tests/components/window-size-selector.test.tsx` (NEW): 3
+  component-level tests that override the global no-op mock via
+  ``vi.mock("@/components/WindowSizeSelector", async
+  (importOriginal) => { return await importOriginal<...>(); })``:
+    - renders all 5 preset options + marks the ``current`` prop
+      as selected.
+    - picking the default (5) emits a bare URL (no query param).
+    - picking a non-default value emits a ``?window_s=N`` URL.
+  The selector's dependencies (``useRouter`` + ``usePathname``)
+  are mocked to deterministic stubs so each test asserts on the
+  emitted URL without booting the real Next.js router.
+
+### Notes
+
+- The dropdown is intentionally a fixed preset list (1, 5, 30,
+  60, 300) rather than a free-form number input. The gateway
+  rejects out-of-range values with 422; a free-form input would
+  require either client-side validation or a 422 error card.
+  Presets cover the common analyst use cases (per-second, default,
+  per-encounter, per-minute, per-5-min) without the validation
+  overhead. A future "Custom..." option could open a number
+  input if analysts request it.
+- ``router.push`` (not ``router.replace``) is used so the
+  analyst can back-button through the bucket sizes they tried.
+  The page is ``force-dynamic`` + ``cache: "no-store"`` so the
+  per-rollup re-render is cheap.
+- The ``usePathname() ?? `/fights/${fightId}`` fallback in the
+  selector is defense-in-depth: ``usePathname`` is a Client hook
+  and always returns a non-null string after hydration, so the
+  fallback is dead code in practice. Kept for robustness.
+
+### Tests
+
+- 5 page-level cases (was 3): populated, 404, empty, window_s=30
+  wired, window_s=9999 clamped.
+- 3 component-level cases (new file).
+- Total: 8 cases for the window-s surface (5 page + 3 component).
+
+### Validation
+
+- ``pnpm tsc --noEmit``: clean (TSC=0).
+- ``pnpm test:unit``: clean (VITEST=0, 6 files / 20 tests).
+- Round 66-67 code-reviewer-minimax-m3: **APPROVED** (URL query
+  param is the canonical Next.js 15+ pattern; searchParams
+  Promise wiring is correct; parseWindowS clamping prevents
+  spurious 422s; WINDOW_S_PRESETS[1] reference keeps onChange
+  in lockstep with the preset list; importOriginal override
+  matches the partial-mock pattern used elsewhere in the
+  test suite).
+
+[0.5.0-web]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-tooling...v0.5.0-web
+
 ## [0.5.0-parser] - Phase 7 v2 cbtevent heal extraction + Event discriminated union
 
 ### Added (parser)
@@ -1000,6 +1100,106 @@ route already handles the union via
 - `libs/gw2_evtc_parser/tests/test_parser.py::test_real_evtc_binary_parses_with_realistic_agent_count`:
   end-to-end real-fixture integration test against
   `/tmp/inner_20251002-213519` (skipped if the fixture is absent).
+
+## [0.5.0-web] - Phase 7 v2 of web: window-s selector on /fights/[id]
+
+### Added (web)
+
+- `web/src/components/WindowSizeSelector.tsx` (NEW): Client
+  Component that renders a dropdown of preset time-bucket sizes
+  (``[1, 5, 30, 60, 300]`` seconds) for the ``/fights/[id]``
+  drill-down page. Uses ``useRouter`` + ``usePathname`` from
+  ``next/navigation``; on change, emits a ``router.push`` to the
+  current path with a ``?window_s=N`` query param (or a bare path
+  when the user picks the gateway default 5s, so the URL stays
+  canonical). The default is referenced via
+  ``String(WINDOW_S_PRESETS[1])`` (not the literal "5") so a
+  future preset-list reorder only needs to change the constant,
+  not two call sites. NAMED export to match the existing
+  test-setup mock contract.
+
+- `web/src/app/fights/[id]/page.tsx`: page signature widened to
+  accept ``searchParams: Promise<{ window_s?: string }>`` (the
+  Next.js 15+ async searchParams contract). The page awaits
+  searchParams, parses the raw string via the new
+  ``parseWindowS()`` helper, and passes ``{ windowS: parsed }`` to
+  ``fetchFightEvents`` so the URL drives the time-bucket size.
+  ``parseWindowS()`` clamps out-of-range / non-integer / negative
+  values to the gateway default (5s) so a URL typo never surfaces
+  a misleading 422 from the gateway -- the analyst lands on the
+  canonical 5s view instead. The page header is now a flex row
+  (display:flex + alignItems:baseline + justifyContent:space-
+  between + flexWrap:wrap) so the new
+  ``<WindowSizeSelector />`` sits to the right of the fight_id +
+  duration sub-header (wraps below on mobile).
+
+- `web/tests/setup.ts`: added a no-op mock for the new
+  ``WindowSizeSelector`` named export (same pattern as the
+  existing ``TargetRollupsGrid`` + ``EventWindowsTable`` mocks
+  so the page-level Server Component test focuses on the page's
+  own render contract).
+
+- `web/tests/app/fight-events-page.test.tsx`: all 3 existing test
+  cases updated to pass ``searchParams: Promise.resolve({})``.
+  Two new test cases:
+    - ``window_s=30`` is forwarded to ``fetchFightEvents`` with
+      ``{ windowS: 30 }`` (locks down the URL -> fetch wiring).
+    - ``window_s=9999`` (out of the gateway's ``[1, 600]``
+      range) is clamped to the default 5 (locks down the
+      ``parseWindowS`` clamping behaviour; the gateway never
+      sees a bogus value).
+
+- `web/tests/components/window-size-selector.test.tsx` (NEW): 3
+  component-level tests that override the global no-op mock via
+  ``vi.mock("@/components/WindowSizeSelector", async
+  (importOriginal) => { return await importOriginal<...>(); })``:
+    - renders all 5 preset options + marks the ``current`` prop
+      as selected.
+    - picking the default (5) emits a bare URL (no query param).
+    - picking a non-default value emits a ``?window_s=N`` URL.
+  The selector's dependencies (``useRouter`` + ``usePathname``)
+  are mocked to deterministic stubs so each test asserts on the
+  emitted URL without booting the real Next.js router.
+
+### Notes
+
+- The dropdown is intentionally a fixed preset list (1, 5, 30,
+  60, 300) rather than a free-form number input. The gateway
+  rejects out-of-range values with 422; a free-form input would
+  require either client-side validation or a 422 error card.
+  Presets cover the common analyst use cases (per-second, default,
+  per-encounter, per-minute, per-5-min) without the validation
+  overhead. A future "Custom..." option could open a number
+  input if analysts request it.
+- ``router.push`` (not ``router.replace``) is used so the
+  analyst can back-button through the bucket sizes they tried.
+  The page is ``force-dynamic`` + ``cache: "no-store"`` so the
+  per-rollup re-render is cheap.
+- The ``usePathname() ?? `/fights/${fightId}`` fallback in the
+  selector is defense-in-depth: ``usePathname`` is a Client hook
+  and always returns a non-null string after hydration, so the
+  fallback is dead code in practice. Kept for robustness.
+
+### Tests
+
+- 5 page-level cases (was 3): populated, 404, empty, window_s=30
+  wired, window_s=9999 clamped.
+- 3 component-level cases (new file).
+- Total: 8 cases for the window-s surface (5 page + 3 component).
+
+### Validation
+
+- ``pnpm tsc --noEmit``: clean (TSC=0).
+- ``pnpm test:unit``: clean (VITEST=0, 6 files / 20 tests).
+- Round 66-67 code-reviewer-minimax-m3: **APPROVED** (URL query
+  param is the canonical Next.js 15+ pattern; searchParams
+  Promise wiring is correct; parseWindowS clamping prevents
+  spurious 422s; WINDOW_S_PRESETS[1] reference keeps onChange
+  in lockstep with the preset list; importOriginal override
+  matches the partial-mock pattern used elsewhere in the
+  test suite).
+
+[0.5.0-web]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-tooling...v0.5.0-web
 
 ## [0.5.0-parser] - Phase 7 v2 cbtevent heal extraction + Event discriminated union
 

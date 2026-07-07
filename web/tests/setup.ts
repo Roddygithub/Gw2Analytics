@@ -46,6 +46,21 @@ vi.mock("@/components/EventWindowsTable", () => ({
 }));
 
 /**
+ * ``@/components/WindowSizeSelector`` is a small Client Component
+ * (useRouter + usePathname from ``next/navigation``) that renders
+ * a dropdown for the ``?window_s=`` query param. The fight-events-
+ * page test imports the page (which transitively imports the
+ * selector), so we mock it as a no-op to keep the page test
+ * focused on the page's own render contract; a dedicated
+ * component-level test in
+ * :file:`web/tests/components/window-size-selector.test.tsx`
+ * exercises the dropdown + router interaction.
+ */
+vi.mock("@/components/WindowSizeSelector", () => ({
+  WindowSizeSelector: () => null,
+}));
+
+/**
  * next/link is replaced with a plain anchor so jsdom can resolve
  * the href without booting the Next.js runtime. The original
  * ``Link`` accepts ``className`` + child React tree; the shim

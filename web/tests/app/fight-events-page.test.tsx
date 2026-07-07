@@ -93,6 +93,7 @@ describe("FightEventsPage", () => {
     vi.mocked(fetchFightEvents).mockResolvedValue(POPULATED_PAYLOAD);
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({}),
     });
     render(tree);
     expect(
@@ -116,6 +117,7 @@ describe("FightEventsPage", () => {
     );
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({}),
     });
     render(tree);
     // Header still renders (analyst can see WHICH fight id failed),
@@ -132,6 +134,7 @@ describe("FightEventsPage", () => {
     vi.mocked(fetchFightEvents).mockResolvedValue(EMPTY_PAYLOAD);
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({}),
     });
     render(tree);
     expect(
@@ -149,5 +152,44 @@ describe("FightEventsPage", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "Event windows" }),
     ).toBeInTheDocument();
+  });
+
+  it("forwards searchParams.window_s to fetchFightEvents (window-s selector wiring)", async () => {
+    vi.mocked(fetchFightEvents).mockResolvedValue(POPULATED_PAYLOAD);
+    const tree = await FightEventsPage({
+      params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({ window_s: "30" }),
+    });
+    render(tree);
+    // The page must pass { windowS: 30 } to fetchFightEvents so the
+    // gateway returns 30-second buckets. This locks down the
+    // URL -> fetchFightEvents wiring (a refactor that drops the
+    // searchParams parse would silently fall back to the default
+    // 5s and the analyst would see wrong-sized buckets).
+    expect(vi.mocked(fetchFightEvents)).toHaveBeenCalledWith(FIGHT_ID, {
+      windowS: 30,
+    });
+    // Header + 3 section headings still render.
+    expect(
+      screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Event windows" }),
+    ).toBeInTheDocument();
+  });
+
+  it("clamps an out-of-range window_s to the gateway default (no upstream 422)", async () => {
+    vi.mocked(fetchFightEvents).mockResolvedValue(POPULATED_PAYLOAD);
+    const tree = await FightEventsPage({
+      params: Promise.resolve({ id: FIGHT_ID }),
+      // 9999 is well outside the gateway's [1, 600] range; the
+      // page should clamp to 5s (the gateway default) instead of
+      // forwarding the bogus value to fetchFightEvents.
+      searchParams: Promise.resolve({ window_s: "9999" }),
+    });
+    render(tree);
+    expect(vi.mocked(fetchFightEvents)).toHaveBeenCalledWith(FIGHT_ID, {
+      windowS: 5,
+    });
   });
 });

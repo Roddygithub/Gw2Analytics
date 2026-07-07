@@ -70,8 +70,26 @@ import {
   type TargetRollupColumn,
 } from "@/components/TargetRollupsGrid";
 import { EventWindowsTable } from "@/components/EventWindowsTable";
+import { WindowSizeSelector } from "@/components/WindowSizeSelector";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Parse the URL ``?window_s=`` query param into a typed integer,
+ * clamping invalid / out-of-range values to the gateway default
+ * (5s). The clamping is intentional: the gateway returns 422 on
+ * out-of-range, which would surface a misleading upstream-error
+ * card for what is really a URL-typo case. By clamping on the
+ * client, an analyst typing ``?window_s=0`` lands on the
+ * canonical 5s view instead of an error page.
+ */
+function parseWindowS(raw: string | undefined): number {
+  const DEFAULT = 5;
+  if (raw === undefined || raw === "") return DEFAULT;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1 || n > 600) return DEFAULT;
+  return n;
+}
 
 // Column specs are built once at module-load time, not inside the
 // component body, so the ``TargetRollupsGrid`` useMemo deps stay
@@ -94,15 +112,19 @@ const HEALING_COLUMNS: TargetRollupColumn<TargetHealingRow>[] = [
 
 export default async function FightEventsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ window_s?: string }>;
 }) {
-  // Next.js 15+ delivers route params as a Promise; await it to
-  // obtain the fight id before fetching. ``encodeURIComponent`` on
-  // the id is unnecessary for a SHA-256 (it's already URL-safe)
-  // but is the canonical guard against any future id shape that
-  // happens to contain reserved characters.
+  // Next.js 15+ delivers both route params AND search params as
+  // Promises; await them to obtain the fight id + window_s. The
+  // ``encodeURIComponent`` on the id is unnecessary for a SHA-256
+  // (already URL-safe) but is the canonical guard against any
+  // future id shape that happens to contain reserved characters.
   const { id } = await params;
+  const { window_s: window_s_raw } = await searchParams;
+  const windowS = parseWindowS(window_s_raw);
 
   let summary: FightEventsSummaryRow | null = null;
   // ``fetchError`` carries the user-facing error string (already
@@ -112,7 +134,7 @@ export default async function FightEventsPage({
   // ``Upstream error:`` prefix is needed.
   let fetchError: string | null = null;
   try {
-    summary = await fetchFightEvents(id);
+    summary = await fetchFightEvents(id, { windowS });
   } catch (err) {
     fetchError = formatApiError(err);
   }
@@ -140,13 +162,24 @@ export default async function FightEventsPage({
         gap: "24px",
       }}
     >
-      <header>
-        <h1 style={{ fontSize: 28, marginBottom: 4 }}>
-          Fight {summary.fight_id}
-        </h1>
-        <p style={{ opacity: 0.7 }}>
-          Duration: {summary.duration_s.toFixed(2)} s
-        </p>
+      <header
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: 28, marginBottom: 4 }}>
+            Fight {summary.fight_id}
+          </h1>
+          <p style={{ opacity: 0.7 }}>
+            Duration: {summary.duration_s.toFixed(2)} s
+          </p>
+        </div>
+        <WindowSizeSelector current={windowS} fightId={id} />
       </header>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
