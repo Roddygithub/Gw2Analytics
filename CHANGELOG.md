@@ -7,6 +7,203 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.8] - v0.8.8: visual documentation in README + auto-codegen on pnpm dev
+
+### Added (web docs)
+
+- `docs/screenshots/01-landing.png` through
+  `docs/screenshots/08-fight-drilldown.png` (NEW,
+  8 PNGs, 384 KB): the 8 captures previously
+  written to the gitignored ``/screenshots/`` dir
+  by `pnpm screenshots` are now committed alongside
+  the README so the visual surface is visible to
+  visitors browsing the repo on github.com. Covers
+  every top-level web route + the fight drilldown +
+  the player profile drilldown.
+- `README.md`: a new `## Screenshots` section
+  between `## Architecture & Component Status` and
+  `## Quickstart` with a route-keyed table
+  referencing 6 of the 8 PNGs (Landing, Upload,
+  Account, Fights, Players, Player profile, Fight
+  drilldown). The table is the canonical entry
+  point for a visitor evaluating the app without
+  running the dev stack.
+- `web/scripts/screenshots.mjs`: a new
+  ``--persist`` flag (read once at startup) mirrors
+  each PNG from the gitignored transient dir into
+  the tracked ``docs/screenshots/`` so the
+  README's `## Screenshots` section stays in sync.
+  Default behaviour is unchanged (transient
+  ``/screenshots/`` only). Pure-Node
+  ``copyFile`` from ``node:fs/promises`` (no shell
+  boundary, no OS-level ``cp`` dep). Idempotent.
+
+### Added (web DX)
+
+- `web/package.json`: the `dev` script now chains
+  ``pnpm generate:api && next dev`` so the OpenAPI
+  ``schema.d.ts`` is always fresh before Next.js
+  boots. ``&&`` fail-fast: a broken codegen stops
+  the dev server with a clear error rather than
+  silently running against a stale schema. Closes
+  the dev-loop gap where a fresh ``git clone`` +
+  ``pnpm dev`` would either fail typecheck or run
+  against an absent ``schema.d.ts`` until the dev
+  manually ran ``pnpm generate:api``.
+- `web/package.json`: ``openapi-typescript`` added
+  to ``devDependencies`` (^7.13.0). The existing
+  ``pnpm generate:api`` script was silently failing
+  in v0.8.7 and earlier because the dep was missing
+  from the lockfile -- the codegen chain
+  (``dump_openapi.py`` -> ``openapi-typescript
+  openapi.json`` -> ``schema.d.ts``) requires the
+  binary to be installed. The new dev-script chain
+  surfaces this on first run instead of failing
+  silently later.
+- `web/.gitignore`: ``src/lib/api/schema.d.ts`` is
+  now ignored. The file is regenerated on every
+  ``pnpm generate:api`` run (and now implicitly on
+  every ``pnpm dev`` start), so committing it would
+  create a per-PR churn cycle with no audit value.
+- `web/README.md`: the `## OpenAPI regeneration`
+  section was rewritten. The v0.3.0-era
+  "reads http://localhost:8000/openapi.json" claim
+  is dropped (the codegen path has been
+  Python-native via ``app.openapi()`` for several
+  versions); the section now documents the new
+  auto-codegen-on-``pnpm dev`` behaviour and notes
+  the ``uv sync`` prerequisite so a fresh-clone
+  ``pnpm dev`` knows the right bootstrap order.
+
+### Added (planning)
+
+- `plans/README.md` + 3 plan files in a new
+  ``plans/`` directory at the repo root: a
+  senior-advisor audit (improve skill, ``next``
+  invocation, ``quick`` effort) stamped at
+  ``fe99cb7`` that scoped the v0.8.8 cycle's 3
+  candidates. The plans are self-contained
+  implementation specs for: (001) bring the
+  gitignored ``pnpm screenshots`` PNGs into a
+  tracked ``docs/screenshots/`` and reference
+  them from the README, (002) close the
+  remaining gaps in the Playwright e2e suite,
+  (003) chain ``pnpm generate:api`` into
+  ``pnpm dev``. The audit also stamped 1
+  "considered and rejected" item: web route
+  coverage of the API surface (already at
+  7/7 coverage from v0.7.1).
+- `plans/002-real-playwright-e2e-suite.md` was
+  revised to reflect that 3 specs +
+  ``mock-server.mjs`` + CI integration were
+  already shipped from prior cycles (v0.7.1 /
+  v0.7.2 / v0.8.0), narrowing the remaining
+  work to 3 new spec files
+  (``landing.spec.ts`` / ``account.spec.ts`` /
+  ``upload.spec.ts``) + 2 mock endpoint
+  additions to ``mock-server.mjs``
+  (``GET /api/v1/account`` /
+  ``POST /api/v1/uploads``). The plan and the
+  parent `plans/README.md` index are the
+  forward-looking artefacts for the v0.8.9
+  cycle.
+
+### Notes
+
+- The v0.8.8 cycle closes the v0.8.7 chore
+  cycle's screenshot investment: the
+  `web/scripts/screenshots.mjs` script (NEW in
+  v0.8.7, commits ``ad9959a`` through
+  ``fe99cb7``) was tracked but the PNGs it
+  emitted were gitignored and invisible to
+  end-users. v0.8.8 brings the PNGs into the
+  tracked ``docs/screenshots/`` + adds a
+  ``--persist`` flag to the script for future
+  refresh runs.
+- The legacy ``/screenshots/`` dir (the v0.8.7
+  capture target, gitignored) was physically
+  removed via ``rm -rf`` after the v0.8.8
+  tracking transition; 384 KB reclaimed. The
+  tracked ``docs/screenshots/`` is the new
+  canonical artifact store.
+- ``pnpm dev`` is now a Python+Node hybrid
+  bootstrap (the codegen chain pulls in
+  ``dump_openapi.py`` which boots the FastAPI
+  app in-process to call ``app.openapi()``).
+  The ``uv sync`` prerequisite (documented in
+  the root README's Quickstart) is now
+  load-bearing for ``pnpm dev`` -- a
+  fresh-clone who skips it will hit a
+  ``uv run python scripts/dump_openapi.py``
+  failure on the first dev start. The
+  `web/README.md` `## OpenAPI regeneration`
+  section was updated to call this out.
+
+### Tests
+
+- 0 new automated tests at the v0.8.8 commit
+  layer. The v0.8.7 test count (Python: 191
+  cases / Web vitest: 70+ cases / Playwright:
+  3 specs) is unchanged. The v0.8.8 cycle
+  was scoped to docs + DX with no behavioural
+  change to the runtime surface.
+- 3 of 3 new Playwright specs from plan/002
+  (the revised plan) are not in this release
+  -- they're the remaining v0.8.8 work,
+  tracked under the revised plan for the
+  v0.8.9 cycle.
+
+### Validation
+
+- `pnpm typecheck` (web/): clean (TSC=0). The
+  generated ``schema.d.ts`` is type-correct.
+- `pnpm test:unit` (web/): clean (VITEST=0).
+  The existing 70+ vitest cases are unchanged.
+- `pnpm exec playwright test` (web/): clean
+  on the existing 3 specs (no new specs in
+  this release).
+- `uv run ruff check libs apps`: clean
+  (RUFF=0). The planning + docs cycle
+  touched no Python source.
+- `uv run mypy --no-incremental libs apps`:
+  clean (MYPY=0). Same.
+- `uv run pytest apps/api`: 191 cases pass
+  (PYTEST=0). Same.
+- ``uv run pre-commit run mypy
+  --all-files``: clean (PRECOMMIT_MYPY=0).
+  The CHANGELOG + plan markdown changes are
+  not type-checked (the hook is gated on
+  ``libs/`` + ``apps/``).
+- `node --check web/scripts/screenshots.mjs`:
+  clean. The script uses ``import.meta.dirname``
+  (stable from Node v20.11+).
+- Round 152 code-reviewer-minimax-m3 (the
+  plan/002 revision): **APPROVED**. The
+  revised plan correctly narrows the
+  remaining work to 3 new spec files + 2
+  mock endpoint additions; the
+  "partially shipped" status in the
+  plans/ status table is the truthful
+  summary of prior-cycle work.
+- Round 150-151 code-reviewer-minimax-m3
+  (the plan/001 execution): **APPROVED**.
+  The ``copyFile`` swap (vs
+  ``execFileP("cp", ...)``) is the
+  pure-Node canonical pattern; the README
+  link-anchor fix (vs the ``(../)``-style
+  relative path) is the GitHub-rendering
+  canonical pattern.
+- Round 151 code-reviewer-minimax-m3 (the
+  plan/003 execution): **APPROVED with 2
+  followup commits**. The missing
+  ``openapi-typescript`` dep + the implicit
+  ``uv sync`` coupling were both addressed
+  in a single followup commit; the
+  round-2 review (after the dep was added)
+  was clean.
+
+[0.8.8]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.7...v0.8.8
+
 ## [0.8.7] - v0.8.7: wire the v0.8.6 health probe into CI as a regression gate
 
 ### Added (apps/api)
@@ -1176,7 +1373,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.7.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.0...v0.7.1
 
-[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.7...HEAD
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.8...HEAD
 
 ## [0.7.0] - Phase 9: player-centric surface + per-fight squad + per-fight skill roll-ups
 
