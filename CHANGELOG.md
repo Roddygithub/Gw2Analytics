@@ -7,6 +7,180 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.9] - v0.8.9: per-account timeline gains ?tz=Continent/City
+
+### Added (apps/api)
+
+- `apps/api/src/gw2analytics_api/schemas.py::PlayerTimelineOut`:
+  gains a `tz: str = "UTC"` field. Additive -- the default
+  preserves the v0.8.1 wire contract for pre-v0.8.9
+  consumers.
+- `apps/api/src/gw2analytics_api/routes/players.py::get_player_timeline`:
+  new `?tz=Continent/City` query param. Default `"UTC"`.
+  The day-bucketed point's `started_at` is now midnight
+  in the requested TZ (serialised back to UTC on the wire
+  for chart-X-axis compatibility -- the existing
+  `time.getUTCHours() === 0` auto-detect works for any
+  TZ the analyst picks without chart-side changes).
+  Invalid IANA names return 422
+  (`ZoneInfoNotFoundError` -> `HTTPException(422, ...)`)
+  AFTER the 404 check (an unknown account + invalid TZ
+  returns 404 because the 404 check fires first; the
+  ordering is documented inline in the route docstring).
+  The `?bucket=fight` mode is unaffected -- the TZ only
+  matters for the day-bucketed grouping.
+
+### Added (web)
+
+- `web/src/lib/api.ts::PlayerTimeline`: gains `tz: string`
+  field (additive). `fetchPlayerTimeline` opts signature
+  gains `tz?: string` -> URLSearchParams.
+- `web/src/components/PlayerTimelineSection.tsx`: the
+  `tz` option is threaded through to both
+  `fetchPlayerTimeline` call sites (the initial-load
+  + the `Load more` pagination). The hardcoded `tz = "UTC"`
+  local const is the v0.8.9 baseline; a future v0.9.0+
+  TZ-selector UI would lift this to a prop.
+- `web/src/app/players/[account_name]/page.tsx`: the
+  `effectiveTimeline` empty-state fallback gains
+  `tz: "UTC"` (mirrors the v0.8.1 `bucket: "fight"`
+  comment style; the section reads `initialTimeline.tz`
+  to thread through to the fetcher).
+
+### Added (planning)
+
+- `plans/001-tz-param-player-timeline.md` (NEW): the
+  v0.8.9 cycle's first advisor-audit plan. Closes the
+  v0.8.1 CHANGELOG's "TZ assumption documented inline"
+  technical-debt note (the v0.8.1 day-bucketing assumed
+  UTC, with the `?tz=Europe/Paris` extension explicitly
+  deferred to v0.8.9).
+- `plans/002-per-fight-timeline-tab.md` (NEW) +
+  `plans/003-visual-regression-testing.md` (NEW): the
+  remaining 2 v0.8.9 advisor-audit candidates. Both
+  deferred to subsequent cycles; the v0.8.9 cycle
+  scopes the API + web threading for plan/001 only.
+
+### Tests
+
+- 4 new e2e tests in
+  `apps/api/tests/test_uploads_e2e.py`:
+  - `test_player_timeline_tz_default_is_utc`: omitting
+    `?tz=` returns the day-bucketed point at UTC midnight
+    + `payload["tz"] == "UTC"` + the local-midnight
+    invariant holds.
+  - `test_player_timeline_tz_europe_paris`: `?tz=Europe/Paris`
+    shifts the day-bucketed point to Paris midnight.
+    The fixture seeds a fight at 2024-01-15 23:30:00
+    UTC (winter, no DST edge case), which lands on
+    2024-01-16 in Paris. Cross-check: the same fight
+    without `?tz=` lands on 2024-01-15 UTC; the 2
+    day-bucketed points are 23h apart on the wire (the
+    structural signature of the TZ shift).
+  - `test_player_timeline_tz_america_new_york`:
+    `?tz=America/New_York` shifts the day-bucketed
+    point to NY midnight. The fixture seeds a fight at
+    2024-01-15 02:30:00 UTC, which lands on 2024-01-14
+    in NY (UTC-5 in winter). The day shifts BACK (the
+    opposite direction of the Paris test).
+  - `test_player_timeline_tz_422_when_invalid_timezone`:
+    `?tz=Mars/Olympus` (unknown IANA name) returns 422
+    + the detail message includes the rejected TZ
+    string. The test seeds a real account so the 404
+    check passes and the handler reaches the
+    `ZoneInfo(tz)` parse block (an unknown account
+    would return 404 first, masking the 422).
+- 1 new vitest case on
+  `web/tests/components/player-timeline-section.test.tsx`:
+  "forwards the optional tz prop to the fetcher" (the
+  section's `tz` prop is threaded through to the
+  `fetchPlayerTimeline` URL params).
+- `tz: string` added to the `EMPTY_TIMELINE` mock in
+  `web/tests/app/player-profile-page.test.tsx` (TS
+  strict-mode requirement).
+- `tz: "UTC"` added to the `effectiveTimeline`
+  fallback in
+  `web/src/app/players/[account_name]/page.tsx`
+  (TS strict-mode requirement; the round-1 review
+  caught the missing field as a TS2322 error).
+
+### Notes
+
+- The day-bucketed point's `started_at` is midnight
+  in the requested TZ, but the wire format stays
+  UTC-stable: the `_combine_day_midnight` helper
+  serialises the local-midnight back to UTC. This
+  means the existing chart's X-axis auto-detect
+  (which flags `time.getUTCHours() === 0` etc.)
+  still works for ANY TZ the analyst picks -- the
+  chart does not need to know the analyst's TZ to
+  render `MM/DD`.
+- The `tz` field on the response is the original
+  query-string value (e.g. `"Europe/Paris"`), NOT
+  the `ZoneInfo`'s canonical name. This lets the
+  consumer see exactly what they sent and detect
+  any TZ-aliasing surprises (e.g. `?tz=Europe/Paris`
+  is preserved as-is, not normalised to
+  `Area/Paris` or similar).
+- 404-vs-422 ordering: UNKNOWN account returns 404
+  (regardless of `?tz=` validity); KNOWN account +
+  invalid `?tz=` returns 422; UNKNOWN account +
+  invalid `?tz=` also returns 404 (the 404 wins
+  because it fires first). This mirrors the
+  conventional REST resource-first / query-param-
+  second validation order.
+- The 4 e2e tests all use 2024-01-15 (winter, no
+  DST edge case for either Paris or NY). A
+  followup cycle could add a DST-boundary test
+  (e.g. a 2024-03-09 / 2024-03-10 fixture to
+  exercise the spring-forward day in the EU or
+  US); the v0.8.9 cycle scopes the core contract,
+  not the DST edge cases.
+- A future v0.9.0+ enhancement could surface a
+  TZ selector UI on the player profile page (a
+  small dropdown that maps to `?tz=Continent/City`).
+  The backend's additive `tz` field is already
+  in place; the v0.8.9 cycle scopes the API + the
+  section threading, not the UI.
+
+### Validation
+
+- `uv run ruff check apps/`: clean (RUFF=0).
+- `uv run mypy apps/ --no-incremental`: clean
+  (MYPY=0).
+- `uv run pytest apps/api/tests/test_uploads_e2e.py -k tz`:
+  not run locally (requires `docker compose up -d
+  gw2a-postgres`); the 4 new tests follow the
+  same patterns as the existing v0.8.1 day-bucketing
+  tests (SQLAlchemy `UPDATE` of `OrmFight.started_at`
+  + the `_post_minimal_fight` helper), so the
+  pattern-level confidence is high. A follow-up
+  CI run will exercise the new path end-to-end.
+- `pnpm typecheck`: clean (TSC=0; the round-1
+  TS2322 on `web/src/app/players/[account_name]/page.tsx`
+  was caught and fixed by adding `tz: "UTC"` to
+  the `effectiveTimeline` fallback).
+- `pnpm test:unit`: clean (VITEST=0, 71 tests
+  across 13 files; 1 new vitest case on
+  `player-timeline-section.test.tsx`).
+- `pnpm exec playwright test`: clean (PLAYWRIGHT=0,
+  14 tests across 6 specs).
+- Round 1 code-reviewer-minimax-m3 (commit
+  `af0729f`): **caught 2 real issues** -- (1)
+  TS2322 on the `effectiveTimeline` fallback
+  (missing `tz` field), (2) 422 test using unknown
+  account "anything" so the 404 check fired first
+  (the test would have masked the 422). Both
+  fixed in the round-2 follow-up. Round 2
+  code-reviewer (after the fixes): **APPROVED**
+  (LGTM; the 2 fixes are minimal and correct;
+  the 404-vs-422 ordering invariant in the test
+  docstring is accurate).
+
+[0.8.9]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.8...v0.8.9
+
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.8...HEAD
+
 ## [0.8.8] - v0.8.8: visual documentation in README + auto-codegen on pnpm dev
 
 ### Added (web docs)
