@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
 
-**Status:** 87 tests across 4 libraries + 1 app / 8 test files (86 passing + 1 conditionally skipped: `apps/api/tests/test_uploads_e2e.py` self-skips when no docker-compose Postgres is reachable) · 6 release tags shipped (incl. `v0.2.0-api`) · strict CI lint-and-test + pnpm typecheck gate active.
+**Status:** 88 tests across 4 libraries + 1 app / 8 test files (87 passing + 1 conditionally skipped: `libs/gw2_evtc_parser/tests/test_parser.py::test_real_evtc_binary_parses_with_realistic_agent_count` requires the real-fixture blob at `/tmp/inner_20251002-213519`) · 6 release tags shipped (incl. `v0.2.0-api`) · strict CI lint-and-test + pnpm typecheck gate active.
 
 Modern combat analytics platform for **Guild Wars 2 WvW** (World vs World).
 
@@ -58,10 +58,13 @@ docker compose up -d
 #    Values mirror docker-compose.yml; never commit the real .env file.
 cp .env.example .env
 
-# 6. Boot the API (http://localhost:8000/docs)
+# 6. Apply the Postgres schema (creates the fights / agents / skills / uploads tables)
+cd apps/api && uv run alembic upgrade head && cd ../..
+
+# 7. Boot the API (http://localhost:8000/docs)
 uv run fastapi dev apps/api/src/gw2analytics_api/main.py
 
-# 7. Frontend (Next.js 16) — the only UI for fights + API key resolve
+# 8. Frontend (Next.js 16) — the only UI for fights + API key resolve
 cd web
 pnpm install
 pnpm dev   # http://localhost:3000
