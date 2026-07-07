@@ -1,6 +1,6 @@
 """Multi-level analytics built on top of :mod:`gw2_core`.
 
-Exposes four siblings:
+Exposes six siblings (Phase 7 v1 added the healing roll-up):
 
 - :class:`~gw2_analytics.aggregate.SingleFightAggregator` -- one parsed
   :class:`~gw2_core.Fight` -> one :class:`~gw2_analytics.aggregate.FightAggregate`.
@@ -8,11 +8,21 @@ Exposes four siblings:
   of parsed ``Fight`` records -> one
   :class:`~gw2_analytics.multi_fight.MultiFightAggregate`.
 - :class:`~gw2_analytics.target_dps.TargetDpsAggregator` -- a stream of
-  :class:`~gw2_core.DamageEvent` -> per-target DPS roll-up rows
-  (Phase 6 v1; input is synthetic until the parser surfaces events).
+  :class:`~gw2_core.DamageEvent` -> per-target DPS roll-up rows.
+- :class:`~gw2_analytics.target_healing.TargetHealingAggregator` -- a stream of
+  :class:`~gw2_core.HealingEvent` -> per-target HPS (healing-per-second) roll-up rows
+  (Phase 7 v1; strict parallel of
+  :class:`~gw2_analytics.target_dps.TargetDpsAggregator`).
 - :class:`~gw2_analytics.event_window.EventWindowAggregator` -- a stream of
-  :class:`~gw2_core.Event` -> time-bucketed roll-ups
-  (Phase 6 v1; same parser-forward-compat note).
+  :class:`~gw2_core.Event` -> time-bucketed roll-ups.
+
+The DPS + Healing aggregators accept single-typed streams
+(``Iterable[DamageEvent]`` / ``Iterable[HealingEvent]``); consumers
+with a heterogeneous ``Iterable[Event]`` stream (e.g. the API route
+layer parsing the per-fight JSONL blob) split the stream by
+``isinstance`` at the call site and invoke both aggregators on the
+same ``duration_s`` -- each aggregator stays free of cross-kind
+discrimination in its hot loop.
 """
 
 from __future__ import annotations
@@ -31,8 +41,9 @@ from gw2_analytics.multi_fight import (
     MultiFightAggregator,
 )
 from gw2_analytics.target_dps import TargetDpsAggregator, TargetDpsRow
+from gw2_analytics.target_healing import TargetHealingAggregator, TargetHealingRow
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "CombatantRollup",
@@ -47,5 +58,7 @@ __all__ = [
     "SkillCatalogEntry",
     "TargetDpsAggregator",
     "TargetDpsRow",
+    "TargetHealingAggregator",
+    "TargetHealingRow",
     "__version__",
 ]

@@ -37,7 +37,7 @@ from pathlib import Path
 
 import pytest
 
-from gw2_core import DamageEvent, EliteSpec, Event, HealingEvent, Profession
+from gw2_core import DamageEvent, EliteSpec, HealingEvent, Profession
 from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
 from gw2_evtc_parser.parser import (
     AGENT_COUNT_OFFSET,

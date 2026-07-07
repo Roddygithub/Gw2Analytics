@@ -14,6 +14,11 @@ Conventions
   ``(-total_damage, target_agent_id)`` -- highest damage first; ties
   broken by ascending ``target_agent_id``. Two runs over the same input
   MUST yield byte-identical row output.
+- This file is the strict parallel of :mod:`gw2_analytics.target_healing`
+  (``TargetDpsRow`` <-> ``TargetHealingRow``,
+  ``TargetDpsAggregator`` <-> ``TargetHealingAggregator``);
+  see that module for the healing-roll-up counterpoint (added in
+  Phase 7 v1).
 - **No defaults invented.** Empty input yields ``[]``; we never
   synthesise a placeholder row.
 - **DPS = ``total_damage / duration_s`` when ``duration_s > 0``.**
