@@ -7,6 +7,178 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - Phase 9 of web: player-centric surface + per-fight squad + skill roll-ups
+
+### Added (web)
+
+- `web/src/components/SquadRollupsGrid.tsx` (NEW): generic AG
+  Grid Community wrapper for the per-subgroup roll-up. Keyed
+  on ``subgroup`` string (NOT ``target_agent_id`` number --
+  the row shape differs from the per-target trio, so a
+  dedicated grid component is warranted). Re-uses the
+  existing ``./ag-grid-setup`` side-effect import so the
+  module registration runs once across the whole module
+  graph.
+- `web/src/components/SkillUsageTable.tsx` (NEW): plain HTML
+  table for the per-skill roll-up. Strict parallel of the
+  pre-existing :class:`EventWindowsTable` (no AG Grid, no
+  charts). The skill count is bounded by the parser's skill
+  table size (typically 5-100 rows for a single fight) so
+  the table stays human-scannable without pagination.
+- `web/src/components/EventWindowsChart.tsx` (NEW): inline
+  SVG bar chart for the per-fight event windows. Side-by-
+  side damage + healing bars per bucket, zero external
+  charting deps (~100 lines of SVG vs ~50-150 KB for a
+  charting library). Sized to fit alongside the pre-existing
+  :class:`EventWindowsTable` on the ``/fights/[id]`` page.
+- `web/src/components/PlayerSearchBar.tsx` (NEW): Client
+  Component with a text input for player search. On submit,
+  navigates to ``/players/{URL-encoded-account_name}`` via
+  ``useRouter().push``. Lives in the root layout's sticky
+  header bar (added below) so the analyst can pivot to a
+  player profile from any page without first navigating to
+  ``/players``.
+- `web/src/components/PlayersGrid.tsx` (NEW): AG Grid
+  Community wrapper for the ``/players`` paginated list.
+  Strict parallel of the pre-existing :class:`FightsGrid`
+  (Quartz dark theme, sortable + filterable columns, 25-row
+  pagination). The ``account_name`` column is rendered as
+  an anchor to ``/players/{URL-encoded}`` so a single click
+  carries the analyst to the per-account drill-down page.
+- `web/src/app/players/page.tsx` (NEW): Server Component that
+  SSR-fetches :func:`fetchPlayers` and renders the
+  :class:`PlayersGrid`. ``force-dynamic`` so the list
+  reflects the latest parsed fight state on every request.
+  Empty + 404 + upstream-error handling matches the
+  pre-existing ``/fights`` page pattern.
+- `web/src/app/players/[account_name]/page.tsx` (NEW):
+  Server Component that SSR-fetches
+  :func:`fetchPlayer(account_name)` and renders the
+  cross-fight stat cards (fights attended + 3 totals) +
+  per-fight breakdown table (sorted by ``started_at`` DESC).
+  ``force-dynamic`` so the profile reflects the latest
+  parsed fight state. ``← Back to players`` anchor in the
+  header so the analyst can return to the list view.
+- `web/src/app/fights/[id]/page.tsx`: extended to
+  ``Promise.allSettled`` for 3 parallel fetchers
+  (:func:`fetchFightEvents` + :func:`fetchFightSquads` +
+  :func:`fetchFightSkills`). ``allSettled`` (NOT ``all``)
+  so a single fetcher failure does not blank the whole page
+  -- the per-target trio is the primary surface and a
+  transient squads/skills failure should not block the
+  per-target roll-ups. Two new sections (Per-subgroup +
+  Per-skill) added below the per-target trio. The
+  ``EventWindowsChart`` is rendered alongside the
+  pre-existing :class:`EventWindowsTable` so the analyst
+  can pick the visualisation they prefer.
+- `web/src/app/layout.tsx`: added a sticky header bar
+  (position: sticky; top: 0) hosting the brand link +
+  :class:`PlayerSearchBar`. The header bar is the canonical
+  Next.js location for a global search affordance; the
+  ``/players`` list page does NOT add a second search input
+  (would duplicate the affordance).
+- `web/src/app/page.tsx`: added a 4th card for ``/players`` in
+  the home page nav (Browse players), matching the
+  existing card triplet aesthetic.
+
+### Added (web lib)
+
+- `web/src/lib/api.ts`: 4 new fetcher helpers
+  (:func:`fetchPlayers`, :func:`fetchPlayer`,
+  :func:`fetchFightSquads`, :func:`fetchFightSkills`) + 8
+  new TypeScript interfaces (:class:`PlayerListRow`,
+  :class:`PerFightBreakdownRow`, :class:`PlayerProfile`,
+  :class:`SquadRollupRow`, :class:`FightSquads`,
+  :class:`SkillUsageRow`, :class:`FightSkills`). All
+  mirror the v0.7.0-api backend schemas (apps/api 0.7.0+).
+
+### Added (web tests)
+
+- `web/tests/app/players-page.test.tsx` (NEW): 4 page-level
+  vitest cases (populated, empty, 404, 502) mirroring the
+  pre-existing ``/fights`` page test pattern. Uses
+  ``vi.hoisted`` to wrap the mock variable so the factory
+  can reference it (vitest hoists ``vi.mock`` calls to the
+  top of the file).
+- `web/tests/app/player-profile-page.test.tsx` (NEW): 4
+  page-level cases (populated, empty breakdown, 404, 502).
+  Same ``vi.hoisted`` pattern.
+- `web/tests/components/player-search-bar.test.tsx` (NEW):
+  5 component-level cases (renders input+button, empty
+  no-op, whitespace no-op, submit URL-encodes, trim before
+  encode). Uses ``vi.mock(..., importOriginal)`` to
+  override the global no-op mock for the search bar
+  declared in :file:`web/tests/setup.ts`.
+- `web/tests/setup.ts`: 6 new global no-op mocks
+  (EventWindowsChart, SquadRollupsGrid, SkillUsageTable,
+  PlayersGrid, PlayerSearchBar) so the page-level tests
+  can render the page wrapper without dragging AG Grid's
+  runtime into jsdom.
+- `web/tests/app/fight-events-page.test.tsx`: extended to
+  mock :func:`fetchFightSquads` + :func:`fetchFightSkills`
+  (the page now fires 3 parallel fetchers via
+  ``Promise.allSettled``) + added 2 new heading checks
+  (Per-subgroup + Per-skill) to the existing test cases.
+
+### Notes
+
+- The web layer for v0.7.0 ships as v0.7.1 (not v0.7.0-web)
+  because the v0.7.0 backend release was already tagged.
+  The version bump keeps the semver convention: the web
+  surface that consumes a v0.7.0 backend is itself a
+  v0.7.1 release (minor version, additive changes only).
+- The ``PlayerSearchBar`` lives in the root layout so it
+  appears on every page (not just ``/players``). The
+  ``/players`` list page does NOT add a second search
+  input -- would duplicate the affordance + force the
+  user to think about which input is the "right" one.
+- The ``EventWindowsChart`` is rendered ALONGSIDE the
+  pre-existing :class:`EventWindowsTable` (not as a
+  replacement). A future enhancement could add a small
+  "table / chart" toggle button pair to let the analyst
+  pick the visualisation; for v0.7.1 the chart is a
+  supplementary view.
+- The ``Promise.allSettled`` pattern in
+  :file:`web/src/app/fights/[id]/page.tsx` is a deliberate
+  trade-off: a single fetcher failure (e.g. transient
+  squads/skills 404) no longer blanks the whole page. The
+  common upstream-blob failure mode (S3Error on ``/events``)
+  still surfaces the unified error card because the
+  per-target trio is the primary surface.
+- The ``PlayerSearchBar`` test uses
+  ``container.querySelector('input[type="search"]')``
+  instead of the more-idiomatic ``getByLabelText`` /
+  ``getByPlaceholderText`` because jsdom's role / aria
+  resolution is unreliable for ``<input type="search">``
+  inside a ``<form role="search">``. The direct DOM query
+  is the most stable path through jsdom's quirks.
+
+### Tests
+
+- 4 new page-level cases for ``/players``
+- 4 new page-level cases for ``/players/[account_name]``
+- 5 new component-level cases for :class:`PlayerSearchBar`
+- 2 existing ``/fights/[id]`` test cases extended with
+  2 new heading checks each (the per-subgroup + per-skill
+  sections).
+- Web test count: 26 (v0.7.0 backend) -> 39 (v0.7.1).
+
+### Validation
+
+- ``pnpm tsc --noEmit``: clean (TSC=0).
+- ``pnpm test:unit``: clean (VITEST=0, 39 tests across 10
+  files).
+- Code-reviewer-minimax-m3: **APPROVED** (the importOriginal
+  override correctly bypasses the global no-op mock;
+  ``vi.hoisted`` resolves the factory hoisting; the
+  count + noun fragment split handles React's
+  children-flattening in JSON.stringify output; the
+  ``Promise.allSettled`` pattern prevents cascade failure).
+
+[0.7.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.0...v0.7.1
+
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.1...HEAD
+
 ## [0.7.0] - Phase 9: player-centric surface + per-fight squad + per-fight skill roll-ups
 
 ### Added (analytics)
