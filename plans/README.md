@@ -7,7 +7,76 @@ candidates. The plans are self-contained implementation specs that a
 different, less-context-aware executor can ship without further
 clarification.
 
-## v0.8.9 audit (current)
+## v0.9.0 audit (current)
+
+**Author:** senior-advisor audit (improve skill, `next` invocation, `quick` effort)
+**Stamped at:** `9fcf1de` (origin/main HEAD at audit time -- after the v0.8.9 cycle fully closed: 3 plans executed + CHANGELOG + `v0.8.9` tag + README Phase Status + 2 followup commits for the visual-regression workflow tightening + the dimension mismatch fix)
+**Recon scope:** README + CHANGELOG + plans/001-003 (v0.8.9) + libs/gw2_analytics + libs/gw2_evtc_parser/parser.py + apps/api routes + web/app pages
+**Audit mode:** direction-only (3 candidates below); correctness/security/perf/etc. out of scope
+
+### v0.9.0 status table
+
+| # | Finding | Category | Impact | Effort | Risk | Plans |
+|---|---------|----------|--------|--------|------|-------|
+| 1 | `PlayerTimelineChart` (v0.8.0) + `PerFightTimelineChart` (v0.8.9) duplicate ~120 lines of near-identical SVG rendering logic; the v0.8.9 plan/002 entry noted this as a future refactor | direction (UX + DX) | Medium (DRY win, isolates complex SVG logic) | S | Low | [001](./001-v090-shared-timeline-chart.md) |
+| 2 | `/players` AG Grid has no filter UI; an analyst looking for "all Mesmer players" has to scan the full table + sort client-side. The `profession` field is already in the response | direction (UX) | High (server-side filter is a one-line SQL WHERE + a dropdown) | M | Low | [002](./002-v090-filter-by-profession.md) |
+| 3 | The v0.8.9 visual-regression spec covers 8 PNGs; 4 high-leverage UI states (second-fixture-fight, sorted-players, fight-with-timeline, account-with-tz) are missing | direction (testing) | Medium (catches v0.8.9 UI regressions that the current 8 PNGs miss) | S | Low | [003](./003-v090-vr-suite-expansion.md) |
+| - | Buff uptime tracking (new visualization) | not a finding — the Python parser explicitly skips state-change records (`if is_statechange != 0: continue`); arcdps encodes buff applications as state changes. Implementing requires a major v1.4+ parser update before any aggregators could be built | — | — | — | rejected |
+| - | Defense events ("what hit me") | not a finding — the parser only evaluates `is_nondamage == 0 + value > 0` (outgoing damage). Gathering incoming/defense events requires parser-level work + validation of arcdps's target tracking. Too undefined for v0.9.0 | — | — | — | rejected |
+| - | AG Grid Community → Enterprise upgrade / Sentry integration | not a finding — same rejections as v0.8.9 (license cost + no production traffic) | — | — | — | rejected |
+
+### Recommended execution order (v0.9.0)
+
+1. **Plan 002** (filter by profession on `/players`) — M effort, the
+   highest-leverage new feature. Self-contained (no parser/UX
+   dependencies). A server-side `?profession=` query param + a small
+   Client Component dropdown unlocks the existing `profession` field
+   that's already in the response.
+2. **Plan 001** (shared `<TimelineChart>` refactor + unified
+   `?window_s=` UI) — S effort, a quick DRY win that depends on the
+   v0.8.9 plan/002 being shipped (the per-fight timeline chart is
+   one of the 2 refactor targets). The unified window-size UI is a
+   small Server-Component change that drives both endpoints.
+3. **Plan 003** (visual regression suite expansion) — S effort,
+   additive coverage. Locks the v0.8.9 features in CI by capturing
+   4 new PNGs (second-fixture-fight, sorted-players,
+   fight-with-timeline, account-with-tz). The data-driven spec loop
+   picks them up automatically.
+
+There are no inter-plan dependencies blocking. All 3 are independent
+and could ship in any order. The recommended order is by highest
+leverage (plan/002 = new feature), then DRY win (plan/001), then
+additive test coverage (plan/003).
+
+### Considered and rejected (v0.9.0)
+
+- **"Buff uptime tracking"**: a compelling visualization, but the
+  Python parser explicitly skips state-change records (`parser.py:201`
+  reads `if is_statechange != 0: continue`). arcdps encodes buff
+  applications as state changes. Implementing this requires a major
+  v1.4+ update to the core parser's binary extraction loop before
+  any aggregators could be built. Defer to a future cycle that
+  includes a parser overhaul.
+- **"Defense events / 'what hit me'"**: complements the v0.8.9
+  per-fight timeline ('what I did') with the reverse view. But the
+  parser only evaluates `is_nondamage == 0 + value > 0` (outgoing
+  damage). Gathering incoming/defense events requires parser-level
+  work + validation of arcdps's target tracking. Too undefined for
+  v0.9.0.
+- **"AG Grid Community → Enterprise upgrade" / "Sentry integration"**:
+  same rejections as the v0.8.9 audit. License cost + no production
+  traffic.
+- **"Compare 2 fights side-by-side"**: could use the v0.9.0 plan/001
+  shared `<TimelineChart>` as the base. The side-by-side layout is a
+  separate concern; deferred to v0.9.0+ (would depend on plan/001).
+- **"Visual regression dashboard"**: a thin Server Component page at
+  `/dev/visual-regression` that displays the latest captured PNGs +
+  diff-vs-baseline percentages. Deferred to v0.9.0+; would need a
+  "latest diff" artifact store that doesn't exist yet.
+
+---
+
+## v0.8.9 audit (closed)
 
 **Author:** senior-advisor audit (improve skill, `next` invocation, `quick` effort)
 **Stamped at:** `1b1de47` (origin/main HEAD at audit time -- after the
