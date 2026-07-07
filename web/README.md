@@ -33,7 +33,7 @@ and `/account`.
 
 | Script                  | Purpose                                                                  |
 |-------------------------|--------------------------------------------------------------------------|
-| `pnpm dev`              | Start the Next.js dev server.                                            |
+| `pnpm dev`              | Start the Next.js dev server (auto-runs `pnpm generate:api` first).      |
 | `pnpm build`            | Production build (`next build`).                                         |
 | `pnpm start`            | Start the production build (`next start`).                               |
 | `pnpm typecheck`        | `tsc --noEmit` against `tsconfig.json` (CI gate).                        |
@@ -46,16 +46,22 @@ and `/account`.
 
 ## OpenAPI regeneration
 
-Once the gateway is wired:
+The web app's `src/lib/api.ts` derives its types from
+`src/lib/api/schema.d.ts`, which is regenerated from the FastAPI
+gateway's `app.openapi()` schema. Since v0.8.8, this regeneration
+runs **automatically** as the first step of `pnpm dev` -- you no
+longer need to remember to run it manually. To refresh without
+restarting the dev server:
 
 ```bash
 pnpm generate:api   # writes src/lib/api/schema.d.ts
 ```
 
-The codegen reads `http://localhost:8000/openapi.json`; bump the URL
-in `web/package.json` `scripts.generate:api` for remote gateways.
-The generated client is typed end-to-end against the gateway's
-response model — drift becomes a TypeScript compile error.
+**Prerequisite**: the codegen shells out to `uv run python
+scripts/dump_openapi.py`, which imports the `gw2analytics_api`
+package. Run `uv sync` at the repo root first if you haven't
+already; without it the codegen step fails fast and
+`pnpm dev` does not start the dev server.
 
 ## Architecture
 

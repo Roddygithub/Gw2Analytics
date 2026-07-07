@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "pnpm generate:api && next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
@@ -29,6 +29,7 @@
     "ag-grid-community": "^34.3.1",
     "ag-grid-react": "^34.3.1",
     "jsdom": "^25.0.1",
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5",
     "vitest": "^2.1.9"
   }
