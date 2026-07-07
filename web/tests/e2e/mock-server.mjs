@@ -29,6 +29,13 @@
 // GET /api/v1/players/:name
 //   -> tests/e2e/fixtures/player-profile.json (when name is
 //      "TestAccount.1234") or 404 (when name is "missing.9999")
+// GET /api/v1/players/:name/timeline?limit=N&offset=M
+//   -> tests/e2e/fixtures/player-timeline.json (when name is
+//      in KNOWN_TIMELINE_PLAYERS -- currently just
+//      "TestAccount.1234") or 404 (for any other known player,
+//      including "empty-history.5678" whose profile returns
+//      200 but whose timeline is hard-coded to 404 so the
+//      page exercises the synthetic-empty rendering path)
 // GET /api/v1/players/:name/special/404
 //   -> always 404 (used by the profile-page error test)
 //
@@ -58,7 +65,24 @@ const KNOWN_PLAYERS = new Set([
   "TestAccount.1234",
   "TestAccount.5678",
   "TestAccount.9999",
+  // ``empty-history.5678`` is a synthetic player used by the
+  // v0.8.0 timeline-empty E2E: the profile endpoint returns
+  // 200 (the alt fixture) so the page renders the normal
+  // chrome, but the timeline endpoint returns 404 (see
+  // ``KNOWN_TIMELINE_PLAYERS`` below) so the page exercises
+  // the synthetic-empty rendering path ("Showing 0 of 0
+  // fights" + the chart's empty-state panel).
+  "empty-history.5678",
 ]);
+// Subset of KNOWN_PLAYERS that have a non-empty timeline
+// fixture. The v0.8.0 timeline endpoint returns 200 for
+// players in this set, 404 for everyone else (including
+// ``empty-history.5678`` -- the profile endpoint returns 200
+// but the timeline endpoint returns 404 so the page exercises
+// the synthetic-empty rendering path). Keeping this separate
+// from KNOWN_PLAYERS avoids mixing the "is this player
+// known?" and "does this player have a timeline?" concerns.
+const KNOWN_TIMELINE_PLAYERS = new Set(["TestAccount.1234"]);
 
 function jsonResponse(res, status, body) {
   res.statusCode = status;
@@ -119,6 +143,34 @@ const server = createServer(async (req, res) => {
 
     if (path === "/api/v1/players") {
       const body = await loadFixture("players-list.json");
+      return jsonResponse(res, 200, body);
+    }
+
+    // /api/v1/players/:name/timeline  (v0.8.0). MUST be matched
+    // BEFORE the catch-all /api/v1/players/:name handler --
+    // otherwise the catch-all would consume
+    // ``/api/v1/players/TestAccount.1234/timeline`` with
+    // ``name="TestAccount.1234/timeline"`` and return 404. The
+    // query string is ignored: the static fixture carries the
+    // canonical "all 2 points" payload (the page tests only
+    // assert the initial render; the Client Component's "Load
+    // more" pagination is covered by the vitest unit tests).
+    //
+    // The handler uses ``KNOWN_TIMELINE_PLAYERS`` (a subset of
+    // ``KNOWN_PLAYERS``) to decide 200 vs 404. This keeps the
+    // "is this player known?" and "does this player have a
+    // timeline?" concerns separate: ``empty-history.5678`` is
+    // in KNOWN_PLAYERS (so the profile endpoint returns 200)
+    // but NOT in KNOWN_TIMELINE_PLAYERS (so the timeline
+    // endpoint returns 404, exercising the synthetic-empty
+    // rendering path on the page).
+    const timelineMatch = path.match(/^\/api\/v1\/players\/([^/]+)\/timeline$/);
+    if (timelineMatch) {
+      const name = decodeURIComponent(timelineMatch[1]);
+      if (!KNOWN_TIMELINE_PLAYERS.has(name)) {
+        return jsonResponse(res, 404, JSON.stringify({ error: "player not found" }));
+      }
+      const body = await loadFixture("player-timeline.json");
       return jsonResponse(res, 200, body);
     }
 

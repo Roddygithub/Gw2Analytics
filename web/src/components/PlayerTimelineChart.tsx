@@ -71,7 +71,18 @@ const DAMAGE_STROKE = "var(--accent)";
 const HEALING_STROKE = "var(--foreground)";
 const STRIP_STROKE = "#f59e0b"; // warm orange; matches the per-target strip roll-up
 
-const X_AXIS_LABEL_FORMAT = new Intl.DateTimeFormat(undefined, {
+/**
+ * Explicit ``"en-US"`` locale (NOT ``undefined``) so the
+ * server (Node.js) and the client (browser) agree on the
+ * format string. ``undefined`` would pick the system locale
+ * (typically ``"C"`` or ``"en-US"`` on Node.js, the user's
+ * browser locale on the client) and cause a React hydration
+ * mismatch when the two disagree -- e.g. ``"07/07/26, 12:00"``
+ * on one side and ``"07/07/2026, 12:00 pm"`` on the other.
+ * The tooltip's ``toLocaleString()`` calls below follow the
+ * same convention.
+ */
+const X_AXIS_LABEL_FORMAT = new Intl.DateTimeFormat("en-US", {
   month: "2-digit",
   day: "2-digit",
   hour: "2-digit",
@@ -254,12 +265,19 @@ export function PlayerTimelineChart({
                   the canonical lightweight tooltip -- no
                   React state, no portal, no client-side
                   JS. The browser shows it as a native
-                  tooltip on hover/focus. */}
+                  tooltip on hover/focus. A single
+                  concatenated string is used (NOT 4
+                  separate template-string children) so
+                  React receives a single string child --
+                  multiple children trigger a hydration
+                  mismatch ("expected a string, received
+                  an array") and inflate the DOM with
+                  reconciliation wrappers. */}
               <title>
-                {`${p.fight_id} · ${X_AXIS_LABEL_FORMAT.format(new Date(p.started_at))}\n`}
-                {`Damage: ${p.total_damage.toLocaleString()}\n`}
-                {`Healing: ${p.total_healing.toLocaleString()}\n`}
-                {`Strip: ${p.total_buff_removal.toLocaleString()}`}
+                {`${p.fight_id} · ${X_AXIS_LABEL_FORMAT.format(new Date(p.started_at))}\n` +
+                  `Damage: ${p.total_damage.toLocaleString("en-US")}\n` +
+                  `Healing: ${p.total_healing.toLocaleString("en-US")}\n` +
+                  `Strip: ${p.total_buff_removal.toLocaleString("en-US")}`}
               </title>
               <circle
                 cx={xFor(i)}
