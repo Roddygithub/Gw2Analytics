@@ -475,6 +475,83 @@ export async function fetchPlayer(
 }
 
 /**
+ * One per-fight timeline point from
+ * ``GET /api/v1/players/{account_name}/timeline``, mirror of
+ * :class:`apps.api.schemas.PlayerTimelinePointOut` (apps/api 0.8.0+).
+ *
+ * Strict parallel of :class:`PerFightBreakdownRow` -- one
+ * point per attended fight, sorted by ``started_at`` DESC
+ * (recency-first) at the route layer with ``fight_id`` ASC
+ * as the deterministic-ordering tiebreaker.
+ */
+export interface PlayerTimelinePoint {
+  fight_id: string;
+  started_at: string;
+  total_damage: number;
+  total_healing: number;
+  total_buff_removal: number;
+}
+
+/**
+ * Per-account historical timeline payload from
+ * ``GET /api/v1/players/{account_name}/timeline``, mirror of
+ * :class:`apps.api.schemas.PlayerTimelineOut` (apps/api 0.8.0+).
+ *
+ * ``total`` is the un-paginated count of attended fights so
+ * the client can render a "showing N of M" caption and gate
+ * the "Load more" button without a second request. ``limit``
+ * and ``offset`` echo the request params so a Server
+ * Component can verify the round-trip (e.g. when the route
+ * clamps an out-of-range value).
+ */
+export interface PlayerTimeline {
+  account_name: string;
+  total: number;
+  limit: number;
+  offset: number;
+  points: PlayerTimelinePoint[];
+}
+
+/**
+ * Get the per-fight historical timeline for one account.
+ *
+ * Mirrors ``GET /api/v1/players/{account_name:path}/timeline``
+ * in :mod:`apps.api.routes.players` with the default
+ * ``limit=20`` and ``offset=0``. The route applies
+ * ``offset``/``limit`` to the FINAL sorted points list (the
+ * same way the list + detail routes do), so the response is
+ * stable across page boundaries: the analyst sees the same
+ * first-N points whether they requested them via
+ * "Load more" or via a fresh ``?offset=20`` query string.
+ *
+ * Throws :class:`ApiError(404)` when no agent in any fight
+ * carries the requested ``account_name`` (the canonical
+ * "player not found" contract); the page-level Server
+ * Component surfaces this as the upstream-error card.
+ *
+ * ``accountName`` MUST be URL-encoded by the caller (use
+ * ``encodeURIComponent``); the Next.js 15+ async ``params``
+ * contract delivers the decoded string automatically.
+ */
+export async function fetchPlayerTimeline(
+  accountName: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<PlayerTimeline> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  const url = `${API_BASE_URL}/api/v1/players/${encodeURIComponent(accountName)}/timeline${
+    qs ? `?${qs}` : ""
+  }`;
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as PlayerTimeline;
+}
+
+/**
  * Get the per-subgroup roll-up for one fight.
  *
  * Mirrors ``GET /api/v1/fights/{fight_id}/squads`` in

@@ -26,9 +26,21 @@ import { ApiError, type PlayerProfile } from "@/lib/api";
  * (before any ``const`` declarations) and the factory's
  * reference to ``fetchPlayerMock`` throws
  * "Cannot access 'fetchPlayerMock' before initialization".
+ *
+ * v0.8.0 of web: the page now also calls ``fetchPlayerTimeline``
+ * (to seed the historical-timeline section on the server).
+ * We mock that too so the page tests can exercise the
+ * page's own render contract without the timeline mock
+ * hitting the real gateway.
  */
-const { fetchPlayerMock } = vi.hoisted(() => ({
+const { fetchPlayerMock, fetchPlayerTimelineMock } = vi.hoisted(() => ({
   fetchPlayerMock: vi.fn<(accountName: string) => Promise<PlayerProfile>>(),
+  fetchPlayerTimelineMock: vi.fn<
+    (
+      accountName: string,
+      opts: { limit?: number; offset?: number },
+    ) => Promise<unknown>
+  >(),
 }));
 
 vi.mock("@/lib/api", async () => {
@@ -36,10 +48,19 @@ vi.mock("@/lib/api", async () => {
   return {
     ...actual,
     fetchPlayer: fetchPlayerMock,
+    fetchPlayerTimeline: fetchPlayerTimelineMock,
   };
 });
 
 import PlayerProfilePage from "@/app/players/[account_name]/page";
+
+const EMPTY_TIMELINE = {
+  account_name: ":synth.aaa",
+  total: 0,
+  limit: 20,
+  offset: 0,
+  points: [],
+};
 
 const POPULATED: PlayerProfile = {
   account_name: ":synth.aaa",
@@ -72,10 +93,12 @@ const POPULATED: PlayerProfile = {
 describe("/players/[account_name] page", () => {
   beforeEach(() => {
     fetchPlayerMock.mockReset();
+    fetchPlayerTimelineMock.mockReset();
   });
 
   it("renders the populated profile (stat cards + breakdown rows)", async () => {
     fetchPlayerMock.mockResolvedValueOnce(POPULATED);
+    fetchPlayerTimelineMock.mockResolvedValueOnce(EMPTY_TIMELINE);
     const tree = await PlayerProfilePage({
       params: Promise.resolve({ account_name: ":synth.aaa" }),
     });
@@ -97,6 +120,7 @@ describe("/players/[account_name] page", () => {
       attended_fight_ids: [],
       fights_attended: 0,
     });
+    fetchPlayerTimelineMock.mockResolvedValueOnce(EMPTY_TIMELINE);
     const tree = await PlayerProfilePage({
       params: Promise.resolve({ account_name: ":synth.aaa" }),
     });

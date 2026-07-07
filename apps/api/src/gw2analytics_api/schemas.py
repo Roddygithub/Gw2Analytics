@@ -323,6 +323,53 @@ class PerFightBreakdownRowOut(BaseModel):
     total_buff_removal: int
 
 
+class PlayerTimelinePointOut(BaseModel):
+    """One row of the per-fight historical timeline on :class:`PlayerTimelineOut`.
+
+    Strict parallel of :class:`PerFightBreakdownRowOut` (the per-fight
+    breakdown on the profile page): ``fight_id`` + ``started_at`` +
+    the 3 totals. v0.8.0 ships this lean schema for the timeline
+    chart -- the analyst UI consumes only the 3 totals per fight
+    (no rate columns, no per-target roll-ups).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fight_id: str
+    started_at: datetime
+    total_damage: int
+    total_healing: int
+    total_buff_removal: int
+
+
+class PlayerTimelineOut(BaseModel):
+    """Response from ``GET /api/v1/players/{account_name}/timeline``.
+
+    The ``total`` field is the un-paginated count of attended
+    fights (the same scalar as :attr:`PlayerProfileOut.fights_attended`).
+    The client uses ``total`` to decide whether the "Load more"
+    button should render (``points.length < total`` means there
+    are more fights to fetch). The ``limit`` + ``offset`` echo
+    the request params so the client can compute the next-page
+    URL without a separate round-trip.
+
+    v0.8.0 of the API surfaces the timeline as a separate
+    endpoint (not folded into :class:`PlayerProfileOut`) so the
+    profile page can fetch the first page in parallel with the
+    profile + per-fight breakdown via ``Promise.allSettled`` --
+    a single bound response would force the page to refetch the
+    full per-fight breakdown just to learn ``total``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    account_name: str
+    total: int
+    limit: int
+    offset: int
+    points: list[PlayerTimelinePointOut] = []
+
+
 class PlayerProfileOut(BaseModel):
     """Full player profile returned by ``GET /api/v1/players/{account_name}``.
 

@@ -450,26 +450,29 @@ def _post_minimal_fight(
     )
     assert resp.status_code == 201, resp.text
     upload_id = resp.json()["id"]
-    # Poll the upload status until the background parser flips
-    # ``status`` to ``"completed"``; the POST handler spawns
-    # ``process_parse`` via FastAPI's BackgroundTasks, so the
-    # upload is still "pending" immediately after the POST. The
-    # tests downstream depend on the events blob being written
-    # (the /players + /squads + /skills routes read it), so the
-    # wait is mandatory. A 5s ceiling is generous: the parser
-    # completes in milliseconds for a fixture-sized blob.
+    return _wait_for_upload_completion(upload_id)
+
+
+def _wait_for_upload_completion(upload_id: str) -> str:
+    """Poll the upload status until the background parser flips
+    ``status`` to ``"completed"``, then return the persisted ``fight_id``.
+
+    The POST handler spawns :func:`process_parse` via FastAPI's
+    ``BackgroundTasks``, so the upload is still ``"pending"`` immediately
+    after the POST. Downstream tests depend on the events blob being
+    written (the ``/players`` + ``/squads`` + ``/skills`` routes read it),
+    so the wait is mandatory. A 5s ceiling is generous: the parser
+    completes in milliseconds for a fixture-sized blob.
+
+    A small post-completion ``time.sleep(0.1)`` gives the parser a chance
+    to write the events blob before the downstream tests query it; the
+    BackgroundTasks runner fires after the POST response is sent, so the
+    first poll iteration may race the task startup.
+    """
     for _ in range(50):
         upload_resp = client.get(f"/api/v1/uploads/{upload_id}")
         assert upload_resp.status_code == 200
         if upload_resp.json()["status"] == "completed":
-            # The FastAPI BackgroundTasks runner fires after
-            # the POST response is sent, so the first poll
-            # iteration might race the task startup. A small
-            # sleep gives the parser a chance to write the
-            # events blob before the downstream tests query
-            # it. The 5s ceiling is generous: the parser
-            # completes in milliseconds for a fixture-sized
-            # blob.
             time.sleep(0.1)
             return str(upload_resp.json()["fight_id"])
         time.sleep(0.1)
@@ -687,3 +690,170 @@ def test_fight_skills_404_when_fight_unknown() -> None:
     """v0.7.0: GET /api/v1/fights/{unknown}/skills returns 404."""
     resp = client.get("/api/v1/fights/does-not-exist-1234/skills")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# v0.8.0: account-level historical timelines
+# ---------------------------------------------------------------------------
+
+
+def test_player_timeline_returns_paginated_recency_first_points() -> None:
+    """v0.8.0: GET /api/v1/players/{name}/timeline returns the per-fight
+    history sorted by started_at DESC, with limit/offset slices.
+
+    Seeds TWO fights for the same account (so ``total >= 2``),
+    then validates that offset 0 / limit 1 returns the most
+    recent fight + offset 1 / limit 1 returns the second-most
+    recent. The 3 totals per point are independent (the 2
+    fights seed different event signatures).
+    """
+    suffix_a = _uuid.uuid4().hex[:8]
+    suffix_b = _uuid.uuid4().hex[:8]
+
+    # Fight 1: A damages B (1234 + 567 = 1801 damage, no heal/strip).
+    base_id_a = 100_000 + (int(suffix_a[:4], 16) if len(suffix_a) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix_a[:4], 16) if len(suffix_a) >= 4 else 0)
+    base_skill_b = base_skill_a + 1
+    events_a = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=567,
+            skill_id=base_skill_b,
+        ),
+    ]
+    fight_id_a = _post_minimal_fight(events_a, suffix=suffix_a)
+
+    # Fight 2: A heals B (800 + 400 = 1200 healing, no damage).
+    # Bypass ``_post_minimal_fight`` and inline a custom POST so the
+    # 2 fights share the same ``account_name`` (A and B are
+    # identical agent_ids between fight 1 and fight 2, so the
+    # parser-assigned account_name ``:synth.<base_id_a>`` is
+    # shared). Reusing ``_post_minimal_fight`` would force a fresh
+    # uuid suffix and break the cross-fight account_name contract
+    # the timeline endpoint depends on.
+    base_skill_c = 2_000_000 + (int(suffix_b[:4], 16) if len(suffix_b) >= 4 else 0)
+    base_skill_d = base_skill_c + 1
+    events_b = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,  # A (same as fight 1)
+            dst=base_id_b,  # B (same as fight 1)
+            value=800,
+            skill_id=base_skill_c,
+            is_nondamage=1,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=400,
+            skill_id=base_skill_d,
+            is_nondamage=1,
+        ),
+    ]
+    blob_b = _make_minimal_zevtc(
+        [
+            (base_id_a, 2, 18, f"V08 Warrior {suffix_b}", True),
+            (base_id_b, 1, 27, f"V08 Guard {suffix_b}", True),
+        ],
+        build=f"2025{suffix_b[:4]}",
+        skills=[
+            (base_skill_c, f"Whirlwind B {suffix_b}"),
+            (base_skill_d, f"Burning B {suffix_b}"),
+        ],
+        events=events_b,
+    )
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("sample.zevtc", blob_b, "application/octet-stream")},
+    )
+    assert resp.status_code == 201, resp.text
+    fight_id_b = _wait_for_upload_completion(resp.json()["id"])
+    assert fight_id_a != fight_id_b
+
+    # Pick the shared account_name (agent A's ``:synth.<id>``).
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+
+    # Default limit/offset: returns up to 20 most-recent points.
+    resp = client.get(f"/api/v1/players/{encoded}/timeline")
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["account_name"] == account_name
+    assert payload["total"] >= 2
+    assert payload["limit"] == 20
+    assert payload["offset"] == 0
+    assert len(payload["points"]) == payload["total"]
+    # Recency-first: the first point is the most recent fight.
+    started_ats = [p["started_at"] for p in payload["points"]]
+    assert started_ats == sorted(started_ats, reverse=True)
+
+    # Page 1: limit=1 offset=0 returns the most recent fight.
+    resp1 = client.get(f"/api/v1/players/{encoded}/timeline", params={"limit": 1, "offset": 0})
+    assert resp1.status_code == 200
+    page1 = resp1.json()
+    assert len(page1["points"]) == 1
+    assert page1["total"] >= 2
+    assert page1["limit"] == 1
+    assert page1["offset"] == 0
+
+    # Page 2: limit=1 offset=1 returns the second-most recent fight.
+    resp2 = client.get(f"/api/v1/players/{encoded}/timeline", params={"limit": 1, "offset": 1})
+    assert resp2.status_code == 200
+    page2 = resp2.json()
+    assert len(page2["points"]) == 1
+    assert page2["offset"] == 1
+    # The 2 pages must not overlap.
+    assert page1["points"][0]["fight_id"] != page2["points"][0]["fight_id"]
+    # The 2 pages combined cover exactly the first 2 fights.
+    first_two = {page1["points"][0]["fight_id"], page2["points"][0]["fight_id"]}
+    assert {fight_id_a, fight_id_b} == first_two
+
+
+def test_player_timeline_404_when_account_unknown() -> None:
+    """v0.8.0: GET /api/v1/players/{unknown}/timeline returns 404."""
+    resp = client.get("/api/v1/players/does-not-exist-1234/timeline")
+    assert resp.status_code == 404
+
+
+def test_player_timeline_422_when_limit_out_of_range() -> None:
+    """v0.8.0: limit=101 (above the 100 ceiling) returns 422."""
+    resp = client.get(
+        "/api/v1/players/anything/timeline",
+        params={"limit": 101},
+    )
+    assert resp.status_code == 422
+
+
+def test_player_timeline_422_when_limit_zero() -> None:
+    """v0.8.0: limit=0 (below the 1 floor) returns 422.
+
+    Symmetric counterpart to :func:`test_player_timeline_422_when_limit_out_of_range`:
+    FastAPI's ``Query(ge=1, le=100)`` rejects 0 with 422 BEFORE the
+    handler runs (so the route never sees a bad value). Covers the
+    lower bound of the [1, 100] window.
+    """
+    resp = client.get(
+        "/api/v1/players/anything/timeline",
+        params={"limit": 0},
+    )
+    assert resp.status_code == 422
+
+
+def test_player_timeline_422_when_offset_negative() -> None:
+    """v0.8.0: offset=-1 returns 422 (ge=0 constraint)."""
+    resp = client.get(
+        "/api/v1/players/anything/timeline",
+        params={"offset": -1},
+    )
+    assert resp.status_code == 422

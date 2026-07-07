@@ -49,6 +49,8 @@ from gw2analytics_api.schemas import (
     PerFightBreakdownRowOut,
     PlayerListRowOut,
     PlayerProfileOut,
+    PlayerTimelineOut,
+    PlayerTimelinePointOut,
 )
 from gw2analytics_api.storage import get_events
 
@@ -260,6 +262,107 @@ def list_players(
         )
         for p in page
     ]
+
+
+@router.get("/{account_name:path}/timeline", response_model=PlayerTimelineOut)
+def get_player_timeline(
+    account_name: str,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_session),  # noqa: B008
+) -> PlayerTimelineOut:
+    """Return the per-fight historical timeline for one account.
+
+    v0.8.0 of the API: the analyst-facing timeline chart on the
+    profile page. Reuses :func:`_compute_contributions` (the same
+    inner loop the list + detail endpoints use) so the route
+    joins + decompresses the events blobs once per request and
+    paginates in-memory.
+
+    Sort order is **recency-first** (``started_at DESC``, with
+    ``fight_id ASC`` as the tiebreaker for fights that share a
+    timestamp) -- the analyst scans a per-account trend, so the
+    most recent fight lands in the top-left slot of the chart.
+    The tiebreaker is the canonical deterministic-ordering
+    contract from the cross-fight roll-up.
+
+    ``limit`` is clamped to ``[1, 100]``; ``offset`` is clamped
+    to ``[0, inf)``. Out-of-range values raise ``422`` via
+    FastAPI's ``Query`` validation (BEFORE the handler runs,
+    so the route never sees a bad value).
+
+    The route raises ``404 Not Found`` when no agent in any
+    fight carries the requested ``account_name`` -- mirrors the
+    detail endpoint's contract.
+
+    Declaration order matters
+    -------------------------
+    This route MUST be declared BEFORE
+    ``get_player`` (the catch-all ``{account_name:path}`` route).
+    FastAPI matches routes in declaration order; if the catch-all
+    is declared first, ``/{account_name:path}`` would greedily
+    match ``/TestAccount.1234/timeline`` with
+    ``account_name="TestAccount.1234/timeline"`` and return 404
+    before the timeline route ever fires. The current declaration
+    order (list + timeline + detail) is the canonical
+    "more-specific-first" pattern.
+
+    Performance note
+    ----------------
+    v0.8.0 of the route does the per-fight roll-up in-memory on
+    every request (consistent with the v0.7.0 list + detail
+    routes). v0.8.0+ will materialise a ``fight_player_summaries``
+    table to avoid the per-request re-computation; the route
+    signature stays unchanged.
+    """
+    fights = (
+        db.execute(
+            select(OrmFight)
+            .order_by(OrmFight.started_at.desc())
+            .options(selectinload(OrmFight.agents)),
+        )
+        .scalars()
+        .all()
+    )
+    contributions = _compute_contributions(db, fights)
+    own_contributions = [c for c in contributions if c.account_name == account_name]
+    if not own_contributions:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "player not found")
+    fight_id_to_started: dict[str, Any] = {f.id: f.started_at for f in fights}
+    # Recency-first: started_at DESC (datetime direct compare
+    # preserves microsecond precision; ``.timestamp()`` would
+    # coerce to float), with ``fight_id ASC`` as the canonical
+    # deterministic-ordering tiebreaker for fights that share
+    # a started_at. The ``.get(fight_id, fight_id)`` fallback
+    # is a defensive guard: ``own_contributions`` is computed
+    # from the same fights list, so the lookup SHOULD always
+    # hit, but the fallback mirrors the detail route's style
+    # and prevents a KeyError on any future schema drift.
+    sorted_contributions = sorted(
+        own_contributions,
+        key=lambda c: (
+            fight_id_to_started.get(c.fight_id, c.fight_id),
+            c.fight_id,
+        ),
+        reverse=True,
+    )
+    page = sorted_contributions[offset : offset + limit]
+    return PlayerTimelineOut(
+        account_name=account_name,
+        total=len(own_contributions),
+        limit=limit,
+        offset=offset,
+        points=[
+            PlayerTimelinePointOut(
+                fight_id=c.fight_id,
+                started_at=fight_id_to_started[c.fight_id],
+                total_damage=c.total_damage,
+                total_healing=c.total_healing,
+                total_buff_removal=c.total_buff_removal,
+            )
+            for c in page
+        ],
+    )
 
 
 @router.get("/{account_name:path}", response_model=PlayerProfileOut)

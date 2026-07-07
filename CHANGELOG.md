@@ -7,6 +7,209 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - Phase 9 of web: account-level historical timelines
+
+### Added (apps/api)
+
+- `apps/api/src/gw2analytics_api/schemas.py`: 2 new Pydantic v2
+  response schemas -- `PlayerTimelinePointOut` (strict parallel
+  of `PerFightBreakdownRowOut`: `fight_id`, `started_at`,
+  `total_damage`, `total_healing`, `total_buff_removal`) and
+  `PlayerTimelineOut` (`account_name`, `total`, `limit`, `offset`,
+  `points: list[PlayerTimelinePointOut]`). `total` is the
+  un-paginated count so the client can render a "showing N of M"
+  caption and gate the "Load more" button without a second
+  request.
+- `apps/api/src/gw2analytics_api/routes/players.py`: new route
+  `GET /api/v1/players/{account_name:path}/timeline?limit=20&offset=0`.
+  Reuses the pre-existing `_compute_contributions` helper (the
+  same O(fights x events) inner loop the list + detail endpoints
+  use) so the route joins + decompresses the events blobs once
+  per request and paginates in-memory. Recency-first sort
+  (``started_at DESC``, ``fight_id ASC`` tiebreaker -- the
+  v0.7.0 aggregator's deterministic-ordering contract). `limit`
+  clamped to ``[1, 100]`` and `offset` clamped to ``[0, ∞)`` via
+  FastAPI ``Query`` validation (out-of-range values raise
+  ``422`` BEFORE the handler runs). 404 contract mirrors the
+  detail endpoint: an unknown ``account_name`` raises
+  ``HTTPException(404, "player not found")``. **Declaration
+  order matters** -- the timeline route MUST be declared BEFORE
+  the catch-all ``{account_name:path}`` detail route or FastAPI
+  would match ``/TestAccount.1234/timeline`` against the
+  catch-all with ``account_name="TestAccount.1234/timeline"`` and
+  return 404 before the timeline route ever fires.
+- `apps/api/src/gw2analytics_api/__init__.py`: ``__version__``
+  bumped ``0.7.0 -> 0.8.0``.
+- `apps/api/src/gw2analytics_api/main.py`: FastAPI ``version``
+  string bumped ``0.7.0 -> 0.8.0``.
+- `apps/api/pyproject.toml`: version bumped ``0.7.0 -> 0.8.0``.
+- `apps/api/tests/test_uploads_e2e.py`: 5 NEW e2e tests
+  covering the new endpoint:
+  - `test_player_timeline_returns_paginated_recency_first_points`
+    (seeds 2 fights that share the same ``account_name`` via a
+    uuid-suffixed fixture; the 2nd POST inlines a custom fixture
+    so both fights reuse the same agent ids; verifies
+    ``started_at`` DESC ordering + that pages 0/1 and 1/1 don't
+    overlap + that the 2 pages combined cover the first 2 fights)
+  - `test_player_timeline_404_when_account_unknown` (mirrors the
+    detail endpoint's 404 contract)
+  - `test_player_timeline_422_when_limit_out_of_range` (limit=101
+    → 422)
+  - `test_player_timeline_422_when_limit_zero` (limit=0 → 422,
+    lower-bound counterpart)
+  - `test_player_timeline_422_when_offset_negative` (offset=-1 →
+    422)
+  Plus a refactored ``_wait_for_upload_completion(upload_id) ->
+  str`` helper extracted from ``_post_minimal_fight`` (the
+  polling loop was duplicated in 2 places; the new helper is
+  the single source of truth).
+
+### Added (web)
+
+- `web/src/lib/api.ts`: new ``fetchPlayerTimeline`` fetcher
+  helper + 2 new TypeScript interfaces
+  (``PlayerTimelinePoint`` + ``PlayerTimeline``). Mirrors the
+  ``fetchPlayer`` pattern (``encodeURIComponent`` for the
+  accountName, ``URLSearchParams`` for ``limit`` / ``offset``,
+  ``ApiError`` on any non-2xx so the page-level Server
+  Component can render the canonical upstream-error card).
+- `web/src/components/PlayerTimelineLegend.tsx` (NEW): small
+  "use client" component that renders a right-aligned flex row
+  of 3 colour swatches (Damage, Healing, Buff removal). Uses
+  ``role="list"`` + ``role="listitem"`` for accessibility.
+  The strip swatch is a hard-coded warm orange (``#f59e0b``)
+  that matches the per-target strip roll-up's tint.
+- `web/src/components/PlayerTimelineChart.tsx` (NEW): "use
+  client" inline SVG line chart. 3 polylines (damage + healing +
+  strip) **normalized to 0-100% of per-series max** so the
+  smaller-magnitude strip line is visible (on a shared absolute
+  Y axis, damage -- typically 10k-100k magnitude -- would crush
+  strip -- typically 0-500 magnitude -- into a flat line).
+  Hovering any of the 3 sibling dots surfaces a native SVG
+  ``<title>`` tooltip with the absolute values
+  (``fight_id`` + formatted ``MM/DD HH:MM`` + 3 metrics via
+  ``toLocaleString()``). X-axis: ``MM/DD HH:MM`` via
+  ``Intl.DateTimeFormat``, first + last labels always drawn,
+  intermediate labels sampled at ~120px intervals. Empty-state
+  panel mirrors ``EventWindowsChart`` styling. The pure helper
+  ``buildTimelineLayout`` is exported for the unit test.
+- `web/src/components/PlayerTimelineSection.tsx` (NEW): "use
+  client" Client Component wrapper. Owns the pagination state
+  (``timeline``, ``isLoading``, ``loadError`` via ``useState``);
+  "Load more" button calls ``fetchPlayerTimeline`` with
+  ``offset=points.length`` and appends the returned points to
+  the in-memory list. Defensive de-dup of ``fight_id`` (in case
+  a fight is added to the dataset mid-pagination). Shows a
+  "Showing N of M fights" caption + a disabled "All fights
+  loaded" button when the last page is reached. Error path:
+  surfaces the upstream error via ``formatApiError`` and
+  re-enables the button (no auto-retry; reload is the recovery
+  path).
+- `web/src/app/players/[account_name]/page.tsx`: extended to
+  fetch the per-account historical timeline (limit=20) on the
+  server alongside the existing profile fetch. 404 from the
+  timeline is swallowed (treated as "player has no attended
+  fights" -- the chart's empty-state panel handles a null
+  timeline via the synthetic-empty pattern). 5xx from the
+  timeline is fatal and renders the same upstream-error card
+  the profile fetch uses. ``ApiError`` + ``err.status`` is the
+  canonical 404 discriminator (NOT a string-based
+  ``err.message.startsWith("404:")`` -- that would couple to
+  the ApiError's formatted message). The ``<PlayerTimelineSection>``
+  is ALWAYS rendered (with a synthetic empty ``PlayerTimeline``
+  on the 404 path) so the analyst sees the "Showing 0 of 0
+  fights" caption + the chart's empty-state panel + a disabled
+  "All fights loaded" button instead of a silent section
+  absence. The section sits between the stat cards and the
+  per-fight breakdown.
+
+### Added (web tests)
+
+- `web/tests/components/player-timeline-chart.test.tsx` (NEW): 6
+  cases (empty state, single all-zero point, 3 points with 9
+  circles + 3 paths + 3 legend swatches, ``buildTimelineLayout``
+  helper for empty / single point / all-zero clamp to 1 / mixed
+  magnitudes). DOM-level assertions via
+  ``container.querySelectorAll`` -- more robust than snapshots
+  when a future refactor reorders an attribute.
+- `web/tests/components/player-timeline-section.test.tsx` (NEW):
+  5 cases (caption + Load more enabled, button disabled when
+  all loaded, Load more click calls ``fetchPlayerTimeline`` with
+  ``offset=3`` and appends, error surfaces and doesn't lock the
+  button, defensive de-dup of ``fight_id`` across pages). Uses
+  the canonical ``vi.mock(..., importOriginal)`` pattern to
+  override the global no-op mock from ``web/tests/setup.ts``.
+- `web/tests/setup.ts`: global no-op mock for the new
+  ``PlayerTimelineSection`` named export (so the page-level
+  tests can render the wrapper without booting the React state +
+  fetch plumbing; a dedicated component-level test exercises
+  the real Client Component).
+- `web/tests/app/player-profile-page.test.tsx`: extended to mock
+  ``fetchPlayerTimeline`` so the page tests don't hit the real
+  gateway; the existing 4 page-level cases (populated, empty
+  breakdown, 404, 502) all use the mock.
+
+### Notes
+
+- The web/ chart is **normalized to 0-100% per series** (not
+  shared absolute Y axis as the design doc proposed). Rationale:
+  damage (10k-100k magnitude) would visually crush strip
+  (0-500 magnitude) on a shared axis, making the strip trend
+  invisible. Per-series normalization lets the analyst compare
+  the **trends** of all 3 metrics simultaneously. The absolute
+  values are surfaced via the SVG ``<title>`` tooltip on hover
+  (zero React state, no portal, no client-side JS -- the
+  canonical lightweight pattern).
+- The web/ tooltip uses the **SVG-native ``<title>`` element**
+  on the parent ``<g>`` group (not an absolutely-positioned
+  ``<div>`` overlay as the design doc proposed). Rationale: the
+  ``<title>`` pattern is dependency-free, hydration-safe, and
+  surfaces the tooltip on any of the 3 sibling dots in the
+  cluster. An absolutely-positioned ``<div>`` would require
+  ``useRef`` + ``getBoundingClientRect`` + React state -- 10x
+  the code for no observable UX win (the browser's native
+  tooltip is already a ``<div>`` overlay).
+- The web/ pagination uses **offset-based loading** (not
+  limit-incrementing as the design doc proposed). Rationale:
+  offset-based pagination is the standard pattern, the
+  ``<title>`` tooltip is hover-only so the user doesn't need to
+  scroll through chunks of 20 -- and the route's tiebreaker
+  (``fight_id ASC``) gives a deterministic total count, so the
+  "Load more" button can hide when the last page is reached.
+- The design doc's v0.9.0 suggestion to "support per-day
+  bucketing" and "cross-account comparison" remains future
+  work. The per-account timeline alone is enough for v0.8.0.
+
+### Tests
+
+- 5 new e2e tests (apps/api/test_uploads_e2e.py).
+- 11 new vitest cases (6 chart + 5 section).
+- Python test count: 86 (v0.7.0) -> 91 (v0.8.0).
+- Web test count: 39 (v0.7.1) -> 50 (v0.8.0).
+
+### Validation
+
+- ``uv run ruff check libs apps``: clean (RUFF=0).
+- ``uv run ruff format --check libs apps``: clean (FORMAT=0).
+- ``uv run mypy libs apps --no-incremental``: clean (MYPY=0).
+- ``uv run pytest apps/api/tests/test_uploads_e2e.py -k timeline``:
+  5 passed (PYTEST=0).
+- ``pnpm tsc --noEmit``: clean (TSC=0).
+- ``pnpm test:unit``: clean (VITEST=0, 13 files / 50 tests).
+- Round 101-107 code-reviewer-minimax-m3: **APPROVED**
+  (route declaration order locks the FastAPI matching
+  contract; ``_wait_for_upload_completion`` extraction
+  single-sources the polling loop; per-series normalization
+  rationale (damage dwarfs strip on shared axis) is the
+  correct chart design; ``<title>``-on-group surfaces the
+  tooltip on any of the 3 sibling dots; ``ApiError`` +
+  ``err.status`` is the type-safe 404 discriminator;
+  synthetic-empty ``PlayerTimeline`` keeps the section
+  visible on the 404 path so the analyst sees the
+  "No data" panel instead of a silent absence).
+
+[0.8.0]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.1...v0.8.0
+
 ## [0.7.1] - Phase 9 of web: player-centric surface + per-fight squad + skill roll-ups
 
 ### Added (web)
@@ -177,7 +380,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.7.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.0...v0.7.1
 
-[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.0...HEAD
 
 ## [0.7.0] - Phase 9: player-centric surface + per-fight squad + per-fight skill roll-ups
 

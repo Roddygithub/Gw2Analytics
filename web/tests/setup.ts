@@ -173,3 +173,17 @@ vi.mock("@/components/PlayersGrid", () => ({
 vi.mock("@/components/PlayerSearchBar", () => ({
   PlayerSearchBar: () => null,
 }));
+
+/**
+ * v0.8.0 of web: ``@/components/PlayerTimelineSection`` is the
+ * Client Component wrapper for the per-account historical
+ * timeline (handles the "Load more" pagination). Mocked as a
+ * no-op so the page-level tests can render the wrapper
+ * without booting the React useState + fetch plumbing; a
+ * dedicated component-level test in
+ * :file:`web/tests/components/player-timeline-section.test.tsx`
+ * exercises the button click + state-update contract.
+ */
+vi.mock("@/components/PlayerTimelineSection", () => ({
+  PlayerTimelineSection: () => null,
+}));

@@ -47,7 +47,13 @@
  *   upstream-error card with the error message.
  */
 
-import { fetchPlayer, formatApiError } from "@/lib/api";
+import {
+  ApiError,
+  fetchPlayer,
+  fetchPlayerTimeline,
+  formatApiError,
+} from "@/lib/api";
+import { PlayerTimelineSection } from "@/components/PlayerTimelineSection";
 
 export const dynamic = "force-dynamic";
 
@@ -93,13 +99,64 @@ export default async function PlayerProfilePage({
 
   let profile: Awaited<ReturnType<typeof fetchPlayer>> | null = null;
   let fetchError: string | null = null;
+  // v0.8.0 of web: also fetch the per-account historical
+  // timeline (the first page only) on the server. A 404
+  // from the timeline endpoint is the canonical "player has
+  // no attended fights" case; we swallow it and render the
+  // chart with the empty-state panel instead of bailing
+  // out of the whole page (the profile is still useful for
+  // a player with zero attended fights once the dataset
+  // is later populated). Any other error is treated as a
+  // fatal upstream error and renders the same error card
+  // the profile fetch uses.
+  let timeline:
+    | Awaited<ReturnType<typeof fetchPlayerTimeline>>
+    | null = null;
+  let timelineError: string | null = null;
   try {
     profile = await fetchPlayer(account_name);
   } catch (err) {
     fetchError = formatApiError(err);
   }
+  if (profile) {
+    try {
+      timeline = await fetchPlayerTimeline(account_name, { limit: 20 });
+    } catch (err) {
+      // 404 (player not in any fight) is the only "expected"
+      // failure mode; the chart's empty-state panel handles
+      // a null timeline. Any other error is fatal to the
+      // page (matches the profile-fetch contract). Using
+      // ``ApiError`` + ``err.status`` is the canonical
+      // discriminator (a string-based ``startsWith("404:")``
+      // would couple to the ApiError's formatted message).
+      if (err instanceof ApiError && err.status === 404) {
+        timeline = null;
+      } else {
+        timelineError = formatApiError(err);
+      }
+    }
+  }
 
-  if (fetchError || !profile) {
+  // v0.8.0 of web: always render the section so the
+  // analyst sees a "Showing 0 of 0 fights" caption + the
+  // chart's empty-state panel + a disabled "All fights
+  // loaded" button when the player has no attended fights.
+  // Silently omitting the section on a 404 would be
+  // ambiguous (the analyst would not know whether the
+  // section was broken or whether the player simply has no
+  // history). The section is only suppressed on a fatal
+  // timeline error (handled by the upstream-error card
+  // above).
+  const effectiveTimeline =
+    timeline ?? {
+      account_name: account_name,
+      total: 0,
+      limit: 20,
+      offset: 0,
+      points: [],
+    };
+
+  if (fetchError || timelineError || !profile) {
     return (
       <main style={{ padding: "32px" }}>
         <header style={{ marginBottom: 16 }}>
@@ -110,7 +167,9 @@ export default async function PlayerProfilePage({
             Cross-fight profile + per-fight breakdown.
           </p>
         </header>
-        <p style={{ color: "var(--accent)" }}>{fetchError}</p>
+        <p style={{ color: "var(--accent)" }}>
+          {fetchError ?? timelineError}
+        </p>
       </main>
     );
   }
@@ -158,6 +217,11 @@ export default async function PlayerProfilePage({
           value={String(profile.total_buff_removal)}
         />
       </section>
+
+      <PlayerTimelineSection
+        accountName={account_name}
+        initialTimeline={effectiveTimeline}
+      />
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Per-fight breakdown</h2>
