@@ -29,35 +29,27 @@ this spec via `pnpm generate:api` (no live uvicorn needed; uses
 
 ## Local bring-up
 
-```bash
-# 1. Bring up the infra (Postgres + MinIO + Redis) — see docker-compose.yml
-docker compose up -d
-
-# 2. Configure local app env (DATABASE_URL + S3_* creds)
-cp .env.example .env
-
-# 3. Apply the Postgres schema (creates the fights / agents / skills /
-#    uploads tables). Run from `apps/api/` because alembic.ini is
-#    relative: `script_location = alembic`.
-cd apps/api && uv run alembic upgrade head && cd ../..
-
-# 4. Boot the API
-uv run fastapi dev apps/api/src/gw2analytics_api/main.py
-# -> http://localhost:8000/docs
-```
+See the root `README.md` Quickstart for the end-to-end bring-up (infra,
+env, alembic, fastapi). Quickstart steps 4-8 cover this package.
 
 ## Postgres dependency for the e2e test
 
-`tests/test_uploads_e2e.py::test_uploads_e2e_happy_path` exercises the full
-POST → GET uploads → GET fights chain against a **real** Postgres. The test
-runs unconditionally against any environment with a Postgres reachable at
-the `DATABASE_URL` declared in `[tool.pytest_env]` / `.env`.
+The unconditional e2e suite in `tests/test_uploads_e2e.py` exercises the
+full POST → GET uploads → GET fights chain against a **real** Postgres
+on every pytest run. The test runs unconditionally against any environment
+with a Postgres reachable at the `DATABASE_URL` declared in
+`[tool.pytest_env]` / `.env`.
 
 | Environment          | Bring up                                                          |
 |----------------------|-------------------------------------------------------------------|
 | Local dev            | `docker compose up -d gw2a-postgres` (already in `docker compose up -d`) |
 | GitHub Actions CI    | `lint-and-test` job spins up a `postgres:16-alpine` service on `localhost:5432` (credentials match `pytest_env`) |
 | Ad-hoc prod-shaped   | Any reachable Postgres ≥ 14 will do — Alembic baseline migration is API-version-agnostic |
+
+If a test name is mentioned elsewhere in the docs and gets renamed (the
+contract — POST → GET uploads → GET fights chain — is what matters, not
+the function identifier), update the contract description, not the
+function name in prose.
 
 If a developer runs `pytest` without a reachable Postgres, the e2e test
 **raises** (not skips) — that's the intended loud signal.
