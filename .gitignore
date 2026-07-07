@@ -61,19 +61,8 @@ Thumbs.db
 web/test-results/
 web/playwright-report/
 
-# Marketing-grade screenshots (web/scripts/screenshots.mjs output)
-# - ``/screenshots/`` is the absolute OUT_DIR the script writes
-#   to from the repo root (matches the convention of
-#   ``web/scripts/dump_openapi.py`` -> ``/openapi.json``).
-# - ``web/screenshots/`` is the legacy write target from an
-#   earlier draft of the script that hardcoded a relative
-#   path. The current script does not touch it; the directory
-#   is gitignored so it stops showing up in ``git status`` but
-#   is preserved on disk for the developer to inspect or remove
-#   manually with ``rm -rf web/screenshots/`` if desired.
-# The script itself (web/scripts/screenshots.mjs) IS tracked --
-# it's the source-of-truth artifact; only the binary output is
-# ignored (consistent with how the openapi.json codegen
-# artifact is treated just above).
+# Marketing screenshots (web/scripts/screenshots.mjs output).
+# The script is tracked; only the PNGs are ignored
+# (mirrors the dump_openapi.py -> /openapi.json convention above).
 /screenshots/
 web/screenshots/

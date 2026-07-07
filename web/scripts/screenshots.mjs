@@ -27,10 +27,11 @@ import { chromium } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
-// Absolute path so the output is stable regardless of
-// ``process.cwd()`` (pnpm scripts + nested basher commands
-// don't always preserve the directory the developer expects).
-const OUT_DIR = "/home/roddy/Gw2Analytics/screenshots";
+// Anchor OUT_DIR to the project root from CWD so the
+// script works for any developer (no per-machine absolute
+// path). Expected invocation: from the repo root, per
+// the docstring above (``node web/scripts/screenshots.mjs``).
+const OUT_DIR = resolve(process.cwd(), "screenshots");
 const BASE = "http://127.0.0.1:3000";
 
 // (label, path, wait-selector?, extra-pre-screenshot-delay-ms)
