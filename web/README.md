@@ -41,6 +41,7 @@ and `/account`.
 | `pnpm test:unit`        | Vitest single-run (CI gate).                                             |
 | `pnpm test:e2e`         | Playwright e2e suite (headless).                                         |
 | `pnpm test:e2e:headed`  | Playwright e2e suite (headed, for debugging).                            |
+| `pnpm screenshots`      | Capture full-page PNGs of every route via Playwright -> `/screenshots/`. |
 | `pnpm generate:api`     | Regenerate `src/lib/api/schema.d.ts` from the running gateway's OpenAPI. |
 
 ## OpenAPI regeneration

@@ -27,11 +27,17 @@ import { chromium } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
-// Anchor OUT_DIR to the project root from CWD so the
-// script works for any developer (no per-machine absolute
-// path). Expected invocation: from the repo root, per
-// the docstring above (``node web/scripts/screenshots.mjs``).
-const OUT_DIR = resolve(process.cwd(), "screenshots");
+// Anchor OUT_DIR to the repo root *from the script's
+// own location*, not from the caller's CWD. This way
+// ``node web/scripts/screenshots.mjs`` from the repo
+// root AND ``pnpm screenshots`` from inside ``web/`` both
+// write to the same ``/screenshots/`` directory at the
+// repo root -- never to the legacy ``web/screenshots/``
+// dir that the round-148 chore commit told everyone to
+// stop writing to.
+// Uses ``import.meta.dirname`` (Node 20.11+, safely
+// supported since Next.js 16 mandates Node 20+).
+const OUT_DIR = resolve(import.meta.dirname, "..", "..", "screenshots");
 const BASE = "http://127.0.0.1:3000";
 
 // (label, path, wait-selector?, extra-pre-screenshot-delay-ms)
