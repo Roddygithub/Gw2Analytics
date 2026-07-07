@@ -85,6 +85,48 @@ class EventBucketOut(BaseModel):
     event_count: int = 0
 
 
+class TargetDpsRowOut(BaseModel):
+    """One damage roll-up row in :class:`FightEventsSummaryOut`.
+
+    Mirrors :class:`gw2_analytics.target_dps.TargetDpsRow` with the
+    ``attack_count`` field dropped from the API surface (analyst-only
+    signal; UI shows ``total_damage`` + ``dps`` only).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    target_agent_id: int
+    total_damage: int
+    dps: float
+
+
+class FightEventsSummaryOut(BaseModel):
+    """Combined aggregation payload returned by ``GET /api/v1/fights/{fight_id}/events``.
+
+    Phase 7 v1 ships a single bound response so the frontend can render
+    the timeline + per-target DPS without two extra round-trips.
+
+    Contract:
+
+    - ``duration_s`` is computed natively from
+      ``max(event.time_ms) / 1000.0`` because the V1.3 EVTC header
+      does not carry a wall-clock duration scalar.
+    - ``target_dps`` is empty when the parser yielded zero damage events
+      (after the ``is_statechange == 0`` ``/`` ``is_nondamage == 0``
+      ``/`` ``value > 0`` filter); the route returns ``404 Not Found``
+      when the events blob is missing entirely (pre-Phase-7 row OR the
+      blob upload failed).
+    - ``event_windows`` is empty when there are no events.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fight_id: str
+    duration_s: float
+    target_dps: list[TargetDpsRowOut] = []
+    event_windows: list[EventBucketOut] = []  # forwarded Pydantic alias
+
+
 class AccountEnrichedOut(BaseModel):
     """GET /api/v1/account response.
 

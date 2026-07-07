@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -279,13 +279,19 @@ class HealingEvent(BaseEvent):
 
 # Discriminated union for forward-compat downstream consumers that
 # accept "any event" (e.g. the EventWindowAggregator buckets damage +
-# healing in one shot without forcing the caller to split the stream).
-# Pydantic does not auto-discriminate the bare ``X | Y`` alias at
-# ``model_validate`` time -- callers must construct ``DamageEvent`` /
-# ``HealingEvent`` directly, OR future Phase 6 v2 should annotate
-# with ``Annotated[DamageEvent | HealingEvent, Field(discriminator='event_type')]``
-# at any validation boundary that round-trips events from JSON.
-Event = DamageEvent | HealingEvent
+# healing in one shot without forcing the caller to split the stream)
+# AND for JSONL round-trip in apps/api/services (the per-fight events
+# blob is a heterogeneous stream of damage + healing records
+# written one ``model_dump_json()`` per line). The ``Annotated`` +
+# ``Field(discriminator="event_type")`` combination tells Pydantic v2
+# to dispatch on the ``event_type`` literal at validation time, so a
+# ``TypeAdapter(Event).validate_json(line)`` call materialises the
+# matching subclass with no manual ``isinstance`` ladder. Declared via
+# the PEP 695 ``type`` statement (Python 3.12+) so mypy treats the
+# right-hand side as a type expression without any ``# type: ignore``.
+type Event = Annotated[
+    DamageEvent | HealingEvent, Field(discriminator="event_type")
+]  # PEP 695 type statement; mypy accepts at the type-expression slot
 
 
 # ---------------------------------------------------------------------------

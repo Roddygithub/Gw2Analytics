@@ -70,8 +70,10 @@ from gw2_core import (
     Agent,
     DamageEvent,
     EliteSpec,
+    Event,
     EvtcHeader,
     Fight,
+    HealingEvent,
     Profession,
     Skill,
 )
@@ -184,18 +186,40 @@ class PythonEvtcParser:
         return _iter_fights(data)
 
     @staticmethod
-    def parse_events(source: BinaryIO | bytes) -> Iterator[DamageEvent]:
-        """Yield :class:`DamageEvent` records from the cbtevent block.
+    def parse_events(source: BinaryIO | bytes) -> Iterator[Event]:
+        """Yield :class:`DamageEvent` + :class:`HealingEvent` records from the cbtevent block.
 
-        Phase 7 v1 ships damage events only (``is_statechange == 0``
-        AND ``is_nondamage == 0`` AND ``value > 0``). ``HealingEvent``
-        extraction is a Phase 7 v2 followup.
+        Phase 7 v2 ships heterogeneous event-stream extraction. The
+        ``is_statechange`` flag is the primary discriminator: any
+        record with ``is_statechange != 0`` is a statechange /
+        buff-apply / defiance-bar event that we do not classify as
+        damage or healing here (Phase 8 candidate).
 
-        Truncation is lenient: if the trailing bytes are less than one
-        cbtevent record wide, the parser stops without raising and
-        logs a warning. ``value`` is clamped via ``max(0, value)`` to
-        absorb signed-int32 overflow quirks that surface as negative
-        damage totals (see validator in :file:`libs/gw2_analytics`).
+        For records with ``is_statechange == 0``, the ``is_nondamage``
+        flag picks the event kind:
+
+        - ``is_nondamage == 0``: direct damage. ``value`` is the
+          damage taken; we clamp via ``max(0, value)`` to absorb
+          signed-int32 overflow quirks, then yield ``DamageEvent``
+          with ``damage = clamped_value``.
+        - ``is_nondamage > 0``: outgoing-heal (per arcdps community
+          convention A -- the same ``value`` field carries the heal
+          amount when the non-damage flag is set; the Elite Insights
+          parser uses the same convention). We clamp + yield
+          ``HealingEvent`` with ``healing = clamped_value``.
+
+        A single cbtevent record yields AT MOST ONE event. We do
+        NOT also yield a ``HealingEvent`` from ``buff_dmg`` when
+        ``value > 0`` -- doing so would double-count the
+        buff-removal path and inflate downstream healing totals.
+        Forward-compat for the buff-removal / barrier path lands in
+        a Phase 8 follow-up keyed off ``is_statechange == 0`` +
+        ``is_nondamage == 0`` + ``buff_dmg > 0`` records.
+
+        Truncation is lenient: trailing bytes < ``EVENT_SIZE`` stop
+        the loop without raising. ``burst`` records (multiple bytes
+        per cbtevent) are not modelled -- arcdps emits one record
+        per event.
         """
         data = _read_all(source)
         offset = _compute_post_skills_offset(data)
@@ -227,18 +251,36 @@ class PythonEvtcParser:
                 _pad66,
             ) = _EVENT_STRUCT.unpack_from(data, cursor)
             cursor += EVENT_SIZE
-            if is_statechange != 0 or is_nondamage != 0:
+            if is_statechange != 0:
                 continue
-            damage = max(0, value)
-            if damage == 0:
+            # Convention A (Elite Insights parity): ``value`` carries
+            # the magnitude of the event, ``is_nondamage`` picks the
+            # kind. Buffer-removal / barrier via ``buff_dmg`` is out
+            # of scope for v2 (Phase 8).
+            magnitude = max(0, value)
+            if magnitude == 0:
                 continue
-            yield DamageEvent(
-                time_ms=time_ms,
-                source_agent_id=src_agent,
-                target_agent_id=dst_agent,
-                skill_id=skill_id,
-                damage=damage,
-            )
+            if is_nondamage == 0:
+                yield DamageEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent,
+                    target_agent_id=dst_agent,
+                    skill_id=skill_id,
+                    damage=magnitude,
+                )
+            else:
+                # ``is_nondamage > 0`` is the healing-class signal. We
+                # do NOT filter further on the specific value of
+                # ``is_nondamage`` -- some arcdps revisions set it to
+                # 2, 3, etc. for sub-kinds of heal; the aggregator
+                # gets one event per heuristic-clamped heal.
+                yield HealingEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent,
+                    target_agent_id=dst_agent,
+                    skill_id=skill_id,
+                    healing=magnitude,
+                )
 
 
 # ---------------------------------------------------------------------------

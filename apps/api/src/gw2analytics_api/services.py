@@ -3,14 +3,27 @@
 Maps a :class:`gw2_core.Fight` (Pydantic V2, stable internal model) to
 the SQLAlchemy ORM rows persisted in Postgres. Errors here write to
 ``uploads.error_message`` rather than raised, so the API stays alive.
+
+Phase 7 v1 also persists the parsed event stream: after :func:`_save_fight`
+inserts the fight row + per-agent + per-skill rows, the same parser is
+fed through :meth:`PythonEvtcParser.parse_events` to drain the cbtevent
+block. Each :class:`DamageEvent` is serialised as JSONL, the stream is
+gzip-compressed, the bytes are uploaded to MinIO at
+``events/{fight_id}.jsonl.gz``, and the storage key is written back to
+``OrmFight.events_blob_uri``. Zero-event fights keep ``events_blob_uri
+= NULL`` -- the parser degrades to no-blob rather than persist an
+empty file. The ``GET /fights/{id}/events`` route surfaces ``404 Not
+Found`` for those rows rather than a misleading empty aggregation.
 """
 
 from __future__ import annotations
 
+import gzip
 import logging
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gw2_core import EliteSpec, Profession
@@ -24,6 +37,7 @@ from gw2analytics_api.models import (
     OrmFightSkill,
     Upload,
 )
+from gw2analytics_api.storage import put_events
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +96,7 @@ def process_parse(db: Session, upload_id: uuid.UUID, raw_bytes: bytes) -> None:
         return
 
     _save_fight(db, upload, core_fight)
+    _persist_event_blob(db, upload, evtc_bytes, core_fight.id)
     upload.status = UPLOAD_STATUS_COMPLETED
     upload.error_message = None
     db.commit()
@@ -139,3 +154,61 @@ def _prof_id(p: Profession) -> int:
 
 def _elite_id(e: EliteSpec) -> int:
     return int(e.value)
+
+
+def _persist_event_blob(
+    db: Session,
+    upload: Upload,
+    evtc_bytes: bytes,
+    fight_id: str,
+) -> None:
+    """Drain the cbtevent block into a MinIO blob and write the key back.
+
+    Phase 7 v1 behaviour:
+
+    - Empty streams (zero damage events after the ``is_statechange == 0`` /
+      ``is_nondamage == 0`` / ``value > 0`` filter) leave
+      ``events_blob_uri`` as ``NULL``. We deliberately do NOT persist an
+      empty blob: an empty blob would round-trip through the route as
+      ``200 OK`` with zero damage + zero events, misleading consumers
+      into thinking the parser ran but nothing happened. ``NULL`` instead
+      signals "no event data available", which the route surfaces as
+      ``404 Not Found`` (consistent with pre-Phase 7 fights).
+    - ANY exception raised by ``parse_events`` or ``put_events`` is
+      logged and swallowed so the upload still flips to ``COMPLETED``
+      with the fight-row + agents + skills persisted. The events blob
+      is a deep-metrics concern; losing it must NOT lose the agents /
+      skills already written. Operators can re-parse the upload to
+      retry the blob upload without losing the agents/skills. The
+      catch is intentionally broad because this call sits OUTSIDE
+      the ``process_parse`` try/except -- the 3-tier classification
+      previously here has been collapsed to one ``except Exception``
+      (the outer ``process_parse`` cannot classify the re-raise, and
+      the historical ``(RuntimeError, ValueError, OSError)`` tier was
+      both drift-prone (mentioned ``S3Error`` in the docstring but
+      did not catch it) and effectively dead under the broad
+      ``except Exception`` below it).
+    """
+
+    parser = PythonEvtcParser()
+    try:
+        events = list(parser.parse_events(evtc_bytes))
+        if not events:
+            logger.debug("upload %s yielded zero events; events_blob_uri stays NULL", upload.id)
+            return
+        jsonl = "\n".join(event.model_dump_json() for event in events).encode("utf-8")
+        gz_bytes = gzip.compress(jsonl)
+        blob_uri = put_events(fight_id, gz_bytes)
+    except Exception:
+        # ``parse_events`` raises ``EvtcParseError`` on malformed
+        # archives; ``put_events`` raises ``S3Error`` (and ``OSError``
+        # variants) on MinIO failures; anything truly unexpected
+        # lands here too. All three are treated identically: degrade
+        # to ``events_blob_uri = NULL``, keep the fight-row contract
+        # intact.
+        logger.exception("event blob unavailable for fight %s; deep metrics degraded", fight_id)
+        return
+
+    orm_fight = db.execute(select(OrmFight).where(OrmFight.id == fight_id)).scalar_one_or_none()
+    if orm_fight is not None:
+        orm_fight.events_blob_uri = blob_uri

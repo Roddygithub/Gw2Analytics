@@ -37,7 +37,7 @@ from pathlib import Path
 
 import pytest
 
-from gw2_core import DamageEvent, EliteSpec, Profession
+from gw2_core import DamageEvent, EliteSpec, Event, HealingEvent, Profession
 from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
 from gw2_evtc_parser.parser import (
     AGENT_COUNT_OFFSET,
@@ -758,8 +758,13 @@ def test_parse_events_filters_statechange_skips_damage() -> None:
     )
     events = list(PythonEvtcParser().parse_events(evtc))
     assert len(events) == 1
-    assert events[0].damage == 42
-    assert events[0].time_ms == 2_000
+    # Rebind to a typed local so mypy narrows ``.damage`` on the
+    # ``Event`` discriminated union without losing the narrowing
+    # across multiple ``events[i]`` accesses.
+    damage_event = events[0]
+    assert isinstance(damage_event, DamageEvent)
+    assert damage_event.damage == 42
+    assert damage_event.time_ms == 2_000
 
 
 def test_parse_events_skips_statechange_records() -> None:
@@ -781,8 +786,16 @@ def test_parse_events_skips_statechange_records() -> None:
     assert events == []
 
 
-def test_parse_events_skips_nondamage_records() -> None:
-    """Records with ``is_nondamage != 0`` (healing-style flags) are filtered."""
+def test_parse_events_skips_nondamage_records_damage_path() -> None:
+    """Old Phase 7 v1 contract: ``is_nondamage == 1`` was filtered.
+
+    Phase 7 v2 changed the contract: ``is_nondamage > 0`` is the
+    HEALING signal (convention A + Elite Insights parity), not the
+    filter. ``test_parse_events_yields_healing_event_on_nondamage``
+    is the new contract test. This test stays as a regression guard
+    on the value-filtering branch: a record with ``value == 0`` and
+    ``is_nondamage == 1`` should still skip (zero-magnitude heal).
+    """
     evtc = _build_minimal_evtc(
         [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
         skills=[(101, "Whirlwind")],
@@ -791,13 +804,265 @@ def test_parse_events_skips_nondamage_records() -> None:
                 time_ms=1_000,
                 src_agent=1,
                 dst_agent=2,
-                value=999,
+                value=0,
                 is_nondamage=1,
             ),
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
     assert events == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 v2: HealingEvent extraction tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_events_yields_healing_event_on_nondamage() -> None:
+    """``is_statechange == 0 && is_nondamage > 0 && value > 0`` yields a HealingEvent.
+
+    Convention A (Elite Insights parity): the ``value`` field carries
+    the heal magnitude when the non-damage flag is set. The
+    HealingEvent.round-trip carries skill_id + source/target agents +
+    time_ms + healing.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Symbol of Healing")],
+        events=[
+            _build_event_record(
+                time_ms=42_500,
+                src_agent=1,
+                dst_agent=2,
+                value=8_500,
+                is_nondamage=1,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, HealingEvent)
+    assert e.event_type == "HEALING"
+    assert e.time_ms == 42_500
+    assert e.source_agent_id == 1
+    assert e.target_agent_id == 2
+    assert e.skill_id == 101
+    assert e.healing == 8_500
+
+
+def test_parse_events_clamps_negative_healing_to_zero() -> None:
+    """Negative ``value`` with ``is_nondamage > 0`` clamps via ``max(0, value)`` -> skip.
+
+    Pydantic ``HealingEvent.healing: int >= 0`` enforces the invariant;
+    the parser absorbs signed-int32 overflow at the event-block filter
+    boundary so negative sums cannot corrupt downstream healing totals.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Healing Skill")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=-50,
+                is_nondamage=1,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_parse_events_emits_one_event_per_cbtevent_for_damage_plus_heal() -> None:
+    """A cbtevent record yields AT MOST ONE event (Convention A).
+
+    When ``is_nondamage == 0`` AND ``value > 0``: yields DamageEvent.
+    When ``is_nondamage > 0`` AND ``value > 0``: yields HealingEvent.
+    The two conditions are mutually exclusive on a single record; we
+    deliberately do NOT also emit a HealingEvent from ``buff_dmg``
+    on the same record -- that would double-count.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Maim")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=2_500,  # direct damage via value
+                is_nondamage=0,
+                skill_id=101,
+            ),
+            _build_event_record(
+                time_ms=2_000,
+                src_agent=1,
+                dst_agent=2,
+                value=1_250,  # healing via value (is_nondamage flag flips the meaning)
+                is_nondamage=1,  # Convention A: is_nondamage > 0 = heal
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 2
+    # Rebind to typed locals so mypy flow-typing can resolve .damage
+    # vs .healing on the Event discriminated union without losing the
+    # narrowing across multiple ``events[i]`` accesses.
+    e0 = events[0]
+    e1 = events[1]
+    assert isinstance(e0, DamageEvent), "first record (nondamage=0) yields DamageEvent"
+    assert e0.damage == 2_500
+    assert isinstance(e1, HealingEvent), "second record (nondamage=1) yields HealingEvent"
+    assert e1.healing == 1_250
+
+
+def test_parse_events_skips_statechange_for_healing() -> None:
+    """Statechange records (``is_statechange != 0``) are skipped, even with is_nondamage > 0.
+
+    Phase 8 will revisit ``is_statechange`` records for buff-apply +
+    defiance-bar + position events; Phase 7 v2 deliberately skips them
+    all.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Heal Skill")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=9_999,
+                is_nondamage=1,
+                is_statechange=1,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_parse_events_skips_statechange_for_damage() -> None:
+    """Statechange records (``is_statechange != 0``) are skipped, even with is_nondamage == 0.
+
+    Locks down the post-v2 invariant: regardless of is_nondamage
+    flag, ``is_statechange != 0`` always skips. Mirrors the
+    healing-side test above.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Skill")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=9_999,
+                is_nondamage=0,
+                is_statechange=1,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_parse_events_emits_heterogeneous_stream_signed_by_event_type() -> None:
+    """Mixed damage + heal stream yields DamageEvent + HealingEvent instances.
+
+    Each event's concrete subclass is determined solely by the
+    cbtevent ``is_nondamage`` flag; the discriminator field on the
+    Pydantic model (``event_type``) reads back from JSONL and is
+    consistent with the runtime ``isinstance`` check.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Skill")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=100,
+                is_nondamage=0,
+            ),
+            _build_event_record(
+                time_ms=2_000,
+                src_agent=1,
+                dst_agent=2,
+                value=200,
+                is_nondamage=1,
+            ),
+            _build_event_record(
+                time_ms=3_000,
+                src_agent=1,
+                dst_agent=2,
+                value=300,
+                is_nondamage=0,
+            ),
+            _build_event_record(
+                time_ms=4_000,
+                src_agent=1,
+                dst_agent=2,
+                value=400,
+                is_nondamage=1,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 4
+    # Sequence: D, H, D, H -- matches the alternating fixture above.
+    assert isinstance(events[0], DamageEvent)
+    assert events[0].damage == 100
+    assert isinstance(events[1], HealingEvent)
+    assert events[1].healing == 200
+    assert isinstance(events[2], DamageEvent)
+    assert events[2].damage == 300
+    assert isinstance(events[3], HealingEvent)
+    assert events[3].healing == 400
+
+
+def test_parse_events_yield_type_is_event_union() -> None:
+    """Static-type witness: ``parse_events`` is annotated as ``Iterator[Event]``.
+
+    A caller iterating the result sees instances of either subclass
+    (Pydantic v2 discriminated union). This is a smoke test on the
+    typing contract -- we measure the Stream-vs-unbound member
+    without asserting the return annotation at runtime (the
+    annotation is structural; the isinstance ladder proves the
+    discriminated-union dispatch was correct).
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        skills=[(101, "Skill")],
+        events=[
+            _build_event_record(
+                time_ms=500,
+                src_agent=1,
+                dst_agent=2,
+                value=10,
+                is_nondamage=0,
+            ),
+            _build_event_record(
+                time_ms=1_500,
+                src_agent=1,
+                dst_agent=2,
+                value=20,
+                is_nondamage=1,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    # The ``Event`` PEP 695 ``type`` declaration is a ``TypeAliasType``
+    # at runtime, not a runtime-callable class -- so ``isinstance(e,
+    # Event)`` raises ``TypeError``. The two leaf subclasses are
+    # themselves, so a tuple-form ``isinstance`` check covers the
+    # same contract at runtime + is mypy-clean.
+    for e in events:
+        assert isinstance(e, (DamageEvent, HealingEvent))
 
 
 # ---------------------------------------------------------------------------

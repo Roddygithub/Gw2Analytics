@@ -7,6 +7,230 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Phase 7 v1 -- parser-side event-stream consumer + apps/api /events wire-up)
+
+- `libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py`:
+  - New `EVENT_SIZE = 64` + `_EVENT_STRUCT = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")`
+    matching the real arcdps `cbtevent` layout
+    (3Q + 2i + 2I + 3H + 8b + 2I + 2b = 64 bytes total).
+  - New `PythonEvtcParser.parse_events(source) -> Iterator[DamageEvent]`
+    reads the cbtevent block at the post-skill-block offset;
+    emits `DamageEvent` only when `is_statechange == 0` AND
+    `is_nondamage == 0` AND `value > 0` (clamped via `max(0, value)`).
+    Truncated trailing bytes are leniently dropped.
+  - New `_compute_post_skills_offset(data) -> int` helper mirrors
+    `_iter_skills` cursor logic so `parse_events` can advance past
+    the skill table deterministically without re-yielding `Skill`
+    records.
+
+- `libs/gw2_evtc_parser/src/gw2_evtc_parser/interface.py`: `EvtcParser`
+  Protocol gained an optional-sense `parse_events(source) ->
+  Iterator[DamageEvent]` member. Existing implementations stay
+  source-compatible -- callers that only enforce `parse(source)` are
+  not broken.
+
+- `libs/gw2_evtc_parser/src/gw2_evtc_parser/__init__.py`: re-exports
+  `EVENT_SIZE` + `PythonEvtcParser` (the existing parser, now with
+  the new `parse_events` method). `__version__` bumped `0.2.0 -> 0.4.0`.
+
+- `libs/gw2_evtc_parser/tests/test_parser.py`: 5 new event-parser tests:
+  empty stream, single damage event shape, truncation tolerance (lenient
+  drop), `is_statechange == 1` filter (skipped), `is_nondamage == 1`
+  filter (skipped). All 5 use a synthetic 25-byte header + 96-byte
+  agent record + zero skills + 64-byte cbtevent records built via
+  `struct.pack` against the same `_EVENT_STRUCT` layout. The
+  pre-existing real-fixture integration test (`test_real_evtc_binary
+  _parses_with_realistic_agent_count`) is unchanged.
+
+- `libs/gw2_evtc_parser/tests/test_interface.py`: protocol conformance
+  test extended to cover `parse_events` round-trip (also via the
+  synthetic 64-byte fixture).
+
+- `apps/api/alembic/versions/0004_fight_events_blob_uri.py` (NEW):
+  adds `events_blob_uri VARCHAR(255) NULL` to the `fights` table.
+  Historical fights (uploaded before Phase 7 v1) keep the column
+  as `NULL`; the `/fights/{id}/events` route surfaces `404 Not
+  Found` for these rows so consumers can distinguish "parser ran
+  but yielded no damage" from "data unavailable".
+
+- `apps/api/src/gw2analytics_api/models.py::OrmFight`: gains
+  `events_blob_uri: Mapped[str | None] = mapped_column(String(255),
+  nullable=True)`. Purely additive; no backfill.
+
+- `apps/api/src/gw2analytics_api/storage.py`:
+  - Extracted `_ensure_bucket()` helper from `put_zevtc()`; both
+    `put_zevtc` and the new `put_events` use it.
+  - New `put_events(fight_id, gz_data) -> str`: uploads to
+    `events/{fight_id}.jsonl.gz` with `content_type="application/gzip"`.
+  - New `get_events(key) -> bytes`: fetches + releases the MinIO
+    connection. `S3Error` propagates so the route can map
+    `NoSuchKey` to `404 Not Found`.
+
+- `apps/api/src/gw2analytics_api/services.py`:
+  - New `_persist_event_blob(db, upload, evtc_bytes, fight_id)`
+    helper called from `process_parse` after `_save_fight` and
+    before `upload.status = UPLOAD_STATUS_COMPLETED`. Calls
+    `PythonEvtcParser.parse_events(evtc_bytes)`, serialises the
+    events as JSONL (one `DamageEvent.model_dump_json()` per line),
+    gzip-compresses with `gzip.compress(jsonl)`, uploads via
+    `put_events`, and writes the storage key back to
+    `OrmFight.events_blob_uri`. Degrades gracefully to
+    `events_blob_uri = NULL` when the parser yields zero events OR
+    when the blob upload fails (the fight-row + agents + skills
+    stay valid; operators can re-parse the upload to retry).
+
+- `apps/api/src/gw2analytics_api/schemas.py`: new
+  `TargetDpsRowOut` (drops `attack_count` from the API surface so
+  the JSON stays client-broad) + `FightEventsSummaryOut`
+  (`fight_id`, `duration_s`, `target_dps`,
+  `event_windows`). The pre-existing `EventBucketOut` is now part
+  of the live response shape rather than a future-proofing stub.
+
+- `apps/api/src/gw2analytics_api/routes/fights.py`:
+  `GET /api/v1/fights/{fight_id}/events` route now returns a real
+  `FightEventsSummaryOut` rather than the Phase 6 v1 `[EventBucketOut]`
+  stub. New `window_s: int = Query(5, ge=1, le=600)` query param
+  drives the time-bucket roll-up. Response codes:
+  - `404 Not Found`: unknown fight OR `events_blob_uri is None`
+    OR the MinIO read raises `S3Error` (blanket 404 so a missing
+    blob never masquerades as a zero-damage fight).
+  - `422 Unprocessable Entity`: `window_s` outside `[1, 600]`
+    (handled by FastAPI before this handler runs).
+  - `502 Bad Gateway`: events blob is present but corrupt
+    (`gzip.decompress` failed).
+  `duration_s` is computed natively as
+  `max(events.time_ms) / 1000.0` (the V1.3 EVTC header does not
+  carry a wall-clock duration scalar).
+
+- `apps/api/pyproject.toml`: gained `gw2_analytics` as a runtime
+  dependency (the route now imports
+  `gw2_analytics.event_window.EventWindowAggregator` +
+  `gw2_analytics.target_dps.TargetDpsAggregator`).
+
+- `apps/api/tests/test_uploads_e2e.py`:
+  - Extended `_make_minimal_zevtc()` to accept an optional
+    `events=` list of pre-packed 64-byte cbtevent records appended
+    after the skill block.
+  - New `_make_cbtevent()` helper packs one cbtevent record with
+    the same layout as the parser's `_EVENT_STRUCT`. Field padding
+    (`pad61`..`pad66`, `translocated`, `is_offcycle`) is set to
+    zero -- the parser never reads them.
+  - Extended `test_uploads_e2e_happy_path` with two damage cbtevent
+    records (`time_ms=1500`, `time_ms=2500`, both targeting agent
+    B with skill A/B), then asserts
+    `GET /fights/{id}/events?window_s=1` returns
+    `duration_s == 2.5`, a single `target_dps` row summing both
+    hits, and 3 contiguous 1-second buckets with counts `[0, 1, 1]`.
+  - New `test_fight_events_404_when_unknown_fight` covers the
+    404 contract for missing fight id.
+  - New `test_fight_events_422_when_window_s_too_small` covers
+    the Pydantic Query `ge=1` validator rejecting `window_s=0`.
+
+### Changed
+
+- `apps/api/src/gw2analytics_api/schemas.py::EventBucketOut`
+  docstring: `Phase 6 v2 future-proofing` references removed; the
+  schema is now wired into the live response.
+- `apps/api/src/gw2analytics_api/services.py` module docstring:
+  extended with Phase 7 v1 scope (`parse_events` drain +
+  gzip JSONL + `events_blob_uri` write-back).
+
+### Notes
+
+- `DamageEvent` (in `libs/gw2_core`) already had `source_agent_id`,
+  `target_agent_id`, `skill_id` via the broader `BaseEvent` model
+  introduced in Phase 6 v1 -- the parser consumer reads those
+  fields directly from the cbtevent record without a wrapper type.
+- The `is_statechange == 0` / `is_nondamage == 0` filter passes
+  only damage events in Phase 7 v1; `HealingEvent` extraction
+  (cbtevent records with the conditioning/damage-with-negation
+  pattern) is a Phase 7 v2 follow-up. The JSONL includes
+  `event_type` so a v2 reader can discriminate without a
+  schema migration on the storage side.
+- `EventWindowAggregator`'s continuous-fill semantics fills the
+  empty `[0, 1000ms)` leading bucket when `window_ms=1000` and the
+  first event lands at `time_ms=1500`. The happy-path test
+  asserts this directly (`counts == [0, 1, 1]`).
+- 404-on-NULL-blob is the canonical contract: returning
+  `200 OK` with empty arrays would conflate "parser ran, no
+  damage" with "data unavailable", and consumers would have
+  no signal to re-upload.
+
+## [0.5.0-parser] - Phase 7 v2 cbtevent heal extraction + Event discriminated union
+
+### Added (parser)
+
+- `libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py`: ``PythonEvtcParser.parse_events``
+  signature broadened from ``-> Iterator[DamageEvent]``` to
+  ``-> Iterator[Event]```. New filter contract (Convention A +
+  Elite Insights parity):
+    - ``is_statechange == 0 && is_nondamage == 0 && value > 0`` -> emits DamageEvent
+    - ``is_statechange == 0 && is_nondamage >  0 && value > 0`` -> emits HealingEvent
+    - Records with ``is_statechange != 0`` still skip (Phase 8 candidate).
+  Each cbtevent record yields AT MOST ONE event. The ``buff_dmg```
+  field is NOT also emitted as a HealingEvent from the same record
+  (deferred to Phase 8 -- avoids double-counting the buff-removal
+  path).
+
+- `libs/gw2_evtc_parser/src/gw2_evtc_parser/interface.py`: ``EvtcParser```
+  Protocol's ``parse_events``` member returns the same
+  ``Iterator[Event]```.
+
+### Added (domain)
+
+- `libs/gw2_core/src/gw2_core/models.py`: ``Event``` is now a PEP 695
+  ``type``` declaration with a Pydantic v2
+  ``Field(discriminator="event_type")``` discriminator so JSONL
+  round-trip auto-dispatches on the ``event_type``` literal payload.
+
+### Changed (apps/api)
+
+- `apps/api/src/gw2analytics_api/routes/fights.py`: module-level
+  ``_EVENT_TYPE_ADAPTER: TypeAdapter[Event]``` (built once at import
+  time) replaced the previous per-line ``DamageEvent.model_validate_json```
+  loop so the heterogeneous JSONL stream materialises damage + healing
+  without manual isinstance dispatch. ``TargetDpsAggregator.aggregate```
+  call site filters via
+  ``[e for e in events if isinstance(e, DamageEvent)]``` so the
+  aggregator signature stays narrow on ``DamageEvent``` (its
+  sum-invariant validates sum-of-row-damage == sum-of-event-damage).
+
+### Test delta
+
+- `libs/gw2_evtc_parser/tests/test_parser.py`: 7 NEW Phase 7 v2 tests
+  locking down the Convention A contract:
+    - test_parse_events_yields_healing_event_on_nondamage
+    - test_parse_events_clamps_negative_healing_to_zero
+    - test_parse_events_emits_one_event_per_cbtevent_for_damage_plus_heal
+      (the Phase 7 v1 contract test was renamed + repurposed to
+      lock down the value-filter branch for the HEALING path)
+    - test_parse_events_skips_statechange_for_healing
+    - test_parse_events_skips_statechange_for_damage
+    - test_parse_events_emits_heterogeneous_stream_signed_by_event_type
+    - test_parse_events_yield_type_is_event_union
+
+### Validation
+
+- ruff check + format: clean (libs + apps)
+- mypy libs apps --no-incremental: clean
+- pytest libs/gw2_evtc_parser libs/gw2_analytics: 103 passed + 1 skipped
+  (the skipped test is the real-EVTC-fixture integration test gated
+  on /tmp/inner_20251002-213519 availability)
+- Round 51-58 code-reviewer: APPROVED (with minor cleanup notes)
+
+### Migration
+
+The Python surface is fully backward-compatible. ``parse_events```
+now yields the union type so callers that explicitly typed the
+return as ``list[DamageEvent]``` need to widen to
+``list[Event]```. The apps/api ``GET /fights/{id}/events```
+route already handles the union via
+``TypeAdapter(Event).validate_json(line)```; pre-Phase-7-v2 records
+(those with NULL events_blob_uri) continue to surface 404.
+
+[0.5.0-parser]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...v0.5.0-parser
+
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...HEAD
 ## [0.3.0] - web upload UI + event aggregations
 
 ### Added
@@ -513,7 +737,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end-to-end real-fixture integration test against
   `/tmp/inner_20251002-213519` (skipped if the fixture is absent).
 
-[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.3.0...HEAD
+## [0.5.0-parser] - Phase 7 v2 cbtevent heal extraction + Event discriminated union
+
+### Added (parser)
+
+- `libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py`: ``PythonEvtcParser.parse_events``
+  signature broadened from ``-> Iterator[DamageEvent]``` to
+  ``-> Iterator[Event]```. New filter contract (Convention A +
+  Elite Insights parity):
+    - ``is_statechange == 0 && is_nondamage == 0 && value > 0`` -> emits DamageEvent
+    - ``is_statechange == 0 && is_nondamage >  0 && value > 0`` -> emits HealingEvent
+    - Records with ``is_statechange != 0`` still skip (Phase 8 candidate).
+  Each cbtevent record yields AT MOST ONE event. The ``buff_dmg```
+  field is NOT also emitted as a HealingEvent from the same record
+  (deferred to Phase 8 -- avoids double-counting the buff-removal
+  path).
+
+- `libs/gw2_evtc_parser/src/gw2_evtc_parser/interface.py`: ``EvtcParser```
+  Protocol's ``parse_events``` member returns the same
+  ``Iterator[Event]```.
+
+### Added (domain)
+
+- `libs/gw2_core/src/gw2_core/models.py`: ``Event``` is now a PEP 695
+  ``type``` declaration with a Pydantic v2
+  ``Field(discriminator="event_type")``` discriminator so JSONL
+  round-trip auto-dispatches on the ``event_type``` literal payload.
+
+### Changed (apps/api)
+
+- `apps/api/src/gw2analytics_api/routes/fights.py`: module-level
+  ``_EVENT_TYPE_ADAPTER: TypeAdapter[Event]``` (built once at import
+  time) replaced the previous per-line ``DamageEvent.model_validate_json```
+  loop so the heterogeneous JSONL stream materialises damage + healing
+  without manual isinstance dispatch. ``TargetDpsAggregator.aggregate```
+  call site filters via
+  ``[e for e in events if isinstance(e, DamageEvent)]``` so the
+  aggregator signature stays narrow on ``DamageEvent``` (its
+  sum-invariant validates sum-of-row-damage == sum-of-event-damage).
+
+### Test delta
+
+- `libs/gw2_evtc_parser/tests/test_parser.py`: 7 NEW Phase 7 v2 tests
+  locking down the Convention A contract:
+    - test_parse_events_yields_healing_event_on_nondamage
+    - test_parse_events_clamps_negative_healing_to_zero
+    - test_parse_events_emits_one_event_per_cbtevent_for_damage_plus_heal
+      (the Phase 7 v1 contract test was renamed + repurposed to
+      lock down the value-filter branch for the HEALING path)
+    - test_parse_events_skips_statechange_for_healing
+    - test_parse_events_skips_statechange_for_damage
+    - test_parse_events_emits_heterogeneous_stream_signed_by_event_type
+    - test_parse_events_yield_type_is_event_union
+
+### Validation
+
+- ruff check + format: clean (libs + apps)
+- mypy libs apps --no-incremental: clean
+- pytest libs/gw2_evtc_parser libs/gw2_analytics: 103 passed + 1 skipped
+  (the skipped test is the real-EVTC-fixture integration test gated
+  on /tmp/inner_20251002-213519 availability)
+- Round 51-58 code-reviewer: APPROVED (with minor cleanup notes)
+
+### Migration
+
+The Python surface is fully backward-compatible. ``parse_events```
+now yields the union type so callers that explicitly typed the
+return as ``list[DamageEvent]``` need to widen to
+``list[Event]```. The apps/api ``GET /fights/{id}/events```
+route already handles the union via
+``TypeAdapter(Event).validate_json(line)```; pre-Phase-7-v2 records
+(those with NULL events_blob_uri) continue to surface 404.
+
+[0.5.0-parser]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...v0.5.0-parser
+
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...HEAD
 [0.3.0]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.3.0-web...v0.3.0
 ## [0.1.0] - Phase 3 analytics prototype
 

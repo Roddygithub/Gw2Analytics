@@ -89,6 +89,14 @@ class OrmFight(Base):
     agent_count: Mapped[int] = mapped_column(Integer, nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     game_type: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # Phase 7 v1: location of the per-fight gzipped-JSONL event blob in
+    # MinIO (``events/{fight_id}.jsonl.gz``). ``NULL`` for fights that
+    # pre-date the parser-side event consumer OR for fights whose parser
+    # pass yielded zero events (the parser degrades to ``NULL`` rather
+    # than persist an empty blob). The ``/fights/{id}/events`` route
+    # surfaces 404 in either case so consumers don't mistake
+    # unavailability for zero damage.
+    events_blob_uri: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     upload: Mapped[Upload] = relationship(back_populates="fight")
     agents: Mapped[list[OrmFightAgent]] = relationship(

@@ -1,18 +1,25 @@
-"""End-to-end POST /uploads test against a real Postgres.
+"""End-to-end POST /uploads + GET /fights/{id}/events tests against a real Postgres.
 
 Builds a synthetic ``.zevtc`` in-memory (using :pymod:`struct` to
 mimic the arcdps layout), POSTs it through the public API, then
-queries GET /uploads and GET /fights to verify the schema is wired
-correctly.
+queries GET ``/uploads`` + GET ``/fights`` + GET ``/fights/{id}/events``
+to verify the schema + Phase 7 v1 wire-up are correct.
+
+The fixture now appends a 64-byte ``cbtevent`` record per damage event
+so the parser surfaces a non-empty stream and the persistence layer
+can write ``events_blob_uri`` end-to-end. Truncated cbtevent trailing
+bytes are tolerated by :meth:`PythonEvtcParser.parse_events` so the
+fixture can use a whole-record span.
 
 Requires a Postgres server reachable at the ``DATABASE_URL`` declared
 in ``pyproject.toml`` / ``.env``. Run ``docker compose up -d
 gw2a-postgres`` first if your local environment does not already
 expose Postgres on port 5432.
 
-The test is **idempotent** by design: each run injects a uuid-derived
-suffix into ``agent_id``, ``name``, the build string, and the skill
-``id``s so the ``fight_agents (fight_id, agent_id)`` PK, the
+The happy-path test is **idempotent** by design: each run injects a
+uuid-derived suffix into ``agent_id``, ``name``, the build string,
+the skill ``id``s and the cbtevent ``time_ms`` so the
+``fight_agents (fight_id, agent_id)`` PK, the
 ``fight_skills (fight_id, skill_id)`` PK and the ``fights.id`` are
 unique per invocation. No CASCADE truncate needed.
 
@@ -27,6 +34,7 @@ import uuid as _uuid
 import zipfile
 from io import BytesIO
 
+import pytest
 from fastapi.testclient import TestClient
 
 from gw2analytics_api.main import app
@@ -38,6 +46,7 @@ client = TestClient(app)
 #                   + agent_count + skill_count + language)
 #   + agent_count x 96-byte agent records
 #   + skill_count x variable-size skill records
+#   + N x 64-byte cbtevent records (Phase 7 v1)
 _HEADER_FMT = "<4s8sBHBI IB"
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 25
 _AGENT_RECORD_FMT = "<QIIhhhhhh"
@@ -46,23 +55,75 @@ _AGENT_NAME_SIZE = 68
 _AGENT_SIZE = _AGENT_PREFIX_SIZE + _AGENT_NAME_SIZE  # 96
 _SKILL_HEADER_FMT = "<II"
 _SKILL_HEADER_SIZE = struct.calcsize(_SKILL_HEADER_FMT)  # 8
+_EVENT_FMT = "<QQQiiIIHHHbbbbbbbbIIbb"
+_EVENT_SIZE = struct.calcsize(_EVENT_FMT)  # 64
+
+
+def _make_cbtevent(
+    time_ms: int,
+    src: int,
+    dst: int,
+    value: int,
+    skill_id: int,
+    *,
+    is_statechange: int = 0,
+    is_nondamage: int = 0,
+) -> bytes:
+    """Pack one 64-byte cbtevent record matching the parser's struct layout.
+
+    Field padding (pad61..pad66) is set to zero -- the parser does not
+    read them. ``value > 0`` + ``is_statechange == 0`` +
+    ``is_nondamage == 0`` produces a yielded ``DamageEvent``.
+    """
+    return struct.pack(
+        _EVENT_FMT,
+        time_ms,  # uint64 time
+        src,  # uint64 src_agent
+        dst,  # uint64 dst_agent
+        value,  # int32 value
+        0,  # int32 buff_dmg
+        0,  # uint32 overstack_value
+        skill_id,  # uint32 skillid
+        0,  # uint16 src_instid
+        0,  # uint16 dst_instid
+        0,  # uint16 translocated
+        0,  # uint8 is_cleanup
+        is_nondamage,  # uint8 is_nondamage
+        is_statechange,  # uint8 is_statechange
+        0,  # uint8 is_flanking
+        0,  # uint8 is_shields
+        0,  # uint8 is_offcycle
+        0,  # uint8 pad61
+        0,  # uint8 pad62
+        0,  # uint32 pad63
+        0,  # uint32 pad64
+        0,  # uint8 pad65
+        0,  # uint8 pad66
+    )[:_EVENT_SIZE]
 
 
 def _make_minimal_zevtc(
     agents: list[tuple[int, int, int, str, bool]],
     build: str,
     skills: list[tuple[int, str]] | None = None,
+    events: list[bytes] | None = None,
 ) -> bytes:
     """Build a synthetic .zevtc blob (zip wrapper around EVTC).
 
     Uses the V1.3 25-byte header + 96-byte agent records + variable
     skill records. For player agents the combo string
-    ``name\\0:synth.<id>\\0`` is null-padded to 68 bytes; NPCs get a
+    ``name\\\\0:synth.<id>\\\\0`` is null-padded to 68 bytes; NPCs get a
     single null-terminated name null-padded to 68 bytes. Skill records
     are ``<II`` (skill_id + name_len) + UTF-8 name + 1 byte null.
+
+    ``events`` is an optional list of pre-packed 64-byte cbtevent
+    records appended verbatim after the skill block -- Phase 7 v1
+    parser drains them with :meth:`PythonEvtcParser.parse_events`.
     """
     if skills is None:
         skills = []
+    if events is None:
+        events = []
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
         header = struct.pack(
@@ -108,11 +169,15 @@ def _make_minimal_zevtc(
                 struct.pack(_SKILL_HEADER_FMT, skill_id, len(name_bytes)) + name_bytes + b"\x00"
             )
             body += skill_record
+        for ev in events:
+            # ``ev`` is a pre-packed 64-byte cbtevent record from
+            # :func:`_make_cbtevent` -- no further packing here.
+            body += ev
         zf.writestr("fight.evtc", header + bytes(body))
     return buf.getvalue()
 
 
-def test_uploads_e2e_happy_path() -> None:
+def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy path: POST + GET upload + GET fight + GET events
     # Per-run uuid suffix keeps fights.id, fight_agents (fight_id,
     # agent_id) and fight_skills (fight_id, skill_id) unique across
     # re-runs, so no CASCADE truncate is required.
@@ -122,6 +187,29 @@ def test_uploads_e2e_happy_path() -> None:
     base_id_b = base_id_a + 1
     base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_skill_b = base_skill_a + 1
+
+    # Two damage cbtevent records targeting agent B with skill A. Both
+    # satisfy the Phase 7 v1 filter (``is_statechange == 0``,
+    # ``is_nondamage == 0``, ``value > 0``), so the parser yields 2
+    # ``DamageEvent`` records and the blob URI is non-null. Timestamps
+    # span 2 separate 1-second buckets so the small ``window_s=1``
+    # roll-up shows 2 buckets instead of one combined mega-bucket.
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=567,
+            skill_id=base_skill_b,
+        ),
+    ]
 
     blob = _make_minimal_zevtc(
         [
@@ -133,6 +221,7 @@ def test_uploads_e2e_happy_path() -> None:
             (base_skill_a, f"Whirlwind {suffix}"),
             (base_skill_b, f"Burning Precision {suffix}"),
         ],
+        events=events,
     )
 
     # POST a synthetic .zevtc
@@ -174,6 +263,48 @@ def test_uploads_e2e_happy_path() -> None:
     assert skill_names == {f"Whirlwind {suffix}", f"Burning Precision {suffix}"}
     skill_ids = {s["id"] for s in fight["skills"]}
     assert skill_ids == {base_skill_a, base_skill_b}
+
+    # Phase 7 v1: GET /fights/{id}/events returns the aggregated summary.
+    # ``window_s=1`` keeps both events in separate 1-second buckets so
+    # the roll-up is observable (``duration_s == max(time_ms) / 1000``
+    # = 2.5, target_dps rows collapsed to a single entry because both
+    # events hit the same target).
+    events_resp = client.get(
+        f"/api/v1/fights/{payload['fight_id']}/events",
+        params={"window_s": 1},
+    )
+    assert events_resp.status_code == 200, events_resp.text
+    summary = events_resp.json()
+    assert summary["fight_id"] == payload["fight_id"]
+    assert summary["duration_s"] == pytest.approx(2.5)
+    assert len(summary["target_dps"]) == 1
+    row = summary["target_dps"][0]
+    assert row["target_agent_id"] == base_id_b
+    assert row["total_damage"] == 1_234 + 567
+    assert row["dps"] == pytest.approx((1_234 + 567) / 2.5)
+    # 2 events landed in the first 3 second-timespan; window_s=1
+    # buckets are [0,1000), [1000,2000), [2000,3000) so buckets 1 + 2
+    # each carry exactly 1 event.
+    assert len(summary["event_windows"]) == 3
+    counts = [b["event_count"] for b in summary["event_windows"]]
+    assert counts == [0, 1, 1]
+    damages = [b["damage_total"] for b in summary["event_windows"]]
+    assert damages == [0, 1_234, 567]
+
+
+def test_fight_events_404_when_unknown_fight() -> None:
+    """GET /fights/{unknown}/events returns 404."""
+    resp = client.get("/api/v1/fights/does-not-exist-1234/events")
+    assert resp.status_code == 404
+
+
+def test_fight_events_422_when_window_s_too_small() -> None:
+    """GET /fights/{id}/events?window_s=0 returns 422 (Pydantic Query validation)."""
+    # The Query ge=1 constraint kicks in BEFORE the handler runs, so
+    # this is a FastAPI-level validation rejection rather than an
+    # aggregator ValueError.
+    resp = client.get("/api/v1/fights/anything/events", params={"window_s": 0})
+    assert resp.status_code == 422
 
 
 def test_healthz_responds() -> None:
