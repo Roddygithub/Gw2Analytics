@@ -7,6 +7,336 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - v0.8.3: player name resolution on the fight drilldown's TargetFilter
+
+### Added (apps/api + libs/gw2_analytics)
+
+- `libs/gw2_analytics/src/gw2_analytics/target_dps.py` +
+  `target_healing.py` + `target_buff_removal.py`: each
+  per-target roll-up row gains an optional
+  `name: str | None = None` field. The corresponding
+  aggregator's `aggregate(events, duration_s, ...)` method
+  gains an optional
+  `name_map: dict[int, str | None] | None = None` parameter.
+  When `name_map` is `None` (the canonical backward-compat
+  case for existing tests / callers), every row's `name` is
+  `None` -- the aggregator never invents a name out of thin
+  air. The dict is denormalised onto each row so the wire
+  consumer doesn't need a second lookup. Strict parallel
+  across the 3 aggregators so the trio reads as one design.
+- `apps/api/src/gw2analytics_api/schemas.py`: each
+  per-target `*Out` Pydantic schema
+  (`TargetDpsRowOut` / `TargetHealingRowOut` /
+  `TargetBuffRemovalRowOut`) mirrors the new `name` field.
+  Additive -- existing wire consumers ignore it.
+- `apps/api/src/gw2analytics_api/routes/fights.py::get_fight_events`:
+  builds a single `agent_id_to_name: dict[int, str | None]`
+  from a dedicated `select(OrmFightAgent).where(fight_id==...)`
+  query and passes it to all 3 per-target aggregators as
+  `name_map=...`. Cross-roll-up consistency invariant: the
+  SAME `name_map` powers all 3 roll-ups, so the same
+  `target_agent_id` resolves to the SAME name across
+  damage + healing + buff-removal rows. `OrmFightAgent.name`
+  is preserved as-is (no `or ""` fallback); the type uses
+  `str | None` so the aggregator's `.get(target)` returns
+  `None` for NPCs without a registered arcdps char-name
+  (explicit `None` and missing-key both collapse to the
+  `name=None` sentinel on the row). The single-query cost
+  is small (5-50 rows per fight).
+
+### Added (web)
+
+- `web/src/lib/api.ts`: each per-target `*Row` TypeScript
+  interface (`TargetDpsRow` / `TargetHealingRow` /
+  `TargetBuffRemovalRow`) gains `name: string | null`.
+- `web/src/app/fights/[id]/page.tsx`: builds a
+  `targetNameMap: Record<number, string | null>` from the
+  roll-up rows using a "first non-null wins" loop (surfaces
+  any cross-roll-up inconsistency a future gateway bug
+  might produce). The PRECEDENCE CONTRACT (DPS -> Healing
+  -> BuffRemoval) is documented inline so a refactor that
+  reorders the roll-up spread doesn't silently change which
+  divergent name wins.
+- `web/src/components/TargetFilter.tsx`: accepts an optional
+  `targetNameMap?: Readonly<Record<number, string | null>>`
+  prop. A new `formatTargetLabel(tid, nameMap)` helper
+  renders `"Name (id)"` when the lookup resolves to a
+  non-empty string; the bare `String(id)` otherwise. The
+  raw id is always present in the label (parenthesised) so
+  the analyst can still cross-reference against arcdps
+  logs / the existing wire contract. Pre-v0.8.3 wire
+  consumers (no map) keep their bare-id dropdown labels
+  (backward compat).
+
+### Tests
+
+- 9 new analytics tests (3 per file: `test_name_default_is_none_when_no_map`,
+  `test_name_map_resolves_to_player_name`,
+  `test_name_map_missing_key_yields_none` on the DPS file;
+  2 corresponding tests on the Healing + BuffRemoval
+  files -- the missing-key case is omitted because the
+  `dict.get` semantic is the same across all 3).
+- 3 new e2e assertions on
+  `test_uploads_e2e_happy_path` (one per roll-up) that
+  lock the wire contract with the fixture's known agent
+  names (`f"E2E Warrior {suffix}"` /
+  `f"E2E Guard {suffix}"`).
+- 3 new `TargetFilter` vitest cases: backward-compat
+  (no map), happy path (3 names + 1 null), empty-string
+  fallback.
+- `name` field added to the `POPULATED_PAYLOAD` +
+  `multiTarget` fixtures in
+  `web/tests/app/fight-events-page.test.tsx` so tsc
+  is happy with the new field on the roll-up row
+  interfaces.
+
+### Notes
+
+- The TargetFilter now displays the player name
+  (when resolved) alongside the agent id; previously it
+  showed only the raw `agent_id` integer. Closes the
+  long-standing tech-debt item "Display player name in
+  the TargetFilter dropdown (currently shows raw
+  agent_ids)" documented since the v0.6.0 release.
+- NPCs without a registered arcdps char-name surface as
+  `name=null` on the wire, which the frontend's
+  `formatTargetLabel` correctly falls back to the bare id
+  (mirrors the v0.6.0 contract that documented the raw id
+  as "the smallest viable affordance").
+- The page-level `targetNameMap` builder is O(n) on the
+  total roll-up row count; the per-row dropdown lookup is
+  O(1). No measurable perf impact.
+
+### Validation
+
+- `uv run ruff check libs apps`: clean (RUFF=0).
+- `uv run mypy libs apps --no-incremental`: clean
+  (MYPY=0). Round 127 fixed the `dict[int, str]` ->
+  `dict[int, str | None]` widening so the route's
+  `agent_id_to_name` is now mypy-clean.
+- `uv run pytest libs`: 25 tests in
+  `test_target_dps.py` + `test_target_healing.py` +
+  `test_target_buff_removal.py` pass (PYTEST_LIBS=0).
+- `uv run pytest apps/api/tests/test_uploads_e2e.py -v`:
+  20 tests pass (PYTEST_APPS=0).
+- `pnpm tsc --noEmit`: clean (TSC=0).
+- `pnpm test:unit`: clean (VITEST=0, 14 tests across the
+  2 affected files).
+- Round 126-128 code-reviewer-minimax-m3: **APPROVED**
+  (name_map contract is correct; cross-roll-up
+  consistency holds; the "first non-null wins" loop
+  correctly surfaces gateway inconsistencies; the
+  PRECEDENCE CONTRACT comment pins the spread order so
+  a future refactor doesn't silently change the
+  precedence).
+
+[0.8.3]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.2...v0.8.3
+
+## [0.8.2] - v0.8.2: log scale Y-axis on the per-account timeline
+
+### Added (web)
+
+- `web/src/components/PlayerTimelineChart.tsx`:
+  `buildTimelineLayout` now accepts a
+  `scale: "linear" | "log"` parameter (default "linear").
+  In "log" mode: `globalMax = max(maxDamage, maxHealing,
+  maxStrip)`, `yFor(v) = innerH * (1 - log10(v+1) /
+  log10(globalMax+1))`, and ticks are generated as decades
+  (1, 10, 100, 1k, 10k, ...) up to `globalMax`, capped at
+  8 ticks. New helper `formatLogTick(v)` renders the tick
+  labels (0, 1, 10, 100, 1k, 1.5k, 1M, 1.5M, 1B). The
+  component accepts a new `scale?: TimelineScale` prop and
+  renders logarithmic Y-axis labels in log mode (instead of
+  the "0" + "100%" pair from linear mode). A
+  `yForPolyline(v, max)` wrapper picks the right `yFor` for
+  each of the 3 polylines.
+- `web/src/components/PlayerTimelineSection.tsx`:
+  Linear/Log toggle next to the existing "Load more"
+  button. Selection persisted in `localStorage` via a
+  mount-only `useEffect` (SSR-safe; initialised to
+  "linear" so the server-rendered HTML never diverges from
+  the first client render). The SSR pattern avoids the
+  hydration mismatch a naive `useState(() =>
+  readStoredScale())` would produce.
+
+### Notes
+
+- The log scale addresses the original ROADMAP XS item
+  "Cas où damage = 1M dwarf strip = 50 reste illisible
+  même après normalisation" -- on the per-series
+  normalised 0-100% chart (v0.8.0), a 1M-damage hit and a
+  50-strip hit are at the same visual height (both at
+  100% of their respective series maxes), but the
+  absolute values differ by 20000x. A log Y-axis lets the
+  analyst see both signals on the same chart without
+  losing the strip trend.
+- The Y-axis is shared across all 3 polylines (damage +
+  healing + strip) so the same `globalMax` calibrates all
+  three. The "0" baseline on the log axis is the chart's
+  bottom edge (not a zero-value point on the log curve) --
+  the convention matches the linear mode.
+- 3 new vitest cases on the chart test file: log-scale
+  tick generation (decade rounding), `yFor` clamping
+  (NaN guard + off-chart clamping), shared `globalMax`
+  across the 3 series.
+
+### Tests
+
+- 3 new vitest cases on
+  `web/tests/components/player-timeline-chart.test.tsx`:
+  log-scale layout produces the right decade ticks,
+  `yFor` is clamped to `[0, innerH]` for any input, and
+  `globalMax` is the max across all 3 series.
+- 1 new vitest case on
+  `web/tests/components/player-timeline-section.test.tsx`:
+  clicking the Linear/Log toggle persists the choice via
+  `localStorage` (read on mount, written on toggle).
+
+### Validation
+
+- `pnpm tsc --noEmit`: clean (TSC=0). Round 121 fixed
+  the `yFor` signature union widening (both branches
+  now accept an optional `max` so the TS2554 errors
+  resolved).
+- `pnpm test:unit`: clean (VITEST=0, all chart +
+  section tests pass).
+- Round 121-125 code-reviewer-minimax-m3: **APPROVED**
+  (the `max: number = 1` default is safe for the actual
+  call sites which always pass the correct max;
+  `Number.isFinite` guard closes the NaN silent-bug
+  gap; SSR mount-only `useEffect` is the canonical
+  hydration-safe localStorage pattern; B-suffix on
+  `formatLogTick` handles 1B+ damage values).
+
+[0.8.2]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.1...v0.8.2
+
+## [0.8.1] - v0.8.1: per-day bucketing on the player timeline
+
+### Added (apps/api)
+
+- `apps/api/src/gw2analytics_api/schemas.py::PlayerTimelineOut`:
+  gains a `bucket: Literal["fight", "day"] = "fight"`
+  field. `"day"` collapses all fights sharing a calendar
+  day into one point whose `total_damage` /
+  `total_healing` / `total_buff_removal` are the SUM of
+  the day's fights. The `started_at` of a day-bucketed
+  point is the day's UTC midnight so the chart's X-axis
+  can detect the day-aligned timestamps and render
+  `MM/DD` instead of `MM/DD HH:MM`. The `fight_id` of a
+  day-bucketed point is the most-recent fight_id of the
+  day (the deterministic tiebreaker; the chart keys on
+  `fight_id` so the React reconciler is happy).
+- `apps/api/src/gw2analytics_api/routes/players.py`:
+  `?bucket=day` query param on
+  `GET /api/v1/players/{account_name:path}/timeline`.
+  Server-local day grouping (future v0.9.0
+  `?tz=Europe/Paris` extension documented inline). The
+  day-bucketed point's totals are the SUM of the day's
+  fights, NOT the max -- the analyst wants the
+  cumulative magnitude per day, not a peak.
+- `apps/api/src/gw2analytics_api/services.py`: the
+  timeline route's `started_at` source was `datetime.now(UTC)`
+  (an unconditional sentinel) -- a critical pre-existing
+  bug: `gw2_core.Fight.started_at` defaults to
+  `datetime(1970, 1, 1, tzinfo=UTC)` (sentinel epoch), so
+  the existing guard `cf.started_at if cf.started_at.tzinfo
+  else datetime.now(UTC)` was always falling through to
+  `cf.started_at` (truthy tzinfo) and storing every fight
+  at 1970-01-01 UTC. v0.8.0's timeline showed every
+  point stacked at the leftmost edge. **Fixed**: the
+  service now writes `started_at = datetime.now(UTC)`
+  unconditionally, with a docstring that explains the
+  sentinel-epoch trap so a future refactor doesn't
+  reintroduce it.
+
+### Added (web)
+
+- `web/src/lib/api.ts`: `fetchPlayerTimeline` opts
+  signature gains `bucket?: "fight" | "day"`. The new
+  `PlayerTimeline.bucket` field is a documented
+  `Literal["fight", "day"]` mirroring the gateway's
+  contract.
+- `web/src/components/PlayerTimelineChart.tsx`: the
+  X-axis auto-detects day-aligned timestamps
+  (`time.getUTCHours() === 0 && time.getUTCMinutes() === 0
+  && time.getUTCSeconds() === 0`) and renders `MM/DD`
+  instead of `MM/DD HH:MM`. No new prop -- the chart
+  infers day-vs-fight from the data. Day labels are
+  rendered slightly bolder so the analyst can spot a
+  day-bucketed point at a glance.
+- `web/src/components/PlayerTimelineSection.tsx`:
+  "Per fight" / "Per day" toggle in the section
+  header. Selection is local state (not URL-driven) so
+  the analyst's bucketing preference doesn't pollute
+  the shareable URL. The toggle resets to "Per fight"
+  on a fresh page load.
+
+### Tests
+
+- 3 new e2e tests in
+  `apps/api/tests/test_uploads_e2e.py`:
+  `test_player_timeline_default_bucket_is_fight` (no
+  `bucket` param yields `bucket="fight"` and a
+  non-midnight `started_at`),
+  `test_player_timeline_day_bucket_aggregates_per_day`
+  (day-bucketed `started_at` is UTC midnight + totals
+  sum across the day's fights),
+  `test_player_timeline_422_when_bucket_invalid`
+  (`?bucket=week` -> 422, mirroring the
+  `limit`/`offset` 422 contract),
+  `test_player_timeline_day_bucket_splits_across_days`
+  (2 fights on different calendar days -> 2
+  day-bucketed points, 2 days apart).
+- 1 new vitest case on
+  `web/tests/components/player-timeline-section.test.tsx`:
+  "Load more" forwards `bucket: "fight"` (locks the
+  v0.8.1 default in the page's fetch options).
+- `bucket: "fight"` field added to the hoisted
+  `fetchPlayerTimelineMock` type in the section test
+  so the section's forwarded fetch options are
+  type-checked.
+
+### Notes
+
+- The TZ assumption is documented inline: the
+  day-bucketed point's `started_at` is the day's
+  UTC midnight, NOT the analyst's local TZ midnight.
+  A future v0.9.0 `?tz=Europe/Paris` query param
+  will let the analyst pick a non-UTC TZ; the
+  service-layer `day_bucketed_points` already groups
+  by `started_at.date()` so the TZ switch is a
+  one-line `to_user_tz(started_at).date()` swap.
+- The fight_id of a day-bucketed point is the
+  most-recent fight_id of the day (the deterministic
+  tiebreaker). The chart keys on `fight_id` for the
+  React reconciler; the day-bucketed point's
+  `fight_id` is unique per day, so the chart's hover
+  tooltip surfaces a single fight's id. A future
+  enhancement could surface the day-bucketed point's
+  underlying N fights via a "Show fights in this day"
+  expansion.
+
+### Validation
+
+- `uv run ruff check libs apps`: clean (RUFF=0).
+- `uv run mypy libs apps --no-incremental`: clean
+  (MYPY=0).
+- `uv run pytest apps/api/tests/test_uploads_e2e.py -v`:
+  4 new tests pass (PYTEST_APPS=0).
+- `pnpm tsc --noEmit`: clean (TSC=0).
+- `pnpm test:unit`: clean (VITEST=0, all chart +
+  section tests pass).
+- Round 108-120 code-reviewer-minimax-m3: **APPROVED**
+  (the `started_at` fix is the canonical
+  `datetime.now(UTC)` unconditional; the day-bucketed
+  `fight_id` is the most-recent deterministic
+  tiebreaker; the X-axis auto-detect is zero-prop
+  (the chart infers from the data); the toggle is
+  local state not URL-driven so the URL stays
+  shareable; the TZ assumption is documented inline).
+
+[0.8.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.0...v0.8.1
+
 ## [0.8.0] - Phase 9 of web: account-level historical timelines
 
 ### Added (apps/api)
@@ -380,7 +710,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.7.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.0...v0.7.1
 
-[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.3...HEAD
 
 ## [0.7.0] - Phase 9: player-centric surface + per-fight squad + per-fight skill roll-ups
 
