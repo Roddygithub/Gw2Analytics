@@ -19,7 +19,7 @@ app = FastAPI(
         "WvW combat-log ingestion + analytics. Wires gw2_evtc_parser behind "
         "a MinIO blob store and Postgres fight tables (Phase 2)."
     ),
-    version="0.2.0",
+    version="0.3.0",
 )
 
 # CORS — wide-open by default for local dev (Next.js at :3000,

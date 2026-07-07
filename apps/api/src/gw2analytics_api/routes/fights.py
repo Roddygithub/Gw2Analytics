@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from gw2_analytics.event_window import EventWindowAggregator
 from gw2_analytics.target_dps import TargetDpsAggregator
-from gw2_core import DamageEvent, Event
+from gw2_analytics.target_healing import TargetHealingAggregator
+from gw2_core import DamageEvent, Event, HealingEvent
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight
 from gw2analytics_api.schemas import (
@@ -28,6 +29,7 @@ from gw2analytics_api.schemas import (
     FightOut,
     SkillOut,
     TargetDpsRowOut,
+    TargetHealingRowOut,
 )
 from gw2analytics_api.storage import get_events
 
@@ -109,6 +111,14 @@ def get_fight_events(
     here as a combined ``FightEventsSummaryOut`` so the frontend
     renders the timeline + per-target DPS without two extra round-trips.
 
+    Phase 7 v1 of the API (apps/api 0.3.0): the per-target healing
+    roll-up is added as a sibling field of ``target_dps``, completing
+    the v2 ``Event`` discriminated union consumption on the HTTP
+    surface. The route filters the heterogeneous JSONL stream
+    by ``isinstance`` at the call site and invokes
+    :class:`gw2_analytics.target_healing.TargetHealingAggregator`
+    on the same ``duration_s`` used for the damage roll-up.
+
     Response codes:
 
     - ``404 Not Found``: fight id is unknown OR the events blob is
@@ -178,6 +188,20 @@ def get_fight_events(
         [e for e in events if isinstance(e, DamageEvent)],
         duration_s,
     )
+    # ``TargetHealingAggregator`` is the strict parallel of
+    # ``TargetDpsAggregator`` (same schema shape with
+    # total_healing + hps, same ordering, same invariants). It
+    # consumes HealingEvent specifically (sum-of-row-healing ==
+    # sum-of-event-healing invariant). Filter at the call site so
+    # the aggregator signature stays narrow on ``HealingEvent``;
+    # damage-only fights correctly yield an empty target_healing
+    # list. Mixed damage + healing fights produce one row per
+    # target across both aggregators (independent roll-ups on the
+    # same ``duration_s``).
+    target_healing = TargetHealingAggregator().aggregate(
+        [e for e in events if isinstance(e, HealingEvent)],
+        duration_s,
+    )
     # ``EventWindowAggregator`` accepts ``Iterable[Event]`` directly and
     # discriminates by isinstance internally (damage_total += damage,
     # healing_total += healing), so the heterogeneous stream passes
@@ -188,6 +212,9 @@ def get_fight_events(
         fight_id=fight_id,
         duration_s=duration_s,
         target_dps=[TargetDpsRowOut.model_validate(r.model_dump()) for r in target_dps],
+        target_healing=[
+            TargetHealingRowOut.model_validate(r.model_dump()) for r in target_healing
+        ],
         event_windows=[EventBucketOut.model_validate(b.model_dump()) for b in event_windows],
     )
 

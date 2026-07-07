@@ -194,6 +194,12 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     # ``DamageEvent`` records and the blob URI is non-null. Timestamps
     # span 2 separate 1-second buckets so the small ``window_s=1``
     # roll-up shows 2 buckets instead of one combined mega-bucket.
+    # Two healing cbtevent records (Phase 7 v2: ``is_nondamage == 1``,
+    # ``value > 0``) flow the opposite direction (B healing A) so the
+    # per-target healing roll-up has a non-empty payload on a
+    # DIFFERENT target than the damage roll-up -- exercises the
+    # damage-only / heal-only / mixed-fight cases the route has to
+    # support independently.
     events = [
         _make_cbtevent(
             time_ms=1_500,
@@ -208,6 +214,22 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
             dst=base_id_b,
             value=567,
             skill_id=base_skill_b,
+        ),
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=800,
+            skill_id=base_skill_a,
+            is_nondamage=1,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=400,
+            skill_id=base_skill_b,
+            is_nondamage=1,
         ),
     ]
 
@@ -287,9 +309,24 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     # each carry exactly 1 event.
     assert len(summary["event_windows"]) == 3
     counts = [b["event_count"] for b in summary["event_windows"]]
-    assert counts == [0, 1, 1]
+    # 1 damage + 1 heal per non-empty bucket (heals land in the
+    # same second-bucket as the corresponding damage on purpose so
+    # the timeline cross-check is observable).
+    assert counts == [0, 2, 2]
     damages = [b["damage_total"] for b in summary["event_windows"]]
     assert damages == [0, 1_234, 567]
+    healings = [b["healing_total"] for b in summary["event_windows"]]
+    assert healings == [0, 800, 400]
+    # Phase 7 v1 of the API: per-target healing roll-up. Strict
+    # parallel of ``target_dps`` -- damage flowed A->B, healing
+    # flowed B->A, so the two roll-ups land on DIFFERENT targets,
+    # exercising the damage-only / heal-only / mixed-fight cases
+    # the route supports independently.
+    assert len(summary["target_healing"]) == 1
+    heal_row = summary["target_healing"][0]
+    assert heal_row["target_agent_id"] == base_id_a
+    assert heal_row["total_healing"] == 800 + 400
+    assert heal_row["hps"] == pytest.approx((800 + 400) / 2.5)
 
 
 def test_fight_events_404_when_unknown_fight() -> None:

@@ -231,6 +231,78 @@ route already handles the union via
 [0.5.0-parser]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...v0.5.0-parser
 
 [Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.4.0-parser...HEAD
+## [0.3.0-api] - Phase 7 v1 of apps/api: per-target healing roll-up
+
+### Added (apps/api)
+
+- `apps/api/src/gw2analytics_api/schemas.py`: new
+  `TargetHealingRowOut` response schema (strict parallel of
+  `TargetDpsRowOut` -- drops `heal_count` from the API surface
+  for analyst-only parity) and a new
+  `target_healing: list[TargetHealingRowOut] = []` sibling field
+  on `FightEventsSummaryOut` (between `target_dps` and
+  `event_windows`). Empty when the parser yielded zero healing
+  events; mixed damage + healing fights produce independent
+  roll-ups on the same `duration_s`.
+- `apps/api/src/gw2analytics_api/routes/fights.py`: the
+  heterogeneous JSONL stream is now split at the call site --
+  `TargetDpsAggregator` receives
+  `[e for e in events if isinstance(e, DamageEvent)]` and
+  `TargetHealingAggregator` receives
+  `[e for e in events if isinstance(e, HealingEvent)]`; both
+  are invoked on the same `duration_s` so the two roll-ups are
+  temporally consistent. The route's per-aggregator call site
+  stays free of cross-kind discrimination in the hot loop. The
+  handler docstring is extended to document the new field and
+  the call-site isinstance filter pattern.
+- `apps/api/tests/test_uploads_e2e.py::test_uploads_e2e_happy_path`:
+  now packs 2 healing cbtevent records (Phase 7 v2
+  `is_nondamage=1` + `value>0` filter) alongside the 2 existing
+  damage records. Damage flows A->B; healing flows B->A so the
+  two roll-ups land on DIFFERENT targets, exercising the
+  damage-only / heal-only / mixed-fight cases. The response
+  assertions cover the new `target_healing` field + the
+  per-bucket `healing_total` accounting + the doubled
+  `event_count` per non-empty bucket.
+
+### Changed
+
+- `apps/api/src/gw2analytics_api/__init__.py`: `__version__`
+  bumped `"0.2.0" -> "0.3.0"`.
+- `apps/api/src/gw2analytics_api/main.py`: FastAPI `version`
+  string bumped `"0.2.0" -> "0.3.0"`.
+- `apps/api/pyproject.toml`: version bumped
+  `"0.2.0" -> "0.3.0"`.
+
+### Notes
+
+- The v2 `Event` discriminated union (`DamageEvent | HealingEvent`)
+  is now consumed end-to-end on the HTTP surface -- a single
+  `GET /api/v1/fights/{fight_id}/events` round-trip returns a
+  per-target damage roll-up AND a per-target healing roll-up.
+  `EventWindowAggregator` was already a damage+healing dual
+  consumer (Phase 6 v1); the per-target view completes the
+  coverage.
+- Forward-compat: any new `Event` subclass added in the future
+  (e.g. a Phase 8 `BuffRemovalEvent`) requires a matching
+  per-target aggregator + a new sibling field on
+  `FightEventsSummaryOut`; the discriminated-union dispatch +
+  per-aggregator call-site filter pattern extends cleanly
+  without breaking the existing contract.
+
+### Validation
+
+- ruff + ruff format + mypy clean across `libs` + `apps`
+  (`uv run`).
+- pytest `libs`: 46 passed (40 existing + 6 new heal-roll-up).
+- pytest `apps/api`: 4 tests in `test_uploads_e2e.py` (1 happy
+  path + 3 edge cases) + 1 test in `test_healthz.py` -- the
+  e2e Postgres-dependent test is conditionally run when
+  `DATABASE_URL` is reachable.
+- Code-reviewer: APPROVED.
+
+[0.3.0-api]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.2.0-api...v0.3.0-api
+
 ## [0.3.0] - web upload UI + event aggregations
 
 ### Added

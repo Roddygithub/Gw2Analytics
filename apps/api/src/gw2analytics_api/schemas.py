@@ -100,11 +100,34 @@ class TargetDpsRowOut(BaseModel):
     dps: float
 
 
+class TargetHealingRowOut(BaseModel):
+    """One healing roll-up row in :class:`FightEventsSummaryOut`.
+
+    Mirrors :class:`gw2_analytics.target_healing.TargetHealingRow`
+    with the ``heal_count`` field dropped from the API surface
+    (analyst-only signal; UI shows ``total_healing`` + ``hps`` only).
+    Strict parallel of :class:`TargetDpsRowOut` so the pair reads as
+    one design.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    target_agent_id: int
+    total_healing: int
+    hps: float
+
+
 class FightEventsSummaryOut(BaseModel):
     """Combined aggregation payload returned by ``GET /api/v1/fights/{fight_id}/events``.
 
     Phase 7 v1 ships a single bound response so the frontend can render
     the timeline + per-target DPS without two extra round-trips.
+    Phase 7 v1 of the API adds the per-target healing roll-up as a
+    sibling field, completing the v2 Event union consumption on the
+    HTTP surface (the v2 ``Event`` discriminated union
+    ``DamageEvent | HealingEvent`` is now materialised as both a
+    per-target DPS roll-up AND a per-target healing roll-up in a
+    single round-trip).
 
     Contract:
 
@@ -116,7 +139,17 @@ class FightEventsSummaryOut(BaseModel):
       ``/`` ``value > 0`` filter); the route returns ``404 Not Found``
       when the events blob is missing entirely (pre-Phase-7 row OR the
       blob upload failed).
-    - ``event_windows`` is empty when there are no events.
+    - ``target_healing`` is the strict parallel of ``target_dps``
+      (filtered by ``isinstance(e, HealingEvent)`` and rolled up via
+      :class:`gw2_analytics.target_healing.TargetHealingAggregator`).
+      Empty when the parser yielded zero healing events; the
+      damage-only / heal-only / mixed-fight cases all surface
+      correctly because the route filters at the call site rather
+      than branching inside the aggregator.
+    - ``event_windows`` is empty when there are no events. The
+      ``EventWindowAggregator`` accepts the full ``Iterable[Event]``
+      and accounts damage + healing in one bucket
+      (``damage_total`` + ``healing_total`` + ``event_count``).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -124,6 +157,7 @@ class FightEventsSummaryOut(BaseModel):
     fight_id: str
     duration_s: float
     target_dps: list[TargetDpsRowOut] = []
+    target_healing: list[TargetHealingRowOut] = []
     event_windows: list[EventBucketOut] = []  # forwarded Pydantic alias
 
 
