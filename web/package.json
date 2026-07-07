@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "generate:api": "uv run python scripts/dump_openapi.py > openapi.json && pnpm exec openapi-typescript openapi.json -o ./src/lib/api/schema.d.ts && rm openapi.json"
   },
   "dependencies": {
     "next": "16.2.10",
