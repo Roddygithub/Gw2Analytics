@@ -12,25 +12,35 @@ from __future__ import annotations
 from gw2_core.models import (
     AccountInfo,
     Agent,
+    BaseEvent,
+    DamageEvent,
     EliteSpec,
+    Event,
+    EventType,
     EvtcHeader,
     Fight,
     GameType,
+    HealingEvent,
     Population,
     Profession,
     Skill,
     WorldInfo,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "AccountInfo",
     "Agent",
+    "BaseEvent",
+    "DamageEvent",
     "EliteSpec",
+    "Event",
+    "EventType",
     "EvtcHeader",
     "Fight",
     "GameType",
+    "HealingEvent",
     "Population",
     "Profession",
     "Skill",

@@ -182,10 +182,39 @@ We use **semver with a scope suffix**:
 
 - ``v0.X.Y-parser``            -- Phase 1 deliverables (parser only)
 - ``v0.X.Y-analytics-prototype`` -- Phase 3 prototype builds
-- ``vX.Y.Z``                    -- full-stack releases (CI green + deployable)
+- ``vX.Y.Z-web``               -- web/ component releases (frontend
+  only, e.g. ``v0.3.0-web`` shipped the upload UI in isolation)
+- ``vX.Y.Z``                   -- full-stack releases (CI green +
+  deployable). The ``apps/api`` + ``libs/*`` backend renders here.
 
 Tags are created locally with ``git tag -a`` and pushed with
-``git push origin <tag>``.
+``git push origin <tag>``. Release notes are then published via
+``gh release create <tag> --notes-file <path> --target main``.### Known cosmetic noise
+
+``pnpm install`` may emit ``[ERR_PNPM_IGNORED_BUILDS]`` warnings
+for ``sharp`` and ``esbuild`` even though we now set
+``dangerouslyAllowAllBuilds=true`` in ``web/.npmrc``. pnpm's
+success-with-warning contract keeps the install exit code at
+``0`` (vitest + Next.js optimize work fine via the JS-only
+fallback for esbuild, and ``sharp`` has a prebuilt-binary
+download path that does not require a postinstall script).
+
+- **Local first install:** run ``pnpm approve-builds --all``
+  once if you want per-dep approval; pnpm writes the entry to
+  the user-level ``~/.npmrc``. Not required.
+- **CI:** the ``.github/workflows/ci.yml::lint-and-test`` step
+  uses ``pnpm install --frozen-lockfile`` directly; the
+  ``dangerouslyAllowAllBuilds`` flag in ``web/.npmrc``
+  guarantees the install gate returns ``0`` on a fresh
+  container (no user-level cache). If a future pnpm version
+  starts returning non-zero again, add ``--ignore-scripts`` to
+  the install invocation -- verify ``next build`` image
+  optimisation still picks up ``sharp``'s prebuilt binary
+  before flipping.
+- The ``verify-deps-before-run: false`` flag in
+  ``web/pnpm-workspace.yaml`` only affects ``pnpm run`` /
+  ``pnpm dev``; it does **not** suppress the install-time
+  verification gate.
 
 ## Code style
 

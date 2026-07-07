@@ -3,6 +3,25 @@ import { vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 /**
+ * ``@/components/FightsGrid`` is the AG Grid client wrapper. The
+ * page-level Server Component tests transitively import it, but
+ * booting AG Grid's full runtime in jsdom would require a real
+ * DOM + canvas + the AllCommunityModule side-effects chain --
+ * well out of scope for the page-render unit tests. Mocking the
+ * whole component here lets the page tests render the wrapper
+ * without dragging :file:`node_modules/ag-grid-react` into the
+ * vitest resolver. AG Grid itself is still installed (real dev
+ * server, real build) -- only the test runtime substitutes it.
+ *
+ * NOTE: ``FightsGrid`` is a NAMED export (``export function
+ * FightsGrid(...)``), not a default export, so the mock shape
+ * must mirror that -- not ``{ default: () => null }``.
+ */
+vi.mock("@/components/FightsGrid", () => ({
+  FightsGrid: () => null,
+}));
+
+/**
  * next/link is replaced with a plain anchor so jsdom can resolve
  * the href without booting the Next.js runtime. The original
  * ``Link`` accepts ``className`` + child React tree; the shim

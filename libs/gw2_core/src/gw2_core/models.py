@@ -4,12 +4,16 @@ This module is the **stable internal data model** of the application.
 Nothing else may import from another domain to define a model. Other
 packages may only consume or produce these shapes.
 
-Two model families live here:
+Three model families live here:
 
 1. **Combat-data models** (`Agent`, `Skill`, `Fight`, etc.) -- the
    parser / analytics layer's vocabulary.
-
-2. **API-data models** (`AccountInfo`, `WorldInfo`, `Population`)
+2. **Event-stream models** (`BaseEvent` + `DamageEvent` /
+   `HealingEvent` + `EventType` discriminator) -- the synthetic event
+   data types forwarded by :mod:`gw2_analytics` Phase 6 v1. Forward
+   compat: a future Phase 6 v2 will swap the synthetic
+   ``Iterable[Event]`` input for a parser-sourced stream.
+3. **API-data models** (`AccountInfo`, `WorldInfo`, `Population`)
    -- the cross-cutting shapes needed for downstream enrichment (the
    v2 REST API's ``account`` and ``worlds`` endpoints). The
    ``gw2_api_client`` library OO-wraps the HTTP calls but delegates
@@ -21,6 +25,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -119,7 +124,7 @@ class Population(StrEnum):
 
 
 # ---------------------------------------------------------------------------
-# Models
+# Combat-data models (parser / analytics layer vocabulary)
 # ---------------------------------------------------------------------------
 
 
@@ -215,6 +220,75 @@ class Fight(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Event-stream models (Phase 6 v1 synthetic event types).
+#
+# arcdps EVTC has 30+ statechange kinds (damage, healing, buff, defiance,
+# etc.) but the V1.3 parser only consumes the agent + skill blocks.
+# Phase 6 v1 ships synthetic event data types so the analytics layer can
+# validate rollup logic against deterministic fixtures; Phase 6 v2 will
+# swap the synthetic ``Iterable[Event]`` inputs for a parser-sourced
+# stream once the EVTC event block is consumed.
+# ---------------------------------------------------------------------------
+
+
+class EventType(StrEnum):
+    """Discriminator for synthetic event kinds shipped in Phase 6 v1.
+
+    Forward-compat: new ``EventType`` entries can be added alongside
+    ``DAMAGE`` / ``HEALING``; aggregators gate on ``isinstance`` against
+    the matching subclass, so unrecognized types fall through to
+    ``event_count`` without breaking ``damage_total`` / ``healing_total``
+    accounting.
+    """
+
+    DAMAGE = "DAMAGE"
+    HEALING = "HEALING"
+
+
+class BaseEvent(BaseModel):
+    """Common timestamp + actor + skill fields shared by every event kind.
+
+    Subclasses carry the per-kind payload (``damage``, ``healing``, ...).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    time_ms: int = Field(..., ge=0, description="Milliseconds since fight start.")
+    source_agent_id: int = Field(..., ge=0, description="Actor agent id.")
+    target_agent_id: int = Field(..., ge=0, description="Target agent id.")
+    skill_id: int = Field(..., ge=0, description="Skill/buff id (FK to fight.skills).")
+
+
+class DamageEvent(BaseEvent):
+    """One outgoing-damage event. ``damage`` is the per-hit integer value."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.DAMAGE] = EventType.DAMAGE
+    damage: int = Field(..., ge=0)
+
+
+class HealingEvent(BaseEvent):
+    """One outgoing-healing event. ``healing`` is the per-hit integer value."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.HEALING] = EventType.HEALING
+    healing: int = Field(..., ge=0)
+
+
+# Discriminated union for forward-compat downstream consumers that
+# accept "any event" (e.g. the EventWindowAggregator buckets damage +
+# healing in one shot without forcing the caller to split the stream).
+# Pydantic does not auto-discriminate the bare ``X | Y`` alias at
+# ``model_validate`` time -- callers must construct ``DamageEvent`` /
+# ``HealingEvent`` directly, OR future Phase 6 v2 should annotate
+# with ``Annotated[DamageEvent | HealingEvent, Field(discriminator='event_type')]``
+# at any validation boundary that round-trips events from JSON.
+Event = DamageEvent | HealingEvent
+
+
+# ---------------------------------------------------------------------------
 # API-data models (gw2 v2 REST API surface -- consumed by gw2_api_client
 # + gw2_analytics for cross-fight enrichment via the v2 worlds index)
 # ---------------------------------------------------------------------------
@@ -262,10 +336,15 @@ class WorldInfo(BaseModel):
 __all__ = [
     "AccountInfo",
     "Agent",
+    "BaseEvent",
+    "DamageEvent",
     "EliteSpec",
+    "Event",
+    "EventType",
     "EvtcHeader",
     "Fight",
     "GameType",
+    "HealingEvent",
     "Population",
     "Profession",
     "Skill",

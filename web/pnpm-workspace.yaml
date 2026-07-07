@@ -2,5 +2,7 @@ allowBuilds:
   esbuild: set this to true or false
   sharp: set this to true or false
 # web/ single-package pnpm workspace. Postinstall allowlist lives in
-# web/.npmrc (pnpm 11 deprecated that field in package.json).
+# web/.npmrc (pnpm 11 deprecated `pnpm.onlyBuiltDependencies` in
+# package.json -- the authoritative home for `onlyBuiltDependencies`
+# in pnpm 11 is the project .npmrc).
 verify-deps-before-run: false

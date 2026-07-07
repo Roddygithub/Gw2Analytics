@@ -33,5 +33,10 @@ export default defineConfig({
     css: false,
     include: ["tests/**/*.test.{ts,tsx}"],
     clearMocks: true,
+    // ``globals: true`` makes ``describe`` / ``it`` / ``expect`` /
+    // ``beforeEach`` / ``afterEach`` available without per-test
+    // imports. The page / layout tests rely on these (the
+    // jsdom-simulated React tree mounts via ``describe`` blocks).
+    globals: true,
   },
 });

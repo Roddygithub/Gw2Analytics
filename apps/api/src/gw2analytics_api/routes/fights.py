@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight
-from gw2analytics_api.schemas import AgentOut, FightOut, SkillOut
+from gw2analytics_api.schemas import AgentOut, EventBucketOut, FightOut, SkillOut
 
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
 
@@ -48,6 +48,31 @@ def get_fight(
     if fight is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
     return _to_fight_out(fight)
+
+
+@router.get(
+    "/{fight_id}/events",
+    response_model=list[EventBucketOut],
+)
+def get_fight_events(
+    fight_id: str,
+    db: Session = Depends(get_session),  # noqa: B008
+) -> list[EventBucketOut]:
+    """Return the parsed event stream for one fight.
+
+    Phase 6 v1 stub: the gw2_evtc_parser does not yet consume the
+    V1.3 event block, so this endpoint returns an empty list. The
+    404 contract and ``response_model`` (``list[EventBucketOut]``)
+    are live so the route shape is stable for Phase 6 v2 (parser
+    integration) -- the moment the parser surfaces events, this
+    handler simply replaces ``[]`` with ``process_parse(db, fight_id)``
+    returning ``list[EventBucket]`` (Pydantic's ``from_attributes``
+    mode picks the typed ::class:`EventBucketOut` shape).
+    """
+    fight = db.get(OrmFight, fight_id)
+    if fight is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
+    return []  # Phase 6 v1: parser integration pending.
 
 
 def _to_fight_out(fight: OrmFight) -> FightOut:

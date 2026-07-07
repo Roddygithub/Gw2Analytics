@@ -67,6 +67,24 @@ class UploadCreatedResponse(BaseModel):
     status: str
 
 
+class EventBucketOut(BaseModel):
+    """Response schema for ``GET /api/v1/fights/{fight_id}/events``.
+
+    Mirrors :class:`gw2_analytics.event_window.EventBucket` so the
+    OpenAPI shape is locked before the parser-side integration in
+    Phase 6 v2. Phase 6 v1 returns an empty list — this schema is
+    future-proofed for the moment parsing of events arrives.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    start_ms: int
+    end_ms: int
+    damage_total: int = 0
+    healing_total: int = 0
+    event_count: int = 0
+
+
 class AccountEnrichedOut(BaseModel):
     """GET /api/v1/account response.
 

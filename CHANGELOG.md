@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - web upload UI + event aggregations
+
 ### Added
 
 - `CHANGELOG.md`: this file. Captures the V1.4 stability cycle and the
@@ -256,17 +258,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `working-directory: web`. The vitest runner is now part of
   the PR merge gate.
 
-### Known noise
-
-- `pnpm install` continues to emit `[ERR_PNPM_IGNORED_BUILDS]`
-  on sharp and esbuild even though they are explicitly listed
-  in `web/.npmrc`. This is a pnpm 11.10 + esbuild/sharp peer
-  quirk: `esbuild`'s install exit code is 0 (falls back to
-  JS-only mode) and `sharp`'s native binary IS downloaded, so
-  vitest + Next.js optimize work correctly. The warning is
-  treated as cosmetic noise; future pnpm bumps may resolve
-  it silently.
-
 ### Added (Phase 5 followup -- web upload UI)
 
 - `web/src/app/upload/page.tsx` (NEW): Client Component that
@@ -310,6 +301,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `web/tests/setup.ts`: no change required; the existing
   global mock shim for `next/link` already covers the
   anchors in the upload page.
+
+### Added (Phase 6 -- event-driven aggregations)
+
+- `libs/gw2_core/src/gw2_core/models.py`: new event-stream
+  data types. `EventType` (`StrEnum`: DAMAGE, HEALING) +
+  `BaseEvent` (`time_ms` + `source_agent_id` +
+  `target_agent_id` + `skill_id`, all ``frozen=True`` +
+  ``extra="forbid"``) + two leaf subclasses
+  (`DamageEvent.damage: int >= 0`,
+  `HealingEvent.healing: int >= 0`). Discriminated via
+  ``event_type: Literal[EventType.X]`` + an `Event` type alias
+  (``Union[DamageEvent, HealingEvent]``) for forward-compat
+  consumers that accept "any event". Phase 6 v1 is synthetic
+  (no parser integration yet) -- Phase 6 v2 will swap the
+  synthetic `Iterable[Event]` input for a parser-sourced stream
+  once the V1.3 event block is consumed.
+- `libs/gw2_core/src/gw2_core/__init__.py`: re-exports the new
+  event types. Version bumped ``0.2.0 -> 0.3.0``.
+- `libs/gw2_core/pyproject.toml`: version bumped
+  ``0.2.0 -> 0.3.0``.
+- `libs/gw2_analytics/src/gw2_analytics/target_dps.py` (NEW):
+  `TargetDpsAggregator.aggregate(events: Iterable[DamageEvent],
+  duration_s: float) -> list[TargetDpsRow]`. Rows sorted
+  deterministic by ``(-total_damage, target_agent_id)``.
+  Cross-field invariants: sum of ``row.total_damage`` == sum
+  of ``event.damage`` (no event dropped, no double-count);
+  rows monotonically non-increasing by ``total_damage``
+  with ascending agent id on tie; each row has
+  ``attack_count >= 1``. Negative ``duration_s`` raises
+  ``ValueError``; zero ``duration_s`` collapses to
+  ``dps=0.0`` (sentinel -- dimensionless DPS is meaningless
+  and the caller's fight-duration is the canonical input).
+  Stateless (instantiate once, reuse).
+- `libs/gw2_analytics/src/gw2_analytics/event_window.py` (NEW):
+  `EventWindowAggregator.aggregate(events: Iterable[Event],
+  window_s: int) -> list[EventBucket]`. Windows are half-open
+  ``[start_ms, end_ms)`` so consecutive buckets tile the
+  timeline without overlap and gaps are zero-filled so the
+  visualisation has no holes. ``window_s < 1`` raises
+  ``ValueError``. Damage vs healing is dispatched via
+  ``isinstance`` against the ``Event`` union; future event
+  types accumulate in ``event_count`` but not in
+  ``damage_total`` / ``healing_total`` (forward-compat).
+- `libs/gw2_analytics/src/gw2_analytics/__init__.py`:
+  re-exports `EventBucket`, `EventWindowAggregator`,
+  `TargetDpsAggregator`, `TargetDpsRow`. Version bumped
+  ``0.2.0 -> 0.3.0``.
+- `libs/gw2_analytics/pyproject.toml`: version bumped
+  ``0.2.0 -> 0.3.0``.
+- `libs/gw2_analytics/tests/test_target_dps.py` (NEW): 6
+  pytest cases covering empty input, single-row shape,
+  zero/negative duration edge case, deterministic ordering
+  (desc + tie-breaker), cross-field sum preservation, frozen
+  Pydantic schema guarantee.
+- `libs/gw2_analytics/tests/test_event_window.py` (NEW): 6
+  pytest cases covering empty input, invalid window guard,
+  single-event bucket shape, gap zero-fill, contiguous
+  adjacency invariant, frozen-Pydantic guarantee.
+- `apps/api/src/gw2analytics_api/routes/fights.py`: new
+  `GET /api/v1/fights/{fight_id}/events` route. Phase 6 v1
+  STUB: returns ``[]`` after the 404 check (response_model is
+  live as ``list[dict[str, object]]`` so the route shape is
+  stable for Phase 6 v2). Phase 6 v2 will replace the empty
+  list with the parser-sourced event stream.
+
+### Notes
+
+- Phase 6 deliberately does NOT modify `gw2_evtc_parser`. The
+  parser doesn't surface events yet -- Phase 6 v1 ships the
+  analytics-surface for synthetic events so the contract is
+  locked, then Phase 6 v2 retrofits the parser.
+- Forward-compat hooks: `EventType` (StrEnum) admits new
+  kinds without API breakage; aggregators gate on
+  ``isinstance`` against the matching subclass so unknown
+  kinds fall through to ``event_count`` (no silent skipping
+  of damage / healing accounting).
 
 ### Added
 
@@ -446,7 +513,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end-to-end real-fixture integration test against
   `/tmp/inner_20251002-213519` (skipped if the fixture is absent).
 
-[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/a67e672...HEAD
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.3.0-web...v0.3.0
 ## [0.1.0] - Phase 3 analytics prototype
 
 ### Added
