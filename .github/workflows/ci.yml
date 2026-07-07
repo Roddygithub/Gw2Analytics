@@ -128,7 +128,7 @@ jobs:
       # :class:`Settings` enforces without defaults.
       # ----------------------------------------------------------------
 
-      - name: OpenAPI: dump FastAPI spec (no port, no race)
+      - name: "OpenAPI: dump FastAPI spec (no port, no race)"
         run: uv run python web/scripts/dump_openapi.py > /tmp/openapi.json
         env:
           DATABASE_URL: "postgresql+psycopg://ci@localhost/ci"
@@ -137,7 +137,7 @@ jobs:
           S3_SECRET_KEY: "ci"
           S3_BUCKET: "ci"
 
-      - name: OpenAPI: regenerate web TypeScript client
+      - name: "OpenAPI: regenerate web TypeScript client"
         working-directory: web
         run: pnpm exec openapi-typescript /tmp/openapi.json -o src/lib/api/schema.d.ts
 
@@ -158,8 +158,58 @@ jobs:
         working-directory: web
         run: pnpm exec vitest run --reporter=verbose
 
+      # ----------------------------------------------------------------
+      # Playwright E2E (v0.7.2 web layer)
+      # ----------------------------------------------------------------
+      # The ``playwright.config.ts`` 2 ``webServer`` blocks (mock
+      # HTTP on 8080 + Next.js on 3000) handle the orchestration;
+      # ``isCI`` flips the Next.js command from ``pnpm dev`` to
+      # ``next build && next start`` for determinism. The
+      # ``--with-deps`` flag installs the system packages the
+      # chromium build needs (``libnss3``, ``libatk1.0``, etc.)
+      # on the bare ``ubuntu-latest`` runner.
+      # ----------------------------------------------------------------
+      - name: Install Playwright chromium
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+
+      # ``playwright.config.ts`` flips the Next.js command to
+      # ``pnpm run build && pnpm run start -- -p 3000`` when
+      # ``isCI`` is truthy, so the ``webServer`` block handles
+      # the production build + serve cycle on its own. No
+      # explicit ``next build`` step is needed here.
+      - name: Playwright E2E tests
+        working-directory: web
+        run: pnpm exec playwright test
+
+      # Upload the Playwright HTML report on failure so the
+      # post-mortem is in the GitHub Actions artifacts tab.
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7
+
+      # Upload the per-test trace + screenshot artifacts on
+      # failure (``playwright.config.ts`` sets
+      # ``trace: "retain-on-failure"`` so the ``test-results/``
+      # directory is populated only when a test fails). The
+      # HTML report and the trace bundles are complementary:
+      # the report gives a high-level summary, the traces
+      # let the post-mortem replay a failing test step-by-step
+      # via ``npx playwright show-trace``.
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: web/test-results/
+          retention-days: 7
+
       # The /tmp/openapi.json file is ephemeral -- clean it up so a
       # later job in the same runner environment doesn't pick it up.
-      - name: OpenAPI: cleanup /tmp/openapi.json
+      - name: "OpenAPI: cleanup /tmp/openapi.json"
         if: always()
         run: rm -f /tmp/openapi.json

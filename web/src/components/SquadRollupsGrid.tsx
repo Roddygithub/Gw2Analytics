@@ -103,7 +103,8 @@ export function SquadRollupsGrid<TRow extends { subgroup: string }>({
   const defaultColDef = useMemo<ColDef>(
     () => ({
       resizable: true,
-      suppressMenu: true,
+      // ``suppressMenu`` was removed in AG Grid 34.x; see
+      // PlayersGrid for the rationale.
     }),
     [],
   );

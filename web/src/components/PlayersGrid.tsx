@@ -135,7 +135,14 @@ export function PlayersGrid({
       resizable: true,
       sortable: true,
       filter: true,
-      suppressMenu: true,
+      // ``suppressMenu`` was removed in AG Grid 34.x (the
+      // legacy column menu was dropped; the modern header
+      // doesn't render a menu button by default). The
+      // property used to hide the kebab menu in the legacy
+      // header; today it's a no-op (and a console warning)
+      // so we omit it. If a future AG Grid release adds a
+      // new "show menu" affordance, the right replacement
+      // is ``suppressHeaderMenuButton: true``.
     }),
     [],
   );

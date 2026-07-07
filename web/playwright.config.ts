@@ -44,7 +44,14 @@ export default defineConfig({
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
   workers: isCI ? 2 : undefined,
-  reporter: isCI ? "list" : "list",
+  // Use the HTML reporter in CI so the post-mortem is
+  // available as a downloadable artifact (see
+  // ``Upload Playwright report on failure`` in
+  // ``.github/workflows/ci.yml``). The local loop keeps the
+  // ``list`` reporter for fast iteration. The HTML report is
+  // written to ``playwright-report/`` (relative to the
+  // playwright project root, i.e. ``web/``) by default.
+  reporter: isCI ? "html" : "list",
   use: {
     baseURL: "http://localhost:3000",
     trace: "retain-on-failure",

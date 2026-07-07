@@ -136,7 +136,8 @@ export function TargetRollupsGrid<TRow extends { target_agent_id: number }>({
   const defaultColDef = useMemo<ColDef>(
     () => ({
       resizable: true,
-      suppressMenu: true,
+      // ``suppressMenu`` was removed in AG Grid 34.x; see
+      // PlayersGrid for the rationale.
     }),
     [],
   );
