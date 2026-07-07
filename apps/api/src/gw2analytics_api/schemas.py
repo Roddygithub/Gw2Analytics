@@ -92,6 +92,14 @@ class TargetDpsRowOut(BaseModel):
     Mirrors :class:`gw2_analytics.target_dps.TargetDpsRow` with the
     ``attack_count`` field dropped from the API surface (analyst-only
     signal; UI shows ``total_damage`` + ``dps`` only).
+
+    v0.8.3 of the API: the optional ``name`` field surfaces the
+    player-name denormalisation passed to the aggregator's
+    ``name_map`` parameter. ``None`` (serialised as ``null``) when
+    the agent id has no registered char-name (an NPC) or when the
+    route did not pass a ``name_map``; the frontend falls back to
+    the raw ``target_agent_id`` in that case. The field is additive
+    -- existing wire consumers ignore it.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -99,6 +107,7 @@ class TargetDpsRowOut(BaseModel):
     target_agent_id: int
     total_damage: int
     dps: float
+    name: str | None = None
 
 
 class TargetHealingRowOut(BaseModel):
@@ -109,6 +118,9 @@ class TargetHealingRowOut(BaseModel):
     (analyst-only signal; UI shows ``total_healing`` + ``hps`` only).
     Strict parallel of :class:`TargetDpsRowOut` so the pair reads as
     one design.
+
+    v0.8.3 of the API: optional ``name`` field, strict parallel of
+    :attr:`TargetDpsRowOut.name`. See that field for the contract.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -116,6 +128,7 @@ class TargetHealingRowOut(BaseModel):
     target_agent_id: int
     total_healing: int
     hps: float
+    name: str | None = None
 
 
 class TargetBuffRemovalRowOut(BaseModel):
@@ -128,6 +141,9 @@ class TargetBuffRemovalRowOut(BaseModel):
     only). Strict parallel of :class:`TargetDpsRowOut` /
     :class:`TargetHealingRowOut` so the trio reads as one design.
     Phase 8 ships this third roll-up.
+
+    v0.8.3 of the API: optional ``name`` field, strict parallel of
+    :attr:`TargetDpsRowOut.name`. See that field for the contract.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -135,6 +151,7 @@ class TargetBuffRemovalRowOut(BaseModel):
     target_agent_id: int
     total_buff_removal: int
     bps: float
+    name: str | None = None
 
 
 class FightEventsSummaryOut(BaseModel):

@@ -73,6 +73,14 @@ class TargetDpsRow(BaseModel):
     total_damage: int = Field(..., ge=0)
     attack_count: int = Field(..., ge=1)
     dps: float = Field(..., ge=0.0)
+    # Optional player-name denormalisation (v0.8.3). ``None`` when the
+    # aggregator was called without a ``name_map`` (the canonical
+    # backward-compat case -- existing tests / callers don't care
+    # about target resolution) OR when the agent id has no name in
+    # the map (an NPC without a registered arcdps char-name -- the
+    # route surfaces it as ``null`` on the wire). The schema is
+    # additive: existing wire consumers ignore the new field.
+    name: str | None = None
 
 
 class TargetDpsAggregator:
@@ -85,12 +93,22 @@ class TargetDpsAggregator:
         self,
         events: Iterable[DamageEvent],
         duration_s: float,
+        name_map: dict[int, str | None] | None = None,
     ) -> list[TargetDpsRow]:
         """Compute the roll-up from a stream of damage events.
 
         ``duration_s`` is the fight duration (the time-bucket the DPS
         rate is measured against). Passed by the caller so the
         aggregator stays free of cross-source metadata.
+
+        ``name_map`` is an OPTIONAL ``{agent_id: name}`` lookup for
+        player-name denormalisation (v0.8.3). ``None`` (the default)
+        leaves every row's ``name`` field as ``None`` -- the
+        canonical backward-compat case. An empty dict has the same
+        effect (no names resolved). Agents not present in the map
+        resolve to ``None`` (NPCs without a registered arcdps
+        char-name); the route surfaces this as ``null`` on the wire
+        and the frontend falls back to the raw ``target_agent_id``.
         """
         if duration_s < 0:
             msg = f"duration_s must be >= 0, got {duration_s!r}"
@@ -105,12 +123,17 @@ class TargetDpsAggregator:
             grand_total += e.damage
 
         dps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_DPS
+        # ``name_map.get(target)`` returns ``None`` for missing keys
+        # AND for explicit ``None`` values -- both cases surface as
+        # ``name=None`` on the row, which is the intended
+        # "unresolved" sentinel. No need to distinguish.
         rows = [
             TargetDpsRow(
                 target_agent_id=target,
                 total_damage=total_by_target[target],
                 attack_count=count_by_target[target],
                 dps=total_by_target[target] * dps_factor,
+                name=(name_map or {}).get(target),
             )
             for target in total_by_target
         ]

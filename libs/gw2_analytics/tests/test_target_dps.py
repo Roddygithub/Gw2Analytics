@@ -111,3 +111,48 @@ class TestTargetDpsAggregator:
         # line syntactically but the runtime guard fires anyway.
         with pytest.raises(ValidationError):
             row.target_agent_id = 999  # type: ignore[misc]
+
+    def test_name_default_is_none_when_no_map(self) -> None:
+        """v0.8.3: when ``name_map`` is not passed (the canonical
+        backward-compat case), every row's ``name`` field is ``None`` --
+        the aggregator never invents a name out of thin air.
+        """
+        rows = TargetDpsAggregator().aggregate(
+            [_damage(target=7, damage=100)],
+            duration_s=10.0,
+        )
+        assert rows[0].name is None
+
+    def test_name_map_resolves_to_player_name(self) -> None:
+        """v0.8.3: when ``name_map`` is passed, every row's ``name``
+        field carries the resolved player name (or ``None`` for
+        unresolved ids -- NPCs / missing keys). The map is
+        denormalised onto each row so the wire consumer doesn't
+        need a second lookup.
+        """
+        rows = TargetDpsAggregator().aggregate(
+            [
+                _damage(target=7, damage=200),
+                _damage(target=9, damage=100),
+            ],
+            duration_s=10.0,
+            name_map={7: "HealBrand", 9: None},  # 9 is an NPC (explicit None)
+        )
+        by_target = {r.target_agent_id: r for r in rows}
+        assert by_target[7].name == "HealBrand"
+        assert by_target[9].name is None  # explicit None -> unresolved sentinel
+
+    def test_name_map_missing_key_yields_none(self) -> None:
+        """v0.8.3: an agent id not present in the map surfaces as
+        ``name=None`` (same as explicit ``None`` -- the
+        ``dict.get`` semantic collapses the two cases). The wire
+        consumer cannot distinguish "NPC" from "missing key" but
+        the analyst-facing fallback is the same: bare
+        ``target_agent_id``.
+        """
+        rows = TargetDpsAggregator().aggregate(
+            [_damage(target=42, damage=100)],
+            duration_s=10.0,
+            name_map={7: "HealBrand"},  # 42 not in the map
+        )
+        assert rows[0].name is None

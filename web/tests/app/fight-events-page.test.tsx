@@ -94,16 +94,19 @@ const POPULATED_PAYLOAD = {
   fight_id: FIGHT_ID,
   duration_s: 12.5,
   target_dps: [
-    { target_agent_id: 2, total_damage: 1234, dps: 1234 / 12.5 },
+    // v0.8.3: the optional ``name`` field mirrors the gateway's
+    // player-name denormalisation. A real string for resolved
+    // players, ``null`` for NPCs / unresolved.
+    { target_agent_id: 2, total_damage: 1234, dps: 1234 / 12.5, name: "HealTarget" },
   ],
   target_healing: [
-    { target_agent_id: 1, total_healing: 567, hps: 567 / 12.5 },
+    { target_agent_id: 1, total_healing: 567, hps: 567 / 12.5, name: "DPSSource" },
   ],
   // Phase 8: third sibling roll-up, mirroring the populated DPS +
   // healing rows on the same target (agent 1) so the per-target
   // filter can be exercised against all three roll-ups at once.
   target_buff_removal: [
-    { target_agent_id: 1, total_buff_removal: 333, bps: 333 / 12.5 },
+    { target_agent_id: 1, total_buff_removal: 333, bps: 333 / 12.5, name: "DPSSource" },
   ],
   event_windows: [
     { start_ms: 0, end_ms: 5000, damage_total: 800, healing_total: 300, event_count: 4 },
@@ -296,15 +299,15 @@ describe("FightEventsPage", () => {
     const multiTarget = {
       ...POPULATED_PAYLOAD,
       target_dps: [
-        { target_agent_id: 1, total_damage: 100, dps: 100 / 12.5 },
-        { target_agent_id: 2, total_damage: 1234, dps: 1234 / 12.5 },
+        { target_agent_id: 1, total_damage: 100, dps: 100 / 12.5, name: "DPSSource" },
+        { target_agent_id: 2, total_damage: 1234, dps: 1234 / 12.5, name: "HealTarget" },
       ],
       target_healing: [
-        { target_agent_id: 1, total_healing: 567, hps: 567 / 12.5 },
+        { target_agent_id: 1, total_healing: 567, hps: 567 / 12.5, name: "DPSSource" },
       ],
       target_buff_removal: [
-        { target_agent_id: 1, total_buff_removal: 333, bps: 333 / 12.5 },
-        { target_agent_id: 2, total_buff_removal: 99, bps: 99 / 12.5 },
+        { target_agent_id: 1, total_buff_removal: 333, bps: 333 / 12.5, name: "DPSSource" },
+        { target_agent_id: 2, total_buff_removal: 99, bps: 99 / 12.5, name: "HealTarget" },
       ],
     };
     vi.mocked(fetchFightEvents).mockResolvedValue(multiTarget);

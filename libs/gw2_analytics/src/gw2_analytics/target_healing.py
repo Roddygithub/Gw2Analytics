@@ -90,6 +90,13 @@ class TargetHealingRow(BaseModel):
     total_healing: int = Field(..., ge=0)
     heal_count: int = Field(..., ge=1)
     hps: float = Field(..., ge=0.0)
+    # Optional player-name denormalisation (v0.8.3). See
+    # :class:`~gw2_analytics.target_dps.TargetDpsRow.name` for the
+    # contract (None = unresolved; the route surfaces ``null`` on
+    # the wire; the frontend falls back to the raw
+    # ``target_agent_id``). Strict parallel of the DPS row so the
+    # trio reads as one design.
+    name: str | None = None
 
 
 class TargetHealingAggregator:
@@ -112,12 +119,18 @@ class TargetHealingAggregator:
         self,
         events: Iterable[HealingEvent],
         duration_s: float,
+        name_map: dict[int, str | None] | None = None,
     ) -> list[TargetHealingRow]:
         """Compute the roll-up from a stream of healing events.
 
         ``duration_s`` is the fight duration (the time-bucket the
         HPS rate is measured against). Passed by the caller so the
         aggregator stays free of cross-source metadata.
+
+        ``name_map`` is an OPTIONAL ``{agent_id: name}`` lookup for
+        player-name denormalisation (v0.8.3). See
+        :meth:`~gw2_analytics.target_dps.TargetDpsAggregator.aggregate`
+        for the full contract; this method is a strict parallel.
         """
         if duration_s < 0:
             msg = f"duration_s must be >= 0, got {duration_s!r}"
@@ -132,12 +145,18 @@ class TargetHealingAggregator:
             grand_total += e.healing
 
         hps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_HPS
+        # ``name_map or {}`` -- see the parallel branch in
+        # :meth:`~gw2_analytics.target_dps.TargetDpsAggregator.aggregate`
+        # for the rationale (``dict.get`` returns ``None`` for missing
+        # keys AND for explicit ``None`` values; both surface as the
+        # ``name=None`` sentinel on the row).
         rows = [
             TargetHealingRow(
                 target_agent_id=target,
                 total_healing=total_by_target[target],
                 heal_count=count_by_target[target],
                 hps=total_by_target[target] * hps_factor,
+                name=(name_map or {}).get(target),
             )
             for target in total_by_target
         ]

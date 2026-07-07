@@ -94,6 +94,13 @@ class TargetBuffRemovalRow(BaseModel):
     total_buff_removal: int = Field(..., ge=0)
     strip_count: int = Field(..., ge=1)
     bps: float = Field(..., ge=0.0)
+    # Optional player-name denormalisation (v0.8.3). See
+    # :class:`~gw2_analytics.target_dps.TargetDpsRow.name` for the
+    # contract (None = unresolved; the route surfaces ``null`` on
+    # the wire; the frontend falls back to the raw
+    # ``target_agent_id``). Strict parallel of the DPS + Healing
+    # rows so the trio reads as one design.
+    name: str | None = None
 
 
 class TargetBuffRemovalAggregator:
@@ -118,12 +125,18 @@ class TargetBuffRemovalAggregator:
         self,
         events: Iterable[BuffRemovalEvent],
         duration_s: float,
+        name_map: dict[int, str | None] | None = None,
     ) -> list[TargetBuffRemovalRow]:
         """Compute the roll-up from a stream of buff-removal events.
 
         ``duration_s`` is the fight duration (the time-bucket the
         BPS rate is measured against). Passed by the caller so the
         aggregator stays free of cross-source metadata.
+
+        ``name_map`` is an OPTIONAL ``{agent_id: name}`` lookup for
+        player-name denormalisation (v0.8.3). See
+        :meth:`~gw2_analytics.target_dps.TargetDpsAggregator.aggregate`
+        for the full contract; this method is a strict parallel.
         """
         if duration_s < 0:
             msg = f"duration_s must be >= 0, got {duration_s!r}"
@@ -138,12 +151,18 @@ class TargetBuffRemovalAggregator:
             grand_total += e.buff_removal
 
         bps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_BPS
+        # ``name_map or {}`` -- see the parallel branch in
+        # :meth:`~gw2_analytics.target_dps.TargetDpsAggregator.aggregate`
+        # for the rationale (``dict.get`` returns ``None`` for missing
+        # keys AND for explicit ``None`` values; both surface as the
+        # ``name=None`` sentinel on the row).
         rows = [
             TargetBuffRemovalRow(
                 target_agent_id=target,
                 total_buff_removal=total_by_target[target],
                 strip_count=count_by_target[target],
                 bps=total_by_target[target] * bps_factor,
+                name=(name_map or {}).get(target),
             )
             for target in total_by_target
         ]

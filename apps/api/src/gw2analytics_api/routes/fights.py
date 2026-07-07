@@ -225,15 +225,43 @@ def get_fight_events(
     # discriminator="event_type")]``) so the dispatch is automatic.
     events = _load_fight_events(db, fight_id)
 
+    # v0.8.3 of the API: build the agent_id -> name map for
+    # player-name denormalisation. A single small query on the
+    # fight's agent table (typically 5-50 rows); the shared
+    # ``_load_fight_events`` helper only loads the fight row, so
+    # this IS a dedicated fetch (a single small one). The map is
+    # passed to all three per-target aggregators below so a target
+    # that appears in the damage roll-up AND the healing roll-up
+    # resolves to the SAME name on both rows (consistency
+    # invariant: same agent_id == same name across all three
+    # roll-ups). ``OrmFightAgent.name`` is a non-null string in
+    # practice but the schema permits ``None``; the type uses
+    # ``str | None`` so the aggregator's ``.get(target)`` returns
+    # ``None`` for NPCs without a registered arcdps char-name
+    # (the explicit-``None`` and missing-key cases collapse to the
+    # same sentinel on the row, which the frontend falls back to
+    # the raw ``target_agent_id`` for).
+    agent_id_to_name: dict[int, str | None] = {
+        a.agent_id: a.name
+        for a in db.execute(
+            select(OrmFightAgent).where(OrmFightAgent.fight_id == fight_id),
+        )
+        .scalars()
+        .all()
+    }
+
     duration_s = max(e.time_ms for e in events) / 1000.0
     # ``TargetDpsAggregator`` consumes DamageEvent specifically
     # (its invariant validates sum-of-row-damage == sum-of-event-damage).
     # Filter the heterogeneous stream at the call site so the
     # aggregator signature stays narrow on ``DamageEvent``. Healing-only
-    # fights correctly yield an empty target_dps list.
+    # fights correctly yield an empty target_dps list. v0.8.3:
+    # the ``name_map`` is passed so each row carries its
+    # player-name denormalisation.
     target_dps = TargetDpsAggregator().aggregate(
         [e for e in events if isinstance(e, DamageEvent)],
         duration_s,
+        name_map=agent_id_to_name,
     )
     # ``TargetHealingAggregator`` is the strict parallel of
     # ``TargetDpsAggregator`` (same schema shape with
@@ -244,10 +272,13 @@ def get_fight_events(
     # damage-only fights correctly yield an empty target_healing
     # list. Mixed damage + healing fights produce one row per
     # target across both aggregators (independent roll-ups on the
-    # same ``duration_s``).
+    # same ``duration_s``). v0.8.3: same ``name_map`` is passed
+    # so the same agent_id resolves to the same name across all
+    # three roll-ups.
     target_healing = TargetHealingAggregator().aggregate(
         [e for e in events if isinstance(e, HealingEvent)],
         duration_s,
+        name_map=agent_id_to_name,
     )
     # Phase 8: third sibling roll-up, strict parallel of the DPS +
     # Healing aggregators. ``TargetBuffRemovalAggregator`` consumes
@@ -258,10 +289,12 @@ def get_fight_events(
     # ``BuffRemovalEvent`` lands in BOTH target_healing AND
     # target_buff_removal -- independent roll-ups on the same
     # ``duration_s``. The pure-strip case (no heal, just a strip)
-    # lands in target_buff_removal only.
+    # lands in target_buff_removal only. v0.8.3: same ``name_map``
+    # is passed for cross-roll-up consistency.
     target_buff_removal = TargetBuffRemovalAggregator().aggregate(
         [e for e in events if isinstance(e, BuffRemovalEvent)],
         duration_s,
+        name_map=agent_id_to_name,
     )
     # ``EventWindowAggregator`` accepts ``Iterable[Event]`` directly and
     # discriminates by isinstance internally (damage_total += damage,

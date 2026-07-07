@@ -247,6 +247,41 @@ export default async function FightEventsPage({
     ]),
   ).sort((a, b) => a - b);
 
+  // v0.8.3 of web: build the ``target_agent_id -> name`` lookup
+  // from the roll-up rows. The gateway surfaces ``name`` on every
+  // row (denormalised from ``OrmFightAgent``); iterating the union
+  // of all three roll-ups guarantees a name is captured for every
+  // target the dropdown exposes, even if the target only appears
+  // in one of the three roll-ups. A "first non-null wins" loop
+  // surfaces any cross-roll-up inconsistency (the gateway should
+  // produce the same name for the same agent_id on every roll-up;
+  // if a future bug breaks that contract, the FIRST name seen
+  // wins and a later divergent name is silently dropped -- a
+  // trade-off we accept because the simpler ``Object.fromEntries``
+  // would silently overwrite with the LAST name, masking the
+  // inconsistency entirely).
+  //
+  // PRECEDENCE CONTRACT: the roll-up order is DPS -> Healing ->
+  // BuffRemoval, so a divergent name on the DPS roll-up wins over
+  // the same id's name on later roll-ups. Do NOT reorder the
+  // spread below without updating this contract.
+  //
+  // A ``null`` name (NPC without a registered char-name) is
+  // preserved as ``null`` on the map so the dropdown falls back to
+  // the raw id (mirrors the ``null``-on-the-wire contract from
+  // the aggregator). Built once at request time -- the dropdown
+  // is the only consumer and the lookup is O(1).
+  const targetNameMap: Record<number, string | null> = {};
+  for (const r of [
+    ...summary.target_dps,
+    ...summary.target_healing,
+    ...summary.target_buff_removal,
+  ]) {
+    if (r.name !== null && !(r.target_agent_id in targetNameMap)) {
+      targetNameMap[r.target_agent_id] = r.name;
+    }
+  }
+
   // Server-side filter: when ``targetFilter`` is set, narrow each
   // of the three roll-up arrays to that target. The
   // ``EventWindowsTable`` is intentionally NOT filtered -- the
@@ -300,6 +335,7 @@ export default async function FightEventsPage({
           <TargetFilter
             current={targetFilter}
             availableTargets={availableTargets}
+            targetNameMap={targetNameMap}
             fightId={id}
           />
         </div>

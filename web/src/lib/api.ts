@@ -204,11 +204,20 @@ export interface UploadCreatedRow {
  * ``dps`` only). The ``dps`` rate is computed by the gateway from
  * ``total_damage / duration_s``; ``duration_s`` itself is on
  * :class:`FightEventsSummaryRow`.
+ *
+ * v0.8.3 of the API: the optional ``name`` field carries the
+ * player-name denormalisation (the arcdps char-name as recorded
+ * on ``OrmFightAgent``). ``null`` when the agent id has no
+ * registered name (an NPC) or when the gateway omitted the map;
+ * the frontend falls back to the raw ``target_agent_id`` in that
+ * case. Strict parallel of :attr:`TargetHealingRow.name` and
+ * :attr:`TargetBuffRemovalRow.name`.
  */
 export interface TargetDpsRow {
   target_agent_id: number;
   total_damage: number;
   dps: number;
+  name: string | null;
 }
 
 /**
@@ -223,6 +232,7 @@ export interface TargetHealingRow {
   target_agent_id: number;
   total_healing: number;
   hps: number;
+  name: string | null;
 }
 
 /**
@@ -242,6 +252,7 @@ export interface TargetBuffRemovalRow {
   target_agent_id: number;
   total_buff_removal: number;
   bps: number;
+  name: string | null;
 }
 
 /**

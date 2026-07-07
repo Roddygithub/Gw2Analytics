@@ -12,6 +12,15 @@
  * the rows server-side so the next render is a fully-populated
  * page (no client-side cascade).
  *
+ * v0.8.3 of web: the dropdown shows the player name (when
+ * resolved) alongside the agent id so the analyst no longer
+ * scans raw ``agent_id`` values. Format: ``"HealBrand (1001)``
+ * (name + space + parenthesised id) when the lookup returns a
+ * non-empty string; the bare id when the lookup is missing,
+ * ``null``, or empty. The raw id is always present in the label
+ * (parenthesised) so the analyst can still cross-reference
+ * against logs / arcdps that key on the opaque id.
+ *
  * Why a dropdown of unique target ids
  * ====================================
  * The roll-up tables key on ``target_agent_id`` (a uint64 arcdps
@@ -48,10 +57,40 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 export interface TargetFilterProps {
   /** Unique target_agent_ids present in the combined roll-up data. */
   availableTargets: readonly number[];
-  /** Currently active target filter (``null`` means "all targets"). */
+  /**
+   * Currently active target filter (``null`` means "all targets").
+   */
   current: number | null;
+  /**
+   * v0.8.3 of web: optional ``{target_agent_id: name}`` lookup
+   * for the dropdown labels. ``null`` / missing / empty string
+   * values fall back to the bare ``target_agent_id`` (preserves
+   * the pre-v0.8.3 wire contract for any future gateway that
+   * doesn't ship names). Default is the empty map (no
+   * resolution) so the existing tests keep their bare-id
+   * assertions.
+   */
+  targetNameMap?: Readonly<Record<number, string | null>>;
   /** Fight id (used as a fallback if ``usePathname`` returns null). */
   fightId: string;
+}
+
+/**
+ * Format a single target_agent_id for the dropdown. Returns
+ * ``"Name (id)"`` when the lookup resolves to a non-empty string;
+ * the bare ``String(id)`` otherwise. The id is always preserved
+ * (parenthesised) so the analyst can cross-reference against
+ * arcdps logs that key on the opaque id.
+ */
+function formatTargetLabel(
+  tid: number,
+  nameMap: Readonly<Record<number, string | null>> | undefined,
+): string {
+  const name = nameMap?.[tid];
+  if (name !== undefined && name !== null && name !== "") {
+    return `${name} (${tid})`;
+  }
+  return String(tid);
 }
 
 /**
@@ -65,6 +104,7 @@ export interface TargetFilterProps {
 export function TargetFilter({
   availableTargets,
   current,
+  targetNameMap,
   fightId,
 }: TargetFilterProps) {
   const router = useRouter();
@@ -116,7 +156,7 @@ export function TargetFilter({
         <option value="">All targets</option>
         {availableTargets.map((tid) => (
           <option key={tid} value={tid}>
-            {tid}
+            {formatTargetLabel(tid, targetNameMap)}
           </option>
         ))}
       </select>

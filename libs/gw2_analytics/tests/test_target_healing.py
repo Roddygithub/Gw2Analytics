@@ -115,3 +115,31 @@ class TestTargetHealingAggregator:
         # line syntactically but the runtime guard fires anyway.
         with pytest.raises(ValidationError):
             row.target_agent_id = 999  # type: ignore[misc]
+
+    def test_name_default_is_none_when_no_map(self) -> None:
+        """v0.8.3: strict parallel of :meth:`TargetDpsAggregator`'s
+        default. When ``name_map`` is not passed, every row's
+        ``name`` is ``None`` (no name invented out of thin air).
+        """
+        rows = TargetHealingAggregator().aggregate(
+            [_healing(target=7, healing=120)],
+            duration_s=10.0,
+        )
+        assert rows[0].name is None
+
+    def test_name_map_resolves_to_player_name(self) -> None:
+        """v0.8.3: strict parallel of the DPS counterpart. The
+        name_map is denormalised onto each row so the wire
+        consumer doesn't need a second lookup.
+        """
+        rows = TargetHealingAggregator().aggregate(
+            [
+                _healing(target=7, healing=200),
+                _healing(target=9, healing=100),
+            ],
+            duration_s=10.0,
+            name_map={7: "HealBrand", 9: None},
+        )
+        by_target = {r.target_agent_id: r for r in rows}
+        assert by_target[7].name == "HealBrand"
+        assert by_target[9].name is None

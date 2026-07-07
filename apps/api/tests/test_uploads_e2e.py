@@ -339,6 +339,13 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     assert row["target_agent_id"] == base_id_b
     assert row["total_damage"] == 1_234 + 567
     assert row["dps"] == pytest.approx((1_234 + 567) / 2.5)
+    # v0.8.3: the optional ``name`` field surfaces the player-name
+    # denormalisation (the agent's arcdps char-name as recorded on
+    # ``OrmFightAgent``). Damage flowed A->B, so the row's name is
+    # B's char-name. The field is additive -- existing wire
+    # consumers ignore it; new consumers use it for the
+    # ``TargetFilter`` dropdown labels.
+    assert row["name"] == f"E2E Guard {suffix}"
     # 2 events landed in the first 3 second-timespan; window_s=1
     # buckets are [0,1000), [1000,2000), [2000,3000) so buckets 1 + 2
     # each carry exactly 1 event.
@@ -366,6 +373,11 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     assert heal_row["target_agent_id"] == base_id_a
     assert heal_row["total_healing"] == 800 + 400
     assert heal_row["hps"] == pytest.approx((800 + 400) / 2.5)
+    # v0.8.3: same name_map powers all three per-target roll-ups
+    # (cross-roll-up consistency invariant: same agent_id ==
+    # same name). Healing flowed B->A, so the row's name is
+    # A's char-name.
+    assert heal_row["name"] == f"E2E Warrior {suffix}"
     # Phase 8: per-target buff-removal roll-up. The dual-emit
     # record (``is_nondamage == 1``, ``value == 800``,
     # ``buff_dmg == 300``) yields a strip landing on A; the
@@ -378,6 +390,10 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     assert strip_row["target_agent_id"] == base_id_a
     assert strip_row["total_buff_removal"] == 300 + 200
     assert strip_row["bps"] == pytest.approx((300 + 200) / 2.5)
+    # v0.8.3: strict parallel of the DPS + Healing assertions --
+    # the same name_map produces the same name on every roll-up
+    # row that targets A.
+    assert strip_row["name"] == f"E2E Warrior {suffix}"
 
 
 def test_fight_events_404_when_unknown_fight() -> None:
