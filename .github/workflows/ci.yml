@@ -45,39 +45,34 @@ jobs:
     name: Lint + test (Python 3.12 + web)
     runs-on: ubuntu-latest
 
+    # The Postgres service runs the same docker-compose dev image the
+    # local developer brings up via ``docker compose up -d
+    # gw2a-postgres``. Credentials match ``[tool.pytest_env]`` in the
+    # root ``pyproject.toml`` so ``uv run pytest`` finds a reachable
+    # ``DATABASE_URL`` without further wiring. The platform-managed
+    # health check gates the rest of the job until the DB is ready to
+    # accept connections (and auto-cleans the container on job exit).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gw2analytics
+          POSTGRES_PASSWORD: gw2analytics
+          POSTGRES_DB: gw2analytics
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gw2analytics"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           # Full history for `uv sync --frozen` and exact blame.
           fetch-depth: 0
-
-      # The Postgres service runs the same docker-compose dev image
-      # the local developer brings up via ``docker compose up -d
-      # gw2a-postgres``. Credentials match ``[tool.pytest_env]`` in
-      # the root ``pyproject.toml`` so ``uv run pytest`` finds a
-      # reachable ``DATABASE_URL`` without further wiring. The health
-      # check gates the rest of the job until the DB is ready to
-      # accept connections.
-      - name: Start Postgres
-        run: |
-          docker run -d --name gw2a-postgres \
-            --health-cmd="pg_isready -U gw2analytics" \
-            --health-interval=5s \
-            --health-timeout=5s \
-            --health-retries=10 \
-            -e POSTGRES_USER=gw2analytics \
-            -e POSTGRES_PASSWORD=gw2analytics \
-            -e POSTGRES_DB=gw2analytics \
-            -p 5432:5432 \
-            postgres:16-alpine
-          # Wait for the health check to pass before pytest runs.
-          for i in $(seq 1 30); do
-            if docker exec gw2a-postgres pg_isready -U gw2analytics > /dev/null 2>&1; then
-              echo "Postgres ready after ${i}s"; break
-            fi
-            sleep 1
-          done
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
