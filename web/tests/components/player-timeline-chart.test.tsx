@@ -2,6 +2,20 @@
  * v0.8.0 of web: vitest cases for the per-account
  * :class:`PlayerTimelineChart` SVG line chart.
  *
+ * v0.9.0 plan/001 refactor: this file now tests the THIN
+ * WRAPPER that delegates to the shared :class:`TimelineChart`
+ * base. The ``buildTimelineLayout`` unit tests use the flat
+ * :class:`TimelineChartPoint` shape (NOT the raw
+ * :class:`PlayerTimelinePoint` API type) because the layout
+ * helper is a pure function of the 3 series values -- the
+ * :class:`fight_id` / :class:`started_at` fields are
+ * wrapper-level concerns (X-axis label format + tooltip
+ * text + React key) that the base doesn't consume. The
+ * :func:`makeChartPoint` helper below constructs a minimal
+ * :class:`TimelineChartPoint` with just the 3 series numbers
+ * + placeholder ``key``/``xLabel``/``tooltip`` strings (the
+ * layout helper doesn't read those 3 placeholder fields).
+ *
  * Coverage
  * ========
  * - zero points -> empty-state panel
@@ -28,6 +42,7 @@ import {
   buildTimelineLayout,
 } from "@/components/PlayerTimelineChart";
 import type { PlayerTimelinePoint } from "@/lib/api";
+import type { TimelineChartPoint } from "@/components/TimelineChart";
 
 function makePoint(
   fight_id: string,
@@ -37,6 +52,28 @@ function makePoint(
   total_buff_removal: number,
 ): PlayerTimelinePoint {
   return { fight_id, started_at, total_damage, total_healing, total_buff_removal };
+}
+
+// v0.9.0 plan/001: the shared :class:`TimelineChart` base
+// consumes the flat :class:`TimelineChartPoint` shape, not
+// the raw :class:`PlayerTimelinePoint` API type. This
+// helper constructs a minimal :class:`TimelineChartPoint`
+// for the ``buildTimelineLayout`` unit tests; the
+// :class:`key` / :class:`xLabel` / :class:`tooltip` fields
+// are unused by the layout helper (they're consumed by the
+// React component, which has its own test coverage in the
+// ``PlayerTimelineChart`` describe block above).
+function makeChartPoint(
+  total_damage: number,
+  total_healing: number,
+  total_buff_removal: number,
+): TimelineChartPoint {
+  return {
+    series: [total_damage, total_healing, total_buff_removal],
+    key: "test",
+    xLabel: "test",
+    tooltip: "test",
+  };
 }
 
 const THREE_POINTS: PlayerTimelinePoint[] = [
@@ -98,9 +135,7 @@ describe("buildTimelineLayout", () => {
   });
 
   it("returns a non-null layout for a single point", () => {
-    const layout = buildTimelineLayout([
-      makePoint("f-1", "2025-01-01T12:00:00Z", 100, 50, 25),
-    ]);
+    const layout = buildTimelineLayout([makeChartPoint(100, 50, 25)]);
     expect(layout).not.toBeNull();
     expect(layout?.maxDamage).toBe(100);
     expect(layout?.maxHealing).toBe(50);
@@ -111,8 +146,8 @@ describe("buildTimelineLayout", () => {
 
   it("clamps all-zero series to a max of 1 (defensive against /0)", () => {
     const layout = buildTimelineLayout([
-      makePoint("f-1", "2025-01-01T12:00:00Z", 0, 0, 0),
-      makePoint("f-2", "2025-01-02T12:00:00Z", 0, 0, 0),
+      makeChartPoint(0, 0, 0),
+      makeChartPoint(0, 0, 0),
     ]);
     expect(layout).not.toBeNull();
     // All zeros -> ``Math.max(1, ...values)`` returns 1 for each
@@ -125,8 +160,8 @@ describe("buildTimelineLayout", () => {
 
   it("uses the actual max for mixed-magnitude series", () => {
     const layout = buildTimelineLayout([
-      makePoint("f-1", "2025-01-01T12:00:00Z", 5_000, 10, 1),
-      makePoint("f-2", "2025-01-02T12:00:00Z", 1_000, 100, 10),
+      makeChartPoint(5_000, 10, 1),
+      makeChartPoint(1_000, 100, 10),
     ]);
     expect(layout).not.toBeNull();
     expect(layout?.maxDamage).toBe(5_000);
@@ -142,10 +177,7 @@ describe("buildTimelineLayout (log scale, v0.8.2)", () => {
     // and the strip at 50 is still visible because log10(51)
     // is much larger than 0 (the baseline).
     const layout = buildTimelineLayout(
-      [
-        makePoint("f-1", "2025-01-01T12:00:00Z", 1_000_000, 100, 50),
-        makePoint("f-2", "2025-01-02T12:00:00Z", 500_000, 200, 30),
-      ],
+      [makeChartPoint(1_000_000, 100, 50), makeChartPoint(500_000, 200, 30)],
       "log",
     );
     expect(layout).not.toBeNull();
@@ -167,10 +199,7 @@ describe("buildTimelineLayout (log scale, v0.8.2)", () => {
   it("generates logarithmic Y-axis ticks (decades up to globalMax)", () => {
     // globalMax=10_000 -> ticks are 0, 1, 10, 100, 1000, 10_000.
     const layout = buildTimelineLayout(
-      [
-        makePoint("f-1", "2025-01-01T12:00:00Z", 10_000, 100, 50),
-        makePoint("f-2", "2025-01-02T12:00:00Z", 5_000, 200, 30),
-      ],
+      [makeChartPoint(10_000, 100, 50), makeChartPoint(5_000, 200, 30)],
       "log",
     );
     expect(layout).not.toBeNull();
@@ -183,7 +212,7 @@ describe("buildTimelineLayout (log scale, v0.8.2)", () => {
     // 10M + 100M + 1B + 10B = 12). The implementation caps
     // at 8 to avoid axis clutter.
     const layout = buildTimelineLayout(
-      [makePoint("f-1", "2025-01-01T12:00:00Z", 10_000_000_000, 0, 0)],
+      [makeChartPoint(10_000_000_000, 0, 0)],
       "log",
     );
     expect(layout).not.toBeNull();
@@ -194,7 +223,7 @@ describe("buildTimelineLayout (log scale, v0.8.2)", () => {
     // All zeros -> globalMax=1 (clamped by Math.max(1, ...)),
     // ticks=[0, 1], yFor(0)=innerH, yFor(1)=0.
     const layout = buildTimelineLayout(
-      [makePoint("f-1", "2025-01-01T12:00:00Z", 0, 0, 0)],
+      [makeChartPoint(0, 0, 0)],
       "log",
     );
     expect(layout).not.toBeNull();

@@ -13,6 +13,19 @@
  *   (all points share the same fight).
  * - The X-axis labels are RELATIVE TIME in ``M:SS``, not
  *   absolute wall-clock ``MM/DD HH:MM``.
+ *
+ * v0.9.0 plan/001 refactor: this file now tests the THIN
+ * WRAPPER that delegates to the shared :class:`TimelineChart`
+ * base. The ``buildPerFightTimelineLayout`` unit tests use
+ * the flat :class:`TimelineChartPoint` shape (NOT the raw
+ * :class:`PerFightTimelinePoint` API type) because the layout
+ * helper is a pure function of the 3 series values -- the
+ * :class:`window_start_ms` / :class:`window_end_ms` fields
+ * are wrapper-level concerns (X-axis label format + tooltip
+ * text + React key) that the base doesn't consume. The
+ * :func:`makeChartPoint` helper below constructs a minimal
+ * :class:`TimelineChartPoint` with just the 3 series numbers
+ * + placeholder ``key``/``xLabel``/``tooltip`` strings.
  */
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -22,6 +35,7 @@ import {
   formatPerFightLogTick,
 } from "@/components/PerFightTimelineChart";
 import type { PerFightTimelinePoint } from "@/lib/api";
+import type { TimelineChartPoint } from "@/components/TimelineChart";
 
 function makePoint(
   window_start_ms: number,
@@ -39,6 +53,28 @@ function makePoint(
   };
 }
 
+// v0.9.0 plan/001: the shared :class:`TimelineChart` base
+// consumes the flat :class:`TimelineChartPoint` shape, not
+// the raw :class:`PerFightTimelinePoint` API type. This
+// helper constructs a minimal :class:`TimelineChartPoint`
+// for the ``buildPerFightTimelineLayout`` unit tests; the
+// :class:`key` / :class:`xLabel` / :class:`tooltip` fields
+// are unused by the layout helper (they're consumed by the
+// React component, which has its own test coverage in the
+// ``PerFightTimelineChart`` describe block above).
+function makeChartPoint(
+  total_damage: number,
+  total_healing: number,
+  total_buff_removal: number,
+): TimelineChartPoint {
+  return {
+    series: [total_damage, total_healing, total_buff_removal],
+    key: "test",
+    xLabel: "test",
+    tooltip: "test",
+  };
+}
+
 // 3 buckets, 5s each -> total 15s of fight. Mixed magnitudes
 // (damage >> healing >> strip) so the 3 series exercise the
 // per-series-max normalisation.
@@ -50,9 +86,19 @@ const THREE_BUCKETS: PerFightTimelinePoint[] = [
 
 describe("PerFightTimelineChart", () => {
   it("renders the empty-state panel when there are no points", () => {
+    // v0.9.0 plan/001: the empty-state text is owned by
+    // the shared :class:`TimelineChart` base (the thin
+    // wrapper delegates the render to the base). The base
+    // emits the same generic ``"No timeline data available."``
+    // for any empty ``points`` array, regardless of whether
+    // the caller is :class:`PlayerTimelineChart` or
+    // :class:`PerFightTimelineChart`. The pre-v0.9.0
+    // per-fight-specific string
+    // (``"No per-fight timeline data available."``) was
+    // dropped as part of the single-source refactor.
     render(<PerFightTimelineChart points={[]} />);
     expect(
-      screen.getByText("No per-fight timeline data available."),
+      screen.getByText("No timeline data available."),
     ).toBeInTheDocument();
   });
 
@@ -115,8 +161,8 @@ describe("buildPerFightTimelineLayout", () => {
 
   it("uses the actual max for mixed-magnitude series", () => {
     const layout = buildPerFightTimelineLayout([
-      makePoint(0, 5_000, 5_000, 10, 1),
-      makePoint(5_000, 10_000, 1_000, 100, 10),
+      makeChartPoint(5_000, 10, 1),
+      makeChartPoint(1_000, 100, 10),
     ]);
     expect(layout).not.toBeNull();
     expect(layout?.maxDamage).toBe(5_000);
@@ -126,8 +172,8 @@ describe("buildPerFightTimelineLayout", () => {
 
   it("clamps all-zero series to a max of 1 (defensive against /0)", () => {
     const layout = buildPerFightTimelineLayout([
-      makePoint(0, 5_000, 0, 0, 0),
-      makePoint(5_000, 10_000, 0, 0, 0),
+      makeChartPoint(0, 0, 0),
+      makeChartPoint(0, 0, 0),
     ]);
     expect(layout).not.toBeNull();
     expect(layout?.maxDamage).toBe(1);
@@ -140,10 +186,7 @@ describe("buildPerFightTimelineLayout", () => {
     // globalMax sits at the TOP of the chart (y=0) and the
     // strip at 50 is still visible (well above the baseline).
     const layout = buildPerFightTimelineLayout(
-      [
-        makePoint(0, 5_000, 1_000_000, 100, 50),
-        makePoint(5_000, 10_000, 500_000, 200, 30),
-      ],
+      [makeChartPoint(1_000_000, 100, 50), makeChartPoint(500_000, 200, 30)],
       "log",
     );
     expect(layout).not.toBeNull();

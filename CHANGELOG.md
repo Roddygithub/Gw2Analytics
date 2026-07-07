@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (web - v0.9.0 plan/001: shared <TimelineChart> base)
+
+- `web/src/components/TimelineChart.tsx` (NEW, ~580 lines): the
+  shared base component for BOTH the per-account historical
+  timeline (`PlayerTimelineChart`, v0.8.0) and the per-fight
+  temporal view (`PerFightTimelineChart`, v0.8.9). Generic over
+  the flat `TimelineChartPoint = { series: [number, number,
+  number], key: string, xLabel: string, tooltip: string }`
+  shape. Encapsulates the SVG render, the per-series 0-100%
+  normalisation (linear mode), the shared-log Y-axis (log mode,
+  v0.8.2 lineage), the decade tick generation, the X-axis
+  label sampling, the legend, and the empty-state panel.
+  Exports `buildTimelineLayout` + `formatLogTick` +
+  `TimelineChart` + `TimelineScale` + `TimelineChartPoint`.
+- `web/src/components/PlayerTimelineChart.tsx` (refactored to a
+  thin ~131-line wrapper): maps `PlayerTimelinePoint[]` to the
+  flat `TimelineChartPoint[]` shape the base consumes; owns the
+  X-axis format detection (`MM/DD HH:MM` vs `MM/DD` for
+  day-bucketed points, v0.8.1) + the tooltip text formatting +
+  `fight_id` as the React key. Re-exports `buildTimelineLayout`
+  + `formatLogTick` from the base for back-compat with the
+  existing unit tests.
+- `web/src/components/PerFightTimelineChart.tsx` (refactored to
+  a thin ~119-line wrapper): strict parallel of
+  `PlayerTimelineChart`. Maps `PerFightTimelinePoint[]` to the
+  flat `TimelineChartPoint[]` shape; owns the `M:SS` X-axis
+  format (relative time) + the per-fight tooltip + the bucket
+  index as the React key. Re-exports `buildTimelineLayout` as
+  `buildPerFightTimelineLayout` + `formatLogTick` as
+  `formatPerFightLogTick` for back-compat with the existing
+  tests.
+
+  The pre-v0.9.0 wrappers each had ~250 lines of near-identical
+  TSX (3 polylines, per-series normalisation, SVG-native
+  `<title>` tooltip, linear/log scale, decade-style X-axis
+  labels, legend, empty-state panel); v0.9.0 plan/001
+  single-sources the rendering in the base and reduces each
+  wrapper to a ~130-line data-prep shell. The public prop
+  interface of both wrappers is unchanged so the page-level
+  consumers don't need to change.
+
+- `web/tests/components/player-timeline-chart.test.tsx`: added
+  a `makeChartPoint` helper that constructs a minimal
+  `TimelineChartPoint` (just the 3 series numbers + placeholder
+  `key`/`xLabel`/`tooltip` strings) and updated 7
+  `buildTimelineLayout` tests to use it. The component tests
+  pass `PlayerTimelinePoint[]` directly to the wrapper (the
+  wrapper maps internally), so the component tests are
+  unchanged.
+- `web/tests/components/per-fight-timeline-chart.test.tsx`:
+  same `makeChartPoint` pattern, updated 3
+  `buildPerFightTimelineLayout` tests. Updated the
+  empty-state test to expect the generic `"No timeline data
+  available."` text -- the pre-v0.9.0 per-fight-specific
+  string (`"No per-fight timeline data available."`) was
+  dropped as part of the single-source refactor (the wrapper
+  no longer owns the empty-state text; the shared base does).
+
+  Why the generic constraint on `buildTimelineLayout` is
+  loosened to `T extends { series: [number, number, number] }`
+  (NOT the full `TimelineChartPoint`): the layout helper is a
+  pure function of the 3 series values -- the `key` /
+  `xLabel` / `tooltip` fields are React-component concerns
+  (the SVG `<title>` tooltip + the React `key` + the X-axis
+  text label) that the layout helper doesn't consume. Loosening
+  the constraint to the structural minimum lets the unit tests
+  pass a minimal fixture instead of forcing them to build full
+  `PlayerTimelinePoint` / `PerFightTimelinePoint` objects and
+  pretend the wrapper isn't there.
+
 ### Added (apps/api - v0.9.0 plan/002: profession filter on /players)
 
 - `apps/api/src/gw2analytics_api/routes/players.py`: `list_players` now accepts
