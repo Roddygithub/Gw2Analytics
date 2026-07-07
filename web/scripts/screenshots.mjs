@@ -27,16 +27,14 @@ import { chromium } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
-// Anchor OUT_DIR to the repo root *from the script's
-// own location*, not from the caller's CWD. This way
+// Anchor OUT_DIR to the repo root (the script's parent
+// directory's parent). Invariant across CWD so neither
 // ``node web/scripts/screenshots.mjs`` from the repo
-// root AND ``pnpm screenshots`` from inside ``web/`` both
-// write to the same ``/screenshots/`` directory at the
-// repo root -- never to the legacy ``web/screenshots/``
-// dir that the round-148 chore commit told everyone to
-// stop writing to.
-// Uses ``import.meta.dirname`` (Node 20.11+, safely
-// supported since Next.js 16 mandates Node 20+).
+// root nor ``cd web && pnpm screenshots`` accidentally
+// lands in the legacy ``web/screenshots/`` dir that the
+// round-148 chore commit told everyone to stop writing to.
+// Requires Node 20.11+ for ``import.meta.dirname``
+// (Next.js 16 mandates Node 20+, so we're safe).
 const OUT_DIR = resolve(import.meta.dirname, "..", "..", "screenshots");
 const BASE = "http://127.0.0.1:3000";
 
