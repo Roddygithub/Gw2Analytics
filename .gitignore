@@ -48,3 +48,15 @@ Thumbs.db
 
 # Codegen artifacts (web/scripts/dump_openapi.py output)
 /openapi.json
+
+# Playwright (v0.7.2) test artifacts
+# - test-results/ holds the per-test trace + screenshot
+#   bundles (retained on failure via
+#   ``trace: "retain-on-failure"`` in web/playwright.config.ts).
+# - playwright-report/ holds the HTML report (generated in
+#   CI via ``reporter: "html"`` for the artifact upload; the
+#   local loop uses the ``list`` reporter so this stays empty
+#   unless someone runs ``pnpm exec playwright test
+#   --reporter=html``).
+web/test-results/
+web/playwright-report/
