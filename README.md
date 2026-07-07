@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
 
-**Status:** 260 active tests across libs + apps + web (190 pytest cases in `libs/gw2_*` + `apps/api` + 70 vitest cases in `web/`; 1 conditionally skipped real-fixture integration test in `libs/gw2_evtc_parser/tests/test_parser.py::test_real_evtc_binary_parses_with_realistic_agent_count` requires the blob at `/tmp/inner_20251002-213519`) · 14 release tags shipped on the remote (latest: `v0.8.3`; the v0.8.4 / v0.8.5 / v0.8.6 backend iterations are in the CHANGELOG but not yet GitHub-tagged) · strict CI lint-and-test + pnpm typecheck + vitest gate active.
+**Status:** 260 active tests across libs + apps + web (190 pytest cases in `libs/gw2_*` + `apps/api` + 70 vitest cases in `web/`; 1 conditionally skipped real-fixture integration test in `libs/gw2_evtc_parser/tests/test_parser.py::test_real_evtc_binary_parses_with_realistic_agent_count` requires the blob at `/tmp/inner_20251002-213519`) · 17 release tags shipped on the remote (latest: `v0.8.6`) · strict CI lint-and-test + pnpm typecheck + vitest gate active.
 
 Modern combat analytics platform for **Guild Wars 2 WvW** (World vs World).
 

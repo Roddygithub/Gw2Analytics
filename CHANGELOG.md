@@ -85,7 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `isinstance` checks are real improvements over `>= 0`;
   the round-140 status assertion is correct).
 
-[0.8.6]: https://github.com/Roddygithub/Gw2Analytics/compare/ce3d797...11c3ee7
+[0.8.6]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.5...v0.8.6
 
 ## [0.8.5] - v0.8.5: backfill player summaries for pre-v0.8.4 fights
 
@@ -187,7 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operational loop; shared `_fixtures.py` extraction
   single-sources the e2e helpers).
 
-[0.8.5]: https://github.com/Roddygithub/Gw2Analytics/compare/ed20259...ce3d797
+[0.8.5]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.4...v0.8.5
 
 ## [0.8.4] - v0.8.4: materialise per-(fight, account) summary rows
 
@@ -294,7 +294,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(fight_id, account_name)` is the right
   upsert-target).
 
-[0.8.4]: https://github.com/Roddygithub/Gw2Analytics/compare/bd1af6e...ed20259
+[0.8.4]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.3...v0.8.4
 
 ## [0.8.3] - v0.8.3: player name resolution on the fight drilldown's TargetFilter
 
@@ -999,7 +999,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.7.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.7.0...v0.7.1
 
-[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/11c3ee7...HEAD
+[Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.6...HEAD
 
 ## [0.7.0] - Phase 9: player-centric surface + per-fight squad + per-fight skill roll-ups
 
