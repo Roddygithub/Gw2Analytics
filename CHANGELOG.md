@@ -177,6 +177,284 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the 404-vs-422 ordering invariant in the test
   docstring is accurate).
 
+### Added (libs/gw2_analytics - plan/002)
+
+- `libs/gw2_analytics/src/gw2_analytics/per_fight_timeline.py`
+  (NEW, ~230 lines): the `PerFightTimelineAggregator`
+  + `PerFightTimelineRow` Pydantic model. Powers the
+  new `GET /api/v1/fights/{id}/timeline?window_s=5`
+  route + the new :class:`PerFightTimelineChart` on
+  `/fights/[id]`. Duplicates the per-bucket skeleton
+  from :class:`EventWindowAggregator` (~30 lines; the
+  plan's pre-approved escape hatch) and adds the third
+  (`total_buff_removal`) accumulator. Single-pass
+  iteration checking `isinstance` for all 3 event
+  types (`DamageEvent` / `HealingEvent` /
+  `BuffRemovalEvent`). Generator-safe signature
+  (only 1 pass over `events`). Cross-field invariant
+  checks: sum-preservation across all 3 kinds (no
+  events dropped) + contiguous buckets (no overlap,
+  no gap). Window bound `_MIN_WINDOW_S = 1` matches
+  `EventWindowAggregator`. The `aggregate()` signature
+  accepts `agents` + `duration_s` for parity with the
+  per-target trio + the squad/skill roll-ups but
+  neither is consumed (the per-bucket aggregation is
+  target-agnostic + duration-agnostic).
+- `libs/gw2_analytics/src/gw2_analytics/__init__.py`:
+  re-exports `PerFightTimelineAggregator` +
+  `PerFightTimelineRow`.
+- `libs/gw2_analytics/tests/test_per_fight_timeline.py`
+  (NEW, 7 pytest cases): empty input / invalid window
+  guard / single-bucket shape / multi-bucket ordering /
+  dual-emit path (`HealingEvent` + `BuffRemovalEvent`
+  from the same cbtevent record -- the v0.6.0 contract
+  that a single dual-emit record must increment BOTH
+  the heal AND the strip totals in the same bucket) /
+  zero-window guard / frozen-Pydantic schema
+  guarantee.
+
+### Added (apps/api - plan/002)
+
+- `apps/api/src/gw2analytics_api/schemas.py`:
+  `PerFightTimelinePointOut` (window_start_ms +
+  window_end_ms + 3 totals) + `PerFightTimelineOut`
+  (fight_id + window_s + duration_s + points list).
+  The `points` array is sorted ascending by
+  `window_start_ms` (the aggregator's
+  deterministic-ordering contract).
+- `apps/api/src/gw2analytics_api/routes/fights.py`:
+  `GET /api/v1/fights/{id}/timeline?window_s=5` route
+  (BEFORE the catch-all for defensive declaration
+  order -- a catch-all `{fight_id}` route would
+  otherwise consume `/fights/{id}/timeline` with
+  `fight_id="{id}/timeline"` and return 404 before
+  the timeline route ever fires). `window_s` clamped
+  to `[1, 600]` with default 5 (matches the per-fight
+  events endpoint's bucketing convention). Returns
+  404 for unknown fights (mirrors the existing
+  `/fights/{id}/events` 404 contract). Threads the
+  loaded events through the new aggregator.
+- `apps/api/tests/test_uploads_e2e.py`: 4 new e2e
+  tests (default 5s window / 1s window / 422 on
+  out-of-range `window_s=0` / 422 on
+  `window_s=601` / 404 on unknown fight). The
+  422 tests pin the `[1, 600]` clamp boundary.
+
+### Added (web - plan/002)
+
+- `web/src/lib/api.ts`: `fetchFightTimeline` fetcher
+  helper + `PerFightTimelinePoint` + `FightTimeline`
+  TypeScript interfaces. Mirrors the
+  `fetchPlayerTimeline` pattern (`encodeURIComponent`
+  for the fightId, `URLSearchParams` for `window_s`,
+  `ApiError` on any non-2xx).
+- `web/src/components/PerFightTimelineChart.tsx`
+  (NEW, ~280 lines): inline SVG line chart, strict
+  parallel of `PlayerTimelineChart`. 3 series
+  (damage + healing + strip), per-series-max
+  normalisation in linear mode + shared-log in log
+  mode (the v0.8.2 lineage). X-axis uses `M:SS`
+  relative time labels (e.g. "0:00", "0:15") instead
+  of `MM/DD HH:MM` wall-clock (the per-fight timeline
+  is the "what happened in this fight" use case, so
+  relative time is the natural frame). The 2-decimal
+  zero-padding on seconds keeps the X-axis labels
+  aligned vertically. Exposes
+  `buildPerFightTimelineLayout` + `formatPerFightLogTick`
+  pure helpers for testing (parallels the
+  `PlayerTimelineChart` pure-helper export pattern).
+- `web/src/components/PerFightTimelineSection.tsx`
+  (NEW, ~50 lines): Server Component wrapper that
+  renders the section heading + caption ("Showing N
+  buckets (M-second window, X-second duration)") +
+  the chart. Handles the `timeline === null` case
+  (section-level "Per-fight timeline unavailable"
+  caption) WITHOUT blanking the page -- a transient
+  `fetchFightTimeline` failure degrades to the
+  caption, not a full-page error.
+- `web/src/app/fights/[id]/page.tsx`: imported the
+  new fetcher + section + `FightTimeline` type.
+  Added a 4th slot to the `Promise.allSettled`
+  parallel fetch (alongside the existing
+  `fetchFightEvents` / `fetchFightSquads` /
+  `fetchFightSkills`). Added a new section at the
+  bottom of the page (after the per-bucket event
+  windows -- the per-bucket event windows are the
+  "raw" absolute view; the per-fight timeline is the
+  "normalised" 3-series trend view). The page is
+  now a 4-fetcher + 7-section contract.
+- `web/tests/setup.ts`: added a no-op mock for
+  `PerFightTimelineSection` (the section component)
+  so the page-level Server Component tests can
+  render the wrapper without booting the SVG runtime.
+  The chart itself is NOT mocked (the page-level
+  tests mock the section, not the chart -- a previous
+  version of this setup mocked the chart with
+  `importOriginal`, but that approach silently broke
+  the component-level test by replacing the React
+  component with `() => null`).
+- `web/tests/e2e/mock-server.mjs`: added
+  `/api/v1/fights/:id/timeline` handler (inline
+  stub, 3 buckets of 5s each, mirrors the canonical
+  `PerFightTimelineOut` shape). Renamed the second
+  `timelineMatch` variable to `fightTimelineMatch`
+  to avoid a duplicate `const` declaration error
+  (the player-timeline handler also uses
+  `timelineMatch`).
+- `web/tests/e2e/fights.spec.ts`: added a heading
+  check for "Per-fight timeline" in the known-fight
+  smoke test (the 7th section assertion).
+- `web/tests/components/per-fight-timeline-chart.test.tsx`
+  (NEW, 8 vitest cases): empty points / 3 buckets
+  with dot trios / M:SS X-axis labels (using
+  `container.querySelectorAll("text")` for reliable
+  SVG text matching) / `buildPerFightTimelineLayout`
+  (null/empty + mixed-magnitude + log scale) /
+  `formatPerFightLogTick` (decade suffixes).
+- `web/tests/app/fight-events-page.test.tsx`: added
+  `fetchFightTimeline: vi.fn()` to the mock +
+  imported it + added a `POPULATED_TIMELINE` fixture
+  (3 buckets of 5s each) + added a `beforeEach`
+  default `mockResolvedValue(POPULATED_TIMELINE)` so
+  the page does not try to make a real HTTP call in
+  jsdom (the unmocked fetcher would timeout at the
+  5s vitest default).
+
+### Tests (plan/002)
+
+- 7 new pytest tests in
+  `libs/gw2_analytics/tests/test_per_fight_timeline.py`
+  (empty input / invalid window guard / single-bucket
+  shape / multi-bucket ordering / dual-emit path /
+  zero-window guard / frozen-Pydantic guarantee).
+- 4 new e2e tests in
+  `apps/api/tests/test_uploads_e2e.py` (default 5s
+  window / 1s window / 422 on out-of-range / 404 on
+  unknown fight).
+- 8 new vitest cases in
+  `web/tests/components/per-fight-timeline-chart.test.tsx`
+  (empty points / 3 buckets with dot trios / M:SS
+  X-axis labels / `buildPerFightTimelineLayout`
+  null/empty + mixed-magnitude + log scale /
+  `formatPerFightLogTick` decade suffixes).
+- `fetchFightTimeline: vi.fn()` added to the
+  `fight-events-page.test.tsx` mock (the page now
+  fires 4 parallel fetchers; the unmocked 4th
+  would timeout in jsdom).
+
+### Notes (plan/002)
+
+- The new aggregator DUPLICATES the per-bucket
+  skeleton from `EventWindowAggregator` (~30 lines)
+  rather than extending `EventBucket` with a
+  `buff_removal_total` field. Rationale: extending
+  `EventBucket` would leak the new field into the
+  existing `/fights/{id}/events` response
+  (whose `FightEventsSummaryOut.event_windows`
+  mirrors `EventBucket`), breaking the Phase 8
+  contract that locked the per-bucket window
+  shape. A v0.9.0 refactor could extract a shared
+  `_bucket_by_window_ms` helper for both
+  aggregators.
+- The route is declared BEFORE the catch-all
+  `{fight_id}` route in `routes/fights.py` (defensive
+  declaration order -- a catch-all would otherwise
+  consume `/fights/{id}/timeline` with
+  `fight_id="{id}/timeline"` and return 404 before
+  the timeline route ever fires).
+- The page's 4-fetcher `Promise.allSettled` is the
+  pre-existing v0.7.1 contract extended: a transient
+  `fetchFightTimeline` failure degrades to a
+  section-level caption WITHOUT blanking the page.
+  Only `/events` failure (slot 0) flips to the
+  unified error card.
+- The chart's X-axis uses RELATIVE TIME in `M:SS`
+  (not absolute wall-clock `MM/DD HH:MM` like the
+  per-account timeline). The per-fight timeline is
+  the "what happened in this fight" use case, so
+  relative time is the natural frame.
+- The component-level test uses
+  `container.querySelectorAll("text")` (NOT
+  `screen.getByText`) because the chart's `<title>`
+  tooltips contain the M:SS labels as substrings of
+  longer "0:00–0:05 · bucket 1/3\n..." strings,
+  which makes `getByText` unreliable for SVG charts.
+  Querying the `<text>` elements directly is more
+  robust -- the `<title>` elements are NOT `<text>`
+  elements so they don't appear in this query.
+- A previous version of `web/tests/setup.ts` mocked
+  `PerFightTimelineChart` with `importOriginal` to
+  keep the pure helpers available, but that approach
+  replaced the React component with `() => null` --
+  which silently broke the component-level test (it
+  rendered nothing, so `querySelectorAll("text")`
+  returned an empty array). The fix is to mock the
+  section wrapper (which is the actual page-level
+  concern) and let the chart be tested directly at
+  the component level.
+
+### Validation (plan/002)
+
+- `uv run ruff check apps/`: clean (RUFF=0).
+- `uv run mypy --no-incremental libs apps`: clean
+  (MYPY=0, 63 source files; +1 from plan/001's 62).
+- `uv run pytest libs/gw2_analytics/tests/`: 7
+  passed (PYTEST=0, new file).
+- `pnpm typecheck`: clean (TSC=0).
+- `pnpm test:unit`: clean (VITEST=0, 79 tests
+  across 14 test files; +8 from plan/001's 71
+  across 13 files).
+- `pnpm exec playwright test`: clean (PLAYWRIGHT=0,
+  14 tests across 6 specs; the `fights.spec.ts`
+  smoke test now asserts the 7th section heading).
+- Round 1 code-reviewer-minimax-m3 (commit
+  `e2198e9`): **caught 4 real issues** -- (1)
+  dual-emit test had events at `time_ms=1500` with
+  `window_s=1` so `bucket_index=1` produced 2 rows
+  (zero-filled bucket 0 + bucket 1 with events) but
+  the test expected 1 row; fix moved events to
+  `time_ms=500` (bucket 0) so the test exercises the
+  dual-emit accounting in isolation. (2) Mock server
+  re-declared `const timelineMatch` (already used by
+  the player-timeline handler); fix renamed to
+  `const fightTimelineMatch`. (3) Page test was
+  missing the 4th fetcher mock (`fetchFightTimeline`
+  would hit real `fetch()` in jsdom and timeout);
+  fix added `fetchFightTimeline: vi.fn()` to the mock
+  + a `POPULATED_TIMELINE` fixture + a `beforeEach`
+  default. (4) Vitest test used `type TimelineScale`
+  in a value import + `"log" as TimelineScale` cast
+  that TypeScript couldn't narrow; fix removed the
+  type from the import + removed the cast (`"log"`
+  is a literal that TypeScript narrows to
+  `TimelineScale` automatically). All 4 fixed in
+  the round-2 follow-up. Round 2 code-reviewer
+  (after the fixes): **APPROVED** with a note that
+  the `setup.ts` `PerFightTimelineChart` mock with
+  `importOriginal` silently broke the component-level
+  test (replaced the React component with `() =>
+  null`); fix removed the redundant mock (the
+  page-level tests mock the section wrapper, so the
+  chart is never rendered in page-level tests). Round
+  3 code-reviewer (after the `setup.ts` fix):
+  **APPROVED** (LGTM; all 5 fixes are correct and
+  minimal).
+
+### Test counts (cumulative after plan/002)
+
+- Python: 199 (v0.8.9 plan/001) -> 210 (v0.8.9
+  plan/002). Delta: +7 libs/gw2_analytics pytest
+  + +4 apps/api e2e.
+- Web vitest: 71 (v0.8.9 plan/001) -> 79 (v0.8.9
+  plan/002). Delta: +8 from
+  `per-fight-timeline-chart.test.tsx` (new file).
+- Playwright: 14 (v0.8.9 plan/001) -> 14 (v0.8.9
+  plan/002). Delta: +0 (the `fights.spec.ts` smoke
+  test gained a heading assertion but the spec
+  count is unchanged).
+- **Total: 270 (v0.8.9 plan/001) -> 289 (v0.8.9
+  plan/002).**
+
 [0.8.9]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.8...v0.8.9
 
 [Unreleased]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.8.8...HEAD
