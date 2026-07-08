@@ -51,6 +51,7 @@ for the stub-by-name pointer to this module.
 
 from __future__ import annotations
 
+import json as _json
 import uuid as _uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -189,13 +190,16 @@ def _seed_failed_delivery(
                 status_code=None,
                 error="non-2xx response: 500",
                 next_attempt_at=next_attempt_at,
-                payload={
-                    "kind": "upload_completed",
-                    "upload_id": upload_id_str,
-                    "fight_id": "fixture-fight",
-                    "sha256": "a" * 64,
-                    "started_at": _BASE_TIME.isoformat(),
-                },
+                payload=_json.dumps(
+                    {
+                        "kind": "upload_completed",
+                        "upload_id": upload_id_str,
+                        "fight_id": "fixture-fight",
+                        "sha256": "a" * 64,
+                        "started_at": _BASE_TIME.isoformat(),
+                    },
+                    separators=(",", ":"),
+                ).encode("utf-8"),
             )
         )
         seed_db.commit()
@@ -292,6 +296,11 @@ def test_retry_scheduler_failure_promotes_to_dlq_after_max_attempts(
             # Payload preserved verbatim so the replay endpoint can
             # re-emit the canonical body byte-for-byte.
             assert dlq_row.payload is not None
-            assert dlq_row.payload["kind"] == "upload_completed"
-            assert dlq_row.payload["upload_id"] == upload_id_str
-            assert dlq_row.payload["sha256"] == "a" * 64
+            # Payload preserved verbatim (bytes) so the replay endpoint
+            # can re-emit the canonical body byte-for-byte. The shape
+            # itself is unchanged from the dispatch-time dict — we
+            # round-trip through json.loads to assert semantic fields.
+            dlq_dict = _json.loads(dlq_row.payload.decode("utf-8"))
+            assert dlq_dict["kind"] == "upload_completed"
+            assert dlq_dict["upload_id"] == upload_id_str
+            assert dlq_dict["sha256"] == "a" * 64

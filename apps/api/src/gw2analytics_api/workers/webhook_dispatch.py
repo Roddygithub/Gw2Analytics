@@ -234,10 +234,15 @@ def _dispatch_single(
         upload_id=upload_id_str,
         attempt=1,
     )
-    # v0.9.1: persist the canonical body + set the retry instant.
-    # The scheduler reads ``next_attempt_at`` to gate re-delivery;
-    # the first attempt is immediate (no backoff delay).
-    delivery.payload = json.loads(body_bytes.decode("utf-8"))
+    # v0.9.1/v0.9.2: persist the canonical body bytes + set the
+    # retry instant. The scheduler reads ``next_attempt_at`` to gate
+    # re-delivery; the first attempt is immediate (no backoff delay).
+    # Post-plan-009 Step 1 the ``payload`` column is LargeBinary
+    # (raw bytes), so we write ``body_bytes`` directly -- otherwise
+    # JSONB key reordering would break the HMAC byte-for-byte
+    # guarantee across retries + replays (the integrator's HMAC
+    # verification would see a different digest each attempt).
+    delivery.payload = body_bytes
     delivery.next_attempt_at = _utcnow()
     db.add(delivery)
 

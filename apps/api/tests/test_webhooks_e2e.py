@@ -653,13 +653,16 @@ def _seed_failed_delivery(
                 status_code=None,
                 error="non-2xx response: 500",
                 next_attempt_at=next_attempt_at,
-                payload={
-                    "kind": "upload_completed",
-                    "upload_id": upload_id_str,
-                    "fight_id": "fixture-fight",
-                    "sha256": "a" * 64,
-                    "started_at": _BASE_TIME.isoformat(),
-                },
+                payload=_json.dumps(
+                    {
+                        "kind": "upload_completed",
+                        "upload_id": upload_id_str,
+                        "fight_id": "fixture-fight",
+                        "sha256": "a" * 64,
+                        "started_at": _BASE_TIME.isoformat(),
+                    },
+                    separators=(",", ":"),
+                ).encode("utf-8"),
             )
         )
         seed_db.commit()
@@ -777,13 +780,17 @@ def test_replay_dlq_idempotent_concurrent_calls(
         "sha256": "a" * 64,
         "started_at": _BASE_TIME.isoformat(),
     }
+    payload_bytes = _json.dumps(
+        payload,
+        separators=(",", ":"),
+    ).encode("utf-8")
     with session_factory() as seed_db:
         seed_db.add(
             OrmWebhookDlq(
                 id=delivery_id,
                 subscription_id=sub_id,
                 upload_id=upload_id_str,
-                payload=payload,
+                payload=payload_bytes,
                 last_error="non-2xx response: 500",
                 moved_to_dlq_at=_BASE_TIME,
             )
@@ -834,21 +841,26 @@ def test_replay_dlq_idempotent_concurrent_calls(
 def test_replayed_delivery_byte_for_byte_hmac_matches_original(
     session_factory: Any,
 ) -> None:
-    """Plan 007 v0.9.1: a fresh delivery row produced by
-    ``replay_dlq_delivery`` has a ``payload`` whose JSONB
-    round-trip (``json.dumps(payload, separators=(",", ":"))``)
-    produces the SAME byte-string the original dispatch worker
-    emitted, so the integrator's HMAC-SHA256 verification
-    computes the SAME digest across replays as it did for the
-    initial POST.
+    """Plan 007 v0.9.1 + plan 009 Step 1 v0.9.2: a fresh delivery
+    row produced by ``replay_dlq_delivery`` has a ``payload`` whose
+    LargeBinary round-trip preserves the SAME byte-string the
+    original dispatch worker emitted, so the integrator's
+    HMAC-SHA256 verification computes the SAME digest across
+    replays as it did for the initial POST.
 
-    Postgres's JSONB column normalises whitespace + key ordering,
-    so the dict passed in via SQLAlchemy's ``Mapped[dict]`` may
-    come back reordered. Python's ``json.loads`` (PEP 468) returns
-    a dict with iteration order = appearance order in the JSON
-    string. JSONB preserves appearance order on the wire back
-    out, so the canonical round-trip is byte-identical -> the HMAC
-    matches on re-emit.
+    Post-v0.9.2 step 1 the ``payload`` column is LargeBinary
+    (raw bytes); the dispatch worker writes canonical
+    ``body_bytes`` via
+    ``json.dumps(payload, separators=(",", ":")).encode("utf-8")``
+    and ``replay_dlq_delivery`` copies the bytes verbatim via
+    ``new_delivery.payload = dlq.payload``. Postgres ``bytea``
+    preserves bytes on round-trip without reordering; HMAC
+    matches across retries + replays (the prior JSONB intrinsic
+    key reordering is gone).
+
+    Pre-plan-009 this test failed because the JSONB round-trip
+    re-ordered dict keys; post-plan-009 it passes because the
+    bytes-as-stored ARE the bytes-as-signed.
     """
     sub_id, upload_id_str, _fight_id = _bootstrap_webhook_environment(
         session_factory,
@@ -873,7 +885,10 @@ def test_replayed_delivery_byte_for_byte_hmac_matches_original(
         hashlib.sha256,
     ).hexdigest()
 
-    # Seed a DLQ row carrying the canonical payload verbatim.
+    # Seed a DLQ row carrying the canonical payload verbatim
+    # (bytes post-plan-009 Step 1; the LargeBinary column does NOT
+    # reorder keys on round-trip, so the bytes-as-stored match the
+    # bytes-as-signed for HMAC integrity).
     delivery_id = f"dly_{_uuid.uuid4()}"
     with session_factory() as seed_db:
         seed_db.add(
@@ -881,7 +896,7 @@ def test_replayed_delivery_byte_for_byte_hmac_matches_original(
                 id=delivery_id,
                 subscription_id=sub_id,
                 upload_id=upload_id_str,
-                payload=canonical_payload,
+                payload=canonical_body_bytes,
                 last_error="non-2xx response: 500",
                 moved_to_dlq_at=_BASE_TIME,
             )
@@ -898,14 +913,19 @@ def test_replayed_delivery_byte_for_byte_hmac_matches_original(
 
     assert new_replay.delivery_id.startswith("dly_")
 
-    # Verify the new delivery's payload round-trips to the SAME bytes.
+    # Verify the new delivery's payload round-trips to the SAME
+    # bytes. Post-plan-009 Step 1, ``new_delivery.payload`` is
+    # LargeBinary (raw bytes written by the original dispatch
+    # worker + copied verbatim by ``replay_dlq_delivery``). The
+    # bytes-as-stored are bytes-as-signed for HMAC integrity -- NO
+    # JSON round-trip here (the prior ``_json.dumps(new_delivery.payload,
+    # ...)`` produced Python-repr bytes for the now-bytes payload,
+    # which is wrong; the LargeBinary column preserves bytes
+    # verbatim across the round-trip).
     with session_factory() as verify_db:
         new_delivery = verify_db.get(OrmWebhookDelivery, new_replay.delivery_id)
         assert new_delivery is not None
-        new_body_bytes = _json.dumps(
-            new_delivery.payload,
-            separators=(",", ":"),
-        ).encode("utf-8")
+        new_body_bytes = new_delivery.payload
 
     assert new_body_bytes == canonical_body_bytes, (
         f"replay payload bytes mismatch canonical bytes; "

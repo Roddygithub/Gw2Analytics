@@ -26,6 +26,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     Uuid,
@@ -287,7 +288,7 @@ class OrmWebhookDelivery(Base):
     next_attempt_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
-    payload: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    payload: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     subscription: Mapped[OrmWebhookSubscription] = relationship(back_populates="deliveries")
 
@@ -313,7 +314,7 @@ class OrmWebhookDlq(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     subscription_id: Mapped[str] = mapped_column(String(64), nullable=False)
     upload_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    payload: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     moved_to_dlq_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow

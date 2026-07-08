@@ -30,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -186,10 +185,12 @@ def _attempt_retry(
         delivery.next_attempt_at = _utcnow()
         return False
 
-    body_bytes = json.dumps(
-        delivery.payload,
-        separators=(",", ":"),
-    ).encode("utf-8")
+    # Post-plan-009 Step 1: ``delivery.payload`` is LargeBinary (raw
+    # bytes). The dispatch worker wrote the canonical ``body_bytes``
+    # verbatim; re-using the bytes directly (rather than a JSON
+    # round-trip via JSONB) preserves byte-for-byte HMAC integrity
+    # across retries + replays.
+    body_bytes = delivery.payload
     signature = hmac.new(
         subscription.secret.encode("utf-8"),
         body_bytes,
@@ -253,11 +254,17 @@ def _promote_to_dlq(db: Session, delivery: OrmWebhookDelivery) -> OrmWebhookDlq:
 
     Caller's outer ``db.commit()`` finalises the atomic promotion.
     """
+    # Post-plan-009 Step 1: ``OrmWebhookDlq.payload`` is LargeBinary
+    # (raw bytes); the dispatch worker computed the canonical bytes
+    # once and the scheduler re-uses them across retries. We copy the
+    # bytes verbatim so a subsequent ``replay_dlq_delivery`` can
+    # re-emit the canonical body without a JSONB round-trip (which
+    # would re-order keys and break the HMAC verification).
     dlq = OrmWebhookDlq(
         id=delivery.id,
         subscription_id=delivery.subscription_id,
         upload_id=delivery.upload_id,
-        payload=delivery.payload or {},
+        payload=delivery.payload if delivery.payload is not None else b"",
         last_error=delivery.error,
         moved_to_dlq_at=_utcnow(),
     )
