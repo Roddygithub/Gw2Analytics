@@ -24,11 +24,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from gw2analytics_api.database import get_session
+from gw2analytics_api.database import get_session, get_sessionmaker
 from gw2analytics_api.models import Upload
 from gw2analytics_api.schemas import UploadCreatedResponse, UploadOut
 from gw2analytics_api.services import process_parse
 from gw2analytics_api.storage import put_zevtc
+from gw2analytics_api.workers.webhook_dispatch import dispatch_for_upload
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,12 @@ def create_upload(
         # If the previous attempt failed, retry it via background task;
         # otherwise return the existing record untouched.
         if existing.status == "failed":
-            background_tasks.add_task(process_parse, db, existing.id, raw)
+            background_tasks.add_task(process_parse, get_sessionmaker(), existing.id, raw)
+            background_tasks.add_task(
+                dispatch_for_upload,
+                get_sessionmaker(),
+                existing.id,
+            )
         return UploadCreatedResponse(
             id=existing.id,
             sha256=existing.sha256,
@@ -96,7 +102,12 @@ def create_upload(
     except (S3Error, OSError):
         logger.exception("MinIO put_zevtc failed; upload remains usable without blob")
 
-    background_tasks.add_task(process_parse, db, upload.id, raw)
+    background_tasks.add_task(process_parse, get_sessionmaker(), upload.id, raw)
+    background_tasks.add_task(
+        dispatch_for_upload,
+        get_sessionmaker(),
+        upload.id,
+    )
     return UploadCreatedResponse(
         id=upload.id,
         sha256=upload.sha256,

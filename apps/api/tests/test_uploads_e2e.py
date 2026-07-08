@@ -38,12 +38,13 @@ from datetime import date as _date
 from datetime import datetime as _dt
 from datetime import timedelta as _td
 from io import BytesIO
+from typing import Any
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app
@@ -1588,6 +1589,135 @@ def test_player_timeline_tz_422_when_invalid_timezone() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_player_timeline_tz_europe_paris_dst_spring_forward() -> None:
+    """v0.9.0 followup: EU spring-forward day-bucketing.
+
+    Seeds 1 fight and pins ``started_at`` to a UTC datetime
+    that straddles the EU spring-forward boundary (2024-03-31
+    01:00 UTC = Paris clocks jump 02:00 CET -> 03:00 CEST).
+    With ``?tz=Europe/Paris&bucket=day``, the day-bucketed
+    point must land on the Paris calendar day (2024-03-31)
+    and the local-midnight invariant must hold at 00:00 Paris.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=2_345,
+            skill_id=base_skill_a,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+
+    # 2024-03-31 01:30 UTC = 03:30 CEST (post-jump). Paris
+    # calendar day: 2024-03-31. Without DST awareness the
+    # naive day-grouping would bucket on 2024-03-30 (the UTC
+    # date) -- that's the regression case the v0.9.0 followup
+    # locks.
+    target_utc = _dt(2024, 3, 31, 1, 30, 0, tzinfo=UTC)
+    session = get_sessionmaker()()
+    try:
+        session.execute(
+            update(OrmFight).where(OrmFight.id == fight_id).values(started_at=target_utc)
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    resp = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day", "tz": "Europe/Paris"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["bucket"] == "day"
+    assert payload["tz"] == "Europe/Paris"
+    assert payload["total"] == 1
+    assert len(payload["points"]) == 1
+    p = payload["points"][0]
+    started_at = _dt.fromisoformat(p["started_at"])
+    # Paris calendar day is 2024-03-31.
+    assert started_at.astimezone(ZoneInfo("Europe/Paris")).date() == _date(2024, 3, 31)
+    # Local-midnight invariant at Europe/Paris (regardless of
+    # CET vs CEST -- the day-bucketed point is at 00:00:00
+    # Paris-local).
+    paris = started_at.astimezone(ZoneInfo("Europe/Paris"))
+    assert (paris.hour, paris.minute, paris.second) == (0, 0, 0)
+    # The 1-event damage total is the seeded value.
+    assert p["total_damage"] == 2_345
+
+
+def test_player_timeline_tz_america_new_york_dst_fall_back() -> None:
+    """v0.9.0 followup: US fall-back day-bucketing.
+
+    Seeds 1 fight and pins ``started_at`` to a UTC datetime
+    that straddles the US fall-back boundary (2024-11-03 06:00
+    UTC = NY clocks roll 02:00 EDT -> 01:00 EST). With
+    ``?tz=America/New_York&bucket=day``, the day-bucketed
+    point must land on the NY calendar day (2024-11-03) and
+    the local-midnight invariant must hold at 00:00 NY local.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=3_456,
+            skill_id=base_skill_a,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+    account_name = f":synth.{base_id_a}"
+    encoded = quote(account_name, safe="")
+
+    # 2024-11-03 06:30 UTC = 01:30 EST (post-fall-back). NY
+    # calendar day: 2024-11-03. The pre-fall-back wall-clock
+    # would have been 02:30 EDT; the route honours the
+    # wall-clock state at parse time.
+    target_utc = _dt(2024, 11, 3, 6, 30, 0, tzinfo=UTC)
+    session = get_sessionmaker()()
+    try:
+        session.execute(
+            update(OrmFight).where(OrmFight.id == fight_id).values(started_at=target_utc)
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    resp = client.get(
+        f"/api/v1/players/{encoded}/timeline",
+        params={"bucket": "day", "tz": "America/New_York"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["bucket"] == "day"
+    assert payload["tz"] == "America/New_York"
+    assert payload["total"] == 1
+    assert len(payload["points"]) == 1
+    p = payload["points"][0]
+    started_at = _dt.fromisoformat(p["started_at"])
+    # NY calendar day is 2024-11-03.
+    assert started_at.astimezone(ZoneInfo("America/New_York")).date() == _date(2024, 11, 3)
+    # Local-midnight invariant at America/New_York (regardless
+    # of EDT vs EST -- the day-bucketed point is at 00:00:00
+    # NY-local).
+    ny = started_at.astimezone(ZoneInfo("America/New_York"))
+    assert (ny.hour, ny.minute, ny.second) == (0, 0, 0)
+    # The 1-event damage total is the seeded value.
+    assert p["total_damage"] == 3_456
+
+
 def test_fight_timeline_returns_per_bucket_totals_for_known_fight() -> None:
     """v0.8.9: ``GET /fights/{id}/timeline?window_s=1`` returns one row
     per bucket with the correct per-kind totals (damage +
@@ -1728,3 +1858,60 @@ def test_fight_timeline_422_when_window_s_too_large() -> None:
         params={"window_s": 601},
     )
     assert resp.status_code == 422
+
+
+def test_background_task_session_alive_at_invocation(
+    client: TestClient,
+    get_sessionmaker: Any,
+) -> None:
+    """Regression: process_parse must run with a WORKER-scoped session.
+
+    Pre-plan-006: ``background_tasks.add_task(process_parse, db=db)`` passed
+    the request-scoped ``db`` whose generator ``finally`` block fires BEFORE
+    FastAPI runs the BG task. ``process_parse`` raised ``DetachedInstanceError``
+    on its first query; upload.status never advanced past "queued"; webhook
+    dispatch never fired.
+
+    Post-plan-006: ``process_parse(session_factory, upload_id, raw_bytes)``
+    opens its own session via ``session_factory()`` (mirrors
+    ``dispatch_for_upload``).
+
+    Operator-runs after ``alembic upgrade head`` (0006 + 0007 applied + live
+    Postgres reachable). The test SKIPs cleanly when no live DB is reachable.
+    """
+    try:
+        probe = get_sessionmaker()
+        probe.execute(text("SELECT 1"))
+        probe.close()
+    except Exception as exc:
+        pytest.skip(
+            f"regression test needs live Postgres; got: "
+            f"{exc.__class__.__name__} (operator-runs after "
+            f"alembic upgrade)"
+        )
+
+    blob = _make_minimal_zevtc(
+        agents=[(123456789, 0, 0, "Player.One.1234", True)],
+        build="20250925",
+    )
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("regression.zevtc", blob, "application/zip")},
+    )
+    assert resp.status_code == 202, f"upload POST failed: {resp.status_code} {resp.text}"
+    upload_id = resp.json()["id"]
+
+    deadline = time.monotonic() + 2.0
+    status_value = None
+    while time.monotonic() < deadline:
+        get_resp = client.get(f"/api/v1/uploads/{upload_id}")
+        if get_resp.status_code == 200:
+            status_value = get_resp.json().get("status")
+            if status_value in ("completed", "failed"):
+                break
+        time.sleep(0.05)
+
+    assert status_value == "completed", (
+        f"BG task left upload in {status_value!r}; expected 'completed'. "
+        "If this fails post-plan-006, the session_factory refactor regressed."
+    )

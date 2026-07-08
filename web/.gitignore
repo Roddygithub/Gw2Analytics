@@ -45,8 +45,9 @@ next-env.d.ts
 # codegen run; never commit). Use `pnpm generate:api` to refresh.
 openapi.json
 
-# Generated OpenAPI types (TypeScript schema, re-derived from the
-# openapi.json by `pnpm exec openapi-typescript` on every codegen
-# run; never commit). Refreshed automatically on `pnpm dev` as of
-# v0.8.8 -- see the "OpenAPI regeneration" section in this README.
-src/lib/api/schema.d.ts
+# Committed `src/lib/api/schema.d.ts` is the OpenAPI drift-gate
+# baseline (v0.9.1 plan 008). Regenerate via `pnpm generate:api`
+# whenever a `apps/api/src/gw2analytics_api/routes/*` file changes
+# shape (new endpoint, renamed parameter, changed response shape)
+# and commit the regenerated schema.d.ts in the SAME PR -- the CI
+# `Detect API client drift` step fails the build otherwise.

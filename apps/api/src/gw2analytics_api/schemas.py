@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AgentOut(BaseModel):
@@ -526,3 +526,117 @@ class PerFightTimelineOut(BaseModel):
     window_s: int
     duration_s: float
     points: list[PerFightTimelinePointOut] = []
+
+
+class WebhookSubscriptionCreate(BaseModel):
+    """POST /api/v1/webhooks request body (v0.9.0 backend).
+
+    The integrator does NOT supply a ``secret`` on create -- the
+    gateway generates a fresh ``whsec_<base64(32bytes)>`` and
+    returns it ONCE in the 201 response (see
+    :class:`WebhookSubscriptionCreatedOut`).
+
+    The ``url`` field is validated as HTTPS-or-localhost per
+    design doc §7.3 (HTTPS-only with a single explicit exception
+    for localhost development). The route layer enforces this
+    via the private ``_validate_webhook_url`` helper; this
+    schema is the structural wire contract only.
+
+    The ``filter`` field is ``dict[str, object]`` (matches the
+    JSONB column on ``webhook_subscriptions``). The integrator
+    pins a subset of keys today (``upload_status``,
+    ``fight_result``); v0.9.1 will add a ``field_validator`` to
+    enforce string-valued filters if the spec decides to lock
+    the contract.
+    """
+
+    url: str
+    filter: dict[str, object]
+    description: str | None = None
+
+
+class WebhookSubscriptionCreatedOut(BaseModel):
+    """Response from POST /api/v1/webhooks (v0.9.0 backend).
+
+    Returned ONCE -- the integrator must capture ``secret`` NOW
+    and store it securely; it's never returned again. The
+    ``id`` field is the ``wh_<uuid>`` discriminator that the
+    integrator uses to identify the subscription on subsequent
+    ``GET`` and ``DELETE`` calls.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    url: str
+    filter: dict[str, object]
+    description: str | None = None
+    secret: str
+    created_at: datetime
+
+
+class WebhookSubscriptionOut(BaseModel):
+    """Response item from GET /api/v1/webhooks (v0.9.0 backend).
+
+    Strict subset of :class:`WebhookSubscriptionCreatedOut` --
+    excludes the ``secret`` field (one-time only on POST per
+    design doc §3.2). Excludes ``revoked_at`` too: per design
+    doc §4, revoked subscriptions return 404 from public view
+    (so listing them at all would leak existence). An
+    auditor-side panel that surfaces revoked subscriptions
+    with their revocation timestamp is a v0.9.1 followup
+    (``GET /api/v1/webhooks?include_revoked=true``).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    url: str
+    filter: dict[str, object]
+    description: str | None = None
+    created_at: datetime
+
+
+# --- v0.9.1 webhook delivery schemas appended below ---
+class WebhookDeliveryOut(BaseModel):
+    """Response item for GET /api/v1/webhooks/deliveries/{id} (v0.9.1).
+
+    Surfaces the canonical outbound payload bytes (`payload`) so an
+    operator can inspect exactly what was POSTed. HMAC-signed; the
+    integrator's verification is byte-for-byte against `payload`.
+
+    `next_attempt_at` is `null` once `delivered_at` is set (success
+    terminal state) or when retries have exhausted and the row has
+    been promoted to ``OrmWebhookDlq`` (failure terminal state).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str = Field(..., min_length=1, max_length=64)
+    subscription_id: str
+    upload_id: str
+    attempt: int
+    status_code: int | None = None
+    error: str | None = None
+    delivered_at: datetime | None = None
+    next_attempt_at: datetime | None = None
+    payload: dict[str, object] | None = None
+
+
+class WebhookDeliveryReplayOut(BaseModel):
+    """Response item for POST /api/v1/webhooks/dlq/{delivery_id}/replay.
+
+    `restart` indicates whether the replay was queued vs already
+    scheduled for retry (idempotent on concurrent calls). When
+    `restart=True`, ``next_attempt_at`` echoes the freshly
+    computed schedule time.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    delivery_id: str = Field(..., min_length=1, max_length=64)
+    subscription_id: str
+    upload_id: str
+    attempt: int
+    next_attempt_at: datetime
+    restart: bool

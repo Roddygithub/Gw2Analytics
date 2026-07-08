@@ -21,6 +21,7 @@ from __future__ import annotations
 import gzip
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
@@ -44,64 +45,69 @@ from gw2analytics_api.storage import put_events
 logger = logging.getLogger(__name__)
 
 
-def process_parse(db: Session, upload_id: uuid.UUID, raw_bytes: bytes) -> None:
-    """Run the V0 parser on the uploaded blob and persist Fight+Agent rows.
+def process_parse(
+    session_factory: Callable[[], Session],
+    upload_id: uuid.UUID,
+    raw_bytes: bytes,
+) -> None:
+    with session_factory() as db:
+        """Run the V0 parser on the uploaded blob and persist Fight+Agent rows.
 
-    Dispatched by FastAPI ``BackgroundTasks`` from ``POST /api/v1/uploads``.
-    The ``db`` Session is the request-scoped one; FastAPI runs background
-    tasks *after* the response is sent and *before* the dependency
-    generator's ``finally`` block closes the session, so the session is
-    still usable here. When 5+ concurrent uploads is the norm, we move
-    to a dedicated queue (Arq) with a **fresh, worker-scoped** session
-    — never reuse the request session in the worker.
-    """
-    upload = db.get(Upload, upload_id)
-    if upload is None:
-        logger.error("upload %s disappeared between POST and parse", upload_id)
-        return
-    try:
-        # ``.zevtc`` files are zip wrappers around the raw EVTC blob.
-        # ``read_zevtc_bytes`` is the single source of truth for the
-        # zip-discriminate-unwrap contract: it returns the inner EVTC for
-        # valid zips and raises :class:`EvtcParseError` for anything else
-        # (bogus zip, non-zip bytes, empty archive — all caught below).
-        evtc_bytes = read_zevtc_bytes(raw_bytes)
-        fights = list(PythonEvtcParser().parse(evtc_bytes))
-    except EvtcParseError as exc:
-        logger.warning("parse failed for upload %s: %s", upload_id, exc)
-        upload.status = UPLOAD_STATUS_FAILED
-        upload.error_message = f"EvtcParseError: {exc}"
-        db.commit()
-        return
-    except (RuntimeError, ValueError) as exc:
-        # Surface genuine Python bugs (e.g. ``_save_fight`` raises
-        # ``ValueError`` defensively if a fight arrives without a header) and
-        # unexpected parser misbehaviour (``RuntimeError``) rather than hide
-        # them behind a generic "failed" status.
-        logger.exception("parse exception for upload %s", upload_id)
-        upload.status = UPLOAD_STATUS_FAILED
-        upload.error_message = f"{type(exc).__name__}: {exc}"
-        db.commit()
-        return
+        Dispatched by FastAPI ``BackgroundTasks`` from ``POST /api/v1/uploads``.
+        The ``db`` Session is the request-scoped one; FastAPI runs background
+        tasks *after* the response is sent and *before* the dependency
+        generator's ``finally`` block closes the session, so the session is
+        still usable here. When 5+ concurrent uploads is the norm, we move
+        to a dedicated queue (Arq) with a **fresh, worker-scoped** session
+        — never reuse the request session in the worker.
+        """
+        upload = db.get(Upload, upload_id)
+        if upload is None:
+            logger.error("upload %s disappeared between POST and parse", upload_id)
+            return
+        try:
+            # ``.zevtc`` files are zip wrappers around the raw EVTC blob.
+            # ``read_zevtc_bytes`` is the single source of truth for the
+            # zip-discriminate-unwrap contract: it returns the inner EVTC for
+            # valid zips and raises :class:`EvtcParseError` for anything else
+            # (bogus zip, non-zip bytes, empty archive — all caught below).
+            evtc_bytes = read_zevtc_bytes(raw_bytes)
+            fights = list(PythonEvtcParser().parse(evtc_bytes))
+        except EvtcParseError as exc:
+            logger.warning("parse failed for upload %s: %s", upload_id, exc)
+            upload.status = UPLOAD_STATUS_FAILED
+            upload.error_message = f"EvtcParseError: {exc}"
+            db.commit()
+            return
+        except (RuntimeError, ValueError) as exc:
+            # Surface genuine Python bugs (e.g. ``_save_fight`` raises
+            # ``ValueError`` defensively if a fight arrives without a header) and
+            # unexpected parser misbehaviour (``RuntimeError``) rather than hide
+            # them behind a generic "failed" status.
+            logger.exception("parse exception for upload %s", upload_id)
+            upload.status = UPLOAD_STATUS_FAILED
+            upload.error_message = f"{type(exc).__name__}: {exc}"
+            db.commit()
+            return
 
-    if not fights:
-        upload.status = UPLOAD_STATUS_FAILED
-        upload.error_message = "parser yielded no fights"
-        db.commit()
-        return
+        if not fights:
+            upload.status = UPLOAD_STATUS_FAILED
+            upload.error_message = "parser yielded no fights"
+            db.commit()
+            return
 
-    core_fight = fights[0]
-    if core_fight.header is None:
-        upload.status = UPLOAD_STATUS_FAILED
-        upload.error_message = "parser yielded fight without header"
-        db.commit()
-        return
+        core_fight = fights[0]
+        if core_fight.header is None:
+            upload.status = UPLOAD_STATUS_FAILED
+            upload.error_message = "parser yielded fight without header"
+            db.commit()
+            return
 
-    _save_fight(db, upload, core_fight)
-    _persist_event_blob(db, upload, evtc_bytes, core_fight.id)
-    upload.status = UPLOAD_STATUS_COMPLETED
-    upload.error_message = None
-    db.commit()
+        _save_fight(db, upload, core_fight)
+        _persist_event_blob(db, upload, evtc_bytes, core_fight.id)
+        upload.status = UPLOAD_STATUS_COMPLETED
+        upload.error_message = None
+        db.commit()
 
 
 def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:

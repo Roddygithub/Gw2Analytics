@@ -6,14 +6,48 @@ sub-router. We expose CORS, ``/healthz``, and the v1 routers.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
+from sqlalchemy.orm import Session
 
 from gw2analytics_api.config import get_settings
-from gw2analytics_api.routes import account, fights, health, players, uploads
+from gw2analytics_api.database import get_sessionmaker
+from gw2analytics_api.routes import account, fights, health, players, uploads, webhooks
+from gw2analytics_api.workers.webhook_scheduler import lifespan_scheduler
+
+
+def _open_session() -> Session:
+    """Open a fresh SQLAlchemy `Session` for one scheduler poll iteration.
+
+    `get_sessionmaker` returns the cached `sessionmaker[Session]` factory;
+    calling this helper invokes `sessionmaker()` which yields a new
+    `Session` instance. Defined as a NAMED function (vs inline lambda) so
+    ruff does not flag `PLW0108 unnecessary-lambda` and so mypy sees a
+    fully-typed ``Callable[[], Session]`` shape.
+    """
+    return get_sessionmaker()()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Start the v0.9.1 webhook retry+DLQ scheduler as a background
+    asyncio task (design doc §5; 5s poll interval)."""
+    scheduler_task = asyncio.create_task(lifespan_scheduler(_open_session))
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await scheduler_task
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title="GW2Analytics API",
     description=(
         "WvW combat-log ingestion + analytics. Wires gw2_evtc_parser behind "
@@ -60,6 +94,7 @@ def healthz() -> dict[str, str]:
 app.include_router(uploads.router)
 app.include_router(fights.router)
 app.include_router(players.router)
+app.include_router(webhooks.router)
 app.include_router(account.router)
 app.include_router(health.router)
 

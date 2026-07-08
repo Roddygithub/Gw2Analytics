@@ -242,6 +242,39 @@ font-rendering drift between the capture host + the spec host.
 Run `pnpm screenshots --persist` to re-baseline from the same
 host the spec runs on, then commit the updated PNGs.
 
+## Regenerating the web TypeScript client
+
+`web/src/lib/api/schema.d.ts` is the TypeScript contract the
+web tier consumes from the backend's FastAPI `app.openapi()`
+schema. Per v0.9.1 plan 008, the file is committed (un-gitignored)
+and the CI `Detect API client drift` step
+(`git diff --exit-code -- web/src/lib/api/schema.d.ts`) fails any
+PR where the regenerated client differs from the committed
+baseline.
+
+**When to regenerate:** any backend PR that touches
+`apps/api/src/gw2analytics_api/routes/*` -- a new endpoint, a
+renamed parameter, an added/changed response field, a changed
+response shape -- MUST regenerate the schema and commit it in
+the same PR.
+
+**How:**
+
+```bash
+# From web/ (runs `uv run python scripts/dump_openapi.py` then
+# `pnpm exec openapi-typescript` then cleans up openapi.json):
+cd web && pnpm generate:api
+```
+
+Then `git add web/src/lib/api/schema.d.ts` and commit the
+regenerated file alongside the backend change. If a PR slips
+through with a stale schema, the CI drift gate will fail on
+the next CI run (after the gate starts working).
+
+The intermediate `openapi.json` is gitignored and removed
+automatically by the `generate:api` script chain. Only the
+final `web/src/lib/api/schema.d.ts` ships.
+
 ## Pull request workflow
 
 1. Branch off `main`.

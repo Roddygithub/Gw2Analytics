@@ -47,7 +47,11 @@ between tests). To keep the assertions stable, each test:
 
 from __future__ import annotations
 
+import struct as _struct
+import time
 import uuid as _uuid
+import zipfile
+from io import BytesIO
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
@@ -73,8 +77,6 @@ def _make_cbtevent(
     this test file self-contained (avoids an import dependency
     on the e2e module's private helpers).
     """
-    import struct as _struct
-
     fmt = "<QQQiiIIHHHbbbbbbbbIIbb"
     return _struct.pack(
         fmt,
@@ -110,10 +112,6 @@ def _make_minimal_zevtc(
     events: list[bytes] | None = None,
 ) -> bytes:
     """Local copy of :func:`test_uploads_e2e._make_minimal_zevtc` for self-containment."""
-    import struct as _struct
-    import zipfile
-    from io import BytesIO
-
     if skills is None:
         skills = []
     if events is None:
@@ -121,10 +119,10 @@ def _make_minimal_zevtc(
     header_fmt = "<4s8sBHBI IB"
     header_size = _struct.calcsize(header_fmt)
     agent_record_fmt = "<QIIhhhhhh"
-    agent_prefix_size = _struct.calcsize(agent_record_fmt)
+    _struct.calcsize(agent_record_fmt)
     agent_name_size = 68
     skill_header_fmt = "<II"
-    skill_header_size = _struct.calcsize(skill_header_fmt)
+    _struct.calcsize(skill_header_fmt)
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
         header = _struct.pack(
@@ -204,7 +202,6 @@ def _post_minimal_fight_with_professions(
     cross-fight response by the ``:synth.<base_id_a>`` prefix
     to count only the test's seeded players.
     """
-    import time as _time
 
     suffix = suffix or _uuid.uuid4().hex[:8]
     build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
@@ -260,11 +257,11 @@ def _post_minimal_fight_with_professions(
         upload_resp = client.get(f"/api/v1/uploads/{upload_id}")
         assert upload_resp.status_code == 200
         if upload_resp.json()["status"] == "completed":
-            _time.sleep(0.1)
+            time.sleep(0.1)
             fight_id = str(upload_resp.json()["fight_id"])
             account_names = [f":synth.{base_id_a + i}" for i in range(len(professions))]
             return fight_id, account_names
-        _time.sleep(0.1)
+        time.sleep(0.1)
     msg = f"upload {upload_id} did not reach 'completed' within 5s"
     raise AssertionError(msg)
 
@@ -443,9 +440,7 @@ def test_players_filter_with_pagination() -> None:
     # applied -- if the filter were broken, page 1 might
     # include a Warrior or Necromancer).
     for row in rows1:
-        assert row["profession"] == "PROF(7)", (
-            f"page 1 row should be Mesmer (PROF(7)), got {row}"
-        )
+        assert row["profession"] == "PROF(7)", f"page 1 row should be Mesmer (PROF(7)), got {row}"
     resp2 = client.get(
         "/api/v1/players",
         params={"profession": "MESMER", "limit": 2, "offset": 2},
@@ -454,9 +449,7 @@ def test_players_filter_with_pagination() -> None:
     rows2 = resp2.json()
     # Every row on page 2 is a Mesmer too.
     for row in rows2:
-        assert row["profession"] == "PROF(7)", (
-            f"page 2 row should be Mesmer (PROF(7)), got {row}"
-        )
+        assert row["profession"] == "PROF(7)", f"page 2 row should be Mesmer (PROF(7)), got {row}"
     page1_accounts = {r["account_name"] for r in rows1}
     page2_accounts = {r["account_name"] for r in rows2}
     # Page 1 + page 2 must not overlap (the offset/limit

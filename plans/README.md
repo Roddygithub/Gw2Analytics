@@ -5,7 +5,29 @@ monorepo. Each audit is a senior-advisor survey (improve skill, `next`
 invocation, `quick` effort) that scopes the next cycle's direction-only
 candidates. The plans are self-contained implementation specs that a
 different, less-context-aware executor can ship without further
-clarification.
+clarification.## v0.9.1 audit (security + correctness + correctness-tighter focus)
+
+Five plans selected from the v0.9.1 audit (drift base `ef5e4f3`). Each plan addresses one HIGH-confidence finding; ordering below reflects the recommended implementation sequence (most-blocking → least-blocking).
+
+| # | Plan | Status | Addresses finding | Effort |
+|---|---|---|---|---|
+| 004 | [004-v091-webhook-schema-id-type-fix](./004-v091-webhook-schema-id-type-fix.md) | **shipped** (`WebhookDeliveryOut.id` + `WebhookDeliveryReplayOut.delivery_id` → `str` with `Field(min_length=1, max_length=64)`; `Field` import added to `schemas.py`; hermetic regression test on schema shape) | #1 schema `int` ↔ `str` mismatch on `WebhookDeliveryOut` + `WebhookDeliveryReplayOut` | S |
+| 005 | [005-v091-webhook-ssrf-block-https](./005-v091-webhook-ssrf-block-https.md) | **shipped** (universal IP-block on resolved addresses in `_validate_webhook_url` — direct IP literals classified via `ipaddress.ip_address`, hostnames via `getaddrinfo` for IPv4+IPv6; opt-out via `GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS` env; fail-closed on DNS errors; 5 new SSRF regression tests covering RFC1918, link-local, IPv6 loopback, hostname-resolves-to-private, and the opt-out escape hatch) | #2 SSRF bypass in `_validate_webhook_url` for `https://` schemes | S |
+| 006 | [006-v091-upload-bg-task-closed-session](./006-v091-upload-bg-task-closed-session.md) | **shipped** (`process_parse(db)` → `process_parse(session_factory, upload_id, raw_bytes)`; body wrapped in `with session_factory() as db:`; both BG-task callers updated to `get_sessionmaker()`; regression test verifies the session is alive at task invocation time) | #3 closed-session bug in `process_parse` BackgroundTasks path | S |
+| 007 | [007-v091-webhook-retry-dlq-replay-tests](./007-v091-webhook-retry-dlq-replay-tests.md) | **shipped** (4 NEW tests: scheduler first-attempt success, exponential backoff (single 10s step at attempt 2) → DLQ promotion on hitting ``_MAX_ATTEMPTS = 3``, replay idempotency under concurrent ``ThreadPoolExecutor`` + ``Session.commit`` race-widener, and HMAC byte-for-byte integrity across replays; the multi-tick ``test_retry_scheduler_failure_promotes_to_dlq_after_max_attempts`` landed in standalone ``apps/api/tests/test_webhooks_e2e_scheduler.py`` after an in-session deferral -- flat per-tick ``with``-block structure escapes the nested dedent footgun; original ``pytest.skip()`` placeholder in ``test_webhooks_e2e.py`` replaced with a stub-by-name pointer to the new module; ``time-machine`` dev-dep added; 22 tests collected across the 2 files; pytest --collect-only clean; mypy clean; ruff clean except 1 cosmetic E501 docstring line in the stub pointer) | #4 v0.9.1 retry+DLQ+replay test gap (0 tests on the scheduler tick + DLQ promote + replay idempotency) | M |
+| 008 | [008-v091-openapi-drift-gate-fix](./008-v091-openapi-drift-gate-fix.md) | **shipped** (`src/lib/api/schema.d.ts` un-gitignored + committed as 71 KB baseline; CI `Detect API client drift` step (`git diff --exit-code -- web/src/lib/api/schema.d.ts`) inserted between `OpenAPI: regenerate web TypeScript client` and `Type-check web`; `CONTRIBUTING.md` `## Regenerating the web TypeScript client` section documents the contract — `Schema.d.ts` must be regenerated + committed in the SAME PR as any backend `apps/api/src/gw2analytics_api/routes/*` shape change; `openapi.json` remains gitignored as ephemeral intermediate artifact; deterministic re-regen verified via drift-gate smoke test (no diff after re-run)) | #5 broken OpenAPI drift gate (schema.d.ts is .gitignored, gate never has anything to diff) | S |
+
+### Considered but deferred
+
+The Agent B perf + tech-debt re-run surfaced 5 additional findings after the security+correctness pass was over. They are tracked here for the next cycle (v0.9.1 hardening or v0.10):
+
+| # | Finding (drift base `ef5e4f3`) | Implication | Suggested phase |
+|---|---|---|---|
+| 12 | `routes/fights.py:list_fights` N+1 query across `agents` + `skills` relationships | `limit=50` triggers 101 SELECTs | v0.10 perf |
+| 13 | `webhook_scheduler.process_scheduled_retries` sync HTTP serially blocks up to 10s per row | One slow webhook stalls the queue | v0.9.1 hardening (combine with plan 006) |
+| 14 | `_load_fight_events` re-downloads + decompresses + re-validates per endpoint (4× per fight hit by parallel frontend) | Massive OOM risk on busy fights | v0.10 perf |
+| 15 | `_attempt_retry` subscription lookup N+1 in scheduler tick | One query per delivery on retry path | v0.9.1 hardening (combine with plan 007 tests) |
+| 16 | `services.read_zevtc_bytes` fully unzips in memory | Scaling poor under BG-worker concurrency | v0.10 perf (streaming parser redesign) |
 
 ## v0.9.0 audit (current)
 
@@ -75,6 +97,17 @@ additive test coverage (plan/003).
   "latest diff" artifact store that doesn't exist yet.
 
 ---
+
+### Hardening followups (post v0.9.1 ship)
+
+Two followup cycles landed during the v0.9.1 hardening pass after the 5 audit plans shipped:
+
+| # | Action | Addresses | Outcome |
+|---|---|---|---|
+| H1 | **Plan 007 re-attempt** — the originally-deferred multi-tick scheduler test `test_retry_scheduler_failure_promotes_to_dlq_after_max_attempts` (exponential backoff at attempt 2 + DLQ-promote at attempt 3, seeded via `time-machine` clock advances + respx 500 mock) moved to a standalone `apps/api/tests/test_webhooks_e2e_scheduler.py` module with FLAT per-tick `with`-block structure (`_respx.mock` OUTERMOST + short-lived `time_machine.travel` per tick, no nesting); the original `pytest.skip()` placeholder in `apps/api/tests/test_webhooks_e2e.py` replaced with a stub-by-name pointer for search-by-name discoverability; ``assert count1 == 1``/``assert count2 == 1`` assertions moved to 8-space (inside each `time_machine.travel`) so they re-anchor unambiguously after future str_replace cleanups | deferred slot in plan 007 (the in-session deferred multi-tick scheduler test) | **shipped** -- all 4 retry+DLQ+replay tests from plan 007 now land; 22 tests collected across the 2 files; ruff + mypy + pytest collect-only all clean |
+| H2 | **Pre-existing lint-debt cleanup** -- 9 ruff errors + 9 ruff-format fixes + 3 mypy errors in `apps/api/tests/` (all pre-existing from prior v0.9.0/v0.9.1 cycles, NOT introduced by plans 004-008). Auto-fixes via `ruff check --fix --unsafe-fixes` (cleared 2 F841 unused-vars in test_players.py) + `ruff format` (10 files reformatted); targeted str_replace / Python edits cleared the rest: dropped 2 unused `# noqa:` directives in test_players.py (PLC0415 on top-level `struct`, F401 on actively-used `_uuid`), dropped extra isort blank-line split, hoisted `import time` to top-level + dropped the inline `import time as _time  # noqa: PLC0415, F811` + converted 2× `_time.sleep(0.1)` to `time.sleep(0.1)`, reordered the stdlib imports in test_uploads_e2e.py (`from X` before `import X`), wrapped the long docstring line in test_webhooks_e2e_scheduler.py via `See  \`\`...\ntest_retry_scheduler_failure_promotes_to_dlq_after_max_attempts\`\``, ran `ruff check --fix` (auto-fixed the trailing W293 whitespace + the residual I001 group split) + `ruff format` for a final pass | accumulated lint debt from test_players.py / test_uploads_e2e.py / test_webhooks_e2e.py / test_webhooks_e2e_scheduler.py | **shipped** -- `ruff check` + `ruff format --check` + `mypy libs apps --no-incremental` all 0 errors; 22 pytest tests collect; ``git status`` shows the 4 affected test files modified (no behavioural changes in production code) |
+
+Both followups are docs-only + test-fixture-touch-ups; no production code paths were affected. The v0.9.1 hardening cycle is now ready for the operator-side close-out: the atomic `feat(api+web): v0.9.1 security + correctness hardening (schemas, SSRF, BG-task, retry+DLQ+replay tests, OpenAPI drift gate)` commit + CHANGELOG `[0.9.1]` entry + `v0.9.1` tag.
 
 ## v0.8.9 audit (closed)
 

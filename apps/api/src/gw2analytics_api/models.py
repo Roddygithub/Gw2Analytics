@@ -20,6 +20,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -210,3 +211,110 @@ class OrmFightPlayerSummary(Base):
     total_damage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_healing: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_buff_removal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class OrmWebhookSubscription(Base):
+    """One registered webhook subscription (v0.9.0 backend).
+
+    Created by ``POST /api/v1/webhooks`` and queried by the
+    worker pool on every parse-completion notification.
+    Soft-delete via ``revoked_at`` (NULL = active) so the
+    ``GET /api/v1/webhooks`` endpoint can surface the analyst's
+    audit panel without losing the historical record.
+    """
+
+    __tablename__ = "webhook_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    # SQL column is ``filter`` (matches the design doc §4 verbatim);
+    # Python attr is ``filter_payload`` to shadow the Python builtin
+    # ``filter()`` (which shadows nothing in practice but the
+    # symbolic collision is a footgun in IDE auto-complete).
+    filter_payload: Mapped[dict[str, object]] = mapped_column("filter", JSON, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    secret: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Back-populates via FK from deliveries (the dlq side does
+    # NOT have an FK -- deliberate forensics decision per
+    # ``OrmWebhookDlq`` docstring). The route / service layer
+    # queries the dlq via a manual filter on subscription_id;
+    # no ``dlq_entries`` relationship here.
+    deliveries: Mapped[list[OrmWebhookDelivery]] = relationship(
+        back_populates="subscription",
+        cascade="all, delete-orphan",
+    )
+
+
+class OrmWebhookDelivery(Base):
+    """One webhook delivery attempt chain (v0.9.0 backend).
+
+    Created by the worker when a parse-completion matches a
+    subscription's filter; updated through the 3-attempt retry
+    schedule (1s / 10s / 100s exponential backoff) until
+    success or DLQ-promotion.
+    """
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # FK to webhook_subscriptions.id. NO ondelete cascade -- the
+    # canonical state transition is soft-delete (revoked_at);
+    # hard delete is a manual operator action that surfaces a
+    # controlled FK violation.
+    subscription_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("webhook_subscriptions.id"),
+        nullable=False,
+    )
+    upload_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # v0.9.1: retry scheduler columns. ``next_attempt_at`` is the
+    # wall-clock instant the polling worker
+    # (webhook_scheduler.py) re-attempts a failed delivery; rows
+    # with NULL ``next_attempt_at`` are picked up immediately. The
+    # 1s/10s/100s exponential backoff (design doc §5) writes the
+    # scheduled instant after each failed POST. ``payload`` stores
+    # the canonical outbound body so retries + replays re-emit
+    # byte-for-byte (HMAC-SHA256 integrity on the integrator side).
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    payload: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+
+    subscription: Mapped[OrmWebhookSubscription] = relationship(back_populates="deliveries")
+
+
+class OrmWebhookDlq(Base):
+    """One dead-letter entry (v0.9.0 backend).
+
+    Populated by the worker when a delivery has exhausted the
+    3-attempt retry schedule. Retained indefinitely (no
+    automatic cleanup); the v0.9.x followup will surface a
+    ``POST /webhooks/dlq/{id}/replay`` endpoint for manual
+    replay.
+
+    Schema note: ``subscription_id`` is NOT FK-referenced. The
+    DLQ keeps the original id for forensics even after the
+    subscription is hard-deleted; the route / service layer
+    queries the subscription row directly by id when needed
+    (no SQLAlchemy relationship here).
+    """
+
+    __tablename__ = "webhook_dlq"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    subscription_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    upload_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    moved_to_dlq_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )

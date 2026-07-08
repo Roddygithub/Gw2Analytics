@@ -54,16 +54,39 @@ const PERSIST = process.argv.includes("--persist");
 const DOCS_DIR = resolve(import.meta.dirname, "..", "..", "docs", "screenshots");
 const BASE = "http://127.0.0.1:3000";
 
-// (label, path, wait-selector?, extra-pre-screenshot-delay-ms)
+// (label, path, hydration-sentinel?, extra-pre-screenshot-delay-ms)
+//
+// The ``hydration-sentinel`` slot carries an optional
+// ``waitForFunction`` predicate that runs in the page context
+// AFTER ``page.goto`` returns. ``null`` means "snapshot
+// immediately after networkidle" (the static pages 01–03
+// hydrate fast enough that a fresh ``fullPage: true`` capture
+// lands at the final document scrollHeight). ``"stable-scroll"``
+// is the v0.9.0 plan/003 hydration guard (see CHANGELOG
+// [Unreleased] "Fixed (web e2e - VR hydration)"): waits until
+// the page's body scrollHeight exceeds 900 -- proving AG Grid /
+// SVG chart mounting expanded the layout beyond the 900px
+// viewport -- AND the scrollHeight has been stable for 500ms.
+//
+// Without this guard the direct ``chromium.launch()`` script
+// captures at 1440×900 while the spec captures at 1440×3196.
+// The Playwright test runner masks the race via internal
+// microtask delays between test setup and ``page.screenshot()``;
+// ``chromium.launch()`` directly does not get those. Commit
+// 882edff "match spec wait strategy (networkidle + immediate
+// capture)" removed this guard in pursuit of identical logic
+// with the spec and was a regression (see CHANGELOG [Unreleased]
+// "Known issue"); this restore keeps the spec identical but
+// adds the script's prose-specific guard back in.
 const PAGES = [
-  ["01-landing",                       "/",                                        null,     0],
-  ["02-account",                       "/account",                                 null,     0],
-  ["03-upload",                        "/upload",                                  null,     0],
-  ["04-fights",                        "/fights",                                  null,     0],
-  ["05-players",                       "/players",                                 null,     0],
-  ["06-player-profile-with-timeline", "/players/TestAccount.1234",                null,     0],
-  ["07-player-empty-timeline",         "/players/empty-history.5678",              null,     0],
-  ["08-fight-drilldown",               "/fights/fixture-fight-001",                null,     0],
+  ["01-landing",                       "/",                                        null,             0],
+  ["02-account",                       "/account",                                 null,             0],
+  ["03-upload",                        "/upload",                                  null,             0],
+  ["04-fights",                        "/fights",                                  "stable-scroll",  0],
+  ["05-players",                       "/players",                                 "stable-scroll",  0],
+  ["06-player-profile-with-timeline", "/players/TestAccount.1234",                "stable-scroll",  0],
+  ["07-player-empty-timeline",         "/players/empty-history.5678",              "stable-scroll",  0],
+  ["08-fight-drilldown",               "/fights/fixture-fight-001",                "stable-scroll",  0],
 ];
 
 await mkdir(OUT_DIR, { recursive: true });
@@ -101,7 +124,40 @@ try {
         waitUntil: "networkidle",
         timeout: 30000,
       });
-    const outPath = resolve(OUT_DIR, `${label}.png`);
+
+      // v0.9.0 plan/003 hydration guard (see CHANGELOG
+      // [Unreleased] "Fixed (web e2e - VR hydration)"). The
+      // predicate polls in the page context and resolves true
+      // only when body.scrollHeight has held steady for
+      // >= 500ms AND exceeded the 900px minimum. ``window``
+      // state is sticky across ``waitForFunction`` polls (each
+      // poll re-runs the predicate on the same Document).
+      if (waitFor === "stable-scroll") {
+        await page.waitForFunction(
+          ({ minHeight, stableMs }) => {
+            const h = document.body.scrollHeight;
+            // Reset the stability timer on every height change
+            // OR on any below-threshold read. Once the height
+            // exceeds ``minHeight`` AND has been steady for
+            // ``stableMs``, resolve.
+            if (h < minHeight || window.__gw2LastHeight !== h) {
+              window.__gw2LastHeight = h;
+              window.__gw2LastChangeAt = performance.now();
+              return false;
+            }
+            return (
+              performance.now() - window.__gw2LastChangeAt >= stableMs
+            );
+          },
+          { minHeight: 900, stableMs: 500 },
+          { timeout: 30000 },
+        );
+      }
+      if (extraDelay > 0) {
+        await page.waitForTimeout(extraDelay);
+      }
+
+      const outPath = resolve(OUT_DIR, `${label}.png`);
       await page.screenshot({ path: outPath, fullPage: true });
       const status = resp ? resp.status() : "?";
       console.log(`OK (HTTP ${status} -> ${outPath})`);

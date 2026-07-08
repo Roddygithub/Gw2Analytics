@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
 
-**Status:** 289 active tests across libs + apps + web (210 pytest cases in `libs/gw2_*` + `apps/api` + 79 vitest cases in `web/`; 1 conditionally skipped real-fixture integration test in `libs/gw2_evtc_parser/tests/test_parser.py::test_real_evtc_binary_parses_with_realistic_agent_count` requires the blob at `/tmp/inner_20251002-213519`) · 20 release tags shipped on the remote (latest: `v0.8.9`) · strict CI lint-and-test + pnpm typecheck + vitest gate active.
+**Status:** 339 active tests across libs + apps + web (241 pytest cases in `libs/gw2_*` + `apps/api` + 82 vitest cases in `web/` + 16 Playwright e2e; 1 conditionally skipped real-fixture integration test in `libs/gw2_evtc_parser/tests/test_parser.py::test_real_evtc_binary_parses_with_realistic_agent_count` requires the blob at `/tmp/inner_20251002-213519`) · 20 release tags shipped on the remote (latest: `v0.8.9`) · strict CI lint-and-test + pnpm typecheck + vitest gate active · OpenAPI drift gate (git diff baseline) wired · v0.9.1 hardening slice close-out in flight (5 plans: webhook Delivery schema `int`→`str` [004] + universal SSRF block for HTTPS [005] + `process_parse` background-task session factory [006] + retry+DLQ+replay worker + 22 tests [007] + OpenAPI drift gate baseline committed [008] + H1 multi-tick scheduler re-attempt + H2 lint-debt cleanup).
 
 Modern combat analytics platform for **Guild Wars 2 WvW** (World vs World).
 
@@ -67,7 +67,7 @@ uv sync
 # 3. Install git hooks
 uv run pre-commit install
 
-# 4. Bring up the infra (Postgres + MinIO + Redis)
+# 4. Bring up the infra (Postgres + MinIO)
 docker compose up -d
 
 # 5. Configure local app env

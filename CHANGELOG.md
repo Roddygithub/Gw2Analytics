@@ -129,37 +129,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale baselines that diffed at near-100% against the spec's
   3196px captures. Timeout bumped from 15s to 30s.
 
-### Known issue (web e2e - visual-regression baselines)
+### Fixed (web e2e - VR hydration)
 
-- The 5 dynamic-page baselines (`04-fights.png` through
-  `08-fight-drilldown.png`) are STILL 1440x900 (the
-  pre-hydration-fix state). The v0.9.0 followup commit
-  `882edff` simplified `web/scripts/screenshots.mjs` to match
-  the spec's wait strategy exactly (`page.goto` with
-  `waitUntil: "networkidle"` + immediate `page.screenshot()`),
-  AND `pnpm screenshots --persist` was re-run against the
-  live dev + mock servers. The script STILL captures at
-  1440x900 while the spec captures at 1440x3196 on the same
-  routes, despite identical wait strategies + identical
-  `fullPage: true` + identical dev server + identical mock
-  server + identical chromium headless. The dimension-mismatch
-  check in the spec fires BEFORE the diff step, so the VR
-  suite currently fails on the 5 dynamic pages.
+- `web/scripts/screenshots.mjs`: restored the v0.9.0 plan/003 hydration guard that commit `882edff` had over-aggressively removed (the root cause of the previous [Unreleased] known-issue was the "match spec wait strategy" simplification; the direct `chromium.launch()` script lost its scrollHeight stability check while the Playwright test runner kept its implicit microtask delays). The `PAGES` const's third slot, previously always `null`, is now a tagged sentinel dispatch: `"stable-scroll"` triggers a `page.waitForFunction` predicate that polls in the page context and resolves when `document.body.scrollHeight > 900` AND has been stable for >= 500ms (uses `window.__gw2LastHeight` + `window.__gw2LastChangeAt` as cross-poll sticky state on the same Document). The dynamic pages (04-08) carry `"stable-scroll"`; the static pages (01-03) keep `null` and capture immediately after networkidle. Timeout clamped to 30s. Once `pnpm screenshots --persist` is re-run against dev + mock-server, the 5 dynamic-page baselines will be 1440x3196 instead of 1440x900, and the spec's dimension-mismatch check in `web/tests/e2e/visual-regression.spec.ts` will stop firing on those 5 routes. Test count: unchanged (the 16-e2e spec dimension check + the 1% total-diff threshold are both unchanged); the operational behaviour change is purely in the script-side capture mechanism.
 
-  The most likely root cause is a Playwright test-runner vs
-  `chromium.launch()` behavioural difference: the spec uses
-  the playwright test runner (which sets additional browser
-  args or context options), while the script uses
-  `chromium.launch({ headless: true })` directly. A secondary
-  hypothesis is a Next.js dev-overlay interaction that inflates
-  the spec's capture but not the script's (the overlay is in a
-  fixed container; `fullPage: true` may or may not include it
-  depending on the browser args). A future cycle should:
-  (a) compare the browser args / context options between the
-  spec and the script, (b) attempt the refresh against a
-  production build (`pnpm build && pnpm start`) where the
-  dev overlay is disabled, or (c) update the spec to drop
-  the dimension check and rely solely on the pixel-diff.
+
+### Added (api - v0.9.0 webhooks backend foundational + API layers)
+
+- NEW migration `0006` adds the 3 webhook tables (`webhook_subscriptions` / `webhook_deliveries` / `webhook_dlq`) per `docs/v0.8.0-backend-design.md` §4. FK from `webhook_deliveries.subscription_id` has NO `ondelete=CASCADE` (the canonical state transition is soft-delete via `revoked_at`); `webhook_dlq.subscription_id` has NO FK at all (deliberate forensics decision -- DLQ rows survive subscription hard-delete). Indexes: `webhook_subscriptions.revoked_at`, `webhook_deliveries.(subscription_id, upload_id)` + `(upload_id)` + `(delivered_at)`, `webhook_dlq.(subscription_id)` + `(moved_to_dlq_at)`.
+- NEW ORM classes: `OrmWebhookSubscription` (id+url+filter_payload+description+secret+created_at+revoked_at + deliveries relationship), `OrmWebhookDelivery` (FK subscription_id + upload_id+attempt+status_code+error+delivered_at + subscription back-ref), `OrmWebhookDlq` (NO FK subscription_id -- forensics). `OrmWebhookSubscription.filter_payload` is a Python attr shadowing the SQL column `filter` (avoids the Python builtin collision).
+- NEW schemas: `WebhookSubscriptionCreate` (POST body), `WebhookSubscriptionCreatedOut` (POST 201 with one-time secret), `WebhookSubscriptionOut` (GET item, no secret, no revoked_at -- revoked subscriptions return 404 per design doc §4).
+- NEW routes `apps/api/src/gw2analytics_api/routes/webhooks.py` + main.py wiring: `POST   /api/v1/webhooks` (HTTPS-or-loopback URL policy, returns 201 + secret ONCE), `GET    /api/v1/webhooks` (active list, no secret), `GET    /api/v1/webhooks/{id}` (404 if revoked), `DELETE /api/v1/webhooks/{id}` (idempotent soft-delete via `revoked_at`, 204 on already-revoked). Hidden helpers `_utcnow` / `_generate_subscription_id` (whsub_<base64(12)>) / `_generate_secret` (whsec_<base64(32)>) / `_validate_webhook_url` (HTTPS-or-loopback + no whitespace + non-empty host).
+
+
+### Added (api - v0.9.0 webhook delivery worker)
+
+- NEW ``apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`` (single-attempt). Fires one HMAC-SHA256-signed POST per active ``OrmWebhookSubscription`` row whenever ``Upload.status`` transitions to COMPLETED. Hooked into ``POST /api/v1/uploads`` as a sibling ``BackgroundTasks.add_task`` after ``process_parse`` -- clean domain separation (the parser never imports the dispatcher). Wire format per design doc §3.4: ``Content-Type: application/json`` + ``X-Gw2Analytics-Signature: sha256=<hex>`` + ``X-Gw2Analytics-Delivery: dly_<uuid>`` + ``User-Agent: Gw2Analytics-Webhook/0.9.0`` + body ``{"kind": "upload_completed", "upload_id", "fight_id", "sha256", "started_at"}``. The worker opens a **fresh, worker-scoped** SQLAlchemy session via the injected ``session_factory`` (does NOT reuse the request session that ``process_parse`` consumed; this is the same DI pattern the production migration toward a dedicated Arq worker process will reuse). Edge cases handled: upload row missing, non-COMPLETED status, missing OrmFight row, empty-active-subs, subscription-with-empty-secret, filter-kind-mismatch, ``httpx.HTTPError`` -> ``error=``<class>: <msg>``, non-2xx -> ``error=non-2xx response: <code>``. ``subs.filter_payload.kind == upload_completed`` is the sole match criterion today; other kinds are accepted on POST but produce zero deliveries. One ``db.commit()`` covers all N deliveries per upload (atomic).
+
+### Added (apps/api + web - v0.9.1 webhook hardening slice)
+
+The 5 v0.9.1 audit plans (drift base `ef5e4f3`; see `plans/README.md` + `plans/004-008-v091-*.md`) plus the H1 (multi-tick scheduler test re-attempt) + H2 (lint-debt cleanup) followups land as part of this hardening slice. The slice closes the deferred Known Followup from v0.9.0 (`### Known followup (api - v0.9.1 webhook retry + DLQ)` above) and the first item of the v0.9.1 Deferred list (`webhook route tests`); the second Deferred item (`webhook secret-at-rest` at-rest `pgcrypto` envelope encryption) remains deferred to a future cycle. Plan-by-plan summary:
+
+- **Plan 004 — webhook Delivery schema `int`→`str`**: `apps/api/src/gw2analytics_api/schemas.py::WebhookDeliveryOut.id` and `WebhookDeliveryReplayOut.delivery_id` are now `str` (with `Field(min_length=1, max_length=64)` bounds) instead of `int`, matching the actual on-disk `f"dly_{uuid.uuid4()}"` discriminator. Pre-plan-004 the 2 new schemas would have raised `pydantic.ValidationError` on every serialisation; the route's downstream `_post_sub` helper's `cast("Response", client.post(...))` workaround in `test_webhooks_e2e.py` was a stopgap that masked the runtime failure. Plus 1 hermetic regression test pinning the `str` annotation + `min_length`/`max_length` bounds.
+- **Plan 005 — universal SSRF block for HTTPS**: `apps/api/src/gw2analytics_api/routes/webhooks.py::_validate_webhook_url` now applies a universal `is_private | is_loopback | is_link_local | is_multicast` check on the resolved address (direct IP literals via `ipaddress.ip_address`; hostnames via `socket.getaddrinfo` for IPv4 + IPv6 simultaneously) for BOTH `http` and `https` schemes. Pre-plan-005 an attacker could subscribe `https://10.0.0.1/`, `https://169.254.169.254/` (AWS IMDS), or `https://[::1]:6379/` (local Redis) and use the endpoint as an SSRF vector. Operator opt-out via `GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS=1` for trusted dev only (documented in `apps/api/.env.example` with operational-risk warning). Fail-closed on DNS errors (DNS-rebind defence). Plus 5 SSRF regression tests covering RFC1918 IPv4 literal, AWS-IMDS link-local, IPv6 loopback literal, hostname-resolves-to-private-via-monkeypatched-`getaddrinfo`, and the env opt-in escape hatch.
+- **Plan 006 — BG-task closed-session bug for `process_parse`**: `apps/api/src/gw2analytics_api/services.py::process_parse` signature changed from `(db: Session, upload_id, raw)` (request-scoped; closed by the dependency teardown before BG-task fires → `DetachedInstanceError` on the first query) to `(session_factory: Callable[[], Session], upload_id, raw)` (worker-scoped; `with session_factory() as db`). Both BG-task callers in `apps/api/src/gw2analytics_api/routes/uploads.py` updated to pass `get_sessionmaker()`. Matches the existing `webhook_dispatch.dispatch_for_upload(session_factory, upload_id)` DI pattern (the v0.9.0 worker was already correct; this plan retrofitted the parser to the same convention). Also added a focused regression test (no `time.sleep(0.1)` poll) that catches the regression where `process_parse` would re-introduce the closed-session dependency.
+- **Plan 007 — retry + DLQ + replay tests + scheduler worker**: `apps/api/src/gw2analytics_api/workers/webhook_scheduler.py` (NEW) is the asyncio-polling worker (`process_scheduled_retries(session_factory) -> int`, 5s poll interval, exponential backoff `{attempt: seconds} = {1: 1, 2: 10, 3: 100}` per design doc §5, `_MAX_ATTEMPTS = 3` before `OrmWebhookDlq` promotion). Lifted `webhook_dispatch.py`'s session-DI discipline (fresh worker-scoped `session_factory`) one-for-one. Started as a background `asyncio` task by `apps/api/src/gw2analytics_api/main.py`'s `lifespan` handler; cancel-safe on app shutdown. Routes: `POST /api/v1/webhooks/dlq/{delivery_id}/replay` in `routes/webhooks.py::replay_dlq_delivery` (deletes DLQ row + creates fresh delivery row in one atomic `db.commit()`; 404 if subscription missing/revoked or upload deleted). 4 canonical tests in `apps/api/tests/test_webhooks_e2e.py` (scheduler first-attempt success, exponential backoff after-failed-1st-tick, replay idempotency under concurrent `ThreadPoolExecutor` + `Session.commit` race-widener, HMAC byte-for-byte integrity across replays); the originally-stubbed multi-tick `test_retry_scheduler_failure_promotes_to_dlq_after_max_attempts` landed in a standalone `apps/api/tests/test_webhooks_e2e_scheduler.py` module via the H1 followup (flat `with`-block structure escapes the original in-session nested-dedent footgun; the original `pytest.skip` placeholder in `test_webhooks_e2e.py` is replaced by a stub-by-name pointer for search-by-name discoverability). `pytest-time-machine` + `respx` added to `apps/api/pyproject.toml` `[dependency-groups].dev`.
+- **Plan 008 — OpenAPI drift gate is now functional**: `web/src/lib/api/schema.d.ts` removed from `web/.gitignore` and committed as the 71 KB drift gate baseline. The CI workflow (`Detect API client drift` step, `git diff --exit-code -- web/src/lib/api/schema.d.ts` between `OpenAPI: regenerate web TypeScript client` and `Type-check web`) now has a tracked baseline to diff against — pre-plan-008 the gate silently passed because untracked-vs-commit diffs return zero. `CONTRIBUTING.md` gains a `## Regenerating the web TypeScript client` section documenting the contract: any backend PR touching `apps/api/src/gw2analytics_api/routes/*` MUST run `cd web && pnpm generate:api` and commit the regenerated `schema.d.ts` in the same PR.
+
+### Deferred (v0.9.2 followups - tracked after the v0.9.1 hardening close-out)
+
+- **webhook secret-at-rest**: the secret column is plaintext in PostgreSQL today. HMAC verification of incoming webhook calls requires plaintext, so we can't fully hash; the layered defence is `pgcrypto` envelope encryption with a `SECRETS_KEK` env var. v0.9.1 ships with plaintext (single-tenant local-dev threat model); v0.9.2 should add at-rest encryption or document the operator-led-DB-compromise risk in the deploy docs. NOT closed by the v0.9.1 hardening slice.
 
 ### Tests
 
@@ -176,10 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   renders 10 options; selecting Mesmer updates the URL).
 - 4 existing vitest cases in
   `web/tests/app/players-page.test.tsx` updated to pass
-  `{ searchParams: Promise.resolve({}) }` (the page is now async).
-- Test totals: 210 -> 217 pytest (+7), 79 -> 82 vitest (+3),
-  14 -> 16 playwright (+2). Total: 303 tests (was 289 before
-  v0.9.0 plan/002).
+  `{ searchParams: Promise.resolve({}) }` (the page is now async).- Test totals: 219 -> 241 pytest (+22), 82 vitest (unchanged), 16 playwright (unchanged). **Total: 339 tests** (was 303 before the v0.9.0 cycle; 317 at the v0.9.0 close-out; the +22 webhook tests are split across `test_webhooks_e2e.py` (+21, including 1 deferred-stub via `pytest.skip`) and `test_webhooks_e2e_scheduler.py` (+1 standalone multi-tick that the H1 followup lifted out of the in-session block)). Cumulative breakdown: 241 pytest = 126 libs/gw2_* + 115 apps/api (was 93 pre-v0.9.1); 82 vitest in `web/` (unchanged); 16 Playwright e2e (unchanged).
 
 ## [0.8.9] - v0.8.9: per-account timeline gains ?tz=Continent/City
 

@@ -61,6 +61,15 @@ Thumbs.db
 web/test-results/
 web/playwright-report/
 
+# Visual-baseline diff artifacts (web/tests/e2e/visual-regression.spec.ts output).
+# Generated on failure (the spec's dimension-mismatch + diff step
+# drops a ``*-actual.png`` + ``*-diff.png`` pair into this dir for
+# analyst inspection); never commit. The committed PNGs in
+# ``docs/screenshots/`` are the canonical baselines; the
+# ``web/scripts/screenshots.mjs`` sibling regenerates them on
+# ``pnpm screenshots --persist``.
+web/tests/e2e/.visual-regression-output/
+
 # Marketing screenshots (web/scripts/screenshots.mjs output).
 # The script is tracked; only the PNGs are ignored
 # (mirrors the dump_openapi.py -> /openapi.json convention above).

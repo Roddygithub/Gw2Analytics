@@ -173,6 +173,21 @@ jobs:
         working-directory: web
         run: pnpm exec openapi-typescript /tmp/openapi.json -o src/lib/api/schema.d.ts
 
+      # ----------------------------------------------------------------
+      # OpenAPI drift gate (v0.9.1 plan 008)
+      # ----------------------------------------------------------------
+      # Fails the build when the regenerated `schema.d.ts` differs
+      # from the committed baseline -- this catches backend PRs that
+      # touched `apps/api/src/gw2analytics_api/routes/*` without
+      # re-running `pnpm generate:api` and committing the regenerated
+      # `schema.d.ts`. The baseline is committed (un-gitignored) per
+      # plan 008; the gate fires on any pre-merge drift detection
+      # (PR or push to main). `git diff --exit-code` exits non-zero
+      # when there is any diff in the named file.
+      # ----------------------------------------------------------------
+      - name: Detect API client drift
+        run: git diff --exit-code -- web/src/lib/api/schema.d.ts
+
       - name: Type-check web
         working-directory: web
         run: pnpm exec tsc --noEmit

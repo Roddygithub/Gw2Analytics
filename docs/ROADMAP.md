@@ -1,6 +1,7 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed after the v0.8.0 release.
+**Status:** Living document. Last refreshed during the v0.9.0
+close-out (post v0.8.9 ship).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -10,45 +11,81 @@ off.
 
 ---
 
-## Current state (v0.8.0)
+## Current state (post v0.8.9 / v0.9.0 close-out)
 
-- **Latest shipped tag:** `v0.8.0` (Phase 9 of web: account-level
-  historical timelines).
-- **Test count:** 165 active tests (115 pytest across `libs/gw2_*` +
-  `apps/api`, 50 vitest across `web/`, plus 1 conditionally skipped
+- **Latest shipped tag:** `v0.8.9`
+  (Phase 9 of web: per-account timeline `?tz=Continent/City`
+  + per-fight timeline section on `/fights/[id]`).
+- **Test count:** 303 active tests at the start of the v0.9.0
+  close-out (210 pytest across `libs/gw2_*` + `apps/api`, 82 vitest
+  across `web/`, 16 Playwright e2e), plus 1 conditionally skipped
   real-fixture integration test in
-  `libs/gw2_evtc_parser/tests/test_parser.py`).
+  `libs/gw2_evtc_parser/tests/test_parser.py`. v0.9.0 plan/001–003
+  adds +7 pytest / +3 vitest / +2 e2e (the CHANGELOG `[Unreleased]`
+  "Test totals" line is the canonical ledger).
 - **Phase status (per README):** Phase 0 through Phase 9 of web all
   marked ✅.
 - **Architecture:** `gw2_evtc_parser` → `gw2_core` → `gw2_analytics` →
   `apps/api` (FastAPI) + `gw2_api_client` (outbound) → `web` (Next.js
   16). Pure-Python parser, gated behind an `EvtcParser` Protocol so a
   Rust + PyO3 binding is a drop-in replacement (no churn elsewhere).
+- **v0.9.0 close-out (✅ shipped):** three advisor plans executed —
+  `plans/001-v090-shared-timeline-chart.md` (shared
+  `<TimelineChart>` base, ~250 → ~130 lines per wrapper),
+  `plans/002-v090-filter-by-profession.md` (filter by profession
+  enum/int on `GET /api/v1/players` + `<ProfessionFilter>` UI), and
+  `plans/003-v090-vr-suite-expansion.md` (visual-regression
+  threshold alignment + hydration guard + spec/data-driven loop).
+  All three plans shipped. The hydration guard has been restored to
+  `web/scripts/screenshots.mjs`; the host-only
+  `pnpm screenshots --persist` re-run that materialises the
+  corrected 5 dynamic-page baselines at 1440×3196 (post-hydration)
+  is a separate work item that lands when the v0.9.0 close-out
+  batch is committed + the dev + mock-server are reachable.
 
 ---
 
-## 1. v0.9.0 candidates (designed, not yet implemented)
+## 1. v1.0 candidates (designed, not yet implemented)
 
 | Item | Source | Effort | Why now |
 |---|---|---|---|
-| **Backend v0.8.0 "webhooks"** — `POST/GET/DELETE /api/v1/webhooks`, HMAC-SHA256 outbound signature, retry+DLQ worker, `webhook_subscriptions` table | `docs/v0.8.0-backend-design.md` (Draft) | **L** | The design doc is complete (SQL schema + API contract + worker design + future-work section). Discord bot + CI integration are the explicit use cases. **Lowest-effort, highest-leverage candidate.** |
 | **Cross-account comparison** — overlay 2-4 accounts' timelines on the same chart | `docs/v0.8.0-web-design.md` §6 | **M** | Reuses `PlayerTimelineChart` from v0.8.0; the multi-series overlay is the main extension. |
-| **Per-day bucketing on the timeline** — aggregate all fights in a day to one chart point | `docs/v0.8.0-web-design.md` §7 | **S** | Analyst use case. Tweak on the v0.8.0 endpoint + chart, no new infra. |
 | **Skill build analyser** — parse the loadout from the EVTC header, show per-skill DPS contribution | `docs/v0.8.0-web-design.md` §6 | **M** | Builds on `SkillUsageTable` from v0.7.1. |
 | **Real-time DPS meter** — WebSocket-based live DPS display during a parse in progress | `docs/v0.8.0-web-design.md` §6 | **XL** | Auth + reconnect + partial-parse handling. Own dedicated cycle. |
 | **Combat readout (4 tables: Damage / Heal / Boons / Defense)** | `docs/v0.9.0-combat-readout-design.md` | **XL+** | The user spec from the brainstorming sessions. Blocked on the statechange parser + the skills DB. **Longest cycle, highest analyst value.** |
 
-### 1.1 "Ready to implement" shortlist (design doc complete)
+### 1.1 Items removed since v0.8.0 / v0.8.9 release cycle (for archival)
 
-The 4 items above with a complete design doc. Any of these can be
+The following items previously listed in §1 have shipped and are now
+documented in their respective CHANGELOG entries. Listed here once
+so a future audit can confirm what was cleaned up; do not re-add.
+
+- **Backend "webhooks" (foundational + API + single-attempt worker)** — shipped v0.9.0 close-out. 8 files: alembic migration `0006` (3 tables: `webhook_subscriptions` / `webhook_deliveries` / `webhook_dlq` per design doc §4) + 3 ORM classes (`OrmWebhookSubscription` with `filter_payload` Python attr shadowing the SQL `filter` column, `OrmWebhookDelivery` with NO ondelete cascade, `OrmWebhookDlq` with NO FK subscription_id for forensics) + 3 Pydantic schemas (`WebhookSubscriptionCreate` / `WebhookSubscriptionCreatedOut` with one-time secret / `WebhookSubscriptionOut` after the dead-`revoked_at`-field post-reviewer drop) + 4 endpoints under `/api/v1/webhooks` (POST → 201 / GET-list / GET-by-id / DELETE → 204 idempotent soft-delete) + workers module (`apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`) with single-attempt HMAC-SHA256-signed dispatch + 11 e2e tests (`apps/api/tests/test_webhooks_e2e.py`, all ruff+mypy clean). The retry+DLQ+replay layer was deliberately deferred to v0.9.1 -- the v0.9.0 close-out ships enough for integrators to build against the API; the retry/DLQ replay-ui loop is the natural hardening slice.
+  Original source: `docs/v0.8.0-backend-design.md` (full design doc shippable as-is). Effort estimate matched reality: M-effort vs the original L estimate (the v0.9.0 scope intentionally excluded the 3-attempt retry schedule + the DLQ replay endpoint to land the foundational layer in one cycle).
+- **Per-day bucketing on the timeline** — shipped v0.8.1
+  (`?bucket=day` on `GET /api/v1/players/{account_name:path}/timeline` +
+  "Per fight" / "Per day" toggle on `PlayerTimelineSection`).
+  Original source: `docs/v0.8.0-web-design.md` §7. Effort estimate
+  matched reality: S-effort as predicted.
+
+### 1.2 "Ready to implement" shortlist (post v0.8.9 / v0.9.0 close-out)
+
+The 3 items above with a complete design doc. Any of these can be
 started as soon as the maintainer gives the green light:
 
-1. **Webhooks backend** — `docs/v0.8.0-backend-design.md` is
-   shippable as-is.
-2. **Cross-account comparison** — reuses v0.8.0 chart.
-3. **Per-day bucketing** — small tweak to v0.8.0 endpoint.
-4. **fight_player_summaries materialization** (see §2) — perf debt
-   with a clear SQL design (trivial migration).
+1. **Cross-account comparison** — reuses v0.8.0 chart.
+2. **Combat readout** — `docs/v0.9.0-combat-readout-design.md`.
+   Note: blocked on statechange parser + skills DB; the §1 table
+   marks this XL+ with the block reason explicit.
+3. **Skill build analyser** — design doc on §6 of
+   `docs/v0.8.0-web-design.md` (extracted from the §1 priorities
+   table row, retained as the most-leverage M-effort web item).
+
+The previous v0.8.0 list's third + fourth + fifth items (per-day
+bucketing + fight_player_summaries materialisation + webhooks
+backend) shipped in v0.8.1, v0.8.4, v0.9.0 respectively and are
+no longer in the shortlist. The webhooks row's new "v0.9.1 retry +
+DLQ + replay" scope is captured in the §1 table above.
 
 ---
 
@@ -56,11 +93,85 @@ started as soon as the maintainer gives the green light:
 
 | Item | Source | Effort | Impact |
 |---|---|---|---|
-| **Materialise `fight_player_summaries` table** | CHANGELOG v0.7.0 "Notes" | **M** | Avoids the 5-30s O(fights × events) per-request re-walk on `/players` when there are 100+ fights. Route becomes a pure SQL aggregation. |
-| **DRY refactor of `_compute_contributions`** | CHANGELOG v0.7.0 + code-reviewer round 72 | **M** | Function has a documented `noqa: PLR0912`. To split once `fight_player_summaries` lands (less critical then). |
-| **Rust + PyO3 parser binding** | `CONTRIBUTING.md` ("anticipated but not in scope") | **XL** | The `EvtcParser` Protocol is already in place for the swap. Pure perf wins (10-100x). Long-term investment, not a v0.9.0 priority. |
-| **Resolve player names in `TargetFilter`** (instead of raw `agent_id`) | CHANGELOG v0.6.0 "Notes" | **S** | UX win. Needs either a new `GET /api/v1/fights/{id}/agents` endpoint or denormalisation of names into the events response. |
-| **Log scale on the `PlayerTimelineChart` Y-axis** | `docs/v0.8.0-web-design.md` §7 | **XS** | When `damage = 1M` and `strip = 50` the strip line is visually crushed even after per-series normalisation. Add a `scale: "linear" | "log"` prop. |
+| **Rust + PyO3 parser binding** | `CONTRIBUTING.md` ("anticipated but not in scope") | **XL** | The `EvtcParser` Protocol is already in place for the swap. Pure perf wins (10-100x). Long-term investment, not a v1.0 priority. |
+
+### 2.1 Items removed since v0.8.0 / v0.8.9 release cycle (for archival)
+
+The following items previously listed in §2 shipped or were
+deliberately retired and are archival here for future audits; do
+not re-add without a fresh "Why now" rationale (§5 anti-drift
+notes).
+
+**Shipped items (no re-add):**- **Backend "webhooks" (retry + DLQ + replay = v0.9.1)** — shipped v0.9.1 cycle. 7 file changes: alembic migration `0007_webhook_retry.py` (2 new columns on `webhook_deliveries`: `next_attempt_at` indexed for polling + `payload` JSONB for byte-for-byte HMAC fidelity) + `models.py` edit (2 columns appended to `OrmWebhookDelivery`) + `webhook_dispatch.py` edit (seeds `payload` + sets `next_attempt_at` on initial dispatch) + new `workers/webhook_scheduler.py` (~180 lines: polling worker with exponential backoff + atomic DLQ promotion + `asyncio.to_thread` for non-blocking DB + crash-resilient lifespan loop) + `routes/webhooks.py` edit (new `POST /dlq/{delivery_id}/replay` endpoint + `WebhookDeliveryReplayOut` schema + `WebhookDeliveryOut` schema + 3-case 404 logic) + `apps/api/src/gw2analytics_api/main.py` lifespan integration (5s poll interval) + `schemas.py` edit (2 new classes appended). Per design doc §5. Tests + secret-at-rest encryption are explicit v0.9.1.1 followups.
+
+
+- **Materialise `fight_player_summaries` table** — shipped v0.8.4
+  (new `OrmFightPlayerSummary` table + `_persist_player_summaries`
+  helper + `_compute_contributions` slow-path fallback for
+  pre-v0.8.4 fights). Latency dropped from 5-30s to ms.
+- **Resolve player names in `TargetFilter`** — shipped v0.8.3
+  (`name_map: dict[int, str | None] | None` parameter on the 3
+  per-target aggregators; format `"HealBrand (1001)"` in the
+  dropdown). Backward compatible — pre-v0.8.3 wire consumers without
+  the map keep their bare-id labels.
+- **Log scale on the `PlayerTimelineChart` Y-axis** — shipped v0.8.2
+  (`scale: "linear" | "log"` parameter on `buildTimelineLayout`; the
+  Linear/Log toggle persists in `localStorage`).
+- **Redis service in `docker-compose.yml` (zombie)** — shipped
+  v0.9.0 close-out. The unused `redis:7-alpine` service + the
+  matching `REDIS_URL=redis://localhost:6379/0` from `.env.example`
+  (root + `apps/api/.env.example`) + the Quickstart comment
+  `# 4. Bring up the infra (Postgres + MinIO + Redis)` were all
+  removed in one batch; `docker compose up -d` now brings up only
+  Postgres + MinIO. Pre-flight grep across `apps/`, `libs/`, `web/`
+  confirmed no functional consumer (`import redis`, no `Settings.redis_url`,
+  no Redis URL in any `pyproject.toml`).
+- **DST boundary tests for `?tz=` (v0.8.9 followup)** — shipped
+  v0.9.0 close-out. Two e2e tests added to
+  `apps/api/tests/test_uploads_e2e.py`:
+  `test_player_timeline_tz_europe_paris_dst_spring_forward` +
+  `test_player_timeline_tz_america_new_york_dst_fall_back`. Each seeds
+  1 fight + pins `started_at` to a UTC instant that straddles the
+  DST wall-clock boundary (EU 2024-03-31 01:30 UTC post-jump, US
+  2024-11-03 06:30 UTC post-fall-back), asserts the day-bucketed
+  point lands on the correct Paris / NY calendar day AND the
+  local-midnight invariant holds (00:00:00 Paris / NY local at
+  the day-bucketed point). Pairs with the 4 winter-only v0.8.9
+  tests for full calendar coverage.
+- **Visual regression baseline dimension drift** — shipped v0.9.0
+  close-out (CHANGELOG `### Fixed (web e2e - VR hydration)`). The
+  hydration sentinel `"stable-scroll"` + `waitForFunction` over
+  scrollHeight > 900 / stable 500ms was restored in
+  `web/scripts/screenshots.mjs` after commit `882edff`'s over-
+  aggressive trim dropped the guard. Host-only
+  `pnpm screenshots --persist` re-run is a separate work item that
+  materialises the corrected 5 dynamic-page baselines at 1440×3196
+  (post-hydration); not blocking v0.9.0 close-out (the code fix is
+  shipped).
+
+**Retired items (deliberately dropped per §5 anti-drift protocol):**
+
+- **DRY refactor of `_compute_contributions`** — RETIRED during
+  v0.9.0 close-out. The CHANGELOG v0.7.0 entry that introduced the
+  `noqa: PLR0912` trade-off establishes the rationale that
+  NEVERTHELESS argues against the split: "_compute_contributions
+  is a single-pass walk over the heterogeneous event stream, so
+  splitting it into smaller helpers would scatter the hot loop
+  across multiple call sites without making it easier to reason
+  about._" That trade-off survives post-v0.8.4 (the v0.8.4
+  materialisation pushed the function to slow-path for pre-v0.8.4
+  fights, but the single-pass semantic is unchanged -- splitting
+  the body into helpers would risk duplicating the per-event branch
+  logic across helpers without a corresponding legibility win).
+  Per §4 "Re-estimate" + §5 "delete if >2 releases without a Why
+  now update": the entry sat in the table for v0.7.0 through
+  v0.9.0 (8+ releases) without a meaningful "Why now" justification
+  beyond the original v0.7.0 conditional. The maintainer's reviewer
+  (the v0.9.0 close-out audit) re-read the v0.7.0 trade-off rationale
+  and concluded: do not refactor, drop the entry. Future readers
+  who feel the urge to split this function: read the v0.7.0
+  rationale first; the split is a regression risk, not an
+  improvement.
 
 ---
 
