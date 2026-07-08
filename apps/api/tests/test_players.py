@@ -417,19 +417,26 @@ def test_players_filter_accepts_integer_value() -> None:
 
 
 def test_players_filter_with_pagination() -> None:
-    """v0.9.0: filter is applied BEFORE pagination; pages stay Mesmer-only.
+    """v0.9.0 + v0.9.2: filter is applied BEFORE pagination; pages stay Mesmer-only.
 
-    The cross-test pollution means there are many Mesmer
-    accounts in the DB from prior runs; this test does
-    NOT check that specific seeded accounts appear in
-    the response (their aid range + low damage places
-    them deep in the damage-sorted list). Instead, the
-    test verifies the filter contract:
+    Post-v0.9.2 plan 009 Step 5 the conftest's autouse
+    ``_isolate_test_state`` wipes the test DB before each
+    test, so the "many Mesmer accounts from prior runs"
+    pollution is gone. We now seed 5 Mesmers deterministically
+    to exercise the cross-page consistency contract:
     1. All rows on every page have ``profession == "PROF(7)"`` (Mesmer)
        -- the filter is applied to every page, not just page 1.
     2. Page 1 + page 2 do not overlap -- the offset/limit
        are consistent on the filtered set.
     """
+    # v0.9.2 plan 009 Step 5: seed 5 Mesmers (the conftest wipes
+    # accumulated state pre-test; pre-Step-5 the test relied on
+    # cross-test pollution, which the conftest now prevents).
+    suffix = _uuid.uuid4().hex[:8]
+    _post_minimal_fight_with_professions(
+        professions=[7] * 5,  # 5 Mesmers
+        suffix=suffix,
+    )
     resp1 = client.get(
         "/api/v1/players",
         params={"profession": "MESMER", "limit": 2, "offset": 0},

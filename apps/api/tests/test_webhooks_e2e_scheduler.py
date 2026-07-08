@@ -59,7 +59,6 @@ from typing import Any
 import pytest
 import respx as _respx
 import time_machine
-from sqlalchemy import delete
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (
@@ -85,26 +84,6 @@ def session_factory() -> Any:
     opens a fresh transaction.
     """
     return get_sessionmaker()
-
-
-@pytest.fixture(autouse=True)
-def _isolate_webhook_tick_state(session_factory: Any) -> None:
-    """Wipe stale ``webhook_deliveries`` + ``webhook_dlq`` rows before each test.
-
-    The scheduler's poll
-    ``where(OrmWebhookDelivery.attempt < _MAX_ATTEMPTS, next_attempt_at <= now, ...)``
-    does NOT filter by ``subscription_id``, so a delivery row left over
-    from a prior ``pytest`` invocation (in this module OR the e2e file's
-    scheduler-using test) pollutes the per-tick ``count`` assertion
-    (``count1 == 1`` fails when 2 deliveries are pending). The fix is a
-    test-only autouse fixture that bulk-deletes rows from BOTH tables
-    before each test runs, so each function sees a hermetic scheduler
-    state.
-    """
-    with session_factory() as db:
-        db.execute(delete(OrmWebhookDelivery))
-        db.execute(delete(OrmWebhookDlq))
-        db.commit()
 
 
 def _bootstrap_webhook_environment(
