@@ -9,7 +9,7 @@
 > WvW combat logs (`.zevtc`) are parsed locally and stored in a stable
 > internal model from which all analytics, API, and frontend derive.
 
-**Status:** Latest tagged release: `v0.8.9` · v0.9.0 + v0.9.1 + v0.9.2 close-out landed on `main` (tag pending operator ceremony) · **339 active tests** across pytest + vitest + Playwright · strict CI lint + test + typecheck + OpenAPI drift gate active.
+**Status:** Latest tagged release: `v0.8.9` · v0.9.0 + v0.9.1 + v0.9.2 close-out **committed on `main`** (not yet released; tag pending operator ceremony) · **339 active tests** across pytest + vitest + Playwright · strict CI lint + test + typecheck + OpenAPI drift gate active.
 
 ## Highlights
 
