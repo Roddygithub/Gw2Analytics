@@ -275,6 +275,29 @@ The intermediate `openapi.json` is gitignored and removed
 automatically by the `generate:api` script chain. Only the
 final `web/src/lib/api/schema.d.ts` ships.
 
+## Webhook discriminator IDs
+
+`apps/api/src/gw2analytics_api/routes/webhooks.py` defines 3
+discriminator generators: `_generate_subscription_id`,
+`_generate_secret`, `_generate_delivery_id`. The encoding
+convention (per v0.9.2 plan 009 Step 4) is:
+
+- **Path-parameter discriminators** (`/webhooks/{id}`): use
+  `base64.urlsafe_b64encode` -- standard `b64encode` emits
+  `/` and `+` which break FastAPI path-param matching.
+- **Byte-only discriminators** (HMAC secrets, never in a URL
+  path): use standard `base64.b64encode` -- HMAC operates on
+  bytes and format churn has migration cost for in-flight
+  integrators.
+- **UUID-based discriminators** (`_generate_delivery_id`):
+  URL-safe by definition; no encoding needed.
+
+When adding a new discriminator, classify it by where it
+appears in the wire contract (path-param vs payload-only) and
+pick the matching encoding. The 3 helper docstrings in
+`routes/webhooks.py` mirror this rule for IDE-hover
+discoverability.
+
 ## Pull request workflow
 
 1. Branch off `main`.

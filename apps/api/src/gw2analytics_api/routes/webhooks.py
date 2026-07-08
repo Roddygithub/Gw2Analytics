@@ -57,12 +57,33 @@ def _utcnow() -> datetime:
 
 
 def _generate_subscription_id() -> str:
-    # URL-safe base64 -- standard b64encode emits '/' / '+' which
-    # break FastAPI path-param matching on DELETE /{subscription_id}.
+    """Path-parameter discriminator: ``whsub_<urlsafe-b64(12B)>``.
+
+    v0.9.2 plan 009 Step 4 discriminator-encoding convention:
+
+    - Path-parameter discriminators (``/webhooks/{id}``): use
+      ``base64.urlsafe_b64encode`` -- standard ``b64encode``
+      emits ``/`` / ``+`` which break FastAPI path-param
+      matching on DELETE /{subscription_id}.
+    - Byte-only discriminators (``_generate_secret``): standard
+      ``b64encode`` is fine since HMAC operates on bytes and
+      format churn has migration cost for in-flight integrators.
+    """
     return "whsub_" + base64.urlsafe_b64encode(secrets.token_bytes(12)).decode()
 
 
 def _generate_secret() -> str:
+    """Byte-only discriminator: ``whsec_<b64(32B)>``.
+
+    v0.9.2 plan 009 Step 4 discriminator-encoding convention:
+    byte-only discriminators (HMAC secrets, never appear in a
+    URL path) use standard ``base64.b64encode``. Format churn
+    has migration cost for in-flight integrators, and HMAC
+    operates on bytes -- the URL-safety concern doesn't apply.
+    See :func:`_generate_subscription_id` for the
+    path-parameter counterpart, and ``CONTRIBUTING.md``
+    (``Webhook discriminator IDs``) for the project-wide rule.
+    """
     return "whsec_" + base64.b64encode(secrets.token_bytes(32)).decode()
 
 
@@ -286,7 +307,13 @@ def revoke_webhook(
 
 
 def _generate_delivery_id() -> str:
-    """Discriminator on the integration-side per §3.4 (``dly_<uuid>``)."""
+    """Discriminator on the integration-side per §3.4 (``dly_<uuid>``).
+
+    v0.9.2 plan 009 Step 4: UUID is URL-safe by definition; no
+    ``urlsafe_b64encode`` wrapping needed. See
+    :func:`_generate_subscription_id` for the path-parameter
+    convention.
+    """
     return f"dly_{uuid.uuid4()}"
 
 
@@ -332,9 +359,7 @@ def replay_dlq_delivery(
     # thread 2 is guaranteed to start its SELECT FOR UPDATE before
     # thread 1's commit lands.
     dlq = db.execute(
-        select(OrmWebhookDlq)
-        .where(OrmWebhookDlq.id == delivery_id)
-        .with_for_update()
+        select(OrmWebhookDlq).where(OrmWebhookDlq.id == delivery_id).with_for_update()
     ).scalar_one_or_none()
     if dlq is None:
         raise HTTPException(
