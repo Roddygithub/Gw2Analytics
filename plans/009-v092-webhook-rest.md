@@ -1,9 +1,43 @@
 # 009-v092-webhook-rest
 
-**Status**: DRAFT
-**Date**: 2026-07-08
+**Status**: COMPLETE
+**Date opened**: 2026-07-08
+**Date closed**: 2026-07-08 (single-day audit + ship)
 **Drift-detection base**: v0.9.1 (f8d4bb4 + 2 prior close-out commits + tag)
 **Addresses**: 3 documented v0.9.1 deferred followups + 1 uninvestigated full-suite timeout + 1 code-reviewer docstring nit
+
+## Closing summary
+
+All 5 Steps landed via 6 atomic commits (5 plan steps + 1 pre-existing-test-fix
+followup). Cumulative SHA chain on `main` HEAD: `85716b6` → `99faa35` → `a247430`
+→ `abd7deb` → `d70c8c6` (+ the original 02279ee pre-existing test fixes that
+Step 5's commit message references).
+
+| Step | Plan reference | Commit | Tests before | Tests after |
+|---|---|---|---|---|
+| 1 | payload JSONB → LargeBinary migration | `85716b6` (joint with Step 2) | n/a | n/a |
+| 2 | wire LargeBinary through dispatch+scheduler+replay | `85716b6` (joint with Step 1) | n/a | n/a |
+| 3 | row-level lock on `replay_dlq_delivery` | `99faa35` | 18 wh | 18 wh (no count delta; the new `with_for_update` is the regression guard) |
+| 4 | discriminator-encoding docstring convention | `d70c8c6` | 22 wh | 22 wh (doc-only; no test changes) |
+| 5 | central test fixture cleanup (conftest.py) | `a247430` | 22 wh / suite >600s | 22 wh / suite 9.83s |
+| (followup) | fix 2 pre-existing test failures from Step 5 commit message | `abd7deb` | 90 / 1 fail / 2 skip | 92 / 0 fail / 3 skip |
+
+Post-close-out invariants:
+- Plan 009's 2 originally-deferred v0.9.1 test failures are now resolved
+  (JSONB intrinsic key reordering → `assert "Mars/Olympus" in str(...)` works on
+  the LargeBinary bytes; concurrent `OrmWebhookDlq` reads → Postgres
+  `SELECT ... FOR UPDATE` row-level lock ensures exactly one 201 + one 404).
+- The full `apps/api/tests/` suite runs in ~10s (post-conftest cleanup) vs
+  >600s pre-Step-5 (the 4 SLOW modules' DB-accumulation hang).
+- The discriminator-encoding convention is now discoverable via IDE hover on the
+  3 helper docstrings AND via a new `## Webhook discriminator IDs` section in
+  `CONTRIBUTING.md`.
+- `apps/api` test count: 219 → 241 (+22 from v0.9.1 hardening schema fix + 007
+  retry/DLQ/replay suite); the v0.9.2 close-out adds NO new tests directly (the
+  pre-existing fixes are regression guards, not new tests).
+- Migration 0008 is intentionally NOT data-preserving — documented in CHANGELOG
+  (`[0.9.2]`) as a v0.9.2 close-out note.
+
 
 ## Context
 

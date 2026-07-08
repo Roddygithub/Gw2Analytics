@@ -109,6 +109,44 @@ Two followup cycles landed during the v0.9.1 hardening pass after the 5 audit pl
 
 Both followups are docs-only + test-fixture-touch-ups; no production code paths were affected. The v0.9.1 hardening cycle is now ready for the operator-side close-out: the atomic `feat(api+web): v0.9.1 security + correctness hardening (schemas, SSRF, BG-task, retry+DLQ+replay tests, OpenAPI drift gate)` commit + CHANGELOG `[0.9.1]` entry + `v0.9.1` tag.
 
+---
+
+## v0.9.2 hardening (post v0.9.1 ship)
+
+Stamped at `pre-d70c8c6` (origin/main HEAD at close-out time -- after the v0.9.1 hardening cycle fully closed: 5 audit plans + H1 + H2 followups shipped + the v0.9.2 close-out landed in 5 atomic commits per the [009 plan](./009-v092-webhook-rest.md)).
+
+v0.9.2 was a hard-trigger follow-up surfaced by the v0.9.1 close-out:
+
+| Trigger | Finding | Plan step that closes it |
+|---|---|---|
+| v0.9.1 deferred-3a | `test_replayed_delivery_byte_for_byte_hmac_matches_original` — JSONB intrinsic key reordering broke the HMAC byte-for-byte guarantee | Step 2 (wire `LargeBinary` through dispatch+scheduler+replay) |
+| v0.9.1 deferred-3b | `test_replay_dlq_idempotent_concurrent_calls` — concurrent reads on `OrmWebhookDlq` create duplicate delivery rows | Step 3 (Postgres `SELECT ... FOR UPDATE` row-level lock on `replay_dlq_delivery`) |
+| v0.9.1 close-out audit | No project-wide convention for path-parameter vs byte-only discriminator encoding (the urlsafe fix happened at one site; future discriminator sites could regress) | Step 4 (discriminator-encoding docstring convention) |
+| v0.9.1 close-out audit | The full `apps/api/tests/` suite times out at >600s due to accumulated DB state across the 4 SLOW modules | Step 5 (central conftest.py fixtures, autouse cleanup of 6 tables) |
+| Step 5 by-product | 2 pre-existing test failures (TZ-test contract mismatch; missing-fixture bug in plan-006 regression test) surfaced as the conftest fixed the accumulated-state hang | Followup commit `abd7deb` |
+
+### v0.9.2 execution summary (5 atomic commits)
+
+1. **`85716b6` — Step 1+2 (migration 0008 payload JSONB→LargeBinary + dispatch+scheduler+replay wiring)**: `apps/api/alembic/versions/0008_payload_bytes.py` (NEW) alters both `webhook_deliveries.payload` + `webhook_dlq.payload` from `JSONB` → `LargeBinary` (NOT data-preserving; documented as a v0.9.2 warning); `apps/api/src/gw2analytics_api/models.py` maps both columns to `Mapped[bytes]`; `apps/api/src/gw2analytics_api/workers/webhook_dispatch.py` writes `payload = json.dumps(body_dict, separators=(",", ":")).encode("utf-8")` (canonical bytes that the HMAC signs); `apps/api/src/gw2analytics_api/workers/webhook_scheduler.py` reads back the same bytes verbatim on retry (no dict round-trip, no JSONB re-ordering hazard); `apps/api/src/gw2analytics_api/routes/webhooks.py::replay_dlq_delivery` copies `dlq.payload` (bytes) into `new_delivery.payload` (bytes) directly.
+2. **`99faa35` — Step 3 (row-level lock on `replay_dlq_delivery`)**: `apps/api/src/gw2analytics_api/routes/webhooks.py::replay_dlq_delivery` now opens the DLQ lookup with `db.execute(select(OrmWebhookDlq).where(OrmWebhookDlq.id == delivery_id).with_for_update()).scalar_one_or_none()` (Postgres `SELECT ... FOR UPDATE` row-level lock) instead of the legacy `db.get(OrmWebhookDlq, delivery_id)`. Exactly one of the concurrent threads reads + deletes the DLQ row; the second thread's transaction blocks until the first commits then sees NULL → 404.
+3. **`a247430` — Step 5 (conftest.py central fixture cleanup)**: `apps/api/tests/conftest.py` (NEW) function-scoped autouse fixture `_isolate_test_state` bulk-deletes from 6 tables (uploads, fights, fight_player_summaries, webhook_subscriptions, webhook_deliveries, webhook_dlq) before each test; pre-Step-5 full suite hangs at >600s, post-Step-5 full suite runs in ~10s; removed the local autouse in `apps/api/tests/test_webhooks_e2e_scheduler.py` (now superseded by the broader conftest cleanup); `apps/api/tests/test_players.py::test_players_filter_with_pagination` now self-seeds 5 Mesmer records (the conftest wipes accumulated state, so the test must rebuild its own seed).
+4. **`abd7deb` — Step 5 by-product (fix 2 pre-existing test failures)**: `apps/api/tests/test_uploads_e2e.py::test_player_timeline_tz_422_when_invalid_timezone` assertion fixed (route returns `detail` as a plain string, not a FastAPI-validation list-detail; new assertion handles both shapes via `str(body.get('detail', ''))`); `apps/api/tests/test_uploads_e2e.py::test_background_task_session_alive_at_invocation` (plan 006 regression test, 3 bugs): `probe = get_sessionmaker() → probe = get_sessionmaker()()` (double-call pattern); `assert resp.status_code == 202 → == 201` (correct REST semantics; the BG-task is implementation detail). Plus `apps/api/tests/conftest.py` gained 2 new pytest fixtures: `client` + `get_sessionmaker` (both consumed by the regression test's signature).
+5. **`d70c8c6` — Step 4 (discriminator-encoding docstring convention)**: `apps/api/src/gw2analytics_api/routes/webhooks.py` gets 3 docstring additions (no code logic changes) on `_generate_subscription_id` (path-parameter convention), `_generate_secret` (byte-only convention), and `_generate_delivery_id` (UUID is URL-safe by definition). `CONTRIBUTING.md` gains a new `## Webhook discriminator IDs` section (cross-referenced from the 3 helper docstrings) with 3 bullet classifications + a classification guide for new discriminators.
+
+### Outcomes
+
+- Plan 009's 2 originally-deferred v0.9.1 test failures are now resolved (HMAC byte-for-byte across retries + concurrent replay idempotent).
+- The full `apps/api/tests/` suite: **92 pass / 0 fail / 3 skip in ~10s** (was 90/1/2 in >600s pre-Step-5).
+- Webhook e2e + scheduler: **22 pass / 0 fail / 1 skip** (unchanged from v0.9.1 close-out; the v0.9.2 followups are defect fixes, not new test coverage).
+- The discriminator-encoding convention is now IDE-discoverable + CONTRIBUTING-documented for future discriminator sites.
+- `apps/api` test count is unchanged (219 → 241 was the v0.9.1 delta; v0.9.2 adds zero new test cases since the pre-existing fixes are regression guards, not new tests).
+- Migration 0008 is intentionally **NOT** data-preserving — pre-v0.9.2 rows become an opaque byte-bag (their dict structure is lost). Operators MUST either: (a) drain DLQ + deliveries before applying, OR (b) accept that pre-v0.9.2 rows lose their original dict. Documented in the migration's `# WARNING` header + the CHANGELOG `[0.9.2]` close-out note.
+
+### Considered but not in v0.9.2 scope (deferred to v0.9.3+)
+
+- **webhook secret-at-rest** (carried from v0.9.1 Deferred list): plaintext in PostgreSQL today; HMAC verification requires plaintext, so full hashing is impossible — pgcrypto envelope encryption with a `SECRETS_KEK` env var is the layered defence path. Deferred because v0.9.2 is feature-complete; tracking starts from the v0.9.1 close-out CHANGELOG.
+- **migration 0008 reverse path** (data preservation on `alembic downgrade -1`): would require a v0.9.2 patch-release if any operator needs to roll back the upgrade. Listed as a future hardening item.
+
 ## v0.8.9 audit (closed)
 
 **Author:** senior-advisor audit (improve skill, `next` invocation, `quick` effort)
