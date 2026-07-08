@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (docs - README professional polish)
+
+- `README.md`: substantial refactor for professional GitHub presentation. The 400+ line original was reorganised:
+  * Tightened the `**Status:**` headline from a 200+ char run-on sentence to 2 lines (latest tagged release + v0.9.x close-out state + test count + CI gate status).
+  * Added a new `## Highlights` section (5 bullets: per-target roll-ups, historical timelines, webhooks, 339+ tests, monorepo structure).
+  * Added a new `## Documentation` index (5 rows pointing to CHANGELOG, CONTRIBUTING, ROADMAP, plans, the v0.8.0 backend design doc).
+  * Added a new `## API surface` section (extracted the API endpoint list from the apps/api Architecture cell into a dedicated, scannable table — 15 endpoints across ingest / browse / per-fight / player / webhooks / ops).
+  * Compressed the `## Release Tags` table cells from multi-sentence paragraphs to 1-line summaries (25 tagged releases).
+  * Collapsed the `## Phase Status` dense paragraphs (Phase 0 → v0.8.9) into a `<details>` block to declutter the public landing page (the canonical per-release content lives in `CHANGELOG.md`; the collapsed block is one click away for developers who want the dev history).
+  * Added a `## Contributing` pointer (to `CONTRIBUTING.md`) + a `## License` placeholder (no LICENSE file yet; marked TBD).
+  * Added a `Latest tag` GitHub badge alongside the existing CI badge.
+  * `**Status:**` line now reflects the v0.9.0 + v0.9.1 + v0.9.2 close-out state accurately (work committed to `main`; tag pending operator ceremony).
+  No code changes; the existing `docs/screenshots/*.png` references are preserved; the Quickstart's 8 numbered steps + the 6 displayed screenshots + the 2 fixture PNGs are preserved verbatim.
+
 ### Changed (web - v0.9.0 plan/001: shared <TimelineChart> base)
 
 - `web/src/components/TimelineChart.tsx` (NEW, ~580 lines): the

@@ -1,18 +1,35 @@
 # GW2Analytics
 
 [![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
+[![Latest tag](https://img.shields.io/github/v/tag/Roddygithub/Gw2Analytics?sort=semver&label=latest)](https://github.com/Roddygithub/Gw2Analytics/tags)
 
-**Status:** 339 active tests across libs + apps + web (241 pytest cases in `libs/gw2_*` + `apps/api` + 82 vitest cases in `web/` + 16 Playwright e2e; 1 conditionally skipped real-fixture integration test in `libs/gw2_evtc_parser/tests/test_parser.py::test_real_evtc_binary_parses_with_realistic_agent_count` requires the blob at `/tmp/inner_20251002-213519`) · 20 release tags shipped on the remote (latest: `v0.8.9`) · strict CI lint-and-test + pnpm typecheck + vitest gate active · OpenAPI drift gate (git diff baseline) wired · v0.9.1 hardening slice close-out in flight (5 plans: webhook Delivery schema `int`→`str` [004] + universal SSRF block for HTTPS [005] + `process_parse` background-task session factory [006] + retry+DLQ+replay worker + 22 tests [007] + OpenAPI drift gate baseline committed [008] + H1 multi-tick scheduler re-attempt + H2 lint-debt cleanup).
+**Modern combat analytics platform for Guild Wars 2 WvW (World vs World).**
 
-Modern combat analytics platform for **Guild Wars 2 WvW** (World vs World).
-
-> Independent of any third-party service (no dps.report, Elite Insights web, etc.).
+> Independent third-party platform — no dps.report, no Elite Insights web.
 > WvW combat logs (`.zevtc`) are parsed locally and stored in a stable
 > internal model from which all analytics, API, and frontend derive.
 
----
+**Status:** Latest tagged release: `v0.8.9` · v0.9.0 + v0.9.1 + v0.9.2 close-out landed on `main` (tag pending operator ceremony) · **339 active tests** across pytest + vitest + Playwright · strict CI lint + test + typecheck + OpenAPI drift gate active.
 
-## Architecture & Component Status
+## Highlights
+
+- 🎯 **Per-target / per-subgroup / per-skill roll-ups** on every fight — DPS, healing, and buff removals via stable pydantic aggregations with deterministic ordering + cross-field invariants.
+- 📈 **Account-level historical timelines** — per-day / per-fight bucketing, linear / log Y-axis, and player-name resolution on the fight drilldown's TargetFilter.
+- 🔌 **Webhook subscriptions** for parse-completion notifications — HMAC-SHA256 signed, 3-attempt retry + DLQ + replay, with SSRF block (HTTPS-only + universal private-IP gate).
+- 🧪 **339+ automated tests** across `pytest` (241), `vitest` (82), and `Playwright` e2e (16) — all green on every PR.
+- 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js 16).
+
+## Documentation
+
+| File | Purpose |
+| --- | --- |
+| [CHANGELOG.md](./CHANGELOG.md) | Canonical per-commit history (includes unreleased `v0.9.x` cycles). |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Workflow conventions, branch protection rules, CI gates. |
+| [docs/ROADMAP.md](./docs/ROADMAP.md) | Forward-looking candidates and technical-debt ledger. |
+| [plans/README.md](./plans/README.md) | Senior-advisor audit trails and scoped cycle implementation plans. |
+| [docs/v0.8.0-backend-design.md](./docs/v0.8.0-backend-design.md) | The webhook subscription + delivery worker design. |
+
+## Architecture
 
 ```
                               gw2_evtc_parser
@@ -27,33 +44,49 @@ Modern combat analytics platform for **Guild Wars 2 WvW** (World vs World).
                                 web (Next.js 16)
 ```
 
-| Component                                      | Role                                                                                    |
-|------------------------------------------------|-----------------------------------------------------------------------------------------|
-| `libs/gw2_core`                                | Stable Pydantic models (combat + API). Single source of truth. **No I/O.**              |
-| `libs/gw2_evtc_parser`                         | Binary `.zevtc` parser behind an `EvtcParser` Protocol. V1.3 layout.                    |
-| `libs/gw2_analytics`                           | Single-, multi-fight, and event-driven aggregations (`SingleFight` / `MultiFight` / `TargetDps` / `TargetHealing` / `TargetBuffRemoval` / `EventWindow` / `PlayerProfile` / `SquadRollup` / `SkillUsage`). Frozen pydantic shapes with deterministic ordering + cross-field invariants. Parser-sourced `Iterable[Event]` stream from the v0.5.0-parser wire-up.     |
-| `libs/gw2_api_client`                          | Typed async httpx wrapper for the Guild Wars 2 REST API v2.                             |
-| `apps/api`                                     | FastAPI gateway v0.8.6. MinIO blobs + Alembic + Postgres. Endpoints: `POST /api/v1/uploads`, `GET /api/v1/uploads/{id}`, `GET /api/v1/fights[/{id}]`, `GET /api/v1/fights/{id}/events` (per-target DPS + HPS + BPS + per-bucket event windows, with the per-target roll-ups carrying an optional `name` field denormalised from `OrmFightAgent` since v0.8.3), `GET /api/v1/fights/{id}/squads` (v0.7.0), `GET /api/v1/fights/{id}/skills` (v0.7.0), `GET /api/v1/players` (v0.7.0), `GET /api/v1/players/{account_name:path}` (v0.7.0), `GET /api/v1/players/{account_name:path}/timeline?limit=20&offset=0&bucket=day` (v0.8.0, per-account historical timeline with recency-first sort; v0.8.1 adds `?bucket=day` for per-day bucketing), `GET /api/v1/health/summary` (v0.8.6, operational health probe for fight-summary drift: `total_fights` / `fights_with_summaries` / `drift_count` / `drift_pct` / `status` binary), `GET /api/v1/account`. The `/players` endpoints read materialised `OrmFightPlayerSummary` rows (v0.8.4) -- latency dropped from 5-30s to ms for v0.8.4+ fights; pre-v0.8.4 fights are auto-recovered via the v0.8.5 backfill CLI (`uv run python -m gw2analytics_api.scripts.backfill_player_summaries`). **Thin: serialises `gw2_core` + composes `gw2_api_client`.** |
-| `web`                                          | Next.js 16 frontend. AG Grid Community tables (`FightsGrid`, `PlayersGrid`), GW2 API key resolve via `/account`, combat-log POST via `/upload` (multiform `POST /api/v1/uploads`). Server Components SSR-fetch the gateway. OpenAPI codegen via `pnpm generate:api`. The player-centric surface (`/players` + `/players/[account_name]`) + per-fight squad + skill roll-ups ship in v0.7.1. The per-account timeline (`PlayerTimelineChart` with Linear/Log toggle since v0.8.2 + Per fight/Per day toggle since v0.8.1) + the `TargetFilter` player-name resolution (v0.8.3) ship in v0.8.x. |
+| Component | Role |
+| --- | --- |
+| `libs/gw2_core` | Stable Pydantic models (combat + API). Single source of truth. **No I/O.** |
+| `libs/gw2_evtc_parser` | Binary `.zevtc` parser behind an `EvtcParser` Protocol. V1.3 layout. |
+| `libs/gw2_analytics` | Single-, multi-fight, and event-driven aggregations. Frozen pydantic shapes with deterministic ordering + cross-field invariants. |
+| `libs/gw2_api_client` | Typed async httpx wrapper for the Guild Wars 2 REST API v2. |
+| `apps/api` | FastAPI gateway. MinIO blobs + Alembic + Postgres. See the [API surface](#api-surface) below. |
+| `web` | Next.js 16 frontend. AG Grid Community tables + SSR fetches. OpenAPI codegen via `pnpm generate:api`. |
 
----
+## API surface
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/api/v1/uploads` | Ingest a `.zevtc` log; returns 201 + `UploadCreatedResponse` (parse runs in background). |
+| `GET` | `/api/v1/uploads/{id}` | Upload metadata. |
+| `GET` | `/api/v1/fights[/{id}]` | List fights (paginated) or fetch a single fight. |
+| `GET` | `/api/v1/fights/{id}/events` | Per-target trio (DPS + healing + buff removal) + per-bucket event windows. |
+| `GET` | `/api/v1/fights/{id}/squads` | Per-subgroup roll-up. |
+| `GET` | `/api/v1/fights/{id}/skills` | Per-skill hit count + damage / heal / strip totals. |
+| `GET` | `/api/v1/fights/{id}/timeline?window_s=N` | Per-fight temporal view (3-series, `M:SS` relative time). |
+| `GET` | `/api/v1/players?profession=&limit=&offset=` | Cross-fight player roll-up (paginated). |
+| `GET` | `/api/v1/players/{account_name:path}` | Player profile + per-fight breakdown. |
+| `GET` | `/api/v1/players/{account_name:path}/timeline?bucket=day&tz=Continent/City` | Account-level historical timeline. |
+| `POST/GET/DELETE` | `/api/v1/webhooks[/{id}]` | Webhook subscription management (HTTPS-only URLs). |
+| `POST` | `/api/v1/webhooks/dlq/{delivery_id}/replay` | Replay a DLQ'd delivery (atomic; row-level locked). |
+| `GET` | `/api/v1/health/summary` | Operational drift probe (binary `ok` / `drift`). |
+| `GET` | `/api/v1/healthz` | Liveness probe. |
+| `GET` | `/api/v1/account` | Bearer-protected world enrichment (uses `gw2_api_client`). |
 
 ## Screenshots
 
-The web's 7 routes captured via `pnpm screenshots` + [Playwright](https://playwright.dev/) (full pages, 1440×900, headless Chrome). Refresh via `pnpm screenshots --persist` after a UI change -- the `--persist` flag copies the 8 PNGs (6 referenced below) into this `docs/screenshots/` directory so they show up on the next commit.
+The web's 7 routes captured via `pnpm screenshots` + [Playwright](https://playwright.dev/) (full pages, 1440×900, headless Chrome). Refresh via `pnpm screenshots --persist` after a UI change.
 
-| Route                       | Capture                                                       |
-|-----------------------------|---------------------------------------------------------------|
-| `/`                         | ![Landing](docs/screenshots/01-landing.png)                   |
-| `/account`                  | ![Account resolve](docs/screenshots/02-account.png)           |
-| `/upload`                   | ![Upload flow](docs/screenshots/03-upload.png)                |
-| `/fights`                   | ![Fights grid](docs/screenshots/04-fights.png)                |
-| `/players`                  | ![Players grid](docs/screenshots/05-players.png)              |
-| `/players/[account_name]`   | ![Player profile with timeline](docs/screenshots/06-player-profile-with-timeline.png) |
+| Route | Capture |
+| --- | --- |
+| `/` | ![Landing](docs/screenshots/01-landing.png) |
+| `/account` | ![Account resolve](docs/screenshots/02-account.png) |
+| `/upload` | ![Upload flow](docs/screenshots/03-upload.png) |
+| `/fights` | ![Fights grid](docs/screenshots/04-fights.png) |
+| `/players` | ![Players grid](docs/screenshots/05-players.png) |
+| `/players/[account_name]` | ![Player profile with timeline](docs/screenshots/06-player-profile-with-timeline.png) |
 
-The script also captures 2 fixture/edge-state PNGs (committed but not displayed): `07-player-empty-timeline.png` (rendered against `/players/empty-history.5678`) + `08-fight-drilldown.png` (rendered against `/fights/fixture-fight-001`). These are reserved for visual regression baselines once their real (non-fixture) counterparts ship.
-
----
+The script also captures 2 fixture/edge-state PNGs (committed but not displayed): `07-player-empty-timeline.png` + `08-fight-drilldown.png` — reserved for visual regression baselines.
 
 ## Quickstart
 
@@ -70,94 +103,85 @@ uv run pre-commit install
 # 4. Bring up the infra (Postgres + MinIO)
 docker compose up -d
 
-# 5. Configure local app env
-#    Required so the FastAPI process picks up DATABASE_URL + S3_* creds.
-#    Values mirror docker-compose.yml; never commit the real .env file.
+# 5. Configure local app env (DB + S3 creds; never commit the real .env)
 cp .env.example .env
 
-# 6. Apply the Postgres schema (creates the fights / agents / skills / uploads tables)
+# 6. Apply the Postgres schema
 cd apps/api && uv run alembic upgrade head && cd ../..
 
 # 7. Boot the API (http://localhost:8000/docs)
 uv run fastapi dev apps/api/src/gw2analytics_api/main.py
 
-# 8. Frontend (Next.js 16) — the only UI for fights + API key resolve
+# 8. Frontend (Next.js 16)
 cd web
 pnpm install
 pnpm dev   # http://localhost:3000
 ```
 
----
-
 ## Release Tags
 
-| Tag                          | Component          | Description                                                  |
-|------------------------------|--------------------|--------------------------------------------------------------|
-| `v0.4.0-parser`              | `gw2_evtc_parser`  | V1.3 EVTC binary parser rollout with 545-test unit suite     |
-| `v0.1.0-analytics-prototype` | `gw2_analytics`    | Initial single-fight aggregation models                      |
-| `v0.2.0-analytics-prototype` | `gw2_analytics`    | Multi-fight rollup support across an iterable of fights      |
-| `v0.2.0-core`                | `gw2_core`         | v2 REST API data models (`AccountInfo`, `WorldInfo`, `Population`) |
-| `v0.1.0-api-client`          | `gw2_api_client`   | Typed async httpx wrapper for the GW2 v2 REST API surface    |
-| `v0.2.0-api`                 | `apps/api`         | `GET /api/v1/account` Bearer-protected world enrichment (Phase 5) |
-| `v0.3.0-web`                 | `web`              | Client upload page + canonical `formatApiError` (Phase 5 followup) |
-| `v0.3.0`                     | full-stack         | Event aggregations + CI-gate stability pass (Phase 6 + release cut) |
-| `v0.4.0-web`                 | `web`              | `/fights/[id]` drill-down page (per-target damage + healing + event windows) |
-| `v0.4.0-tooling`             | tooling            | Workspace-aware pre-commit mypy hook (`uv run mypy --no-incremental`) |
-| `v0.5.0-parser`              | `gw2_evtc_parser`  | Phase 7 v2: `Event` discriminated union + healing extraction |
-| `v0.5.0-web`                 | `web`              | Phase 7 v2: window-s selector on `/fights/[id]` |
-| `v0.6.0`                     | full-stack         | Phase 8: `BuffRemovalEvent` end-to-end + per-target filter + CI Postgres service |
-| `v0.7.0`                     | full-stack         | Phase 9: player-centric surface (`PlayerProfileAggregator` + `SquadRollupAggregator` + `SkillUsageAggregator`) + 4 new API endpoints (`/api/v1/players`, `/api/v1/players/{account_name:path}`, `/api/v1/fights/{id}/squads`, `/api/v1/fights/{id}/skills`) + 7 new e2e tests |
-| `v0.7.1`                     | `web`              | Phase 9 of web: player-centric UI (`/players` + `/players/[account_name]`) + per-fight squad + skill roll-ups (`SquadRollupsGrid` + `SkillUsageTable` + `EventWindowsChart` + `PlayerSearchBar` + `PlayersGrid`) + 4 new fetcher helpers + 13 new vitest cases |
-| `v0.8.0`                     | full-stack         | Phase 9 of web: account-level historical timelines. `GET /api/v1/players/{account_name:path}/timeline?limit=20&offset=0` backend endpoint (recency-first sort, limit [1, 100], offset [0, ∞)) + `PlayerTimelineChart` (inline SVG line chart, 3 series normalized to 0-100% of per-series max) + `PlayerTimelineLegend` (3 colour swatches) + `PlayerTimelineSection` (Client Component with "Load more" pagination) + 5 new e2e tests + 11 new vitest cases |
-| `v0.8.1`                     | `web` + `apps/api` | Per-day bucketing on the player timeline. `?bucket=day` query param on `GET /api/v1/players/{account_name:path}/timeline` collapses fights sharing a calendar day into one point whose `started_at` is UTC midnight + totals are the SUM of the day's fights. The `PlayerTimelineChart` X-axis auto-detects the day-aligned timestamps (zero-prop -- the chart infers day-vs-fight from the data) and renders `MM/DD` instead of `MM/DD HH:MM`. The `PlayerTimelineSection` gains a "Per fight" / "Per day" toggle. **Bonus**: fixes a pre-existing critical bug where the `services.py` started_at guard was falling through to a 1970-01-01 sentinel epoch (the timeline showed every point stacked at the leftmost edge). 4 new e2e tests + 1 new vitest case |
-| `v0.8.2`                     | `web`              | Log scale Y-axis on the per-account timeline. `PlayerTimelineChart.buildTimelineLayout` gains a `scale: "linear" \| "log"` parameter (default "linear"); in log mode, the Y-axis is shared across the 3 polylines (damage + healing + strip) calibrated to the tallest series, so a 1M-damage hit and a 50-strip hit are both visible on the same chart. Decade ticks (1, 10, 100, 1k, 10k, ...) with a `formatLogTick` helper (B-suffix for 1B+ values). `PlayerTimelineSection` gains a Linear/Log toggle with `localStorage` persistence (SSR-safe via mount-only `useEffect`). 4 new vitest cases |
-| `v0.8.3`                     | `web` + `apps/api` | Player name resolution on the fight drilldown's TargetFilter. The arcdps char-name (from `OrmFightAgent.name`) is denormalised into every per-target roll-up row (`target_dps` + `target_healing` + `target_buff_removal` all gain an optional `name: str \| None` field) so the dropdown can show `"HealBrand (1001)"` instead of the raw `"1001"`. Cross-roll-up consistency invariant: the same `agent_id` resolves to the same name on all 3 roll-ups (single `name_map` powers the 3 aggregators). The `TargetFilter` Client Component gains an optional `targetNameMap` prop with a `formatTargetLabel` helper (backward compat: pre-v0.8.3 wire consumers without the map keep their bare-id labels). NPCs without a registered char-name surface as `name=null` on the wire and fall back to the bare id in the UI. 9 new analytics tests + 3 new e2e assertions + 3 new frontend tests |
-| `v0.8.4`                     | `apps/api`         | Per-(fight, account) summary materialisation. New `OrmFightPlayerSummary` table + `OrmFightPlayerSummary` mapped model + `_persist_player_summaries` helper called from `process_parse` (best-effort `try/except SQLAlchemyError` -- a transient DB hiccup doesn't break the upload; the slow-path fallback serves the data). The `/players` endpoints read the materialised rows via a single SQL aggregation -- latency dropped from 5-30s to ms for v0.8.4+ fights. The pre-v0.8.4 slow path (`_compute_contributions`) is preserved as a backward-compat fallback for historical uploads. 1 new alembic migration (`0005_fight_player_summaries.py`) + 1 extended e2e test + 1 new e2e test |
-| `v0.8.5`                     | `apps/api`         | Backfill player summaries for pre-v0.8.4 fights. New `backfill.py` library (`run_backfill(db, *, fight_id, limit, dry_run) -> (backfilled, skipped, failed)`) with single-SQL `NOT EXISTS` discovery + per-fight commit (tight failure isolation) + `(S3Error, OSError, SQLAlchemyError, ValidationError)` per-fight catch. New `scripts/backfill_player_summaries.py` CLI with `--limit` / `--dry-run` / `--fight-id` flags; exit code 1 on partial-success. New shared `_fixtures.py` extracted from `test_uploads_e2e.py` (~150 lines of duplication eliminated). 3 new e2e tests + 1 skipped |
-| `v0.8.6`                     | `apps/api`         | Operational health probe for fight-summary drift. New `GET /api/v1/health/summary` endpoint + `summary_drift(db) -> SummaryDrift` library function (single SQL round-trip with 2 subqueries; `DISTINCT fight_id` is required because a single fight has multiple summary rows). Response: `total_fights` / `fights_with_summaries` / `drift_count` / `drift_pct` / `status: Literal["ok", "drift"]`. Unauthenticated by design (matches `/healthz` -- external monitoring systems typically don't carry credentials). Closes the operational observability gap: the v0.8.4 best-effort materialise + v0.8.5 per-fight catch both silently swallow errors, so an operator previously had no easy way to detect fast-path degradation. 3 new e2e tests |
-| `v0.8.7`                     | `apps/api`         | Wire the v0.8.6 health probe into CI as a regression gate + 5 hermetic unit tests. New `gw2analytics_api.scripts.health_gate` module (moved from the top-level `apps/api/ci_health_gate.py` after the v0.8.7 follow-up commit -- the canonical location is alongside the existing v0.8.5 backfill CLI, and the move lets the pre-commit mypy hook resolve the import without any `mypy_path` work-around) with 2 CLI modes: `--save-baseline PATH` (capture pre-e2e probe to JSON) + `--check-delta PATH` (compare post-e2e probe to baseline; fail on `drift_count` delta >= `MAX_DRIFT_DELTA = 2`). In-process TestClient (no uvicorn boot, no port binding, < 1 s on a CI runner); `cast(SummaryDrift, ...)` for mypy-friendly typing; `Path.open()` for PEP-736. The v0.8.6 probe's strict-binary `status` field would false-positive on the e2e suite's deliberate drift (the `test_health_summary_surfaces_drift_after_summary_deletion` test deletes summary rows); the **delta check** is baseline-agnostic and catches a v0.8.4 materialise regression (+2 delta) without false-positiving the legitimate e2e drift (+1 delta). 3 new CI steps in `.github/workflows/ci.yml` (baseline BEFORE pytest, delta check AFTER pytest, cleanup with `if: always()`); the CI invocation is now `python -m gw2analytics_api.scripts.health_gate ...` (workspace install makes the module globally importable). 5 new hermetic unit tests in `apps/api/tests/test_ci_health_gate.py` (save baseline file, check-delta pass / fail / boundary, no-args debug mode) + `_make_drift` helper that pins the rounding formula. 3 code-reviewer rounds (142-144, 147) APPROVED |
-| `v0.8.8`                     | `web` + planning   | Visual documentation in README + auto-codegen on `pnpm dev` + v0.8.8 advisor audit (`plans/` directory + 3 plans). The web/ side ships 8 tracked PNGs at `docs/screenshots/` (the captures previously written to the gitignored `/screenshots/` dir by `pnpm screenshots`) + a new `## Screenshots` section in the root README (route-keyed table referencing 6 of 8 PNGs between `## Architecture & Component Status` and `## Quickstart`) + a `--persist` flag on `web/scripts/screenshots.mjs` (pure-Node `copyFile` from `node:fs/promises`; no shell boundary, no OS-level `cp` dep; idempotent). The `web/package.json` `dev` script now chains `pnpm generate:api && next dev` so the OpenAPI `schema.d.ts` is always fresh before Next.js boots (fail-fast on a broken codegen); `openapi-typescript` added to devDependencies (the previously-missing dep that the existing `pnpm generate:api` script was silently failing on); `web/.gitignore` ignores the generated `src/lib/api/schema.d.ts`; `web/README.md` `## OpenAPI regeneration` section rewritten (drops the v0.3.0-era "reads http://localhost:8000/openapi.json" claim + documents the new auto-codegen behaviour + notes the `uv sync` prerequisite). The new `plans/` directory at the repo root holds a senior-advisor audit (improve skill, `next` invocation, `quick` effort) with 3 self-contained plans (001 screenshots-into-readme, 002 close the remaining e2e gaps, 003 auto-codegen-on-dev) + 1 considered-and-rejected item (web route coverage; already at 7/7 from v0.7.1); plan/002 was later revised to reflect that 3 of 6 Playwright specs + the `mock-server.mjs` + CI integration are already shipped from prior cycles (v0.7.1 / v0.7.2 / v0.8.0), narrowing the remaining work to 3 new spec files (`landing.spec.ts` / `account.spec.ts` / `upload.spec.ts`) + 2 mock endpoint additions to `web/tests/e2e/mock-server.mjs` (`GET /api/v1/account` + `POST /api/v1/uploads`). The legacy gitignored `/screenshots/` dir was physically removed (`rm -rf`, 384 KB reclaimed). 0 new automated tests (docs + DX cycle). Tagged `v0.8.8` |
-| `v0.8.9`                     | `apps/api` + `web` | Per-account timeline gains `?tz=Continent/City` (plan/001) + per-fight timeline section on `/fights/[id]` (plan/002). **plan/001**: the `PlayerTimelineOut` schema gains an additive `tz: str = "UTC"` field; the `get_player_timeline` route gains a `?tz=` query param that drives the day-bucketed point's `started_at` (midnight in the requested TZ, serialised back to UTC on the wire so the existing chart's X-axis `time.getUTCHours() === 0` auto-detect still works for any TZ). `ZoneInfoNotFoundError` is caught and surfaced as `HTTPException(422, ...)` AFTER the 404 check. The web/ side threads `tz` through `fetchPlayerTimeline` opts + the `PlayerTimelineSection` Client Component (both call sites: initial-load + "Load more" pagination). **plan/002**: a new `PerFightTimelineAggregator` in `libs/gw2_analytics` (duplicates the per-bucket skeleton from `EventWindowAggregator` ~30 lines; the plan's pre-approved escape hatch) + a new `GET /api/v1/fights/{id}/timeline?window_s=5` route (BEFORE the catch-all for defensive declaration order) + a new `PerFightTimelineChart` (inline SVG, 3 series, `M:SS` relative-time X-axis labels) + a new `PerFightTimelineSection` Server Component wrapper. The `/fights/[id]` page is now a 4-fetcher + 7-section contract (the 4th fetcher joins the `Promise.allSettled` parallel fetch; a transient `fetchFightTimeline` failure degrades to a section-level caption WITHOUT blanking the page). 7 new pytest + 4 new e2e + 8 new vitest tests. Round-1 review (plan/002) caught 4 real issues (dual-emit test wrong bucket placement / mock server duplicate `const` / page test missing 4th fetcher mock / vitest test type-import issue + redundant `setup.ts` mock that broke the component-level test); round-3 LGTM after all 5 fixes. Tagged `v0.8.9` |
+| Tag | Component | Summary |
+| --- | --- | --- |
+| `v0.4.0-parser` | `gw2_evtc_parser` | V1.3 EVTC binary parser rollout with 545-test unit suite |
+| `v0.1.0-analytics-prototype` | `gw2_analytics` | Initial single-fight aggregation models |
+| `v0.2.0-analytics-prototype` | `gw2_analytics` | Multi-fight rollup support across an iterable of fights |
+| `v0.2.0-core` | `gw2_core` | v2 REST API data models (`AccountInfo`, `WorldInfo`, `Population`) |
+| `v0.1.0-api-client` | `gw2_api_client` | Typed async httpx wrapper for the GW2 v2 REST API surface |
+| `v0.2.0-api` | `apps/api` | `GET /api/v1/account` Bearer-protected world enrichment |
+| `v0.3.0-web` | `web` | Client upload page + canonical `formatApiError` |
+| `v0.3.0` | full-stack | Event aggregations + CI-gate stability pass |
+| `v0.4.0-web` | `web` | `/fights/[id]` drill-down page |
+| `v0.4.0-tooling` | tooling | Workspace-aware pre-commit mypy hook |
+| `v0.5.0-parser` | `gw2_evtc_parser` | Phase 7 v2: `Event` discriminated union + healing extraction |
+| `v0.5.0-web` | `web` | Phase 7 v2: window-s selector on `/fights/[id]` |
+| `v0.6.0` | full-stack | Phase 8: `BuffRemovalEvent` end-to-end + per-target filter + CI Postgres service |
+| `v0.7.0` | full-stack | Phase 9 backend: player-centric surface + 4 new API endpoints + 7 new e2e tests |
+| `v0.7.1` | `web` | Phase 9 web: player-centric UI + 5 new components + 13 new vitest cases |
+| `v0.8.0` | full-stack | Account-level historical timelines + 5 new e2e tests + 11 new vitest cases |
+| `v0.8.1` | `web` + `apps/api` | Per-day bucketing on the player timeline + critical 1970-01-01 sentinel fix |
+| `v0.8.2` | `web` | Log scale Y-axis on the per-account timeline |
+| `v0.8.3` | `web` + `apps/api` | Player name resolution on the fight drilldown's TargetFilter |
+| `v0.8.4` | `apps/api` | Per-(fight, account) summary materialisation (5-30s → ms latency) |
+| `v0.8.5` | `apps/api` | Backfill player summaries for pre-v0.8.4 fights |
+| `v0.8.6` | `apps/api` | Operational health probe for fight-summary drift |
+| `v0.8.7` | `apps/api` | Wire the v0.8.6 health probe into CI as a regression gate |
+| `v0.8.8` | `web` + planning | Visual documentation in README + auto-codegen on `pnpm dev` + advisor audit |
+| `v0.8.9` | `apps/api` + `web` | Per-account timeline `?tz=Continent/City` + per-fight timeline section |
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the per-commit history and the linking notes between releases.
+See [CHANGELOG.md](./CHANGELOG.md) for the per-commit history.
 
----
+<details>
+<summary>Phase history (Phase 0 → v0.8.9)</summary>
 
-## Phase Status
+### Phase 0 → v0.8.9
 
 ✅ **Phase 0** — Monorepo skeleton + tooling (`uv`, `ruff`, `mypy`) + boilerplate scaffolding.
-✅ **Phase 1** — `gw2_evtc_parser` V1.3 binary layout parsing behind an `EvtcParser` Protocol. Lenient on skill tables, strict on agent boundaries. Tagged `v0.4.0-parser`.
+✅ **Phase 1** — `gw2_evtc_parser` V1.3 binary layout parsing behind an `EvtcParser` Protocol. Tagged `v0.4.0-parser`.
 ✅ **Phase 2** — FastAPI gateway + Alembic migrations + MinIO content-addressed `.zevtc` blob storage + V1.3 `gw2_core` combat schemas. Env-driven credentials via `pydantic-settings` + `pytest-env`.
 ✅ **Phase 3** — `gw2_analytics` aggregations. `SingleFightAggregator` + `MultiFightAggregator` with strict frozen pydantic shapes + cross-field invariant validation. Tagged `v0.1.0-analytics-prototype` and `v0.2.0-analytics-prototype`.
 ✅ **Phase 4** — `web/` Next.js 16 frontend scaffolded. AG Grid Community tables (`FightsGrid`), `openapi-typescript` codegen, `pnpm typecheck` step in CI. Server Components SSR-fetch the gateway through an env-driven `src/lib/api.ts` helper.
-✅ **Phase 5** — `GET /api/v1/account` Bearer-protected world enrichment. Composes `AsyncGuildWars2Client.account_get` + `worlds_get([world_id])` into a deterministic ``(world_id, world_name, world_population)`` triple. Tagged `v0.2.0-api`. The web/ side surfaced ``/upload`` (multiform `POST /api/v1/uploads` envelope renderer) + a canonical `formatApiError` helper shared with `/account`; tagged `v0.3.0-web`.
-✅ **Phase 6** — Event-driven aggregations + CI-gate stability. `TargetDpsAggregator` (per-target damage roll-ups with deterministic ordering + sum-preservation invariant) and `EventWindowAggregator` (1-second bucket histogram with gap zero-fill + contiguous adjacency invariant). Both accept `Iterable[Event]` from `gw2_core` 0.3.0 (`DamageEvent` / `HealingEvent` discriminated by `EventType` StrEnum). `GET /api/v1/fights/{id}/events` route exists as a Phase 6 v1 stub returning `[]`; Phase 7 will swap parser-sourced streams in. 13 new pytest tests + 4 new vitest tests lock the surfaces. Tagged `v0.3.0`.
-🔄 **Phase 7** — Parser-side V1.3 event-block consumer. `libs/gw2_evtc_parser::PythonEvtcParser::parse_events(source) -> Iterator[Event]` reads the 64-byte `cbtevent` struct at the post-skill-block offset; the filter ``is_statechange == 0 && is_nondamage == 0 && val > 0`` round-trips into a ``DamageEvent``. Storage is hybrid: per-fight gzipped JSONL blob in MinIO + an ``events_blob_uri`` column on the ``fights`` Postgres table. The apps/api background parse task persists the blob after the existing fight-row insertion; ``GET /api/v1/fights/{id}/events`` decompresses on demand and feeds ``TargetDpsAggregator`` + ``EventWindowAggregator``. ``HealingEvent`` extraction (the ``val < 0`` sign-split) is a Phase 7 v2 followup.
-✅ **Phase 8** — `BuffRemovalEvent` end-to-end (parser dual-emit contract + `TargetBuffRemovalAggregator` + `target_buff_removal` on `/fights/{id}/events` + per-target filter dropdown on `/fights/[id]`). Tagged `v0.6.0`. CI services block landed (Postgres on a fresh runner).
-✅ **Phase 9 (v0.7.0 backend)** — Player-centric surface. `PlayerProfileAggregator` (cross-fight join on `account_name`, first-seen profession/elite, last-seen name, dedup on `(account_name, fight_id)`), `SquadRollupAggregator` (per-subgroup source-side roll-up), `SkillUsageAggregator` (per-skill hit count + damage/heal/strip totals). 4 new API endpoints: `GET /api/v1/players` (paginated cross-fight roll-up), `GET /api/v1/players/{account_name:path}` (full profile + per-fight breakdown), `GET /api/v1/fights/{id}/squads`, `GET /api/v1/fights/{id}/skills`. 7 new self-contained e2e tests. Tagged `v0.7.0`. The web layer (2 new pages + 4 new components + nav update) ships in v0.7.1.
-✅ **Phase 9 of web (v0.7.1)** — Player-centric UI. 2 new pages (`/players` + `/players/[account_name]`) + 5 new components (`SquadRollupsGrid` for the per-subgroup roll-up, `SkillUsageTable` for the per-skill roll-up, `EventWindowsChart` for the inline SVG bar chart of the per-bucket event windows, `PlayerSearchBar` in the layout's sticky header bar, `PlayersGrid` for the paginated AG Grid). The `/fights/[id]` page now fires 3 parallel fetchers via `Promise.allSettled` (events + squads + skills) so a single fetcher failure does not blank the whole page. 13 new vitest cases. Tagged `v0.7.1`.
-✅ **Phase 9 of web (v0.8.0)** — Account-level historical timelines. New backend endpoint `GET /api/v1/players/{account_name:path}/timeline?limit=20&offset=0` (recency-first sort, limit [1, 100], offset [0, ∞), 404 on unknown player, 422 on out-of-range query params). The web layer adds `PlayerTimelineChart` (inline SVG line chart, 3 series normalized to 0-100% of per-series max so the smaller-magnitude strip line is visible alongside damage + healing; SVG-native `<title>` tooltip on the group surfaces the absolute values on hover) + `PlayerTimelineLegend` (3 colour swatches) + `PlayerTimelineSection` (Client Component owning the "Load more" pagination state). The `/players/[account_name]` page always renders the section (synthetic-empty `PlayerTimeline` on the 404 path) so the analyst sees the empty-state panel instead of a silent absence. 5 new e2e tests + 11 new vitest cases. Tagged `v0.8.0`.
-✅ **Phase 9 of web (v0.8.1)** — Per-day bucketing on the player timeline. `?bucket=day` query param on the timeline endpoint collapses fights sharing a calendar day into one point whose `started_at` is UTC midnight and whose 3 totals are the SUM of the day's fights. The `PlayerTimelineChart` X-axis auto-detects the day-aligned timestamps (zero-prop: `time.getUTCHours() === 0 && ...`) and renders `MM/DD` instead of `MM/DD HH:MM`; the `PlayerTimelineSection` gains a "Per fight" / "Per day" toggle. **Bonus fix**: a critical pre-existing bug in `services.py` where the `started_at` guard was falling through to the 1970-01-01 sentinel epoch was discovered during the v0.8.1 wire-up and fixed (now unconditionally `datetime.now(UTC)` with a docstring that explains the trap so a future refactor doesn't reintroduce it). The v0.8.0 timeline previously showed every point stacked at the leftmost edge; the timeline is now usable. 4 new e2e tests + 1 new vitest case. Tagged `v0.8.1`.
-✅ **Phase 9 of web (v0.8.2)** — Log scale Y-axis on the per-account timeline. `PlayerTimelineChart.buildTimelineLayout` gains a `scale: "linear" \| "log"` parameter (default "linear"); in log mode, the Y-axis is shared across the 3 polylines (damage + healing + strip) calibrated to the tallest series, so a 1M-damage hit and a 50-strip hit are both visible on the same chart (the original ROADMAP XS item: "Cas où damage = 1M dwarf strip = 50 reste illisible même après normalisation"). Decade ticks (1, 10, 100, 1k, 10k, ...) capped at 8 with a `formatLogTick` helper (0, 1, 10, 100, 1k, 1.5k, 1M, 1.5M, 1B). `PlayerTimelineSection` gains a Linear/Log toggle with `localStorage` persistence (SSR-safe via mount-only `useEffect` to avoid hydration mismatches). 4 new vitest cases. Tagged `v0.8.2`.
-✅ **Phase 9 of web (v0.8.3)** — Player name resolution on the fight drilldown's TargetFilter. The arcdps char-name (from `OrmFightAgent.name`) is denormalised into every per-target roll-up row (`target_dps` + `target_healing` + `target_buff_removal` all gain an optional `name: str \| None` field via a single `name_map` built by the route and passed to all 3 aggregators) so the dropdown can show `"HealBrand (1001)"` instead of the raw `"1001"`. Closes the long-standing tech-debt item "Display player name in the TargetFilter dropdown (currently shows raw agent_ids)" documented since the v0.6.0 release. Cross-roll-up consistency invariant: the same `agent_id` resolves to the same name on all 3 roll-ups (a single `name_map` powers the 3 aggregators). NPCs without a registered char-name surface as `name=null` on the wire and fall back to the bare id in the UI. 9 new analytics tests + 3 new e2e assertions + 3 new frontend tests. Tagged `v0.8.3`.
-✅ **v0.8.4** — apps/api: per-(fight, account) summary materialisation. New `OrmFightPlayerSummary` table + mapped model + `_persist_player_summaries` helper called from `process_parse` (best-effort `try/except SQLAlchemyError` -- a transient DB hiccup doesn't break the upload; the slow-path fallback serves the data on the read side). The `/players` endpoints (`GET /players`, `GET /players/{account_name:path}`, `GET /players/{account_name:path}/timeline`) now read the materialised rows via a single SQL aggregation -- latency dropped from 5-30s to ms for v0.8.4+ fights. The pre-v0.8.4 slow path (`_compute_contributions`) is preserved as a backward-compat fallback for historical uploads. 1 new alembic migration (`0005_fight_player_summaries.py`) + 1 extended e2e test + 1 new e2e test. Tagged `v0.8.4` (changelog-only, not yet on the remote).
-✅ **v0.8.5** — apps/api: backfill player summaries for pre-v0.8.4 fights. New `backfill.py` library (`run_backfill(db, *, fight_id, limit, dry_run) -> (backfilled, skipped, failed)`) with single-SQL `NOT EXISTS` discovery + per-fight commit (tight failure isolation) + `(S3Error, OSError, SQLAlchemyError, ValidationError)` per-fight catch. New `scripts/backfill_player_summaries.py` CLI (`uv run python -m gw2analytics_api.scripts.backfill_player_summaries --limit 1000`) with `--limit` / `--dry-run` / `--fight-id` flags; exit code 1 on partial-success so cron / CI can detect + alert. New shared `_fixtures.py` extracted from `test_uploads_e2e.py` (~150 lines of duplication eliminated). 3 new e2e tests + 1 skipped. Tagged `v0.8.5` (changelog-only, not yet on the remote).
-✅ **v0.8.6** — apps/api: operational health probe for fight-summary drift. New `GET /api/v1/health/summary` endpoint + `summary_drift(db) -> SummaryDrift` library function (single SQL round-trip with 2 subqueries; `DISTINCT fight_id` is required because a single fight has multiple summary rows). Response: `total_fights` / `fights_with_summaries` / `drift_count` / `drift_pct` / `status: Literal["ok", "drift"]`. Unauthenticated by design (matches `/healthz` -- external monitoring systems typically don't carry credentials, and the data is operational, not sensitive). Closes the operational observability gap: the v0.8.4 best-effort materialise + v0.8.5 per-fight catch both silently swallow errors, so an operator previously had no easy way to detect fast-path degradation. 3 new e2e tests. Tagged `v0.8.6` (changelog-only, not yet on the remote).
-✅ **v0.8.7** — apps/api: wire the v0.8.6 health probe into CI as a regression gate + 5 hermetic unit tests. New `gw2analytics_api.scripts.health_gate` module (originally `apps/api/ci_health_gate.py` at the gate commit; moved into the `src/` tree in the v0.8.7 follow-up commit so the pre-commit mypy hook + the workspace install can resolve the import without any `mypy_path` work-around) with 2 CLI modes: `--save-baseline PATH` (capture pre-e2e probe to JSON) + `--check-delta PATH` (compare post-e2e probe to baseline; fail on `drift_count` delta >= `MAX_DRIFT_DELTA = 2`). In-process TestClient (no uvicorn boot, no port binding, < 1 s on a CI runner); `cast(SummaryDrift, ...)` for mypy-friendly typing; `Path.open()` for PEP-736. The v0.8.6 probe's strict-binary `status` field would false-positive on the e2e suite's deliberate drift (the `test_health_summary_surfaces_drift_after_summary_deletion` test deletes summary rows); the **delta check** is baseline-agnostic and catches a v0.8.4 materialise regression (+2 delta) without false-positiving the legitimate e2e drift (+1 delta). The off-by-one fix (`>=` vs `>`) is critical: with `>` and `MAX=2`, a single-fight regression would pass. 3 new CI steps in `.github/workflows/ci.yml` (baseline BEFORE pytest, delta check AFTER pytest, cleanup with `if: always()`); the CI invocation is now `python -m gw2analytics_api.scripts.health_gate ...` (workspace install makes the module globally importable). 5 new hermetic unit tests in `apps/api/tests/test_ci_health_gate.py` (the gate is now an automated regression check, not just a CI step): 5 cases covering `_save_baseline`, `_check_delta` (3 boundary tests: delta == MAX fails, delta == MAX-1 passes, zero delta passes), and `main` no-args debug. 3 code-reviewer rounds (142-144, 147) APPROVED + round 146 thinker recommendation that drove the script move. Tagged `v0.8.7` (changelog-only, not yet on the remote).
-✅ **v0.8.8** — `web` + planning: visual documentation in README + auto-codegen on `pnpm dev`. The web/ side ships 8 tracked PNGs at `docs/screenshots/` (the captures previously written to the gitignored `/screenshots/` dir by `pnpm screenshots`; the 8 PNGs cover every top-level web route + the fight drilldown + the player profile drilldown) + a new `## Screenshots` section in the root README (route-keyed table referencing 6 of 8 PNGs) + a `--persist` flag on `web/scripts/screenshots.mjs` (pure-Node `copyFile` from `node:fs/promises`; no shell boundary, no OS-level `cp` dep; idempotent). The `web/package.json` `dev` script now chains `pnpm generate:api && next dev` so the OpenAPI `schema.d.ts` is always fresh before Next.js boots (`&&` fail-fast on a broken codegen); `openapi-typescript` added to devDependencies (the previously-missing dep that the existing `pnpm generate:api` script was silently failing on); `web/.gitignore` ignores the generated `src/lib/api/schema.d.ts`; `web/README.md` `## OpenAPI regeneration` section rewritten (drops the v0.3.0-era "reads http://localhost:8000/openapi.json" claim + documents the new auto-codegen behaviour + notes the `uv sync` prerequisite). The new `plans/` directory at the repo root holds a senior-advisor audit (improve skill, `next` invocation, `quick` effort) with 3 self-contained plans + 1 considered-and-rejected item (web route coverage; already at 7/7 from v0.7.1); plan/002 was later revised to reflect that 3 of 6 Playwright specs + the `mock-server.mjs` + CI integration are already shipped from prior cycles. Closes the v0.8.7 chore cycle's screenshot investment: the v0.8.7 `web/scripts/screenshots.mjs` script was tracked but the PNGs it emitted were gitignored and invisible to end-users; v0.8.8 brings them into the tracked `docs/screenshots/` + adds a `--persist` flag for future refresh runs. The legacy gitignored `/screenshots/` dir was physically removed (`rm -rf`, 384 KB reclaimed). `pnpm dev` is now a Python+Node hybrid bootstrap (the codegen chain pulls in `dump_openapi.py` which boots the FastAPI app in-process to call `app.openapi()`); the `uv sync` prerequisite is now load-bearing. 0 new automated tests (docs + DX cycle). Tagged `v0.8.8`.
-✅ **v0.8.9** — `apps/api` + `web`: per-account timeline gains `?tz=Continent/City` (plan/001) + per-fight timeline section on `/fights/[id]` (plan/002). **plan/001**: the `PlayerTimelineOut` schema gains an additive `tz: str = "UTC"` field; the `get_player_timeline` route gains a `?tz=` query param that drives the day-bucketed point's `started_at` (midnight in the requested TZ, serialised back to UTC on the wire so the existing chart's X-axis `time.getUTCHours() === 0` auto-detect still works for any TZ -- the chart does not need to know the analyst's TZ to render `MM/DD`). `ZoneInfoNotFoundError` is caught and surfaced as `HTTPException(422, ...)` AFTER the 404 check (UNKNOWN account returns 404 first; KNOWN account + invalid TZ returns 422; UNKNOWN + invalid also returns 404 because the 404 check fires first; the ordering is documented inline in the route docstring). The `?bucket=fight` mode is unaffected -- the TZ only matters for the day-bucketed grouping. The web/ side threads `tz` through `fetchPlayerTimeline` opts + the `PlayerTimelineSection` Client Component (both call sites: initial-load + "Load more" pagination); the page's `effectiveTimeline` fallback gains `tz: "UTC"` (TS2322 fix from round 1). The hardcoded `tz = "UTC"` local const in the section is the v0.8.9 baseline; a future v0.9.0+ TZ-selector UI would lift this to a prop. Closes the v0.8.1 CHANGELOG's "TZ assumption documented inline" tech-debt note (the v0.8.1 day-bucketing assumed UTC, with the `?tz=Europe/Paris` extension explicitly deferred to v0.8.9). 4 new e2e tests (UTC default + Europe/Paris + America/New_York + 422 invalid -- the 422 test seeds a real account so the 404 check passes; an unknown account would mask the 422) + 1 new vitest case + 2 mock-type extensions. Round-1 review caught 2 real issues (TS2322 + 422 test ordering); round-2 LGTM after the fixes. **plan/002**: a new `PerFightTimelineAggregator` in `libs/gw2_analytics` (duplicates the per-bucket skeleton from `EventWindowAggregator` ~30 lines; the plan's pre-approved escape hatch; generator-safe single-pass iteration checking `isinstance` for all 3 event types with cross-field invariant checks: sum-preservation across all 3 kinds + contiguous buckets) + a new `GET /api/v1/fights/{id}/timeline?window_s=5` route (BEFORE the catch-all for defensive declaration order; `window_s` clamped to `[1, 600]`; 404 on unknown fight; 422 on out-of-range `window_s`) + `PerFightTimelinePointOut` + `PerFightTimelineOut` schemas + a new `PerFightTimelineChart` (inline SVG, 3 series with per-series-max normalisation in linear mode + shared-log in log mode, `M:SS` relative-time X-axis labels like "0:00" / "0:15", pure helpers `buildPerFightTimelineLayout` + `formatPerFightLogTick` exported for testing) + a new `PerFightTimelineSection` Server Component wrapper (renders the section heading + "Showing N buckets (M-second window, X-second duration)" caption + the chart; handles `timeline === null` as a section-level "Per-fight timeline unavailable" caption WITHOUT blanking the page). The `/fights/[id]` page is now a 4-fetcher + 7-section contract (the 4th fetcher joins the `Promise.allSettled` parallel fetch; only `/events` failure flips to the unified error card). The page is now a 4-fetcher + 7-section contract. 7 new pytest + 4 new e2e + 8 new vitest tests. Round-1 review (plan/002) caught 4 real issues (dual-emit test wrong bucket placement / mock server duplicate `const` / page test missing 4th fetcher mock / vitest test type-import issue + redundant `setup.ts` mock that broke the component-level test); round-3 LGTM after all 5 fixes. Tagged `v0.8.9`.
+✅ **Phase 5** — `GET /api/v1/account` Bearer-protected world enrichment. Tagged `v0.2.0-api`. The web/ side surfaced ``/upload``; tagged `v0.3.0-web`.
+✅ **Phase 6** — Event-driven aggregations + CI-gate stability. `TargetDpsAggregator` + `EventWindowAggregator`. Tagged `v0.3.0`.
+🔄 **Phase 7** — Parser-side V1.3 event-block consumer.
+✅ **Phase 8** — `BuffRemovalEvent` end-to-end. Tagged `v0.6.0`. CI services block landed (Postgres on a fresh runner).
+✅ **Phase 9 (v0.7.0 backend)** — Player-centric surface. Tagged `v0.7.0`. The web layer ships in v0.7.1.
+✅ **Phase 9 of web (v0.7.1)** — Player-centric UI. Tagged `v0.7.1`.
+✅ **Phase 9 of web (v0.8.0)** — Account-level historical timelines. Tagged `v0.8.0`.
+✅ **Phase 9 of web (v0.8.1)** — Per-day bucketing on the player timeline. Tagged `v0.8.1`.
+✅ **Phase 9 of web (v0.8.2)** — Log scale Y-axis on the per-account timeline. Tagged `v0.8.2`.
+✅ **Phase 9 of web (v0.8.3)** — Player name resolution on the fight drilldown's TargetFilter. Tagged `v0.8.3`.
+✅ **v0.8.4** — apps/api: per-(fight, account) summary materialisation.
+✅ **v0.8.5** — apps/api: backfill player summaries for pre-v0.8.4 fights.
+✅ **v0.8.6** — apps/api: operational health probe for fight-summary drift.
+✅ **v0.8.7** — apps/api: wire the v0.8.6 health probe into CI as a regression gate.
+✅ **v0.8.8** — `web` + planning: visual documentation in README + auto-codegen on `pnpm dev`.
+✅ **v0.8.9** — `apps/api` + `web`: per-account timeline `?tz=Continent/City` + per-fight timeline section.
 
----
+</details>
 
-## Conventions
+## Contributing
 
-Project rules live in [`CONTRIBUTING.md`](CONTRIBUTING.md):
-
-- Conventional Commits v1.0.0 spec with the canonical 9-type table.
-- Branch protection for `main` (linear history, no force pushes, required status checks).
-- Pre-commit / CI mirror table: `trim-whitespace`, `ruff check`, `ruff format`, `mypy`, `pytest`.
-- Test requirements (cross-field invariants get explicit tests, lenient edges locked at unit level, prefer `_build_*_record` helpers).
-- Per-component `pyproject.toml` + per-library release tags (scheme: `vMAJOR.MINOR.PATCH-<lib>`).
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for branch protection, pre-commit, code style, and test requirements.
 
 ### Principles
 
@@ -165,3 +189,7 @@ Project rules live in [`CONTRIBUTING.md`](CONTRIBUTING.md):
 2. **The parser is replaceable** behind the `EvtcParser` Protocol. Swap Python for Rust + PyO3 with zero churn elsewhere.
 3. **The frontend never knows** about EVTC, parser internals, or DB schema — only the OpenAPI surface.
 4. **Each component evolves independently** — enforced by `pyproject.toml` per lib.
+
+## License
+
+All rights reserved. License TBD.
