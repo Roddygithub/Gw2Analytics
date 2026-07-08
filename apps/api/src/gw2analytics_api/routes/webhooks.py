@@ -317,7 +317,25 @@ def replay_dlq_delivery(
        the upload's fight summary but a 404 here surfaces the
        orphaned-row case.
     """
-    dlq = db.get(OrmWebhookDlq, delivery_id)
+    # v0.9.2 plan 009 Step 3: row-level lock via SELECT ... FOR UPDATE
+    # to close the read-before-commit race in the concurrent replay
+    # test. Pre-fix, two concurrent threads both called
+    # ``db.get(OrmWebhookDlq, delivery_id)`` before either committed,
+    # each creating a fresh delivery row + each returning 201. The
+    # new path uses ``select(...).with_for_update()`` so the second
+    # thread's SELECT FOR UPDATE BLOCKS on the first thread's row
+    # lock; once the first thread commits the dlq delete + delivery
+    # add, the second thread's SELECT returns 0 rows (``scalar_one_or_none()``
+    # returns None) and the route raises 404. The two-thread pool in
+    # ``test_replay_dlq_idempotent_concurrent_calls`` widens the race
+    # window with a 0.5s sleep on the first ``Session.commit`` so
+    # thread 2 is guaranteed to start its SELECT FOR UPDATE before
+    # thread 1's commit lands.
+    dlq = db.execute(
+        select(OrmWebhookDlq)
+        .where(OrmWebhookDlq.id == delivery_id)
+        .with_for_update()
+    ).scalar_one_or_none()
     if dlq is None:
         raise HTTPException(
             status_code=404,
