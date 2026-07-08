@@ -57,7 +57,9 @@ def _utcnow() -> datetime:
 
 
 def _generate_subscription_id() -> str:
-    return "whsub_" + base64.b64encode(secrets.token_bytes(12)).decode()
+    # URL-safe base64 -- standard b64encode emits '/' / '+' which
+    # break FastAPI path-param matching on DELETE /{subscription_id}.
+    return "whsub_" + base64.urlsafe_b64encode(secrets.token_bytes(12)).decode()
 
 
 def _generate_secret() -> str:

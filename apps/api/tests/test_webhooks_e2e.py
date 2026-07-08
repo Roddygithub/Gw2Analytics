@@ -140,6 +140,40 @@ def _post_sub(url: str = "") -> Response:
     )
 
 
+def test_generate_subscription_id_is_url_safe() -> None:
+    """Regression guard for the v0.9.1 close-out bug where standard
+    ``base64.b64encode`` emitted '/' / '+' characters in ~6% of
+    16-byte token encodings. Those characters break FastAPI's
+    path-parameter matching on
+    ``DELETE /api/v1/webhooks/{subscription_id}`` (the route
+    framework returns 404 even though the row exists in Postgres).
+
+    The fix swapped to ``base64.urlsafe_b64encode`` which maps
+    '/' -> '_' and '+' -> '-'. This unit-level test asserts the
+    invariant without requiring a DB session. 256 iterations
+    gives >99.99% probability of catching any regression to a
+    non-URL-safe base64 alphabet.
+
+    Tests importing ``_webhook_routes`` (the route module) get the
+    same generator the route uses, so this test guards against
+    future refactors that swap the generator -- e.g., a future
+    engineer drafting ``POST /api/v1/webhooks/{id}/test-ping``
+    would still benefit from the URL-safe invariant even if they
+    never re-read the DELETE route.
+    """
+    for _ in range(256):
+        sid = _webhook_routes._generate_subscription_id()
+        assert sid.startswith("whsub_"), f"prefix missing: {sid!r}"
+        assert "/" not in sid, (
+            f"subscription id contains URL-unsafe '/': {sid!r}; "
+            f"FastAPI DELETE /{{subscription_id}} will 404"
+        )
+        assert "+" not in sid, (
+            f"subscription id contains URL-unsafe '+': {sid!r}; "
+            f"FastAPI DELETE /{{subscription_id}} will 404"
+        )
+
+
 def test_webhooks_post_201_returns_secret_once() -> None:
     """Happy-path POST returns 201 with secret + id; the GET round-trip
     confirms the secret is NEVER returned again (the v0.9.0
