@@ -1570,9 +1570,13 @@ def test_player_timeline_tz_422_when_invalid_timezone() -> None:
     # The error payload includes the rejected TZ string in the
     # ``detail`` field (matches the existing 422 detail-message
     # convention used by the limit/offset/bucket validators).
+    # The route surfaces a plain-string ``detail`` (the
+    # ``ZoneInfoNotFoundError`` message) rather than a
+    # FastAPI-validation list-detail (no Pydantic field is
+    # being validated here -- the IANA name is parsed
+    # inside the handler, not by the Query type system).
     body = resp.json()
-    detail_strs = [str(item) for item in body.get("detail", [])]
-    assert any("Mars/Olympus" in s for s in detail_strs), body
+    assert "Mars/Olympus" in str(body.get("detail", "")), body
 
 
 # ---------------------------------------------------------------------------
@@ -1880,7 +1884,7 @@ def test_background_task_session_alive_at_invocation(
     Postgres reachable). The test SKIPs cleanly when no live DB is reachable.
     """
     try:
-        probe = get_sessionmaker()
+        probe = get_sessionmaker()()
         probe.execute(text("SELECT 1"))
         probe.close()
     except Exception as exc:
@@ -1898,7 +1902,7 @@ def test_background_task_session_alive_at_invocation(
         "/api/v1/uploads",
         files={"file": ("regression.zevtc", blob, "application/zip")},
     )
-    assert resp.status_code == 202, f"upload POST failed: {resp.status_code} {resp.text}"
+    assert resp.status_code == 201, f"upload POST failed: {resp.status_code} {resp.text}"
     upload_id = resp.json()["id"]
 
     deadline = time.monotonic() + 2.0

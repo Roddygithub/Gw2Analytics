@@ -47,10 +47,15 @@ to <120s.
 
 from __future__ import annotations
 
-import pytest
-from sqlalchemy import delete
+from collections.abc import Callable
 
-from gw2analytics_api.database import get_sessionmaker
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import delete
+from sqlalchemy.orm import Session, sessionmaker
+
+from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory
+from gw2analytics_api.main import app
 from gw2analytics_api.models import (
     OrmFight,
     OrmFightPlayerSummary,
@@ -73,7 +78,7 @@ def _isolate_test_state() -> None:
     ``uploads`` + ``fights`` mid-test would surface a partial
     state to the test).
     """
-    with get_sessionmaker()() as db:
+    with _get_sessionmaker_factory()() as db:
         # Order: children before parents. ``OrmFight`` has SQLAlchemy
         # relationship cascades to ``OrmFightAgent`` + ``OrmFightSkill``
         # so those are auto-cleaned; we delete the others explicitly
@@ -85,3 +90,57 @@ def _isolate_test_state() -> None:
         db.execute(delete(OrmFight))
         db.execute(delete(Upload))
         db.commit()
+
+
+# ---------------------------------------------------------------------------
+# v0.9.2 plan 006 regression test fixtures
+# ---------------------------------------------------------------------------
+# The ``test_background_task_session_alive_at_invocation`` regression
+# test (added in plan 006 to lock the ``process_parse`` session_factory
+# refactor) requests ``client`` + ``get_sessionmaker`` as pytest
+# fixture parameters, NOT as module-level names. The conftest provides
+# them here so the regression test can ship without a per-file
+# ``client`` fixture shadowing the module-level ``client`` already
+# defined in ``test_uploads_e2e.py``.
+#
+# Why this lives in conftest (not the test file): the regression test
+# is the ONLY test in the suite that uses fixture-injected ``client``
+# + ``get_sessionmaker``; a per-file fixture would add ~15 lines of
+# boilerplate to ``test_uploads_e2e.py`` for a single consumer. A
+# conftest fixture is the idiomatic pytest pattern for fixtures
+# consumed by 1+ test files.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def client() -> TestClient:
+    """Fresh ``TestClient(app)`` per test.
+
+    Mirrors the module-level ``client = TestClient(app)`` at the top
+    of ``test_uploads_e2e.py``; the regression test prefers
+    fixture-injected ``client`` for explicitness (the test signature
+    advertises its dependencies).
+    """
+    return TestClient(app)
+
+
+@pytest.fixture
+def get_sessionmaker() -> Callable[[], sessionmaker[Session]]:
+    """The sessionmaker factory from :mod:`gw2analytics_api.database`.
+
+    Returns a callable that, when invoked, returns a
+    ``sessionmaker[Session]`` instance. To open a fresh
+    ``Session`` for query/insert, callers invoke
+    ``get_sessionmaker()()`` (the standard double-call
+    pattern used everywhere else in the test suite -- see
+    :func:`test_uploads_e2e_happy_path` for the canonical
+    example).
+
+    The regression test's signature is
+    ``def test_background_task_session_alive_at_invocation(
+    client: TestClient, get_sessionmaker: Any)``. The fixture
+    shadows the imported symbol so the test does not need a
+    top-level ``from gw2analytics_api.database import
+    get_sessionmaker`` -- the fixture IS the import.
+    """
+    return _get_sessionmaker_factory
