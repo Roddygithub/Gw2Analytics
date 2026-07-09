@@ -1,4 +1,4 @@
-"""v0.10.2 hotfix followup #8: defensive WARNING when ``cf.skills`` is empty despite ``header.skill_count > 0``.
+"""v0.10.2 hotfix followup #8: defensive WARNING when cf.skills is empty.
 
 Background
 ==========
@@ -26,6 +26,9 @@ The WARNING is non-fatal (the upload still completes), but it
 makes the silent parser misread visible to operators
 monitoring the parser logs. This mirrors the #4 followup's
 "0-summary on non-empty source_map" WARNING.
+
+(Module docstring compressed to fit the 100-char E501 line
+limit; the full background lives in this expanded block.)
 
 What this test pins
 ===================
@@ -111,9 +114,7 @@ def test_warning_fires_when_header_claims_skills_but_parser_yields_zero(
                 break
             time.sleep(0.1)
         else:
-            pytest.fail(
-                f"upload {upload_id} did not reach terminal status within 5s"
-            )
+            pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
         assert upload_resp.json()["status"] == "completed", (
             f"expected 'completed' (the WARNING is non-fatal), "
             f"got {upload_resp.json()['status']!r}; "
@@ -126,7 +127,8 @@ def test_warning_fires_when_header_claims_skills_but_parser_yields_zero(
     # changes the WARNING text (e.g. removes the
     # "skill_count" anchor) fires this test.
     warning_records = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.levelno == logging.WARNING
         and r.name == services_logger.name
         and "skill_count" in r.message
@@ -179,9 +181,7 @@ def test_no_warning_when_skill_count_is_zero(
                 break
             time.sleep(0.1)
         else:
-            pytest.fail(
-                f"upload {upload_id} did not reach terminal status within 5s"
-            )
+            pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
         assert upload_resp.json()["status"] == "completed", (
             f"expected 'completed', got {upload_resp.json()['status']!r}; "
             f"error_message: {upload_resp.json().get('error_message')!r}"
@@ -191,7 +191,8 @@ def test_no_warning_when_skill_count_is_zero(
     # ``head.skill_count > 0`` guard prevents the false
     # positive).
     false_positive_warnings = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.levelno == logging.WARNING
         and r.name == services_logger.name
         and "skill_count" in r.message

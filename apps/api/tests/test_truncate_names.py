@@ -129,9 +129,7 @@ def test_overlong_skill_name_is_truncated_to_max_name_len() -> None:
             break
         time.sleep(0.1)
     else:
-        pytest.fail(
-            f"upload {upload_id} did not reach terminal status within 5s"
-        )
+        pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
     final_status = upload_resp.json()["status"]
     assert final_status == "completed", (
         f"expected 'completed', got {final_status!r}; "
@@ -157,8 +155,7 @@ def test_overlong_skill_name_is_truncated_to_max_name_len() -> None:
             f"got {len(skills[0].name)} chars (truncation not applied)"
         )
         assert skills[0].name == expected_truncated_name, (
-            f"expected the first {MAX_NAME_LEN} chars to be preserved, "
-            f"got {skills[0].name!r}"
+            f"expected the first {MAX_NAME_LEN} chars to be preserved, got {skills[0].name!r}"
         )
 
 
@@ -206,9 +203,7 @@ def test_overlong_skill_name_with_nul_byte_is_truncated_post_strip() -> None:
             break
         time.sleep(0.1)
     else:
-        pytest.fail(
-            f"upload {upload_id} did not reach terminal status within 5s"
-        )
+        pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
     assert upload_resp.json()["status"] == "completed", (
         f"expected 'completed', got {upload_resp.json()['status']!r}; "
         f"error_message: {upload_resp.json().get('error_message')!r}"
@@ -225,8 +220,7 @@ def test_overlong_skill_name_with_nul_byte_is_truncated_post_strip() -> None:
         # The first 128 chars of the post-strip string are
         # all "A" (the B's are beyond the truncation cap).
         assert skills[0].name == expected_truncated_name, (
-            f"expected first 128 chars of post-strip string to be 'A's, "
-            f"got {skills[0].name!r}"
+            f"expected first 128 chars of post-strip string to be 'A's, got {skills[0].name!r}"
         )
         # Defensive: the truncated name contains NO NUL bytes
         # (the strip pass happened before the truncation).

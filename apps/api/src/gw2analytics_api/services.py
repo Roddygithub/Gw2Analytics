@@ -34,8 +34,10 @@ from gw2_core import Fight as DomainFight
 from gw2_evtc_parser import (
     EvtcParseError,
     PythonEvtcParser,
-    __version__ as PARSER_VERSION,
     read_zevtc_bytes,
+)
+from gw2_evtc_parser import (
+    __version__ as PARSER_VERSION,  # noqa: N812
 )
 from gw2analytics_api.models import (
     UPLOAD_STATUS_COMPLETED,
@@ -530,7 +532,7 @@ def _persist_player_summaries(
         # practice (``# noqa: S101`` to silence the assert-detection
         # lint; the codebase doesn't run with ``python -O`` so the
         # assert cannot be optimised away in production).
-        assert account is not None  # noqa: S101  # narrowed by the source_map comprehension
+        assert account is not None  # noqa: S101
         # Last-seen name (overwrite on every event after the first)
         # + first-seen profession / elite (initialised on the first
         # event). The ``account in per_account`` branch is the

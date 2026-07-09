@@ -42,21 +42,23 @@ successfully parsed", NOT "the parser is version 0".
 
 from __future__ import annotations
 
+import io
 import time
 import uuid as _uuid
+import zipfile
 
 import pytest
 from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 
-from gw2_evtc_parser import __version__ as PARSER_VERSION
+from gw2_evtc_parser import __version__ as PARSER_VERSION  # noqa: N812
 from gw2analytics_api.main import app
 
 client: TestClient = TestClient(app)
 
 
 def test_parser_version_is_stamped_on_successful_parse() -> None:
-    """A successful POST → parse → persist stamps ``upload.parser_version`` with the real parser version.
+    """A successful POST stamps ``upload.parser_version`` with the real parser version.
 
     Pre-v0.10.2 hotfix followup #6: the column stayed at the
     ``"0"`` sentinel indefinitely, even after a successful
@@ -98,9 +100,7 @@ def test_parser_version_is_stamped_on_successful_parse() -> None:
             break
         time.sleep(0.1)
     else:
-        pytest.fail(
-            f"upload {upload_id} did not reach terminal status within 5s"
-        )
+        pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
 
     assert final_status == "completed", (
         f"expected 'completed', got {final_status!r}; "
@@ -143,8 +143,6 @@ def test_parser_version_stays_at_sentinel_on_failed_parse() -> None:
     # ``parser.py::_first_entry``). The parser raises
     # ``EvtcParseError`` and the upload flips to
     # ``status="failed"``.
-    import io
-    import zipfile
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
@@ -169,9 +167,7 @@ def test_parser_version_stays_at_sentinel_on_failed_parse() -> None:
             break
         time.sleep(0.1)
     else:
-        pytest.fail(
-            f"upload {upload_id} did not reach terminal status within 5s"
-        )
+        pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
 
     body = upload_resp.json()
     assert body["status"] == "failed", (

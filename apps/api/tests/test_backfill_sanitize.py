@@ -131,9 +131,7 @@ def test_backfill_pre_phase7_truncates_overlong_agent_name() -> None:
         # identity map so the in-memory mutation is visible to
         # the backfill's helper).
         fight = session.execute(
-            select(OrmFight)
-            .where(OrmFight.id == fight_id)
-            .options(selectinload(OrmFight.agents)),
+            select(OrmFight).where(OrmFight.id == fight_id).options(selectinload(OrmFight.agents)),
         ).scalar_one()
         assert fight.events_blob_uri is None
         player_agents: list[OrmFightAgent] = [
@@ -167,9 +165,7 @@ def test_backfill_pre_phase7_truncates_overlong_agent_name() -> None:
         # (SQLAlchemy's pending-objects list) -- they have
         # NOT been flushed yet (no ``commit()`` was called).
         # Verify the names are <= 128 chars.
-        new_summaries = [
-            obj for obj in session.new if isinstance(obj, OrmFightPlayerSummary)
-        ]
+        new_summaries = [obj for obj in session.new if isinstance(obj, OrmFightPlayerSummary)]
         assert len(new_summaries) == 2
         for summary in new_summaries:
             assert len(summary.name) <= MAX_NAME_LEN, (
@@ -183,8 +179,7 @@ def test_backfill_pre_phase7_truncates_overlong_agent_name() -> None:
         # truncated 128-char version (the first 128 chars of
         # "X" * 200 are all "X").
         mutated_summary = next(
-            s for s in new_summaries
-            if s.account_name == player_agents[0].account_name
+            s for s in new_summaries if s.account_name == player_agents[0].account_name
         )
         assert mutated_summary.name == "X" * MAX_NAME_LEN, (
             f"expected the first {MAX_NAME_LEN} chars of the overlong "
