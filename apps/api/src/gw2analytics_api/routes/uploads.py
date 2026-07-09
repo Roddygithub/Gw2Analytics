@@ -69,19 +69,24 @@ async def _enqueue_parse(
     at the cost of response latency.
     """
     pool = getattr(request.app.state, "arq_pool", None)
-    if pool is not None:
+    if pool is not None and not os.environ.get("ALLOW_INREQUEST_PARSE_FALLBACK"):
         await pool.enqueue_job("parse_job", str(upload_id), raw)
         return
-    # Arq pool is None (Redis unreachable at lifespan startup).
-    # In production this is a 503: a misconfigured Redis broker
-    # is an operational concern that deserves a loud signal
-    # (not a silent latency increase). The fallback is gated
-    # on ``ALLOW_INREQUEST_PARSE_FALLBACK=1`` so the test env
-    # (which can't easily start an Arq worker) can exercise
-    # the parse path without the broker. Operators in a true
-    # emergency can set the env var to opt-in to the
-    # degradation (the WARNING log + the slow response are
-    # both operator-visible).
+    # Arq pool is None (Redis unreachable at lifespan startup)
+    # OR the operator has explicitly opted in to the in-request
+    # fallback via ``ALLOW_INREQUEST_PARSE_FALLBACK=1``. The latter
+    # case is the common dev workflow: docker-compose spins up Redis
+    # + the API, but no arq worker is running (the user opted out
+    # to avoid yet another process to manage). Without this bypass,
+    # the dev path enqueues the job to Redis, no worker consumes it,
+    # and the upload sits in ``status='pending'`` forever (the UI's
+    # ``attempt 7/15`` counter is just the frontend polling, not
+    # real arq retries). v0.10.2 hotfix followup #11.
+    #
+    # In production (env var unset) the 503 below fires when Redis
+    # is unreachable, which is the correct loud signal: a
+    # misconfigured broker is an operational concern that deserves
+    # a 5xx, not a silent latency increase.
     if not os.environ.get("ALLOW_INREQUEST_PARSE_FALLBACK"):
         logger.error(
             "arq pool unavailable; refusing upload %s to surface "

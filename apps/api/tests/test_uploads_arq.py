@@ -91,8 +91,14 @@ def mock_arq_pool() -> Generator[_MockArqPool, None, None]:
 def test_create_upload_enqueues_via_arq(
     client: TestClient,
     mock_arq_pool: _MockArqPool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When the Arq pool is set, POST enqueues the parse job (no inline run)."""
+    # v0.10.2 hotfix followup #11: the dev workflow sets
+    # ALLOW_INREQUEST_PARSE_FALLBACK=1 globally (via dev-api-bg.sh). The
+    # arq-path test must opt out so the route's new "pool reachable but
+    # operator opted in" bypass does not silently re-route to inline.
+    monkeypatch.delenv("ALLOW_INREQUEST_PARSE_FALLBACK", raising=False)
     blob = make_minimal_zevtc(
         agents=[(100_001, 2, 18, "V10 Warrior ARQ", True)],
         build="20251015",
@@ -154,8 +160,11 @@ def test_create_upload_falls_back_to_background_tasks(
 def test_create_upload_idempotent_existing_failed_enqueues(
     client: TestClient,
     mock_arq_pool: _MockArqPool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Re-upload of a SHA matching an existing ``failed`` upload re-enqueues."""
+    # v0.10.2 hotfix followup #11: see test_create_upload_enqueues_via_arq.
+    monkeypatch.delenv("ALLOW_INREQUEST_PARSE_FALLBACK", raising=False)
     blob = make_minimal_zevtc(
         agents=[(100_003, 2, 18, "V10 Warrior IDEMPOTENT", True)],
         build="20251017",
@@ -227,6 +236,7 @@ def test_create_upload_503_when_arq_down_and_no_fallback(
 def test_re_upload_does_not_redispatch_when_not_failed(
     client: TestClient,
     mock_arq_pool: _MockArqPool,
+    monkeypatch: pytest.MonkeyPatch,
     status: str,
 ) -> None:
     """Re-POST of a SHA matching an existing non-failed upload does NOT enqueue.
@@ -249,6 +259,8 @@ def test_re_upload_does_not_redispatch_when_not_failed(
     status check surfaces as a failed test (and not as a
     silent race or double-delivery in production).
     """
+    # v0.10.2 hotfix followup #11: see test_create_upload_enqueues_via_arq.
+    monkeypatch.delenv("ALLOW_INREQUEST_PARSE_FALLBACK", raising=False)
     blob = make_minimal_zevtc(
         agents=[(100_004, 2, 18, "V10 Warrior REDISPATCH", True)],
         build="20251018",
@@ -281,3 +293,50 @@ def test_re_upload_does_not_redispatch_when_not_failed(
     assert resp2.status_code == 201, resp2.text
     assert resp2.json()["id"] == upload_id
     assert mock_arq_pool.enqueued == []  # no double-dispatch
+
+
+def test_create_upload_inline_fallback_when_pool_reachable_and_env_set(
+    client: TestClient,
+    mock_arq_pool: _MockArqPool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """v0.10.2 hotfix followup #11: the dev workflow has Redis up
+    (docker-compose) but no arq worker. The operator opts in to the
+    inline fallback via ``ALLOW_INREQUEST_PARSE_FALLBACK=1`` so the
+    route bypasses the arq pool entirely and parses in-request.
+
+    Before the fix: pool is reachable + no env opt-in -> the route
+    enqueued the job to Redis, no worker consumed it, and the
+    upload sat in ``status='pending'`` forever (the UI's
+    ``attempt 7/15`` counter was just frontend polling, not real
+    arq retries). The dev experience was broken.
+
+    After the fix: pool is reachable + env opt-in -> the route
+    short-circuits the enqueue and runs the parse + dispatch in a
+    thread, the upload flips to ``completed`` within milliseconds.
+    Production behavior (env unset) is unchanged: pool is reachable
+    -> enqueue, pool is None -> 503 (the existing loud-signal path).
+    """
+    monkeypatch.setenv("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
+    blob = make_minimal_zevtc(
+        agents=[(100_006, 2, 18, "V10 Warrior POOL_REACHABLE", True)],
+        build="20251020",
+    )
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("pool_reachable.zevtc", blob, "application/octet-stream")},
+    )
+    assert resp.status_code == 201, resp.text
+    upload_id = resp.json()["id"]
+    # Pool was reachable but the operator opted in: no enqueue.
+    assert mock_arq_pool.enqueued == []
+    # Parse ran inline (status flips to completed within 5s).
+    for _ in range(50):
+        upload = client.get(f"/api/v1/uploads/{upload_id}").json()
+        if upload["status"] == "completed":
+            assert upload["fight_id"] is not None
+            return
+        if upload["status"] == "failed":
+            pytest.fail(f"upload {upload_id} failed: {upload.get('error_message')}")
+        time.sleep(0.1)
+    pytest.fail(f"upload {upload_id} did not reach 'completed' within 5s")
