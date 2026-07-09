@@ -91,7 +91,11 @@ async def _enqueue_parse(
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Parser worker unavailable. Check Redis is up.",
+            detail=(
+                "Parser worker unavailable. Check Redis is up. Set"
+                " ALLOW_INREQUEST_PARSE_FALLBACK=1 to opt-in to"
+                " in-request parsing."
+            ),
         )
     # Fallback: parse + dispatch in a thread pool (awaited in
     # the request handler). GIL contention is NOT solved; the
@@ -110,6 +114,29 @@ async def _enqueue_parse(
     "",
     response_model=UploadCreatedResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": (
+                "Parser worker unavailable. The Arq broker (Redis) was"
+                " unreachable at lifespan startup, so the upload"
+                " pipeline cannot be enqueued. Set"
+                " ALLOW_INREQUEST_PARSE_FALLBACK=1 to opt-in to the"
+                " synchronous in-request fallback (degrades response"
+                " latency; closes the GIL bottleneck mitigation)."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": (
+                            "Parser worker unavailable. Check Redis is up."
+                            " Set ALLOW_INREQUEST_PARSE_FALLBACK=1 to opt-in"
+                            " to in-request parsing."
+                        ),
+                    },
+                },
+            },
+        },
+    },
 )
 async def create_upload(
     request: Request,

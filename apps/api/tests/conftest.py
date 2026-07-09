@@ -50,7 +50,6 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
-from arq.connections import RedisSettings
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from sqlalchemy.orm import Session, sessionmaker
@@ -65,7 +64,6 @@ from gw2analytics_api.models import (
     OrmWebhookSubscription,
     Upload,
 )
-from gw2analytics_api.workers import parser_settings
 
 
 @pytest.fixture(autouse=True)
@@ -96,18 +94,26 @@ def _isolate_test_state() -> None:
 
 @pytest.fixture(autouse=True)
 def _disable_arq_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the Arq broker at a non-existent host so the lifespan's
-    pool init fails fast (sets ``app.state.arq_pool = None``),
-    AND opt-in to the in-request parse fallback so the route
-    handler doesn't 503 the test upload.
+    """Disable the Arq pool init at lifespan startup so the route
+    handler exercises the in-request fallback path (gated on
+    ``ALLOW_INREQUEST_PARSE_FALLBACK=1``).
 
     Two side effects:
-    1. ``RedisSettings(host="127.0.0.1", port=1)`` makes the
-       lifespan's ``create_pool`` call raise ``ConnectionError``
-       on init; the lifespan's broad ``except Exception``
-       catches it + sets the pool to ``None``. Port ``1`` is
-       reserved (``tcpmux``) and refuses connections on every
-       test host seen.
+
+    1. ``arq.create_pool`` is monkey-patched to raise
+       :class:`ConnectionError` so the lifespan's
+       ``await create_pool(...)`` fails fast and the broad
+       ``except Exception`` in :mod:`gw2analytics_api.main`
+       sets ``app.state.arq_pool = None``. The patch targets
+       the module attribute (``arq.create_pool``) so it
+       applies to the lazy ``from arq import create_pool``
+       import inside the lifespan. This is more robust than
+       the previous ``RedisSettings(host=..., port=1)`` trick
+       (port 1 = ``tcpmux``) which depended on the test host
+       refusing connections on the reserved port; containerised
+       CI hosts sometimes expose the port via permissive
+       firewall rules, which would let the real pool init
+       succeed and silently break the test contract.
     2. ``ALLOW_INREQUEST_PARSE_FALLBACK=1`` opts the route
        handler's :func:`_enqueue_parse` into the in-request
        fallback path (production raises 503 without this env
@@ -119,12 +125,13 @@ def _disable_arq_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     dequeue them → ``wait_for_upload_completion`` would time
     out at 5s.
     """
+
+    async def _fake_create_pool(*_args: object, **_kwargs: object) -> None:
+        msg = "arq disabled in test fixture (_disable_arq_for_tests)"
+        raise ConnectionError(msg)
+
     monkeypatch.setenv("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
-    monkeypatch.setattr(
-        parser_settings.WorkerSettings,
-        "redis_settings",
-        RedisSettings(host="127.0.0.1", port=1),
-    )
+    monkeypatch.setattr("arq.create_pool", _fake_create_pool)
 
 
 # ---------------------------------------------------------------------------

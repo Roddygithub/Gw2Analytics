@@ -223,23 +223,31 @@ def test_create_upload_503_when_arq_down_and_no_fallback(
     assert "Parser worker unavailable" in str(body.get("detail", ""))
 
 
-def test_re_upload_completed_does_not_redispatch(
+@pytest.mark.parametrize("status", ["pending", "completed"])
+def test_re_upload_does_not_redispatch_when_not_failed(
     client: TestClient,
     mock_arq_pool: _MockArqPool,
+    status: str,
 ) -> None:
-    """Re-POST of a SHA matching an existing ``completed`` upload does NOT enqueue.
+    """Re-POST of a SHA matching an existing non-failed upload does NOT enqueue.
 
     The idempotent path in the route handler is:
     - ``Upload.status == "failed"`` -> re-enqueue (re-parse).
-    - ``Upload.status == "completed"`` (or any other non-failed) ->
-      return existing record WITHOUT enqueuing. The original
-      upload's webhook dispatch already ran (chained inside the
-      original ``parse_job``); a re-enqueue here would silently
-      double-deliver the webhook to every active subscriber.
+    - ``Upload.status == "pending"`` (the immediate-post state,
+      before the first parse has run) or ``"completed"`` (after
+      the chained parse+dispatch has finished) -> return existing
+      record WITHOUT enqueuing.
+
+    Re-enqueuing in the ``"pending"`` case would race the
+    in-flight Arq worker (two parses on the same SHA), and
+    re-enqueuing in the ``"completed"`` case would silently
+    double-deliver the webhook to every active subscriber
+    (the original dispatch already fired inside the chained
+    ``parse_job``).
 
     Pins the contract so a future refactor that drops the
     status check surfaces as a failed test (and not as a
-    silent double-delivery in production).
+    silent race or double-delivery in production).
     """
     blob = make_minimal_zevtc(
         agents=[(100_004, 2, 18, "V10 Warrior REDISPATCH", True)],
@@ -253,14 +261,15 @@ def test_re_upload_completed_does_not_redispatch(
     assert resp1.status_code == 201, resp1.text
     upload_id = resp1.json()["id"]
     assert len(mock_arq_pool.enqueued) == 1
-    # Flip the row to "completed" (the success path of the
-    # original parse). The chained dispatch has already
-    # fired (in the real Arq worker); a re-POST must NOT
-    # re-enqueue.
+    # Flip the row to the parametrised status (NOT "failed").
+    # The chained dispatch has already fired (in the real Arq
+    # worker) for the "completed" case; for the "pending"
+    # case the first parse is in-flight. Either way, a
+    # re-POST must NOT re-enqueue.
     with get_sessionmaker()() as db:
         upload = db.get(Upload, _uuid.UUID(upload_id))
         assert upload is not None
-        upload.status = "completed"
+        upload.status = status
         db.commit()
     mock_arq_pool.enqueued.clear()
     # Second POST with the same SHA: idempotent path,
