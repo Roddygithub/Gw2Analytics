@@ -273,4 +273,36 @@ describe("PlayerTimelineSection", () => {
       expect(screen.getByText("Showing 4 of 5 fights")).toBeInTheDocument(),
     );
   });
+
+  it("auto-switches bucket to 'day' and refetches when TZ is changed (v0.9.0)", async () => {
+    // v0.9.0 of web: the TZ selector ``<select>`` is
+    // intentionally a no-op when ``bucket === "fight"``
+    // (TZ is only meaningful for the day-bucketed
+    // ``started_at``), so the ``changeTz`` handler
+    // auto-switches bucket to "day" as part of the
+    // fetch. Validates both:
+    // 1. the fetched call carries ``bucket: "day"`` (auto
+    //    switch happened)
+    // 2. the fetched call carries``tz: <select value>``
+    //    (TZ state used, not the prop)
+    fetchPlayerTimelineMock.mockResolvedValueOnce(
+      makeInitial([makePoint("f-d-1", 50)], 1, "Europe/Paris"),
+    );
+    render(
+      <PlayerTimelineSection
+        accountName=":synth.aaa"
+        initialTimeline={INITIAL_3_OF_5}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("timezone-selector"), {
+      target: { value: "Europe/Paris" },
+    });
+    await waitFor(() =>
+      expect(fetchPlayerTimelineMock).toHaveBeenCalledWith(":synth.aaa", {
+        limit: 20,
+        bucket: "day",
+        tz: "Europe/Paris",
+      }),
+    );
+  });
 });

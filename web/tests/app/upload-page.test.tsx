@@ -4,30 +4,37 @@ import { vi } from "vitest";
 /**
  * Vitest partial mock: keep the real ``ApiError`` + ``formatApiError``
  * surface so the page tests against the actual error class. We only
- * stub ``uploadLog`` (the network surface). If the real ``ApiError``
- * constructor gains fields, the test still validates against the
- * real class -- the mock cannot silently drift.
+ * stub ``uploadLog`` + ``fetchUploadStatus`` (the two network
+ * surfaces the wizard drives). If the real ``ApiError`` constructor
+ * gains fields, the tests still validate against the real class --
+ * the mock cannot silently drift.
  */
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, uploadLog: vi.fn() };
+  return {
+    ...actual,
+    uploadLog: vi.fn(),
+    fetchUploadStatus: vi.fn(),
+  };
 });
 
 import UploadPage from "@/app/upload/page";
-import { ApiError, uploadLog } from "@/lib/api";
+import {
+  ApiError,
+  fetchUploadStatus,
+  uploadLog,
+} from "@/lib/api";
 
 /**
- * CI smoke for the upload page.
+ * Wizard-flow smoke for the upload page.
  *
- * Like ``fights-page.test.tsx`` this is a deliberate mock-and-call
- * smoke (no real multipart upload, no Next.js RSC runtime), so the
- * assertions cover: (1) the empty-state contract, (2) the
- * client-side extension guard, (3) the happy-path card render with
- * a real ``UploadCreatedRow``, (4) the ``ApiError`` formatting via
- * the shared ``formatApiError`` helper, and (5) network-failure
- * fall-through. If the page grows to use streaming SSR / cookies,
- * this test must move alongside the page (refactor into a Client
- * Component wrapper if needed).
+ * The wizard replaces the legacy 1-step flow (file input -> POST ->
+ * result card) with a 3-step state machine:
+ *   pick -> upload -> parse -> done.
+ * Each step has its own affordance + data-testid so the e2e suite
+ * (Playwright ``tests/e2e/upload.spec.ts``) can probe the same
+ * surface. The 5 legacy cases are kept + 2 new cases added to cover
+ * the new step transitions.
  */
 function makeFile(name = "fight-2026-07-07.zevtc", bytes = 4096): File {
   const blob = new Blob([new Uint8Array(bytes)], {
@@ -36,8 +43,8 @@ function makeFile(name = "fight-2026-07-07.zevtc", bytes = 4096): File {
   return new File([blob], name, { type: "application/octet-stream" });
 }
 
-describe("UploadPage", () => {
-  it("renders the heading + empty file chip + disabled submit", () => {
+describe("UploadPage wizard", () => {
+  it("renders the heading + step indicator + disabled Next (v0.9.0)", () => {
     render(<UploadPage />);
     expect(
       screen.getByRole("heading", {
@@ -45,53 +52,87 @@ describe("UploadPage", () => {
         name: /Upload a .zevtc replay/,
       }),
     ).toBeInTheDocument();
+    expect(screen.getByTestId("step-pick")).toBeInTheDocument();
+    expect(screen.getByTestId("step-indicator-pick")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
     expect(screen.getByTestId("file-chip")).toHaveTextContent(
       "No file selected",
     );
-    expect(screen.getByTestId("submit")).toBeDisabled();
+    expect(screen.getByTestId("next")).toBeDisabled();
   });
 
-  it("rejects non-.zevtc files before uploading", () => {
+  it("rejects non-.zevtc files before leaving the pick step (v0.9.0)", () => {
     render(<UploadPage />);
     const input = screen.getByTestId("file-input") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [makeFile("evil.exe")] } });
-    expect(uploadLog).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent(
+    expect(screen.getByTestId("next")).toBeDisabled();
+    expect(screen.getByTestId("rejected")).toHaveTextContent(
       "Only .zevtc files are accepted.",
     );
-    expect(screen.getByTestId("submit")).toBeDisabled();
+    expect(uploadLog).not.toHaveBeenCalled();
   });
 
-  it("uploads a valid .zevtc and renders the result card", async () => {
+  it("uploads a valid .zevtc and transitions to step 3 (parse) (v0.9.0)", async () => {
     vi.mocked(uploadLog).mockResolvedValue({
       id: "11111111-2222-3333-4444-555555555555",
       sha256: "abcdef0123456789".repeat(4),
       status: "pending",
     });
     render(<UploadPage />);
-    const input = screen.getByTestId("file-input") as HTMLInputElement;
-    fireEvent.change(input, {
+    fireEvent.change(screen.getByTestId("file-input") as HTMLInputElement, {
       target: { files: [makeFile("fight-2026-07-07.zevtc")] },
     });
-    fireEvent.click(screen.getByTestId("submit"));
+    fireEvent.click(screen.getByTestId("next"));
 
     await waitFor(() => expect(uploadLog).toHaveBeenCalledTimes(1));
     const forwarded = vi.mocked(uploadLog).mock.calls[0]?.[0];
     expect(forwarded).toBeInstanceOf(File);
     expect((forwarded as File).name).toBe("fight-2026-07-07.zevtc");
 
-    const card = await screen.findByTestId("result");
-    expect(card).toHaveTextContent("Upload received");
-    expect(card).toHaveTextContent("11111111-2222-3333-4444-555555555555");
-    expect(card).toHaveTextContent("abcdef01");
-    expect(card).toHaveTextContent("6789");
-    expect(card).toHaveTextContent("pending");
+    // The wizard auto-transitions from upload -> parse once the POST
+    // resolves. Status badge defaults to "pending" (no GET yet).
+    const parsePanel = await screen.findByTestId("step-parse");
+    expect(parsePanel).toBeInTheDocument();
+    expect(screen.getByTestId("parse-status")).toHaveTextContent("pending");
+    expect(parsePanel).toHaveTextContent("11111111-2222-3333-4444-555555555555");
+    expect(parsePanel).toHaveTextContent("abcdef01");
+    expect(parsePanel).toHaveTextContent("6789");
   });
 
-  it("formats real ApiError failures as Upstream error: status: message", async () => {
-    // Uses the REAL ApiError class (partial mock preserved it). The
-    // assertion is a literal string so the test fails on any drift
-    // in formatApiError or the ApiError ctor signature.
+  it("advances to step 4 (done) when the poll resolves completed (v0.9.0)", async () => {
+    vi.mocked(uploadLog).mockResolvedValue({
+      id: "22222222-3333-4444-5555-666666666666",
+      sha256: "deadbeefcafebabe".repeat(4),
+      status: "pending",
+    });
+    vi.mocked(fetchUploadStatus).mockResolvedValue({
+      id: "22222222-3333-4444-5555-666666666666",
+      sha256: "deadbeefcafebabe".repeat(4),
+      original_filename: "fight-2026-07-07.zevtc",
+      size_bytes: 4096,
+      uploaded_at: "2026-07-09T12:00:00Z",
+      status: "completed",
+      error_message: null,
+      parser_version: "v1.0.0",
+      fight_id: "fight-deadbeef",
+    });
+    render(<UploadPage />);
+    fireEvent.change(screen.getByTestId("file-input") as HTMLInputElement, {
+      target: { files: [makeFile("fight-2026-07-07.zevtc")] },
+    });
+    fireEvent.click(screen.getByTestId("next"));
+
+    const done = await screen.findByTestId("step-done");
+    expect(done).toHaveTextContent("Upload complete");
+    expect(done).toHaveTextContent("completed");
+    const link = done.querySelector("a");
+    expect(link).toHaveAttribute("href", "/fights/fight-deadbeef");
+    expect(link).toHaveTextContent("/fights/fight-deadbeef");
+  });
+
+  it("formats real ApiError failures from POST as Upstream error (v0.9.0)", async () => {
     vi.mocked(uploadLog).mockRejectedValueOnce(
       new ApiError(502, "upstream gateway"),
     );
@@ -99,14 +140,48 @@ describe("UploadPage", () => {
     fireEvent.change(screen.getByTestId("file-input") as HTMLInputElement, {
       target: { files: [makeFile("fight.zevtc")] },
     });
-    fireEvent.click(screen.getByTestId("submit"));
+    fireEvent.click(screen.getByTestId("next"));
 
-    expect(await screen.findByTestId("error")).toHaveTextContent(
+    // The wizard stays on step 2 (upload) and now exposes the error
+    // banner so the analyst sees the same message format as the
+    // legacy page did.
+    const errorMsg = await screen.findByTestId("error");
+    expect(errorMsg).toHaveTextContent(
       "Upstream error: 502: 502: upstream gateway",
     );
+    expect(screen.getByTestId("step-upload")).toBeInTheDocument();
   });
 
-  it("passes through network failures as the thrown Error message", async () => {
+  it("resets back to step 1 when 'Upload another' fires (v0.9.0)", async () => {
+    vi.mocked(uploadLog).mockResolvedValue({
+      id: "22222222-3333-4444-5555-666666666666",
+      sha256: "deadbeefcafebabe".repeat(4),
+      status: "pending",
+    });
+    vi.mocked(fetchUploadStatus).mockResolvedValue({
+      id: "22222222-3333-4444-5555-666666666666",
+      sha256: "deadbeefcafebabe".repeat(4),
+      original_filename: "fight-2026-07-07.zevtc",
+      size_bytes: 4096,
+      uploaded_at: "2026-07-09T12:00:00Z",
+      status: "completed",
+      error_message: null,
+      parser_version: "v1.0.0",
+      fight_id: "fight-deadbeef",
+    });
+    render(<UploadPage />);
+    fireEvent.change(screen.getByTestId("file-input") as HTMLInputElement, {
+      target: { files: [makeFile("fight-2026-07-07.zevtc")] },
+    });
+    fireEvent.click(screen.getByTestId("next"));
+    await screen.findByTestId("step-done");
+
+    fireEvent.click(screen.getByTestId("upload-another"));
+    expect(screen.getByTestId("step-pick")).toBeInTheDocument();
+    expect(screen.queryByTestId("step-done")).not.toBeInTheDocument();
+  });
+
+  it("formats real ApiError failures from network layer (v0.9.0)", async () => {
     vi.mocked(uploadLog).mockRejectedValueOnce(
       new Error("Network unreachable"),
     );
@@ -114,9 +189,10 @@ describe("UploadPage", () => {
     fireEvent.change(screen.getByTestId("file-input") as HTMLInputElement, {
       target: { files: [makeFile("fight.zevtc")] },
     });
-    fireEvent.click(screen.getByTestId("submit"));
+    fireEvent.click(screen.getByTestId("next"));
 
     const errorMsg = await screen.findByTestId("error");
     expect(errorMsg).toHaveTextContent("Network unreachable");
+    expect(screen.getByTestId("step-upload")).toBeInTheDocument();
   });
 });

@@ -127,6 +127,35 @@ export async function uploadLog(file: File): Promise<UploadCreatedRow> {
 }
 
 /**
+ * Fetch the current parse status for an upload.
+ *
+ * Mirrors ``GET /api/v1/uploads/{upload_id}`` in
+ * :mod:`apps.api.routes.uploads`. The gateway returns the canonical
+ * ``UploadOut`` envelope (id + sha256 + status + parser_version +
+ * fight_id + ...) -- the wizard polls this every ~2s after POST until
+ * ``status`` flips to ``"completed"`` (reveals drill-down link to
+ * ``/fights/{fight_id}``) or ``"failed"`` (reveals ``error_message``).
+ *
+ * Throws :class:`ApiError` on any non-2xx so the wizard can render
+ * the canonical upstream-error card (404: upload deleted server-side,
+ * 502: gateway down). The wizard's 30s polling budget surfaces a
+ * timeout instead of looping forever on a wedged parse.
+ *
+ * v0.9.0 of the API: this endpoint was already present at v0.5.0;
+ * the wizard is the first front-end consumer that depends on its
+ * status polling semantics.
+ */
+
+export async function fetchUploadStatus(uploadId: string): Promise<UploadStatusRow> {
+  const url = `${API_BASE_URL}/api/v1/uploads/${encodeURIComponent(uploadId)}`;
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as UploadStatusRow;
+}
+
+/**
  * Format any thrown value into the canonical error string we show
  * the user in Client Components. Shared between ``/account`` +
  * ``/upload`` so the upstream diagnostics stay consistent.
@@ -193,6 +222,51 @@ export interface UploadCreatedRow {
    * the three known values today.
    */
   status: "pending" | "completed" | "failed" | (string & {});
+}
+
+/**
+ * Full upload envelope from ``GET /api/v1/uploads/{upload_id}``.
+ *
+ * Returned by the gateway's :func:`apps.api.routes.uploads.get_upload`
+ * route; the wizard polls this every ~2s after ``POST /uploads``
+ * resolves to detect when the background parse finishes
+ * (``status="completed"`` + ``fight_id`` populated) or fails
+ * (``status="failed"`` + ``error_message`` populated).
+ *
+ * v0.9.0 of the web: this surface was previously exposed only via
+ * internal ``/api/v1/webhooks`` admin tooling; the wizard is the
+ * first user-facing consumer that polls it.
+ */
+export interface UploadStatusRow {
+  /** Same UUID v4 string as :attr:`UploadCreatedRow.id`. */
+  id: string;
+  /** Same hex string as :attr:`UploadCreatedRow.sha256`. */
+  sha256: string;
+  /** Original filename as posted in the multipart ``file`` field. */
+  original_filename: string;
+  /** Raw blob size in bytes (matches Content-Length on the POST). */
+  size_bytes: number;
+  /** ISO-8601 wall-clock time the row was committed. */
+  uploaded_at: string;
+  /**
+   * Backend uses "pending" / "completed" / "failed". The trailing
+   * ``(string & {})`` keeps forward-compat same as :attr:`UploadCreatedRow.status`.
+   */
+  status: "pending" | "completed" | "failed" | (string & {});
+  /** Populated only when ``status="failed"``; ``null`` otherwise. */
+  error_message: string | null;
+  /**
+   * Parser version that processed (or is processing) the blob;
+   * ``null`` while ``status="pending"``.
+   */
+  parser_version: string | null;
+  /**
+   * Authoritative ``fight.id`` of the parsed encounter; ``null``
+   * while ``status="pending"`` or while ``status="failed"`` (a
+   * failed parse never yields a row). The wizard's drill-down link
+   * uses this id on success.
+   */
+  fight_id: string | null;
 }
 
 /**

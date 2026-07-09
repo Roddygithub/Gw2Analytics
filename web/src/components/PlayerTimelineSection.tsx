@@ -126,6 +126,52 @@ function readStoredScale(): TimelineScale {
 }
 void readStoredScale; // re-exported for unit testability below
 
+// v0.9.0 of web: the time-zone selector for the day-bucketed
+// started_at. Client-state driver (NOT URL-driven): deviating
+// from the ProfessionFilter pattern is intentional -- the
+// ``bucket`` + ``scale`` toggles are pure client state already,
+// so a ``router.push`` would either trigger a redundant server
+// re-render OR force an async URL/state sync. The initial TZ
+// is read from ``initialTimeline.tz`` (the Server Component
+// fetches the first page with the routed-back ``?tz=`` URL
+// param + the gateway's TZ-string echo); the subsequent
+// selections are pure client state with an auto-switch-to-day
+// bucket (see the ``changeTz`` handler). The ``scale`` toggle
+// uses ``localStorage`` for return-visit persistence because
+// it's a pure visual re-derivation; the ``tz`` field is
+// data-affecting (changes the day-bucketed ``started_at``),
+// so return-visit persistence would silently diverge from
+// the URL on a multi-tab session. Deferring localStorage for
+// ``tz`` until the page-level Server Component reads it is
+// the v0.9.X roadmap item (~5 LoC change).
+const TIMEZONE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "UTC", label: "UTC" },
+  { value: "America/New_York", label: "US Eastern (New York)" },
+  { value: "America/Chicago", label: "US Central (Chicago)" },
+  { value: "America/Denver", label: "US Mountain (Denver)" },
+  { value: "America/Los_Angeles", label: "US Pacific (Los Angeles)" },
+  { value: "America/Sao_Paulo", label: "BR São Paulo" },
+  { value: "Europe/London", label: "UK London" },
+  { value: "Europe/Paris", label: "EU Paris" },
+  { value: "Europe/Berlin", label: "EU Berlin" },
+  { value: "Europe/Madrid", label: "EU Madrid" },
+  { value: "Europe/Rome", label: "EU Rome" },
+  { value: "Europe/Warsaw", label: "PL Warsaw" },
+  { value: "Europe/Stockholm", label: "SE Stockholm" },
+  { value: "Europe/Moscow", label: "RU Moscow" },
+  { value: "Africa/Cairo", label: "EG Cairo" },
+  { value: "Africa/Johannesburg", label: "ZA Johannesburg" },
+  { value: "Asia/Dubai", label: "AE Dubai" },
+  { value: "Asia/Kolkata", label: "IN Kolkata" },
+  { value: "Asia/Singapore", label: "SG Singapore" },
+  { value: "Asia/Shanghai", label: "CN Shanghai" },
+  { value: "Asia/Seoul", label: "KR Seoul" },
+  { value: "Asia/Tokyo", label: "JP Tokyo" },
+  { value: "Australia/Perth", label: "AU Perth" },
+  { value: "Australia/Sydney", label: "AU Sydney" },
+  { value: "Pacific/Auckland", label: "NZ Auckland" },
+];
+
 export function PlayerTimelineSection({
   accountName,
   initialTimeline,
@@ -186,6 +232,16 @@ export function PlayerTimelineSection({
     }
   }, [scale]);
 
+  // v0.9.0 of web: TZ selector state. Initialised from
+  // ``initialTimeline.tz`` (the server-rendered first page
+  // already carries the routed-back ``tz`` string) + pure
+  // client state thereafter -- the user picks a TZ and the
+  // section re-fetches with the new value. No mount-effect
+  // override (deliberately -- see the ``TIMEZONE_OPTIONS``
+  // const block above for the localStorage deferral
+  // rationale).
+  const [tz, setTz] = useState<string>(initialTimeline.tz);
+
   const hasMore = timeline.points.length < timeline.total;
   const unit = bucket === "day" ? "days" : "fights";
 
@@ -200,14 +256,11 @@ export function PlayerTimelineSection({
         limit: timeline.limit,
         offset: timeline.points.length,
         bucket,
-        // v0.8.9: forward the TZ from the initial timeline so
-        // the subsequent page stays in the same TZ grouping.
-        // Read-only (no client-side TZ state) because the v0.8.9
-        // spec doesn't ship a TZ selector UI -- the URL ``?tz=``
-        // param is the canonical control. A future v0.9 cycle
-        // can add a TZ selector + a corresponding ``tz`` state
-        // field.
-        tz: timeline.tz,
+        // v0.9.0 of web: forward the client-state TZ so a
+        // "Load more" preserves the analyst's selected region
+        // (UTC by default; the analyst's last-selected on
+        // return visits).
+        tz,
       });
       // Defensive de-dup: if the gateway ever returns a
       // fight_id that's already in the in-memory list (e.g.
@@ -242,14 +295,43 @@ export function PlayerTimelineSection({
       const response = await fetchPlayerTimeline(accountName, {
         limit: timeline.limit,
         bucket: next,
-        // v0.8.9: forward the TZ so a bucket-toggle preserves
-        // the analyst's TZ selection (otherwise the server
-        // re-derives a fresh TZ from the (empty) URL param and
-        // defaults to UTC, silently breaking the TZ contract).
-        tz: timeline.tz,
+        // v0.9.0 of web: forward the client-state TZ so a
+        // bucket-toggle stays in the analyst's TZ.
+        tz,
       });
       setTimeline(response);
       setBucket(next);
+    } catch (err) {
+      setLoadError(formatApiError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // v0.9.0 of web: change the TZ for the day-bucketed
+  // ``started_at``. Selecting a non-UTC TZ without changing
+  // the bucket would be a no-op on the rendered chart (the
+  // fight-bucket points have absolute ``started_at``), so the
+  // handler auto-switches bucket to "day" -- the canonical
+  // mode where TZ matters. The analyst can toggle back to
+  // "Per fight" via the existing bucket buttons without
+  // losing the TZ (the bucket change above forwards it).
+  const changeTz = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const nextTz = event.target.value;
+    if (nextTz === tz || isLoading) {
+      return;
+    }
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const response = await fetchPlayerTimeline(accountName, {
+        limit: timeline.limit,
+        bucket: "day", // auto-switch: TZ is only meaningful in day bucket
+        tz: nextTz,
+      });
+      setTimeline(response);
+      setTz(nextTz);
+      setBucket("day");
     } catch (err) {
       setLoadError(formatApiError(err));
     } finally {
@@ -353,6 +435,43 @@ export function PlayerTimelineSection({
             >
               Log
             </button>
+          </div>
+          {/* v0.9.0 of web: TZ selector for the day-bucketed
+              started_at. Native <select> with 25 curated IANA
+              zones (matches the ProfessionFilter pattern for
+              native-select styling). Auto-switches bucket to
+              "day" on selection (see changeTz above). Persisted
+              in localStorage via readStoredTz + the write-effect
+              that mirrors the scale persistence. */}
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 4 }}
+            role="group"
+            aria-label="Timeline timezone"
+          >
+            <select
+              data-testid="timezone-selector"
+              aria-label="Day-bucket timezone (region/city)"
+              value={tz}
+              onChange={changeTz}
+              disabled={isLoading}
+              style={{
+                padding: "4px 8px",
+                fontSize: 12,
+                border: "1px solid var(--accent)",
+                borderRadius: 4,
+                background: "transparent",
+                color: "var(--accent)",
+                fontFamily:
+                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+                cursor: "pointer",
+              }}
+            >
+              {TIMEZONE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>

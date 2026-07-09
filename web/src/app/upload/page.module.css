@@ -212,3 +212,153 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+/* Wizard step indicator -- 3-segment horizontal breadcrumb with
+   aria-current on the active segment. */
+.stepIndicator {
+  display: flex;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+  max-width: 560px;
+}
+
+.stepIndicator li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  opacity: 0.65;
+  transition:
+    opacity 0.15s ease-in-out,
+    border-color 0.15s ease-in-out,
+    background 0.15s ease-in-out;
+}
+
+.stepActive {
+  opacity: 1 !important;
+  border-color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.stepDone {
+  opacity: 0.85 !important;
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.stepPending {
+  /* default opaque state -- uses the inherited ``opacity: 0.65`` */
+}
+
+.stepNumber {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface);
+  font-family: var(--font-geist-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.stepLabel {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Wizard step panel -- same shape as the legacy ``.form`` + ``.card``
+   so the visual continuity is preserved across the 1-page->3-step
+   transition. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 560px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+/* Static version of the legacy ``.fileChip`` for step 2 (no <input>,
+   no hover state, no click affordance). */
+.fileChipStatic {
+  display: inline-block;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: var(--font-geist-mono);
+  font-size: 13px;
+}
+
+/* Step 2 spinner row: spinner + filename + size, side-by-side. */
+.spinnerRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: upload-wizard-spin 0.9s linear infinite;
+}
+
+@keyframes upload-wizard-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Button row shared by every step that has a CTA cluster. */
+.buttonRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+/* Secondary CTA (Cancel, Start over) -- same shape as ``.submit``
+   with the accent muted. Lives alongside ``.submit`` in the same
+   button row so the visual hierarchy is preserved. */
+.muted {
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease-in-out;
+}
+
+.muted:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.muted:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Non-blocking warning -- sits alongside ``.error`` but doesn't
+   carry the alarming red colour (it's a "we gave up after 30s,
+   try again" message, not a hard failure). */
+.warn {
+  color: #ffb86b;
+  font-size: 14px;
+  margin: 0;
+}
