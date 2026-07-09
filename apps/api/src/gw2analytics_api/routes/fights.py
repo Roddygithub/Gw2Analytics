@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import logging
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error
@@ -20,9 +21,12 @@ from gw2_analytics.event_window import EventWindowAggregator
 from gw2_analytics.per_fight_timeline import PerFightTimelineAggregator
 from gw2_analytics.skill_usage import SkillUsageAggregator
 from gw2_analytics.squad_rollup import SquadRollupAggregator
-from gw2_analytics.target_buff_removal import TargetBuffRemovalAggregator
-from gw2_analytics.target_dps import TargetDpsAggregator
-from gw2_analytics.target_healing import TargetHealingAggregator
+from gw2_analytics.target_buff_removal import (
+    TargetBuffRemovalAggregator,
+    TargetBuffRemovalRow,
+)
+from gw2_analytics.target_dps import TargetDpsAggregator, TargetDpsRow
+from gw2_analytics.target_healing import TargetHealingAggregator, TargetHealingRow
 from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightSkill
@@ -54,6 +58,23 @@ logger = logging.getLogger(__name__)
 _EVENT_TYPE_ADAPTER: TypeAdapter[Event] = TypeAdapter(Event)
 
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
+
+
+# Module-level single-source-of-truth for window-S bounds.
+# The per-fight timeline (``GET /fights/{id}/timeline``) + the
+# per-bucketed events roll-up (``GET /fights/{id}/events``) share the
+# same default (5 seconds -- the standard GW2 toolchain bucketing
+# convention) and the same bounds (1 second minimum -- the
+# ``EventWindowAggregator`` + ``PerFightTimelineAggregator`` invariant;
+# 600 seconds ceiling -- sanity bound so a misconfigured client
+# cannot ask for 24h buckets). The pre-v0.9.38 design declared
+# the constants twice with identical values
+# (``_TIMELINE_DEFAULT_WINDOW_S`` + ``_EVENTS_DEFAULT_WINDOW_S``);
+# this is the canonical single-source. Plan 117 closes the DRY
+# gap so a future maintainer who changes the default / bounds
+# only edits one site.
+_PER_FIGHT_DEFAULT_WINDOW_S: int = 5
+_PER_FIGHT_MAX_WINDOW_S: int = 600
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +148,67 @@ def _load_fight_events(
     return events
 
 
+def _aggregate_per_target_rollup(
+    events: list[Event],
+    agent_id_to_name: dict[int, str | None],
+    duration_s: float,
+    event_cls: type[Event],
+) -> list[TargetDpsRow | TargetHealingRow | TargetBuffRemovalRow]:
+    """Compute one per-target roll-up branch (DPS / healing / buff-removal).
+
+    Centralises the 3 sibling roll-up branches in
+    :func:`get_fight_events` (the one structural change
+    introduced by Phase 8 v0.8.0 + v0.8.3 + v0.10.2 hotfix #12).
+    Each branch was 3 lines: an ``isinstance`` filter, an
+    aggregator call with ``(events, duration_s, name_map=...)``,
+    and a schema-validation list comprehension. The helper
+    picks the aggregator + output-row-type by ``event_cls`` so
+    the route layer wraps schema validation in a thin
+    comprehension with the right ``RowOut`` subclass.
+
+    Mapping
+    -------
+    ``DamageEvent`` -> :class:`TargetDpsAggregator`
+    ``HealingEvent`` -> :class:`TargetHealingAggregator`
+    ``BuffRemovalEvent`` -> :class:`TargetBuffRemovalAggregator`
+
+    Any other ``event_cls`` (e.g. a Phase 9
+    ``ConditionDamageEvent``) raises ``ValueError`` -- the
+    dispatch table is explicitly closed-form so a future
+    addition is a single-line edit here.
+
+    Performance
+    -----------
+    The ``isinstance`` filter is one pass over ``events``.
+    For a multi-million-event fight (rare but possible in
+    WvW) the filter is still O(N) -- the cost is amortised
+    across the 3 calls because the same event is filtered
+    3 times. The aggregated shape (a few hundred rows) is
+    small by comparison.
+    """
+    if event_cls is DamageEvent:
+        aggregator: TargetDpsAggregator | TargetHealingAggregator | TargetBuffRemovalAggregator = (
+            TargetDpsAggregator()
+        )
+    elif event_cls is HealingEvent:
+        aggregator = TargetHealingAggregator()
+    elif event_cls is BuffRemovalEvent:
+        aggregator = TargetBuffRemovalAggregator()
+    else:
+        raise ValueError(
+            f"_aggregate_per_target_rollup: unknown event_cls {event_cls!r}; "
+            f"expected DamageEvent | HealingEvent | BuffRemovalEvent"
+        )
+    return cast(
+        list[TargetDpsRow | TargetHealingRow | TargetBuffRemovalRow],
+        aggregator.aggregate(
+            [e for e in events if isinstance(e, event_cls)],  # type: ignore[misc]
+            duration_s,
+            name_map=agent_id_to_name,
+        ),
+    )
+
+
 @router.get("", response_model=list[FightOut])
 def list_fights(
     limit: int = Query(50, ge=1, le=500),
@@ -166,11 +248,10 @@ def list_fights(
 # burst variance). ``Query(..., ge=1, le=600)`` enforces a 1
 # second minimum (the ``PerFightTimelineAggregator`` invariant)
 # and a 10 minute ceiling (sanity bound so a misconfigured client
-# cannot ask for 24h buckets). The bounds mirror the
-# ``_EVENTS_DEFAULT_WINDOW_S`` / ``_EVENTS_MAX_WINDOW_S`` constants
-# above.
-_TIMELINE_DEFAULT_WINDOW_S: int = 5
-_TIMELINE_MAX_WINDOW_S: int = 600
+# cannot ask for 24h buckets). The bounds are defined at module
+# level (``_PER_FIGHT_DEFAULT_WINDOW_S`` +
+# ``_PER_FIGHT_MAX_WINDOW_S``) so the per-fight timeline + the
+# per-bucketed events roll-up share a single source of truth.
 
 
 @router.get(
@@ -180,9 +261,9 @@ _TIMELINE_MAX_WINDOW_S: int = 600
 def get_fight_timeline(
     fight_id: str,
     window_s: int = Query(
-        _TIMELINE_DEFAULT_WINDOW_S,
+        _PER_FIGHT_DEFAULT_WINDOW_S,
         ge=1,
-        le=_TIMELINE_MAX_WINDOW_S,
+        le=_PER_FIGHT_MAX_WINDOW_S,
         description=(
             "Time-bucket size for the per-fight timeline roll-up. "
             "Defaults to 5 seconds; bounded 1 <= window_s <= 600 "
@@ -281,8 +362,6 @@ def get_fight(
 # variance). ``Query(..., ge=1, le=600)`` enforces a 1 second minimum
 # (the ``EventWindowAggregator`` invariant) and a 10 minute ceiling
 # (sanity bound so a misconfigured client cannot ask for 24h buckets).
-_EVENTS_DEFAULT_WINDOW_S: int = 5
-_EVENTS_MAX_WINDOW_S: int = 600
 
 
 @router.get(
@@ -292,9 +371,9 @@ _EVENTS_MAX_WINDOW_S: int = 600
 def get_fight_events(
     fight_id: str,
     window_s: int = Query(
-        _EVENTS_DEFAULT_WINDOW_S,
+        _PER_FIGHT_DEFAULT_WINDOW_S,
         ge=1,
-        le=_EVENTS_MAX_WINDOW_S,
+        le=_PER_FIGHT_MAX_WINDOW_S,
         description=(
             "Time-bucket size for the roll-up window. Defaults to 5 seconds; "
             "bounded 1 <= window_s <= 600 (10 minutes)."
@@ -370,50 +449,33 @@ def get_fight_events(
     }
 
     duration_s = max(e.time_ms for e in events) / 1000.0
-    # ``TargetDpsAggregator`` consumes DamageEvent specifically
-    # (its invariant validates sum-of-row-damage == sum-of-event-damage).
-    # Filter the heterogeneous stream at the call site so the
-    # aggregator signature stays narrow on ``DamageEvent``. Healing-only
-    # fights correctly yield an empty target_dps list. v0.8.3:
-    # the ``name_map`` is passed so each row carries its
-    # player-name denormalisation.
-    target_dps = TargetDpsAggregator().aggregate(
-        [e for e in events if isinstance(e, DamageEvent)],
+    # Plan 117: the 3 per-target roll-ups (DPS + Healing + BuffRemoval)
+    # share an isomorphic ``(isinstance filter, aggregator call,
+    # name_map=...)`` shape. The single ``_aggregate_per_target_rollup``
+    # helper centralises that shape and dispatches to the right
+    # aggregator + output-row-type via ``event_cls``. The schema
+    # validation step (per-rollup ``TargetXRowOut.model_validate``) +
+    # the 100-row cap (v0.10.2 hotfix followup #12) stay in the
+    # route handler because the right ``RowOut`` subclass + the
+    # cap policy are wire-format / payload-bound concerns, not
+    # aggregation concerns.
+    target_dps_rows = _aggregate_per_target_rollup(
+        events,
+        agent_id_to_name,
         duration_s,
-        name_map=agent_id_to_name,
+        DamageEvent,
     )
-    # ``TargetHealingAggregator`` is the strict parallel of
-    # ``TargetDpsAggregator`` (same schema shape with
-    # total_healing + hps, same ordering, same invariants). It
-    # consumes HealingEvent specifically (sum-of-row-healing ==
-    # sum-of-event-healing invariant). Filter at the call site so
-    # the aggregator signature stays narrow on ``HealingEvent``;
-    # damage-only fights correctly yield an empty target_healing
-    # list. Mixed damage + healing fights produce one row per
-    # target across both aggregators (independent roll-ups on the
-    # same ``duration_s``). v0.8.3: same ``name_map`` is passed
-    # so the same agent_id resolves to the same name across all
-    # three roll-ups.
-    target_healing = TargetHealingAggregator().aggregate(
-        [e for e in events if isinstance(e, HealingEvent)],
+    target_healing_rows = _aggregate_per_target_rollup(
+        events,
+        agent_id_to_name,
         duration_s,
-        name_map=agent_id_to_name,
+        HealingEvent,
     )
-    # Phase 8: third sibling roll-up, strict parallel of the DPS +
-    # Healing aggregators. ``TargetBuffRemovalAggregator`` consumes
-    # ``BuffRemovalEvent`` specifically (sum-of-row-buff-removal ==
-    # sum-of-event-buff-removal invariant). The heterogeneous
-    # stream passes through ``isinstance`` at the call site; a
-    # single cbtevent that dual-emits a ``HealingEvent`` AND a
-    # ``BuffRemovalEvent`` lands in BOTH target_healing AND
-    # target_buff_removal -- independent roll-ups on the same
-    # ``duration_s``. The pure-strip case (no heal, just a strip)
-    # lands in target_buff_removal only. v0.8.3: same ``name_map``
-    # is passed for cross-roll-up consistency.
-    target_buff_removal = TargetBuffRemovalAggregator().aggregate(
-        [e for e in events if isinstance(e, BuffRemovalEvent)],
+    target_buff_removal_rows = _aggregate_per_target_rollup(
+        events,
+        agent_id_to_name,
         duration_s,
-        name_map=agent_id_to_name,
+        BuffRemovalEvent,
     )
     # ``EventWindowAggregator`` accepts ``Iterable[Event]`` directly and
     # discriminates by isinstance internally (damage_total += damage,
@@ -438,13 +500,13 @@ def get_fight_events(
         # ``event_windows`` is NOT capped -- it groups by time bucket,
         # which is bounded by the fight duration, so the data volume
         # is naturally bounded.
-        target_dps=[TargetDpsRowOut.model_validate(r.model_dump()) for r in target_dps[:100]],
+        target_dps=[TargetDpsRowOut.model_validate(r.model_dump()) for r in target_dps_rows[:100]],
         target_healing=[
-            TargetHealingRowOut.model_validate(r.model_dump()) for r in target_healing[:100]
+            TargetHealingRowOut.model_validate(r.model_dump()) for r in target_healing_rows[:100]
         ],
         target_buff_removal=[
             TargetBuffRemovalRowOut.model_validate(r.model_dump())
-            for r in target_buff_removal[:100]
+            for r in target_buff_removal_rows[:100]
         ],
         event_windows=[EventBucketOut.model_validate(b.model_dump()) for b in event_windows],
     )
