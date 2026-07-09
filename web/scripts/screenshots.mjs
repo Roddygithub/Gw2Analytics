@@ -78,15 +78,63 @@ const BASE = "http://127.0.0.1:3000";
 // with the spec and was a regression (see CHANGELOG [Unreleased]
 // "Known issue"); this restore keeps the spec identical but
 // adds the script's prose-specific guard back in.
+// v0.9.0 sync: pull live account_name + fight_id from the seeded DB so the
+// per-account timeline + fight drilldown screenshots show populated data,
+// not the 404 upstream-error card. Pre-v0.9.0 the script used static
+// fixture URLs (the mock-server's ``TestAccount.1234`` +
+// ``fixture-fight-001``) which the seed_demo-created database doesn't
+// contain; the resulting 8 PNGs were the 900px upstream-error card,
+// not the populated 1022px / 3196px rows. The CLI helper
+// ``gw2analytics_api.scripts.seed_demo`` (new in v0.9.0) populates the
+// DB with the demo namespace (``seed_demo`` writes 3 fights + 6 accounts
+// to the live Postgres + MinIO).
+//
+// Hard-fail loud when the gateway is unreachable / the DB is empty so
+// the maintainer who runs ``--persist`` against a fresh stack gets a
+// clear remediation message instead of 8 misleading empty captures.
+const GATEWAY_BASE_URL = process.env.GATEWAY_BASE_URL ?? "http://127.0.0.1:8000";
+let realAccountName = null;
+let realFightId = null;
+try {
+  const playersResp = await fetch(`${GATEWAY_BASE_URL}/api/v1/players`);
+  if (playersResp.ok) {
+    const playersJson = await playersResp.json();
+    if (Array.isArray(playersJson) && playersJson.length > 0 && playersJson[0]) {
+      realAccountName = playersJson[0].account_name ?? null;
+    }
+  }
+  const fightsResp = await fetch(`${GATEWAY_BASE_URL}/api/v1/fights`);
+  if (fightsResp.ok) {
+    const fightsJson = await fightsResp.json();
+    if (Array.isArray(fightsJson) && fightsJson.length > 0 && fightsJson[0]) {
+      realFightId = fightsJson[0].id ?? null;
+    }
+  }
+} catch (err) {
+  console.log(`[v0.9.0 sync] Failed to probe ${GATEWAY_BASE_URL}: ${err.message}`);
+}
+if (realAccountName === null || realFightId === null) {
+  console.log(
+    `\n[v0.9.0 sync] Empty or unreachable seeded DB at ${GATEWAY_BASE_URL}.\n` +
+    `Run \`uv run python -m gw2analytics_api.scripts.seed_demo --num-fights 3\` first.\n` +
+    `Falling back to empty upstream-error cards on routes 06 / 08.`,
+  );
+}
+
+// Resolve all 8 URLs up-front so the PAGES array below stays a clean
+// tabular literal (the script's contract is "8 routes, 8 PNGs").
+const PLAYER_PROFILE_ROUTE = `/players/${encodeURIComponent(realAccountName ?? "unknown")}`;
+const FIGHT_DRILLDOWN_ROUTE = `/fights/${encodeURIComponent(realFightId ?? "unknown")}`;
+
 const PAGES = [
   ["01-landing",                       "/",                                        null,             0],
   ["02-account",                       "/account",                                 null,             0],
   ["03-upload",                        "/upload",                                  null,             0],
   ["04-fights",                        "/fights",                                  "stable-scroll",  0],
   ["05-players",                       "/players",                                 "stable-scroll",  0],
-  ["06-player-profile-with-timeline", "/players/TestAccount.1234",                "stable-scroll",  0],
+  ["06-player-profile-with-timeline", PLAYER_PROFILE_ROUTE,                       "stable-scroll",  0],
   ["07-player-empty-timeline",         "/players/empty-history.5678",              "stable-scroll",  0],
-  ["08-fight-drilldown",               "/fights/fixture-fight-001",                "stable-scroll",  0],
+  ["08-fight-drilldown",               FIGHT_DRILLDOWN_ROUTE,                      "stable-scroll",  0],
 ];
 
 await mkdir(OUT_DIR, { recursive: true });
