@@ -43,14 +43,12 @@ if [[ "$cmd" == "--status" || "$cmd" == "status" ]]; then
   fi
   echo
   echo "=== port :$PORT ==="
+  # Process info via lsof (informational only — the curl health check below
+  # is the source of truth for pass/fail, because lsof can misreport for
+  # child processes spawned by tmux on some platforms / lsof versions).
+  # The `|| true` is required: pipefail propagates lsof's no-match exit 1.
   if command -v lsof >/dev/null 2>&1; then
-    if lsof -nP -iTCP:${PORT} -sTCP:LISTEN 2>/dev/null | grep -q .; then
-      lsof -nP -iTCP:${PORT} -sTCP:LISTEN 2>/dev/null | head -3
-    else
-      echo "  (not bound)"
-    fi
-  else
-    echo "  (lsof not installed — check 'health check' below for the source of truth)"
+    lsof -nP -iTCP:${PORT} -sTCP:LISTEN 2>/dev/null | head -3 | sed 's/^/  /' || true
   fi
   echo
   echo "=== health check ==="
