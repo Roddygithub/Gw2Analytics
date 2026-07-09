@@ -173,7 +173,7 @@ export default async function PlayerProfilePage({
 
   if (fetchError || timelineError || !profile) {
     return (
-      <main style={{ padding: "32px" }}>
+      <main style={{ padding: "32px", width: "100%" }}>
         <header style={{ marginBottom: 16 }}>
           <h1 style={{ fontSize: 28, marginBottom: 4 }}>
             Player {account_name}
@@ -196,6 +196,24 @@ export default async function PlayerProfilePage({
         display: "flex",
         flexDirection: "column",
         gap: "24px",
+        // v0.10.0 plan 032: explicit ``width: 100%`` on the
+        // main element so the page fills the 1440x900
+        // visual-regression viewport even when a downstream
+        // CSS rule (e.g. a child element with a fixed
+        // ``max-width`` or a wide horizontal scroll) would
+        // otherwise shrink the parent's intrinsic width.
+        // The bug was a 900px-wide render on the seeded
+        // ``:demo.<N>`` accounts (per the visual-regression
+        // suite) -- the page rendered the chart + table
+        // but the page-level ``<main>`` collapsed to
+        // ~900px instead of filling the viewport. This
+        // explicit width is the defensive fix: it does not
+        // change the layout when the page renders
+        // correctly (a block element already fills the
+        // viewport by default) and it prevents the silent
+        // collapse when a child element is wider than its
+        // content.
+        width: "100%",
       }}
     >
       <header>

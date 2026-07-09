@@ -255,6 +255,38 @@ const server = createServer(async (req, res) => {
       return jsonResponse(res, 200, body);
     }
 
+    // v0.10.0 plan 032: ``GET /api/v1/players/compare/timeline``
+    // with a repeatable ``?accounts=`` query param. The
+    // handler MUST be declared BEFORE the
+    // ``/api/v1/players/:name`` catch-all so the
+    // ``/compare/timeline`` path segment is not consumed
+    // as an ``account_name`` value. The fixture serves the
+    // canonical 2-account payload (``TestAccount.1234`` +
+    // ``TestAccount.5678``); an ``?accounts=`` value that
+    // does not match a known fixture account falls through
+    // to the catch-all (404) per the canonical "unknown
+    // account" contract.
+    const compareMatch = path.match(
+      /^\/api\/v1\/players\/compare\/timeline$/,
+    );
+    if (compareMatch) {
+      const requestedAccounts = url.searchParams.getAll("accounts");
+      const validAccounts = new Set([
+        "TestAccount.1234",
+        "TestAccount.5678",
+      ]);
+      const allValid = requestedAccounts.every((a) => validAccounts.has(a));
+      if (!allValid) {
+        return jsonResponse(
+          res,
+          422,
+          JSON.stringify({ error: "unknown account in compare request" }),
+        );
+      }
+      const body = await loadFixture("cross-account-timeline.json");
+      return jsonResponse(res, 200, body);
+    }
+
     // /api/v1/players/:name/timeline  (v0.8.0). MUST be matched
     // BEFORE the catch-all /api/v1/players/:name handler --
     // otherwise the catch-all would consume

@@ -75,6 +75,20 @@ recovered). Operators MUST:
    rotation script that re-encrypts every ``ciphertext`` row in
    place (out of scope for plan 031).
 
+WARNING: re-run idempotency
+---------------------------
+A `downgrade -1 && upgrade head` sequence is the ONLY safe way
+to re-run 0009. Manually wiping the ``alembic_version`` row to
+re-run from scratch is NOT idempotent: ``op.add_column`` on the
+``ciphertext`` column fails with ``column already exists`` on
+the second pass. If a manual reset is unavoidable:
+1. Drop + restore the ``webhook_subscriptions`` table (DATA LOSS).
+2. Re-run ``alembic upgrade head``, then re-seed.
+The data-loss risk is intentional (re-running 0009 without a
+full teardown could land a half-migrated state where some rows
+have ``ciphertext`` and some do not). Use this path ONLY on a
+fresh database or after a full backup restore.
+
 Data migration
 --------------
 The migration is data-affecting. ``downgrade`` requires the SAME

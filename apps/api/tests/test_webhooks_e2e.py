@@ -1131,6 +1131,22 @@ def test_dispatch_skips_corrupted_ciphertext_but_continues_others(
         assert "InvalidToken" in corrupt_deliveries[0].error
         assert corrupt_deliveries[0].delivered_at is None
 
+    # Defensive assertion: the dispatch loop's FernetInvalidToken
+    # catch MUST short-circuit BEFORE any outbound POST to /corrupt.
+    # Without this guard, a future refactor that reorders decrypt
+    # AFTER httpx.post (i.e., signs with empty bytes then POSTs)
+    # would leave delivered_at = None (httpx would 500 on the empty
+    # HMAC, delivered_at never set) but the test would pass with
+    # the WRONG root cause ("empty signature 500" instead of
+    # "corrupt ciphertext before sign"). Counting respx calls
+    # programmatically locks the ordering invariant.
+    corrupt_path_calls = [c for c in mock.calls if c.request.url.path == "/corrupt"]
+    assert corrupt_path_calls == [], (
+        "dispatch loop made an outbound POST to /corrupt BEFORE "
+        "the FernetInvalidToken catch; the 'decrypt-then-sign' "
+        f"ordering invariant is violated. Calls: {corrupt_path_calls!r}"
+    )
+
 
 def test_settings_secrets_kek_reads_from_env_alias(
     monkeypatch: pytest.MonkeyPatch,

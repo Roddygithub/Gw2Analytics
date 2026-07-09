@@ -58,6 +58,10 @@ from gw2_analytics.aggregate import (
     SingleFightAggregator,
     SkillCatalogEntry,
 )
+from gw2_analytics.cross_account_timeline import (
+    CrossAccountTimelineAggregator,
+    CrossAccountTimelineSeries,
+)
 from gw2_analytics.event_window import EventBucket, EventWindowAggregator
 from gw2_analytics.multi_fight import (
     CombatantRollup,
@@ -87,6 +91,8 @@ __version__ = "0.7.0"
 __all__ = [
     "CombatantRollup",
     "CombatantSummary",
+    "CrossAccountTimelineAggregator",
+    "CrossAccountTimelineSeries",
     "EventBucket",
     "EventWindowAggregator",
     "FightAggregate",

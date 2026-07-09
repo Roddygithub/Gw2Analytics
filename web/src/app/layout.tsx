@@ -65,6 +65,44 @@ export default function RootLayout({
           >
             GW2Analytics
           </a>
+          {/* v0.10.0 plan 032: secondary nav links between
+              the brand and the search bar. ``/players`` and
+              ``/players/compare`` are the 2 most common
+              cross-fight destinations; the analyst can pivot
+              from any page to either view without typing a
+              URL. The link styles mirror the brand link so
+              the nav reads as one consistent strip. */}
+          <nav
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 16,
+            }}
+            aria-label="Primary"
+          >
+            <a
+              href="/players"
+              style={{
+                fontSize: 13,
+                color: "var(--foreground)",
+                opacity: 0.85,
+                textDecoration: "none",
+              }}
+            >
+              Players
+            </a>
+            <a
+              href="/players/compare"
+              style={{
+                fontSize: 13,
+                color: "var(--foreground)",
+                opacity: 0.85,
+                textDecoration: "none",
+              }}
+            >
+              Compare
+            </a>
+          </nav>
           <PlayerSearchBar />
         </header>
         {children}

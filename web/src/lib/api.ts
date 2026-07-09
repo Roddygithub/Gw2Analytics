@@ -600,6 +600,78 @@ export interface PlayerTimelinePoint {
  * Component can verify the round-trip (e.g. when the route
  * clamps an out-of-range value).
  */
+export interface CrossAccountTimelinePoint {
+  fight_id: string;
+  started_at: string;
+  total_damage: number;
+  total_healing: number;
+  total_buff_removal: number;
+}
+
+/**
+ * One per-account series within a cross-account timeline response,
+ * mirror of
+ * :class:`gw2_analytics.cross_account_timeline.CrossAccountTimelineSeries`
+ * (apps/api 0.10.0+).
+ *
+ * The ``points`` array mirrors :attr:`PlayerTimelinePoint` (one
+ * point per attended fight, sorted by ``started_at`` DESC at the
+ * route layer with ``fight_id`` ASC as the deterministic-ordering
+ * tiebreaker). The ``name`` field is the last-seen char-name
+ * (cosmetic identity); the analyst-facing chart labels each
+ * polyline with ``name ?? account_name`` so a renamed player is
+ * still visually identifiable.
+ */
+export interface CrossAccountTimelineSeries {
+  account_name: string;
+  name: string;
+  points: CrossAccountTimelinePoint[];
+}
+
+/**
+ * Get the per-fight historical timeline for N accounts
+ * simultaneously.
+ *
+ * Mirrors ``GET /api/v1/players/compare/timeline`` in
+ * :mod:`apps.api.routes.player_compare` with the ``accounts``
+ * query param as a repeatable list (``?accounts=A&accounts=B``
+ * URL-encoded; the route enforces ``[2, 4]`` accounts). The
+ * response is a list of per-account series -- one series per
+ * requested account -- each with the same ``points`` shape as
+ * the per-account timeline (so the chart can overlay the
+ * accounts on a shared X axis). An account with no attended
+ * fights is reported as a series with ``points: []`` (NOT a
+ * 404 -- the analyst UX benefits from a same-shape response
+ * for all requested accounts).
+ *
+ * Throws :class:`ApiError(422)` on fewer than 2 / more than 4
+ * unique accounts, on an unknown ``?tz=`` IANA name, or on an
+ * unknown ``?bucket=`` value. The page-level Server Component
+ * surfaces these as the upstream-error card.
+ */
+export async function fetchPlayerCompareTimeline(
+  accounts: string[],
+  opts: { bucket?: "fight" | "day"; tz?: string } = {},
+): Promise<CrossAccountTimelineSeries[]> {
+  const params = new URLSearchParams();
+  for (const acct of accounts) {
+    params.append("accounts", acct);
+  }
+  if (opts.bucket !== undefined) params.set("bucket", opts.bucket);
+  if (opts.tz !== undefined) params.set("tz", opts.tz);
+  const qs = params.toString();
+  const url = `${API_BASE_URL}/api/v1/players/compare/timeline?${qs}`;
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  const rows: unknown = await resp.json();
+  if (!Array.isArray(rows)) {
+    throw new ApiError(500, "upstream returned non-array");
+  }
+  return rows as CrossAccountTimelineSeries[];
+}
+
 export interface PlayerTimeline {
   account_name: string;
   total: number;

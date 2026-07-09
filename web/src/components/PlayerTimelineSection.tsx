@@ -42,6 +42,7 @@
 import { useEffect, useState } from "react";
 import { fetchPlayerTimeline, formatApiError, type PlayerTimeline } from "@/lib/api";
 import { PlayerTimelineChart, type TimelineScale } from "@/components/PlayerTimelineChart";
+import { TIMEZONE_OPTIONS } from "@/lib/timezones";
 
 const BUTTON_STYLE: React.CSSProperties = {
   padding: "8px 16px",
@@ -144,33 +145,7 @@ void readStoredScale; // re-exported for unit testability below
 // the URL on a multi-tab session. Deferring localStorage for
 // ``tz`` until the page-level Server Component reads it is
 // the v0.9.X roadmap item (~5 LoC change).
-const TIMEZONE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "UTC", label: "UTC" },
-  { value: "America/New_York", label: "US Eastern (New York)" },
-  { value: "America/Chicago", label: "US Central (Chicago)" },
-  { value: "America/Denver", label: "US Mountain (Denver)" },
-  { value: "America/Los_Angeles", label: "US Pacific (Los Angeles)" },
-  { value: "America/Sao_Paulo", label: "BR São Paulo" },
-  { value: "Europe/London", label: "UK London" },
-  { value: "Europe/Paris", label: "EU Paris" },
-  { value: "Europe/Berlin", label: "EU Berlin" },
-  { value: "Europe/Madrid", label: "EU Madrid" },
-  { value: "Europe/Rome", label: "EU Rome" },
-  { value: "Europe/Warsaw", label: "PL Warsaw" },
-  { value: "Europe/Stockholm", label: "SE Stockholm" },
-  { value: "Europe/Moscow", label: "RU Moscow" },
-  { value: "Africa/Cairo", label: "EG Cairo" },
-  { value: "Africa/Johannesburg", label: "ZA Johannesburg" },
-  { value: "Asia/Dubai", label: "AE Dubai" },
-  { value: "Asia/Kolkata", label: "IN Kolkata" },
-  { value: "Asia/Singapore", label: "SG Singapore" },
-  { value: "Asia/Shanghai", label: "CN Shanghai" },
-  { value: "Asia/Seoul", label: "KR Seoul" },
-  { value: "Asia/Tokyo", label: "JP Tokyo" },
-  { value: "Australia/Perth", label: "AU Perth" },
-  { value: "Australia/Sydney", label: "AU Sydney" },
-  { value: "Pacific/Auckland", label: "NZ Auckland" },
-];
+
 
 export function PlayerTimelineSection({
   accountName,
@@ -436,13 +411,13 @@ export function PlayerTimelineSection({
               Log
             </button>
           </div>
-          {/* v0.9.0 of web: TZ selector for the day-bucketed
-              started_at. Native <select> with 25 curated IANA
-              zones (matches the ProfessionFilter pattern for
-              native-select styling). Auto-switches bucket to
-              "day" on selection (see changeTz above). Persisted
-              in localStorage via readStoredTz + the write-effect
-              that mirrors the scale persistence. */}
+          {/* v0.10.0 plan 032: the TZ selector uses the
+              shared ``TIMEZONE_OPTIONS`` catalog from
+              ``web/src/lib/timezones.ts`` (extracted in plan
+              032 so the per-account + cross-account
+              selectors ship the SAME 25 curated IANA zones).
+              Auto-switches bucket to "day" on selection
+              (see changeTz above). */}
           <div
             style={{ display: "flex", alignItems: "center", gap: 4 }}
             role="group"

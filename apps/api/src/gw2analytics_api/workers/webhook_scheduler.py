@@ -211,7 +211,10 @@ def _attempt_retry(
             delivery.id,
         )
         delivery.attempt = _MAX_ATTEMPTS
-        delivery.error = f"ciphertext corrupt: {FernetInvalidToken.__name__}: {exc}"
+        delivery.error = (
+            f"ciphertext corrupt: {FernetInvalidToken.__name__}: {exc} "
+            f"(terminal on attempt={delivery.attempt}, no retry)"
+        )
         delivery.next_attempt_at = None
         return False
 

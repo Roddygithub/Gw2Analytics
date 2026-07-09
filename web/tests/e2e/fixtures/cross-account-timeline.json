@@ -1,0 +1,42 @@
+[
+  {
+    "account_name": "TestAccount.1234",
+    "name": "Test Char",
+    "points": [
+      {
+        "fight_id": "fixture-fight-001",
+        "started_at": "2026-07-07T12:00:00+00:00",
+        "total_damage": 85000,
+        "total_healing": 12000,
+        "total_buff_removal": 50
+      },
+      {
+        "fight_id": "fixture-fight-002",
+        "started_at": "2026-07-08T18:30:00+00:00",
+        "total_damage": 100000,
+        "total_healing": 15000,
+        "total_buff_removal": 30
+      }
+    ]
+  },
+  {
+    "account_name": "TestAccount.5678",
+    "name": "Other Char",
+    "points": [
+      {
+        "fight_id": "fixture-fight-001",
+        "started_at": "2026-07-07T12:00:00+00:00",
+        "total_damage": 40000,
+        "total_healing": 60000,
+        "total_buff_removal": 80
+      },
+      {
+        "fight_id": "fixture-fight-003",
+        "started_at": "2026-07-09T20:00:00+00:00",
+        "total_damage": 35000,
+        "total_healing": 70000,
+        "total_buff_removal": 90
+      }
+    ]
+  }
+]

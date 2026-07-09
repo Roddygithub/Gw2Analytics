@@ -268,7 +268,39 @@ The v0.10.0 cycle (per `plans/010-v100-roadmap.md`) is now underway. Item A in t
 ### Deferred (v0.10.0 backlog - tracked from `plans/010-v100-roadmap.md` scope)
 
 - **B (security HIGH)**: webhook secret-at-rest envelope encryption. NOW SHIPPED — see v0.10.0 plan 031 entry below. The previously-deferred-from-v0.9.1 hardening layer is closed: CWE-256 (plaintext storage of a password) is no longer surface-able via DB snapshot alone (KEK must ALSO be in the gateway process environment).
-- **C (UX)**: cross-account timeline comparison (M effort). Reuses v0.8.0 `PlayerTimelineChart` + extends with a multi-series overlay mode. The squad-comparison use case (e.g. "how does my DPS compare to my healer's damage absorbed over the same fight window?") is the maintainer's most-requested feature in the incident log. Tracked for v0.10.0 item C.
+- **C (UX)**: cross-account timeline comparison (M effort). NOW SHIPPED — see v0.10.0 plan 032 entry below. The squad-comparison use case (e.g. "how does my DPS compare to my healer's damage absorbed over the same fight window?") is closed with the new `GET /api/v1/players/compare/timeline?accounts=A&accounts=B` route + the new `/players/compare` page.
+
+### Added (apps/api + web - v0.10.0 plan 032: cross-account comparison timeline)
+
+The v0.10.0 cycle item C closes the maintainer's most-requested feature in the incident log (per `docs/ROADMAP.md` §1): the squad-comparison use case. The new endpoint + page let the analyst overlay 2-4 accounts' damage / healing / strip curves on a single chart with a metric radio (Damage / Healing / Buff removal), a linear/log Y-axis scale toggle, and the shared 25-zone TZ selector. ~16 files changed (3 new backend + 6 new web + 5 modified + 2 docs).
+
+- `libs/gw2_analytics/src/gw2_analytics/cross_account_timeline.py` (NEW, ~280 LoC): the stateless `CrossAccountTimelineAggregator` + Pydantic `CrossAccountTimelinePoint` + `CrossAccountTimelineSeries` models. Recency-first sort (mirrors the per-account contract) + day-bucketing (mirrors the per-account `_combine_day_midnight` helper). `aggregate(per_account_contributions, fight_id_to_started, bucket, tz)` is the single entry point.
+- `libs/gw2_analytics/tests/test_cross_account_timeline.py` (NEW, 7 hermetic cases): empty input / two-account / recency-first sort / account-with-no-fights / day-bucketing / default-tz-is-utc / invariant guard.
+- `apps/api/src/gw2analytics_api/routes/player_compare.py` (NEW, ~140 LoC): `GET /api/v1/players/compare/timeline?accounts=A&accounts=B&bucket=day&tz=Continent/City` with a **repeatable** `accounts` query param (`[2, 4]` unique accounts enforced by `Query(min_length=2, max_length=4)`). Reuses the per-account route's `_compute_contributions` helper. Declaration-order matters: MUST be included BEFORE the players router in `main.py` so the catch-all `{account_name:path}` doesn't greedily match `/players/compare/timeline` as `account_name="compare/timeline"`. Returns 422 on out-of-range, 422 on unknown IANA TZ, 200 with `points: []` for an unknown account (NOT 404 -- the analyst UX benefits from a same-shape response for all requested accounts).
+- `apps/api/src/gw2analytics_api/main.py`: includes `player_compare.router` BEFORE `players.router`; `version="0.8.6"` -> `"0.10.0"`.
+- `libs/gw2_analytics/src/gw2_analytics/__init__.py`: re-exports `CrossAccountTimelineAggregator` + `CrossAccountTimelineSeries`.
+- `web/src/lib/api.ts`: `fetchPlayerCompareTimeline(accounts, opts)` + `CrossAccountTimelinePoint` + `CrossAccountTimelineSeries` types.
+- `web/src/lib/timezones.ts` (NEW): the 25-city IANA catalog extracted from `PlayerTimelineSection` so the per-account + cross-account selectors ship the SAME curated set (pre-plan-032 the compare section had a 9-zone subset; the analyst who has used the per-account page would silently lose 16 zones on the compare view).
+- `web/src/components/CrossAccountTimelineChart.tsx` (NEW, ~280 LoC): purpose-built N-line SVG chart (NOT a wrapper around the existing `TimelineChart` because the cross-account use case is 1 metric × N accounts, the inverse of the per-account chart's N metrics × 1 account). 4-color palette (red / green / blue / purple) per account. Broken-line segments for missing dates (an account with no fight on date D renders no line through D, rather than a misleading 0-baseline). Shared absolute Y axis (log scale default; matches the per-account log mode's "1M damage vs 50 strip" use case).
+- `web/src/components/CrossAccountCompareSection.tsx` (NEW, ~280 LoC): Client Component. Owns the metric / scale / bucket / tz toggles + re-fetches the timeline when bucket / tz change. Read-only account chips (the in-page add/remove affordance is a v0.10.X followup; v0.10.0 ships set-via-URL).
+- `web/src/app/players/compare/page.tsx` (NEW, ~210 LoC): Server Component. Reads `?accounts=` from URL search params, validates 2-4 unique accounts, fetches initial timeline on the server, renders the section. Empty-state copy for `< 2` accounts; upstream-error card for `> 4` or 422.
+- `web/src/app/layout.tsx`: added Players + Compare secondary nav links between the brand and the search bar. Compare link goes to `/players/compare` (no query params); the page's empty-state copy guides the analyst to add accounts via URL.
+- `web/src/app/players/page.tsx`: added a "Compare the first 2 players" CTA that pre-fills the URL with the first 2 rows' `account_name`; also `width: "100%"` defensive fix on the main element.
+- `web/src/app/players/[account_name]/page.tsx`: `width: "100%"` defensive fix on the main element (the v0.9.0 visual regression on `:demo.<N>` accounts where the page rendered at ~900px wide instead of 1440px; the defensive fix prevents the silent collapse even when a downstream CSS rule would otherwise shrink the parent's intrinsic width; the root-cause investigation is a v0.10.X followup).
+- `web/src/components/PlayerTimelineSection.tsx`: replaced the local 25-zone `TIMEZONE_OPTIONS` const with the import from `web/src/lib/timezones.ts` (the shared module).
+- `web/tests/e2e/fixtures/cross-account-timeline.json` (NEW): 2-account fixture (TestAccount.1234 + TestAccount.5678) with overlapping but distinct fight sets across 3 dates (2026-07-07 + 2026-07-08 + 2026-07-09). Exercises the broken-line + legend + X-axis date-union paths.
+- `web/tests/e2e/mock-server.mjs`: added `/api/v1/players/compare/timeline` endpoint with a 422 on unknown `?accounts=` values.
+- `web/tests/e2e/players-compare.spec.ts` (NEW, 3 cases): initial render / metric radio toggles / 0-accounts empty state.
+- `web/tests/components/cross-account-timeline-chart.test.tsx` (NEW, 5 cases): empty state / multi-account polylines / default Damage caption / metric switch / log scale Y-axis labels.
+- `web/tests/components/cross-account-compare-section.test.tsx` (NEW, 2 cases): initial render + radio click.
+- `web/tests/app/players-compare-page.test.tsx` (NEW, 3 cases): empty state / too-many / valid render.
+
+### Deferred (v0.10.X followups - tracked from plan 032)
+
+- **In-page add/remove accounts in `/players/compare`**: v0.10.0 ships read-only chips; the full in-page add/remove UX is ~50 LoC and is a v0.10.X followup.
+- **Visual regression baseline for `/players/compare`**: a tracked `docs/screenshots/09-players-compare.png` (the route is dynamic; the fixture + e2e spec cover the e2e path; a visual baseline is a v0.10.X followup when the page settles).
+- **Per-account-vs-cross-account rate columns**: a per-second rate field on `CrossAccountTimelinePoint` is a v0.10.X followup; the v0.10.0 wire surface is the totals-only contract (matches the per-account timeline).
+- **900px bug root-cause investigation**: the `width: "100%"` defensive fix is in place but the underlying CSS root cause (likely the `auto-fit minmax(180px, 1fr)` stat grid + a downstream intrinsic-width shrink on `:demo.<N>` accounts) is a v0.10.X followup with a DevTools session.
 
 ### Added (apps/api - v0.10.0 plan 031: webhook secret-at-rest envelope encryption, OWASP CWE-256)
 

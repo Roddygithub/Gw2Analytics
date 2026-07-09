@@ -33,9 +33,40 @@
  *   upstream-error card with the error message.
  */
 
-import { fetchPlayers, formatApiError } from "@/lib/api";
+import { fetchPlayers, formatApiError, type PlayerListRow } from "@/lib/api";
 import { PlayersGrid } from "@/components/PlayersGrid";
 import { ProfessionFilter } from "@/components/ProfessionFilter";
+
+function CompareCta({ rows }: { rows: PlayerListRow[] }) {
+  if (rows.length < 2) {
+    return null;
+  }
+  const a = rows[0];
+  const b = rows[1];
+  if (!a || !b) {
+    return null;
+  }
+  const href =
+    `/players/compare?accounts=${encodeURIComponent(a.account_name)}` +
+    `&accounts=${encodeURIComponent(b.account_name)}`;
+  return (
+    <a
+      href={href}
+      style={{
+        alignSelf: "flex-start",
+        padding: "6px 12px",
+        fontSize: 12,
+        border: "1px solid var(--accent)",
+        borderRadius: 4,
+        color: "var(--accent)",
+        textDecoration: "none",
+        fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+      }}
+    >
+      Compare the first 2 players &rarr;
+    </a>
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +110,7 @@ export default async function PlayersPage(props: {
         display: "flex",
         flexDirection: "column",
         gap: "16px",
+        width: "100%",
       }}
     >
       <header>
@@ -91,6 +123,17 @@ export default async function PlayersPage(props: {
       </header>
 
       <ProfessionFilter currentValue={professionFilter} />
+
+      {/* v0.10.0 plan 032: a small "Compare" CTA so the
+          analyst can jump to the cross-account view from
+          the players list. The query string is pre-loaded
+          with the first 2 rows' account names so the
+          landing page on /players/compare is non-empty;
+          the analyst can edit the URL to add more
+          accounts. The CTA is disabled when the list
+          has fewer than 2 rows (the compare page requires
+          at least 2 accounts). */}
+      <CompareCta rows={rows} />
 
       {fetchError ? (
         <p style={{ color: "var(--accent)" }}>{fetchError}</p>
