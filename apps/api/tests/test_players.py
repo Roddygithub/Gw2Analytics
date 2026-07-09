@@ -501,3 +501,23 @@ def test_players_filter_does_not_affect_other_responses() -> None:
     # (``"PROF(7)"`` for Mesmer -- see :func:`_profession_label`
     # in routes/players.py for the exact wire shape).
     assert profile["profession"] == "PROF(7)"
+    # v0.10.3 plan 083: the per-fight breakdown now carries the
+    # role detection (detected_role / detected_tags). The Mesmer
+    # seeded above has damage-only events (the back-and-forth
+    # cbtevent stream in the fixture), so the heuristic should
+    # classify it as DPS (the Mesmer's profession hint is DPS,
+    # and the damage axis crosses the pure threshold). The
+    # assertion locks BOTH the non-None invariant AND the
+    # specific value to catch regressions in the algorithm or
+    # the route integration (a weak ``is not None`` check would
+    # miss a regression that classifies everything as UNKNOWN).
+    breakdown_roles = [row.get("detected_role") for row in profile["per_fight_breakdown"]]
+    assert any(r is not None for r in breakdown_roles), (
+        f"expected at least one per-fight breakdown row with a non-None "
+        f"detected_role, got {breakdown_roles!r}"
+    )
+    assert "DPS" in breakdown_roles, (
+        f"expected at least one per-fight breakdown row classified as "
+        f"DPS (Mesmer with damage-only events -> DPS via profession hint), "
+        f"got {breakdown_roles!r}"
+    )

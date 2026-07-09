@@ -88,6 +88,19 @@ class FightContribution(BaseModel):
     total_damage: int = Field(default=0, ge=0)
     total_healing: int = Field(default=0, ge=0)
     total_buff_removal: int = Field(default=0, ge=0)
+    # v0.10.3 plan 083: the per-fight role detection (ported
+    # from WvW_Analytics) lands as 2 optional fields --
+    # ``detected_role`` and ``detected_tags``. Default ``None``
+    # preserves the pre-v0.10.3 wire contract (callers that
+    # don't run the heuristic still produce a valid contribution).
+    # The fast-path (OrmFightPlayerSummary query) projects both
+    # fields from the materialised table; the slow-path
+    # (events-blob walk) invokes :func:`detect_role_lite`
+    # on the per-account accumulator before emitting the
+    # contribution. See ``libs/gw2_analytics/role_detection.py``
+    # for the algorithm + the WvW_Analytics port rationale.
+    detected_role: str | None = None
+    detected_tags: list[str] | None = None
 
 
 class PlayerProfile(BaseModel):

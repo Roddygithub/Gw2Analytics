@@ -48,6 +48,7 @@ from gw2_analytics.player_profile import (
     FightContribution,
     PlayerProfileAggregator,
 )
+from gw2_analytics.role_detection import detect_role_lite
 from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, Event, HealingEvent, Profession
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary
@@ -174,6 +175,14 @@ def _contributions_from_summary(
             total_damage=row.total_damage,
             total_healing=row.total_healing,
             total_buff_removal=row.total_buff_removal,
+            # v0.10.3 plan 083: project the per-fight role detection
+            # from the materialised ``OrmFightPlayerSummary`` row.
+            # Pre-v0.10.3 rows land with ``NULL`` (the migration is
+            # ``nullable=True`` + no backfill); the route's
+            # ``PerFightBreakdownRowOut`` surface treats ``NULL`` as
+            # "unknown" (the pre-migration semantic).
+            detected_role=row.detected_role,
+            detected_tags=row.detected_tags,
         )
         for row in rows
     ]
@@ -239,6 +248,14 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
                 total_damage=0,
                 total_healing=0,
                 total_buff_removal=0,
+                # v0.10.3 plan 083: the 0/0/0 bucket (no events
+                # blob) maps to UNKNOWN + zero_output tag. The
+                # fast-path would also return ``NULL`` for these
+                # rows (pre-migration), but the slow-path
+                # explicitly tags them so the wire contract is
+                # identical between paths.
+                detected_role="UNKNOWN",
+                detected_tags=["zero_output"],
             )
             for _agent_id, (ac_name, ac_char_name, prof_id, elite_id) in agent_map.items()
         ]
@@ -295,19 +312,42 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
         elif isinstance(event, BuffRemovalEvent):
             bucket["strip"] = int(bucket["strip"]) + event.buff_removal
 
-    return [
-        FightContribution(
-            fight_id=fight.id,
-            account_name=account_name,
-            name=str(bucket["name"]),
-            profession=Profession(int(bucket["prof"])),
-            elite=EliteSpec(int(bucket["elite"])),
+    # v0.10.3 plan 083: the per-account loop also invokes
+    # :func:`detect_role_lite` so the slow-path blob walk
+    # produces the same role output as the fast-path summary
+    # query. The fast-path projects the pre-computed
+    # ``detected_role`` / ``detected_tags`` from
+    # ``OrmFightPlayerSummary``; the slow-path computes them on
+    # the fly here. The 2 paths converge on byte-identical
+    # output (the heuristic is deterministic -- same inputs
+    # always produce the same output). Pre-migration fights
+    # take the slow-path (no summary row exists) so this is
+    # also the v0.10.3 backfill path for the ``detected_role``
+    # / ``detected_tags`` columns.
+    contributions: list[FightContribution] = []
+    for account_name, bucket in per_account.items():
+        detected_role, detected_tags = detect_role_lite(
             total_damage=int(bucket["damage"]),
             total_healing=int(bucket["healing"]),
             total_buff_removal=int(bucket["strip"]),
+            profession_int=int(bucket["prof"]),
+            elite_spec_int=int(bucket["elite"]),
         )
-        for account_name, bucket in per_account.items()
-    ]
+        contributions.append(
+            FightContribution(
+                fight_id=fight.id,
+                account_name=account_name,
+                name=str(bucket["name"]),
+                profession=Profession(int(bucket["prof"])),
+                elite=EliteSpec(int(bucket["elite"])),
+                total_damage=int(bucket["damage"]),
+                total_healing=int(bucket["healing"]),
+                total_buff_removal=int(bucket["strip"]),
+                detected_role=detected_role,
+                detected_tags=detected_tags,
+            ),
+        )
+    return contributions
 
 
 # ---------------------------------------------------------------------------
@@ -691,6 +731,17 @@ def get_player(
                 total_damage=c.total_damage,
                 total_healing=c.total_healing,
                 total_buff_removal=c.total_buff_removal,
+                # v0.10.3 plan 083: project the per-fight role
+                # detection from the ``FightContribution`` (which
+                # itself is populated either from the materialised
+                # ``OrmFightPlayerSummary`` row in the fast-path
+                # or from the on-the-fly ``detect_role_lite`` call
+                # in the slow-path). ``None`` is theoretically
+                # unreachable (the slow-path always produces a
+                # value) but the type is ``Optional`` for
+                # forward-compat with pre-migration rows.
+                detected_role=c.detected_role,
+                detected_tags=c.detected_tags,
             )
             for c in breakdown
         ],

@@ -214,6 +214,25 @@ class OrmFightPlayerSummary(Base):
     total_damage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_healing: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_buff_removal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # v0.10.3 plan 083: heuristic role detection (ported from
+    # WvW_Analytics's ``apps/api/src/api/services/roles.py``).
+    # ``detected_role`` is the primary role (DPS / HEAL / STRIP /
+    # BOON / MIXED / UNKNOWN); ``String(30)`` covers every
+    # current role name + a generous future-proofing margin.
+    # ``detected_tags`` is an open-ended list of downstream-UX
+    # signals (high_dps / off_meta / foreign_badges:<role> /
+    # zero_output / ...). Stored as JSON (not ARRAY(String)) so
+    # the list shape is flexible without an Alembic type change
+    # on every future tag addition. Both columns are
+    # ``nullable=True`` so the pre-v0.10.3 rows (which were
+    # materialised without the heuristic) keep ``NULL`` -- the
+    # frontend treats ``NULL`` as "unknown" (the pre-migration
+    # semantic). The ``_persist_player_summaries`` helper
+    # populates both columns for every new fight; see migration
+    # 0011 + ``libs/gw2_analytics/role_detection.py`` for the
+    # algorithm + the rationale.
+    detected_role: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    detected_tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
 
 class OrmWebhookSubscription(Base):

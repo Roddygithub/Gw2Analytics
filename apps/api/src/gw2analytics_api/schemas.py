@@ -330,6 +330,15 @@ class PerFightBreakdownRowOut(BaseModel):
     pair by walking the fight's events blob and accumulating
     magnitudes where ``event.source_agent_id`` maps to
     ``account_name`` via :class:`OrmFightAgent`.
+
+    v0.10.3 plan 083: the per-fight role detection (ported from
+    WvW_Analytics) lands as two new fields -- ``detected_role`` and
+    ``detected_tags``. Both are ``None`` for pre-v0.10.3 rows (the
+    column was added in migration 0011 as ``nullable=True`` and
+    pre-migration rows were not backfilled). The frontend surfaces
+    ``detected_role`` as a coloured badge (DPS / HEAL / STRIP / BOON
+    / MIXED) and ``detected_tags`` as a tooltip (high_dps / off_meta
+    / foreign_badges:<role> / zero_output).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -339,6 +348,11 @@ class PerFightBreakdownRowOut(BaseModel):
     total_damage: int
     total_healing: int
     total_buff_removal: int
+    # v0.10.3 plan 083: see :class:`OrmFightPlayerSummary` docstring
+    # for the algorithm + the WvW_Analytics port rationale. ``None``
+    # for pre-migration rows (no backfill).
+    detected_role: str | None = None
+    detected_tags: list[str] | None = None
 
 
 class PlayerTimelinePointOut(BaseModel):

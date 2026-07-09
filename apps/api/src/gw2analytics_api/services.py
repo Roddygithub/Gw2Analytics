@@ -29,6 +29,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
+from gw2_analytics.role_detection import detect_role_lite
 from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, Event, HealingEvent, Profession
 from gw2_core import Fight as DomainFight
 from gw2_evtc_parser import (
@@ -649,6 +650,29 @@ def _persist_player_summaries(
         # value is guaranteed NUL-free and <= 128 chars. The
         # ``str(...)`` cast is removed because the bucket value is
         # already a ``str`` post-sanitization.
+        #
+        # v0.10.3 plan 083: invoke the v1 lite role-detection
+        # heuristic on the 3 per-account magnitudes + the
+        # profession / elite-spec integers. The heuristic is
+        # pure (no I/O, no DB) so it composes cleanly into the
+        # per-fight ingestion pipeline. The result is the
+        # ``detected_role`` (String(30) on the ORM side) +
+        # ``detected_tags`` (JSON-serialised list on the ORM
+        # side). The heuristic is documented in
+        # :mod:`libs.gw2_analytics.role_detection` and unit-
+        # tested in ``tests/test_role_detection.py``. The
+        # algorithm gracefully degrades to ``("UNKNOWN", [])``
+        # on a 0/0/0 input (defensive against parser bugs that
+        # yield empty magnitudes) and is deterministic (same
+        # inputs always produce the same output -- a property
+        # the re-parse path relies on).
+        detected_role, detected_tags = detect_role_lite(
+            total_damage=int(bucket["damage"]),
+            total_healing=int(bucket["healing"]),
+            total_buff_removal=int(bucket["strip"]),
+            profession_int=int(bucket["prof"]),
+            elite_spec_int=int(bucket["elite"]),
+        )
         db.add(
             OrmFightPlayerSummary(
                 fight_id=orm_fight.id,
@@ -659,5 +683,7 @@ def _persist_player_summaries(
                 total_damage=int(bucket["damage"]),
                 total_healing=int(bucket["healing"]),
                 total_buff_removal=int(bucket["strip"]),
+                detected_role=detected_role,
+                detected_tags=detected_tags,
             ),
         )
