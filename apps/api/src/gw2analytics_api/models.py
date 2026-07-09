@@ -27,6 +27,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     LargeBinary,
+    Numeric,
     String,
     Text,
     Uuid,
@@ -123,7 +124,8 @@ class OrmFightAgent(Base):
         ForeignKey("fights.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    agent_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # v0.10.2 hotfix: NUMERIC(20, 0) for arcdps uint64 (see migration 0010).
+    agent_id: Mapped[int] = mapped_column(Numeric(20, 0), primary_key=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     profession: Mapped[int] = mapped_column(Integer, nullable=False)
     elite_spec: Mapped[int] = mapped_column(Integer, nullable=False)
