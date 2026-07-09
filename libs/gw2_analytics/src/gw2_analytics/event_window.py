@@ -21,17 +21,19 @@ Conventions
 - **``window_s`` must be > 0.** Smaller / equal-zero is rejected so
   callers can't accidentally produce infinite-resolution buckets.
 
-Damage + healing accounting
-===========================
+Damage + healing + buff-removal accounting
+==========================================
 
 Each event in the input stream is interrogated for its concrete type
 via :func:`isinstance`:
 
 - :class:`~gw2_core.DamageEvent`: ``damage_total += event.damage``
 - :class:`~gw2_core.HealingEvent`: ``healing_total += event.healing``
-- Other future kinds: not counted in damage / healing but still
-  accumulate in ``event_count`` so the per-bucket activity signal is
-  forward-compat.
+- :class:`~gw2_core.BuffRemovalEvent`: ``buff_removal_total += event.buff_removal``
+  (Phase 8 cascade)
+- Other future kinds: not counted in damage / healing / buff-removal
+  but still accumulate in ``event_count`` so the per-bucket activity
+  signal is forward-compat.
 
 Cross-field invariants (validated post-construction; violations raise
 ``ValueError``):
@@ -59,7 +61,7 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gw2_core import DamageEvent, Event, HealingEvent
+from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 
 # Lower bound enforced on ``window_s``. Smaller windows are not
 # meaningful (would be millisecond-resolution buckets; arcdps default
@@ -76,6 +78,14 @@ class EventBucket(BaseModel):
     end_ms: int = Field(..., ge=0)
     damage_total: int = Field(default=0, ge=0)
     healing_total: int = Field(default=0, ge=0)
+    # Phase 8 cascade (plan 083): per-bucket buff-removal total.
+    # Mirrors the ``damage_total`` / ``healing_total`` invariants
+    # (sum across buckets == sum of ``event.buff_removal`` across
+    # input events). ``default=0`` so pre-Phase-8 fixtures without
+    # strip events continue to validate cleanly (the existing
+    # tests assert ``bucket.damage_total`` + ``bucket.healing_total``
+    # only; the new field defaults to 0 in those cases).
+    buff_removal_total: int = Field(default=0, ge=0)
     event_count: int = Field(default=0, ge=0)
 
 
@@ -98,8 +108,18 @@ class EventWindowAggregator:
         window_ms = window_s * 1000
         damage_by_bucket: dict[int, int] = defaultdict(int)
         healing_by_bucket: dict[int, int] = defaultdict(int)
+        # Phase 8 cascade (plan 083): per-bucket buff-removal
+        # accumulator (mirror of ``damage_by_bucket`` /
+        # ``healing_by_bucket``).
+        buff_removal_by_bucket: dict[int, int] = defaultdict(int)
         count_by_bucket: dict[int, int] = defaultdict(int)
         last_bucket_index = -1
+        # Phase 8 cascade (plan 083): total strip across the input
+        # stream, accumulated in the same for-loop. Mirrors the
+        # existing ``total_event_count`` plumbing; passed to
+        # ``_check_invariants`` to validate
+        # ``sum(b.buff_removal_total) == total_strip``.
+        total_strip = 0
 
         for e in events:
             # ``e.time_ms`` is integers >= 0 (Pydantic-validated upstream),
@@ -111,9 +131,19 @@ class EventWindowAggregator:
                 damage_by_bucket[bucket_index] += e.damage
             elif isinstance(e, HealingEvent):
                 healing_by_bucket[bucket_index] += e.healing
+            # Phase 8 cascade (plan 083): per-bucket buff-removal
+            # tracking. Mirror of the Damage + Healing branches --
+            # the third member of the discriminated union now writes
+            # to its own accumulator; the bucket's ``event_count``
+            # invariant (sum of ``bucket.event_count`` == ``len(events)``)
+            # still holds because the ``count_by_bucket`` branch above
+            # fires for every event.
+            elif isinstance(e, BuffRemovalEvent):
+                buff_removal_by_bucket[bucket_index] += e.buff_removal
+                total_strip += e.buff_removal
             # Future EventType subclasses land here -- still
             # counted in ``event_count`` even when no damage /
-            # healing attribute exists.
+            # healing / buff-removal attribute exists.
 
         buckets: list[EventBucket] = []
         for idx in range(last_bucket_index + 1):
@@ -123,23 +153,46 @@ class EventWindowAggregator:
                     end_ms=(idx + 1) * window_ms,
                     damage_total=damage_by_bucket[idx],
                     healing_total=healing_by_bucket[idx],
+                    buff_removal_total=buff_removal_by_bucket[idx],
                     event_count=count_by_bucket[idx],
                 )
             )
 
         total_event_count = sum(count_by_bucket.values())
-        self._check_invariants(buckets, total_event_count)
+        # Phase 8 cascade (plan 083): pass ``total_strip`` to
+        # ``_check_invariants`` so the per-bucket buff-removal sum
+        # is cross-validated against the input stream total.
+        self._check_invariants(buckets, total_event_count, total_strip)
         return list(buckets)
 
     @staticmethod
     def _check_invariants(
         buckets: list[EventBucket],
         expected_total_events: int,
+        # Phase 8 cascade (plan 083): expected total ``buff_removal``
+        # across the input stream. Validates that
+        # ``sum(b.buff_removal_total for b in buckets) ==
+        # expected_total_strip`` -- no strip events dropped, no
+        # double-counting.
+        expected_total_strip: int = 0,
     ) -> None:
         """Raise ``ValueError`` if any cross-field invariant is violated."""
         total = sum(b.event_count for b in buckets)
         if total != expected_total_events:
             msg = f"sum of bucket.event_count ({total}) != len(events) ({expected_total_events})"
+            raise ValueError(msg)
+        # Phase 8 cascade (plan 083): the buff-removal sum across
+        # buckets must equal the expected input-stream total. This
+        # invariant catches a future refactor that accidentally
+        # drops the per-bucket ``buff_removal_by_bucket[idx] += ...``
+        # accumulation (e.g. a copy-paste regression from the
+        # Damage / Healing branches above).
+        total_strip = sum(b.buff_removal_total for b in buckets)
+        if total_strip != expected_total_strip:
+            msg = (
+                f"sum of bucket.buff_removal_total ({total_strip}) "
+                f"!= sum of event.buff_removal ({expected_total_strip})"
+            )
             raise ValueError(msg)
         # ``pairwise`` is the canonical idiom for adjacent buckets
         # (ruff RUF007); equivalent to ``zip(buckets, buckets[1:])``.

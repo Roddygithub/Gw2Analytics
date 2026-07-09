@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (libs/gw2_analytics - v0.9.27 plan 083: Phase 8 cascade in event_window.py)
+
+The Phase 8 cycle that added `BuffRemovalEvent` as the third `Event` discriminated-union member in `libs/gw2_core/src/gw2_core/models.py` cascaded the change to `target_buff_removal.py` (the per-target strip rollup) but NOT to `event_window.py` (the per-bucket time-rollup aggregator). The per-bucket `EventBucket` schema was missing the `buff_removal_total` field, so the per-fight timeline chart (`apps/web/src/app/fights/[id]/page.tsx`'s `<PerFightTimelineChart>`) had no per-bucket strip band — a researcher investigating "which 5s window saw the most corrupting concentration" had no timeline answer, only the per-target rollup which is blind to per-bucket chronology. Plan 083 closes the gap:
+
+- `libs/gw2_analytics/src/gw2_analytics/event_window.py`:
+  - `EventBucket` gains a new `buff_removal_total: int = Field(default=0, ge=0)` field (mirrors the existing `damage_total` / `healing_total` invariants; `default=0` keeps pre-Phase-8 callers valid).
+  - `EventWindowAggregator.aggregate()` gains a `buff_removal_by_bucket` accumulator + an `elif isinstance(e, BuffRemovalEvent): buff_removal_by_bucket[bucket_index] += e.buff_removal; total_strip += e.buff_removal` branch in the event-type if/elif chain (parallel to the existing `DamageEvent` / `HealingEvent` branches).
+  - The bucket construction now passes `buff_removal_total=buff_removal_by_bucket[idx]` to the `EventBucket` constructor.
+  - `_check_invariants` gains an `expected_total_strip: int = 0` parameter + the `sum(b.buff_removal_total) != expected_total_strip` cross-field invariant (no strip events dropped, no double-counting).
+  - Module docstring updated from "Damage + healing accounting" to "Damage + healing + buff-removal accounting" with the new `BuffRemovalEvent` line.
+- `libs/gw2_analytics/tests/test_event_window.py`: 5 NEW tests appended to `TestEventWindowAggregator` covering the Phase 8 cascade:
+  - `test_damage_event_in_bucket_defaults_buff_removal_total_to_zero`: 1 DamageEvent at t=1500ms lands in bucket 1 (bucket 0 is zero-filled); `buff_removal_total` defaults to 0 (Phase 8 additive default).
+  - `test_buff_removal_event_accumulates_in_bucket`: 1 BuffRemovalEvent at t=1500ms lands in bucket 1; `buff_removal_total` accumulates the event's `buff_removal` value.
+  - `test_mixed_damage_healing_strip_in_single_bucket`: 3 events (Damage + Healing + BuffRemoval) all at t=1500ms land in bucket 1; the 3 independent roll-ups accumulate in parallel; `event_count` is the residue of the input stream.
+  - `test_buff_removal_accumulates_across_multiple_buckets`: 2 BuffRemovalEvents at t=1500ms + t=2500ms land in bucket 1 + bucket 2; the per-bucket `buff_removal_total` accumulates each event into its own bucket; the total across buckets == sum of event.buff_removal (cross-field invariant).
+  - `test_buff_removal_total_field_default_and_annotation`: Pydantic field introspection — `EventBucket.model_fields["buff_removal_total"].default == 0` AND `.annotation is int` (locks the schema for forward-compat with pre-Phase-8 callers).
+  - The 7 pre-existing Phase 6+v1 tests are unchanged (the `default=0` keeps the pre-Phase-8 fixtures validate cleanly).
+
+#### Public contract change
+
+**The API's `EventBucketOut` schema (in `apps/api/src/gw2analytics_api/schemas.py`) is deliberately NOT extended** with the new `buff_removal_total` field. The `/fights/{id}/events` endpoint's `event_windows` array is the per-bucket rollup from `EventWindowAggregator` (now with the new field), and the route's `EventBucketOut.model_validate(b.model_dump())` step silently drops the unknown field (Pydantic v2 `extra="ignore"` default for `EventBucketOut`, which has `ConfigDict(from_attributes=True)` without `extra="forbid"`). The per-bucket strip data is exposed to the frontend via the separate `/fights/{id}/timeline` endpoint (uses the sibling `PerFightTimelineAggregator` + `PerFightTimelinePointOut` schema, which already had `total_buff_removal` since v0.8.9). The Phase 8 contract that locked the `/events` per-bucket window shape is preserved.
+
+#### Validation
+
+- `uv run pytest libs/gw2_analytics/tests/test_event_window.py`: 12 passed (PYTEST=0; 7 pre-existing + 5 new).
+- `uv run ruff check libs/gw2_analytics/`: clean (RUFF=0).
+- `uv run mypy --no-incremental libs`: clean (MYPY=0).
+
 ### Changed (docs - README professional polish)
 
 - `README.md`: substantial refactor for professional GitHub presentation. The 400+ line original was reorganised:
