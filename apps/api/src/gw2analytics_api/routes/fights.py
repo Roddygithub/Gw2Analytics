@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from gw2_analytics.event_window import EventWindowAggregator
 from gw2_analytics.per_fight_timeline import PerFightTimelineAggregator
+from gw2_analytics.per_player_timeline import PerPlayerTimelineAggregator
 from gw2_analytics.skill_usage import SkillUsageAggregator
 from gw2_analytics.squad_rollup import SquadRollupAggregator
 from gw2_analytics.target_buff_removal import (
@@ -39,6 +40,8 @@ from gw2analytics_api.schemas import (
     FightSquadsOut,
     PerFightTimelineOut,
     PerFightTimelinePointOut,
+    PerPlayerTimelineOut,
+    PerPlayerTimelineSeriesOut,
     SkillOut,
     SkillUsageRowOut,
     SquadRollupRowOut,
@@ -338,6 +341,132 @@ def get_fight_timeline(
         window_s=window_s,
         duration_s=duration_s,
         points=[PerFightTimelinePointOut.model_validate(r.model_dump()) for r in rows],
+    )
+
+
+# ---------------------------------------------------------------------------
+# v0.10.3 plan 083 Feature 3A: per-player timeline (source-side
+# attribution, 1 series per player agent).
+#
+# Declaration order matters: same defensive guard as
+# :func:`get_fight_timeline` -- declared BEFORE the
+# ``/{fight_id}`` catch-all ``get_fight`` below so a future
+# refactor that widens the catch-all to ``/{fight_id:path}`` does
+# not silently break the per-player timeline endpoint.
+# -----------------------------------------------------------------------------
+
+
+@router.get(
+    "/{fight_id}/timeline/players",
+    response_model=PerPlayerTimelineOut,
+)
+def get_fight_player_timeline(
+    fight_id: str,
+    window_s: int = Query(
+        _PER_FIGHT_DEFAULT_WINDOW_S,
+        ge=1,
+        le=_PER_FIGHT_MAX_WINDOW_S,
+        description=(
+            "Time-bucket size for the per-player timeline roll-up. "
+            "Defaults to 5 seconds; bounded 1 <= window_s <= 600 "
+            "(10 minutes). Same contract as the aggregated "
+            "``/timeline`` endpoint."
+        ),
+    ),
+    db: Session = Depends(get_session),  # noqa: B008
+) -> PerPlayerTimelineOut:
+    """Return the per-player timeline (1 series per player, damage + healing + strip over time).
+
+    v0.10.3 plan 083 Feature 3A ships this as a SEPARATE endpoint
+    (not folded into :class:`PerFightTimelineOut`) for the same
+    reason the squads + skills endpoints are separate: a single
+    bound response would force the page to refetch the full
+    event blob even when only the per-player view is requested.
+    The route reuses :func:`_load_fight_events` (the same shared
+    helper the per-target trio + squads + skills + aggregated
+    timeline endpoints use), loads the fight's ``OrmFightAgent``
+    rows to build the source-side attribution map, and invokes
+    :class:`gw2_analytics.per_player_timeline.PerPlayerTimelineAggregator`
+    on the parsed events + the agent iterable.
+
+    The aggregator applies the second-layer
+    ``account_name``-non-empty filter (the per-source-side
+    contract in :func:`apps.api.services._persist_player_summaries`).
+    NPC agents are silently dropped (they have no
+    ``account_name`` registered in the arcdps account-name
+    stream); events whose ``source_agent_id`` maps to an NPC
+    are silently dropped at the aggregator's source-side
+    attribution step.
+
+    Response codes match :func:`get_fight_timeline` exactly:
+
+    - ``404 Not Found``: fight id is unknown OR the events
+      blob is missing (pre-Phase 7 row OR the parser pass
+      yielded zero events after filtering).
+    - ``422 Unprocessable Entity``: ``window_s`` is outside
+      ``[1, 600]``. Handled by FastAPI before this handler
+      runs.
+    - ``502 Bad Gateway``: events blob is present but
+      corrupt (gzip decompression failure or non-JSON
+      payload).
+
+    A fight with zero player agents (a 0-player NPC-only
+    fight) returns ``200 OK`` with ``series: []`` -- NOT
+    ``404 Not Found``. The ``/timeline`` endpoint raises
+    ``404`` on a 0-event fight (the blob is present but the
+    parser yielded no events); a 0-player fight is a different
+    state (the blob is present, the parser yielded events,
+    but every event is NPC-sourced so the source-side
+    attribution has nothing to attribute to). The 2 endpoints'
+    empty-state contracts diverge by design.
+    """
+    # Shared helper handles the blob load + decompress + event
+    # split + 404 / 502 error contract (the per-target trio +
+    # squads + skills + aggregated timeline endpoints share
+    # the same pattern). The aggregator accepts the events
+    # list as an ``Iterable[Event]`` (we re-iterate twice
+    # internally -- once for the bucket attribution + once
+    # for the invariant check -- so the list materialisation
+    # here is a one-time cost).
+    events = _load_fight_events(db, fight_id)
+
+    # Build the per-fight agent iterable (passed to the
+    # aggregator which applies the is_player + account_name
+    # filters). The aggregator reads 4 attributes via
+    # ``getattr`` (agent_id / account_name / is_player /
+    # name) so the SQLAlchemy ORM instances are a drop-in
+    # match. A single small query on the fight's agent
+    # table (typically 5-50 rows); a small N+1 guard is
+    # not warranted at this row count.
+    agents: list[OrmFightAgent] = list(
+        db.execute(
+            select(OrmFightAgent).where(OrmFightAgent.fight_id == fight_id),
+        )
+        .scalars()
+        .all()
+    )
+
+    duration_s = max(e.time_ms for e in events) / 1000.0
+    series = PerPlayerTimelineAggregator().aggregate(
+        events,
+        agents,
+        window_s=window_s,
+    )
+
+    return PerPlayerTimelineOut(
+        fight_id=fight_id,
+        window_s=window_s,
+        duration_s=duration_s,
+        # ``model_validate`` + ``model_dump`` mirrors the
+        # per-target trio + squads + skills + aggregated
+        # timeline endpoints' wire-validation pattern (see
+        # :func:`get_fight_events` + :func:`get_fight_skills`).
+        # The aggregator's field names match the wire
+        # schema's field names 1:1, so the round-trip is
+        # mechanical -- no manual field mapping.
+        series=[
+            PerPlayerTimelineSeriesOut.model_validate(s.model_dump()) for s in series
+        ],
     )
 
 

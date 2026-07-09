@@ -612,6 +612,106 @@ class WebhookSubscriptionOut(BaseModel):
 
 
 # --- v0.9.1 webhook delivery schemas appended below ---
+class PerPlayerTimelinePointOut(BaseModel):
+    """One row of one player's per-fight timeline on :class:`PerPlayerTimelineSeriesOut`.
+
+    v0.10.3 plan 083 Feature 3A ships this as the strict parallel
+    of :class:`PerFightTimelinePointOut` but scoped to a single
+    player (the series' owner). The schema is structurally nested
+    (``list[PerPlayerTimelineSeriesOut[points: list[PerPlayerTimelinePointOut]]]``)
+    vs the flat ``list[PerFightTimelinePointOut]`` of the
+    aggregated timeline. The frontend's per-player chart (visx
+    multi-line) requires the 2-level nested shape so the same
+    X-axis bucket grid can be rendered with one line per player
+    -- a flat list would force the chart to re-group by player
+    on every render.
+
+    ``window_start_ms`` / ``window_end_ms`` form a half-open
+    ``[start, end)`` range (mirrors the per-fight timeline
+    contract). The 3 totals are non-negative (Pydantic
+    ``ge=0`` validated).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    window_start_ms: int
+    window_end_ms: int
+    total_damage: int
+    total_healing: int
+    total_buff_removal: int
+
+
+class PerPlayerTimelineSeriesOut(BaseModel):
+    """One player's per-fight timeline series.
+
+    v0.10.3 plan 083 Feature 3A: the wire shape is a list of
+    these series (one per player agent in the fight). The
+    ``points`` field is the per-bucket timeline for THIS
+    player -- every series has the same number of points
+    (zero-filled to ``max(bucket_index)``) so the visx
+    multi-line chart's arrays are aligned (a strict
+    requirement of stacked-line SVG renders).
+
+    - ``account_name`` is the operational identity (stable
+      across uploads, the join key for the per-account
+      cross-fight roll-up).
+    - ``name`` is the LAST-SEEN char-name (cosmetic identity,
+      best-effort -- arcdps prefixes with ``:`` so the cosmetic
+      name is the ``:``-stripped form per the
+      :class:`PlayerProfileAggregator` contract).
+    - ``points`` is the per-bucket timeline (length-N where
+      ``N = max(bucket_index) + 1`` across all players in
+      the fight).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    account_name: str
+    name: str
+    points: list[PerPlayerTimelinePointOut] = []
+
+
+class PerPlayerTimelineOut(BaseModel):
+    """Response from ``GET /api/v1/fights/{fight_id}/timeline/players``.
+
+    v0.10.3 plan 083 Feature 3A ships this as a SEPARATE endpoint
+    (not folded into :class:`PerFightTimelineOut`) for the same
+    reason the squads + skills endpoints are separate: a single
+    bound response would force the page to refetch the full
+    event blob even when only the per-player view is requested.
+    The route reuses :func:`_load_fight_events` (the same
+    shared helper the per-target trio + squads + skills +
+    aggregated timeline endpoints use) and invokes
+    :class:`gw2_analytics.per_player_timeline.PerPlayerTimelineAggregator`
+    on the parsed events + the fight's ``OrmFightAgent`` rows
+    (filtered to ``is_player=True`` upstream by the aggregator's
+    second-layer ``account_name``-non-empty filter).
+
+    - ``fight_id`` echoes the path param so the wire consumer
+      can verify which fight the timeline belongs to.
+    - ``window_s`` echoes the query param so the consumer can
+      verify the bucket size the route applied (matches the
+      ``window_s`` contract on :func:`get_fight_timeline`).
+    - ``duration_s`` mirrors the same scalar on
+      :class:`PerFightTimelineOut` (computed natively as
+      ``max(event.time_ms) / 1000.0`` because the V1.3 EVTC
+      header does not carry a wall-clock duration).
+    - ``series`` is the list of :class:`PerPlayerTimelineSeriesOut`
+      entries, sorted by ``(-total_damage, account_name)``
+      (the deterministic-ordering contract of
+      :class:`PerPlayerTimelineAggregator`). Empty when the
+      fight has zero player agents (a defensive empty list --
+      a 0-player fight has no per-player timeline to show).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fight_id: str
+    window_s: int
+    duration_s: float
+    series: list[PerPlayerTimelineSeriesOut] = []
+
+
 class WebhookDeliveryOut(BaseModel):
     """Response item for GET /api/v1/webhooks/deliveries/{id} (v0.9.1).
 

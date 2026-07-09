@@ -886,3 +886,122 @@ export async function fetchFightTimeline(
   }
   return (await resp.json()) as FightTimeline;
 }
+
+/**
+ * One per-player timeline point from
+ * ``GET /api/v1/fights/{fight_id}/timeline/players``, mirror
+ * of :class:`apps.api.schemas.PerPlayerTimelinePointOut`
+ * (apps/api 0.10.3+).
+ *
+ * Strict parallel of :class:`PerFightTimelinePoint` but
+ * scoped to a single player (the series' owner). The schema
+ * is structurally nested (``list[PerPlayerTimelineSeries[points:
+ * list[PerPlayerTimelinePoint]]]``) vs the flat
+ * ``list[PerFightTimelinePoint]`` of the aggregated
+ * timeline. The frontend's per-player chart requires the
+ * 2-level nested shape so the same X-axis bucket grid can
+ * be rendered with one line per player -- a flat list would
+ * force the chart to re-group by player on every render.
+ */
+export interface PerPlayerTimelinePoint {
+  window_start_ms: number;
+  window_end_ms: number;
+  total_damage: number;
+  total_healing: number;
+  total_buff_removal: number;
+}
+
+/**
+ * One player's per-fight timeline series from
+ * ``GET /api/v1/fights/{fight_id}/timeline/players``, mirror
+ * of :class:`apps.api.schemas.PerPlayerTimelineSeriesOut`.
+ *
+ * Every series has the same number of points (zero-filled
+ * to ``max(bucket_index)``) so the multi-line chart's
+ * arrays are aligned (a strict requirement of stacked-line
+ * SVG renders).
+ *
+ * - ``account_name`` is the operational identity (stable
+ *   across uploads, the join key for the per-account
+ *   cross-fight roll-up).
+ * - ``name`` is the LAST-SEEN char-name (cosmetic identity,
+ *   best-effort -- arcdps prefixes with ``:`` so the
+ *   cosmetic name is the ``:``-stripped form per the
+ *   :class:`PlayerProfileAggregator` contract).
+ */
+export interface PerPlayerTimelineSeries {
+  account_name: string;
+  name: string;
+  points: PerPlayerTimelinePoint[];
+}
+
+/**
+ * Per-fight per-player timeline payload from
+ * ``GET /api/v1/fights/{fight_id}/timeline/players``, mirror
+ * of :class:`apps.api.schemas.PerPlayerTimelineOut`
+ * (apps/api 0.10.3+, plan 083 Feature 3A).
+ *
+ * The ``series`` array is sorted by
+ * ``(-total_damage, account_name)`` (the aggregator's
+ * deterministic-ordering contract). ``window_s`` +
+ * ``duration_s`` echo the request params + the parser's
+ * ``max(event.time_ms) / 1000.0`` so the chart can render a
+ * "Showing N players (M-second window, X-second duration)"
+ * caption without a second lookup. ``series`` is empty when
+ * the fight has zero player agents (a 0-player NPC-only
+ * fight); the per-fight timeline endpoint raises ``404`` on
+ * a 0-event fight, the per-player endpoint returns ``200``
+ * with empty arrays (the 2 endpoints' empty-state contracts
+ * diverge by design).
+ */
+export interface FightPlayerTimeline {
+  fight_id: string;
+  window_s: number;
+  duration_s: number;
+  series: PerPlayerTimelineSeries[];
+}
+
+/**
+ * Get the per-player timeline (1 series per player, damage +
+ * healing + buff-removal over time) for one fight.
+ *
+ * Mirrors ``GET /api/v1/fights/{fight_id}/timeline/players``
+ * in :mod:`apps.api.routes.fights`. ``windowS`` defaults to
+ * 5 (the gateway default; matches the per-fight events
+ * endpoint's bucketing convention + the aggregated
+ * ``/timeline`` endpoint's contract). Throws :class:`ApiError`
+ * on any non-2xx so the Server Component can render the
+ * canonical upstream-error card (404: fight unknown OR
+ * events blob missing; 422: windowS out of range; 502: blob
+ * corrupt).
+ *
+ * The per-player timeline is a separate endpoint from
+ * :func:`fetchFightTimeline` (not folded into the aggregated
+ * timeline payload) for the same reason the squads + skills
+ * endpoints are separate: a single bound response would
+ * force the page to refetch the full event blob even when
+ * only the per-player view is requested. The 2 timeline
+ * endpoints share the same ``window_s`` / ``duration_s`` /
+ * bucket semantics so the page can swap between them via a
+ * tab toggle without re-fetching the underlying blob.
+ */
+export async function fetchFightPlayerTimeline(
+  fightId: string,
+  opts: { windowS?: number } = {},
+): Promise<FightPlayerTimeline> {
+  const params = new URLSearchParams();
+  if (opts.windowS !== undefined) {
+    params.set("window_s", String(opts.windowS));
+  }
+  const qs = params.toString();
+  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/timeline/players${
+    qs ? `?${qs}` : ""
+  }`;
+  const resp = await fetch(url, {
+    cache: "no-store",
+  });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as FightPlayerTimeline;
+}

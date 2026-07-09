@@ -60,6 +60,7 @@
 
 import {
   fetchFightEvents,
+  fetchFightPlayerTimeline,
   fetchFightSquads,
   fetchFightSkills,
   fetchFightTimeline,
@@ -68,6 +69,7 @@ import {
   type TargetHealingRow,
   type TargetBuffRemovalRow,
   type FightEventsSummaryRow,
+  type FightPlayerTimeline,
   type FightTimeline,
   type SquadRollupRow,
   type SkillUsageRow,
@@ -207,6 +209,15 @@ export default async function FightEventsPage({
   let squads: import("@/lib/api").FightSquads | null = null;
   let skills: import("@/lib/api").FightSkills | null = null;
   let timeline: FightTimeline | null = null;
+  // v0.10.3 plan 083 Feature 3A: the per-player timeline
+  // joins the parallel fetch in the 5th slot. A transient
+  // per-player failure (502 blob corrupt, 404 unknown fight)
+  // degrades to a tab-level "Per-player timeline unavailable"
+  // caption WITHOUT blanking the page -- the aggregated
+  // timeline tab stays functional on the same underlying
+  // blob. Only the /events failure (slot 0) flips the page
+  // to the unified error card above.
+  let playerTimeline: FightPlayerTimeline | null = null;
   // ``fetchError`` carries the user-facing error string (already
   // formatted via :func:`formatApiError` so the page renders the
   // exact same text a Client Component would). The body of the
@@ -218,6 +229,7 @@ export default async function FightEventsPage({
     fetchFightSquads(id),
     fetchFightSkills(id),
     fetchFightTimeline(id, { windowS }),
+    fetchFightPlayerTimeline(id, { windowS }),
   ]);
   if (results[0].status === "fulfilled") {
     summary = results[0].value;
@@ -232,6 +244,9 @@ export default async function FightEventsPage({
   }
   if (results[3].status === "fulfilled") {
     timeline = results[3].value;
+  }
+  if (results[4].status === "fulfilled") {
+    playerTimeline = results[4].value;
   }
 
   if (fetchError || !summary) {
@@ -416,7 +431,7 @@ export default async function FightEventsPage({
           series for trend reading). Showing both side-by-side
           lets the analyst correlate the absolute bucket
           magnitudes with the per-series trend lines. */}
-      <PerFightTimelineSection timeline={timeline} />
+      <PerFightTimelineSection timeline={timeline} playerTimeline={playerTimeline} />
     </main>
   );
 }
