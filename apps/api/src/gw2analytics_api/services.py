@@ -23,6 +23,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Final
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,7 +31,12 @@ from sqlalchemy.orm import Session, selectinload
 
 from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, Event, HealingEvent, Profession
 from gw2_core import Fight as DomainFight
-from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
+from gw2_evtc_parser import (
+    EvtcParseError,
+    PythonEvtcParser,
+    __version__ as PARSER_VERSION,
+    read_zevtc_bytes,
+)
 from gw2analytics_api.models import (
     UPLOAD_STATUS_COMPLETED,
     UPLOAD_STATUS_FAILED,
@@ -107,6 +113,24 @@ def process_parse(
         _persist_event_blob(db, upload, evtc_bytes, core_fight.id)
         upload.status = UPLOAD_STATUS_COMPLETED
         upload.error_message = None
+        # v0.10.2 hotfix followup #6: stamp the parser version on
+        # the upload envelope so operators can correlate a
+        # ``completed`` row with the exact ``gw2_evtc_parser``
+        # release that processed it. The ``Upload.parser_version``
+        # column defaults to the sentinel ``"0"`` (the
+        # "not parsed yet" signal); flipping it to the real
+        # ``PARSER_VERSION`` here is the canonical "this upload
+        # was successfully processed by parser X.Y.Z" marker.
+        # The change is post-commit-safe: a re-parse that flips
+        # a previously-failed upload to ``completed`` will also
+        # stamp the version (the assignment overwrites the
+        # sentinel). On failure, the sentinel stays (the
+        # ``failed`` branch in the except clauses above
+        # short-circuits before reaching this line, so the
+        # version is NOT stamped on a failed parse -- correct
+        # semantics: we never ran the parser, so we cannot
+        # attribute a version to the parse attempt).
+        upload.parser_version = PARSER_VERSION
         db.commit()
 
 
@@ -160,7 +184,10 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
             logger.info(
                 "fight %s: deduplicating duplicate agent_id=%s (name=%r, "
                 "is_player=%s); first-seen entry wins",
-                cf.id, agent_id_int, agent.name, agent.is_player,
+                cf.id,
+                agent_id_int,
+                agent.name,
+                agent.is_player,
             )
             continue
         seen_agent_ids.add(agent_id_int)
@@ -181,9 +208,7 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
                 account_name=(
                     None if agent.account_name is None else _sanitize_name(agent.account_name)
                 ),
-                subgroup=(
-                    None if agent.subgroup is None else _sanitize_name(agent.subgroup)
-                ),
+                subgroup=(None if agent.subgroup is None else _sanitize_name(agent.subgroup)),
             ),
         )
 
@@ -204,9 +229,10 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
         skill_id_int = int(skill.id)
         if skill_id_int in seen_skill_ids:
             logger.info(
-                "fight %s: deduplicating duplicate skill_id=%s (name=%r); "
-                "first-seen entry wins",
-                cf.id, skill_id_int, skill.name,
+                "fight %s: deduplicating duplicate skill_id=%s (name=%r); first-seen entry wins",
+                cf.id,
+                skill_id_int,
+                skill.name,
             )
             continue
         seen_skill_ids.add(skill_id_int)
@@ -216,6 +242,31 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
                 skill_id=skill_id_int,
                 name=_sanitize_name(skill.name),
             ),
+        )
+
+    # v0.10.2 hotfix followup #8: defensive WARNING when the
+    # header claims skills but the parser yielded 0. This is
+    # the same kind of "silent data quality" observability as
+    # the #4 followup (0-summary on non-empty source_map).
+    # The case happens when the parser's safety bound
+    # (``MAX_SKILL_NAME_BYTES``) fires on the first skill
+    # record (the parser stops reading the skill table), or
+    # when the skill table is truncated before the first
+    # record. The upload still completes (the events blob
+    # may reference ``skill_id``s that don't have a name in
+    # the ``fight_skills`` table, but the routes degrade
+    # gracefully -- the ``/fights/{id}/events`` route
+    # surfaces the events as raw ``skill_id`` integers, and
+    # the SkillUsageTable component shows the id without a
+    # name). The WARNING makes the silent failure visible
+    # to operators monitoring the parser logs.
+    if head.skill_count > 0 and not cf.skills:
+        logger.warning(
+            "fight %s: header claims skill_count=%d but parser yielded 0 skills; "
+            "skill table likely truncated or corrupted (see MAX_SKILL_NAME_BYTES "
+            "warning in gw2_evtc_parser.parser)",
+            cf.id,
+            head.skill_count,
         )
 
     # Flush the staged agents + skills so the re-query in
@@ -243,8 +294,19 @@ def _elite_id(e: EliteSpec) -> int:
     return int(e.value)
 
 
-def _sanitize_name(name: str | None) -> str:
-    """Strip NUL (0x00) bytes from a name; coerce None to empty string.
+#: Maximum length of a name-like field written to the ORM. Matches
+#: the ``String(128)`` NOT NULL column constraint on
+#: ``OrmFightAgent.name`` / ``OrmFightSkill.name`` /
+#: ``OrmFightPlayerSummary.name`` (and the corresponding
+#: ``account_name`` / ``subgroup`` columns where applicable). Names
+#: longer than this are silently truncated to fit the column.
+#: Centralised here so a future schema bump (e.g. ``String(256)``)
+#: only needs to touch this constant.
+MAX_NAME_LEN: Final[int] = 128
+
+
+def _sanitize_name(name: str | None, max_length: int = MAX_NAME_LEN) -> str:
+    """Strip NUL (0x00) bytes from a name; coerce None to empty string; truncate to ``max_length``.
 
     PostgreSQL TEXT/VARCHAR columns cannot contain 0x00 (the byte is
     reserved as the C-string terminator in the wire protocol). The
@@ -255,19 +317,39 @@ def _sanitize_name(name: str | None) -> str:
     unguarded INSERT raises ``psycopg.DataError`` and rolls back the
     whole transaction, losing the fight row + agents + skills.
 
-    Policy: strip NUL bytes only. Other control characters (tab,
-    newline, etc.) are preserved because they're sometimes part of
-    legitimate skill names (e.g. add-on-supplied custom names). An
-    all-NUL name collapses to the empty string, which the ORM
+    Additionally, the arcdps parser can yield ``name_len`` up to
+    ``MAX_SKILL_NAME_BYTES = 4096`` for skill names -- a 200-char
+    custom skill name from an arcdps add-on would otherwise fail the
+    INSERT with ``value too long for type character varying(128)``
+    and roll back the whole ``_save_fight`` transaction (losing the
+    fight row + agents + skills). The truncation is silent (no
+    warning) because the column constraint is the canonical source
+    of truth and a future schema bump will lift the cap.
+
+    Policy (applied in order):
+        1. ``None`` and empty string round-trip to the empty string.
+        2. Strip NUL (0x00) bytes only. Other control characters
+           (tab, newline, etc.) are preserved because they're
+           sometimes part of legitimate skill names (e.g.
+           add-on-supplied custom names).
+        3. Truncate to ``max_length`` (default 128, the String(128)
+           column constraint). Applied AFTER NUL stripping so a
+           name with NULs followed by > 128 chars of content is
+           truncated on the surviving (post-strip) string, not on
+           the original (pre-strip) string.
+
+    An all-NUL name collapses to the empty string, which the ORM
     accepts (String(128) NOT NULL with an empty value is valid).
 
     Used by :func:`_save_fight` for ALL name-like fields (agent.name,
-    skill.name, account_name, subgroup) to centralise the
-    sanitization contract.
+    skill.name, account_name, subgroup) AND by
+    :func:`_persist_player_summaries` for the summary's ``name`` +
+    ``account_name`` to centralise the sanitization contract at
+    every ORM write boundary.
     """
     if not name:
         return ""
-    return name.replace("\x00", "")
+    return name.replace("\x00", "")[:max_length]
 
 
 def _persist_event_blob(
@@ -458,13 +540,25 @@ def _persist_player_summaries(
         # "first" and "subsequent" in the same dict as the data.
         if account in per_account:
             bucket: dict[str, int | str] = per_account[account]
-            bucket["name"] = agent.name or ""
+            # v0.10.2 hotfix followup #5: route the bucket's ``name``
+            # through :func:`_sanitize_name` so the sanitization
+            # contract is centralised at every ORM write boundary
+            # (the same helper ``_save_fight`` uses for
+            # ``OrmFightAgent.name``). The ``OrmFightAgent`` here is
+            # already NUL-stripped (the write path runs
+            # ``_sanitize_name`` before INSERT) AND bounded to 68
+            # bytes by the arcdps combo string layout, so the call
+            # is defensive -- but it keeps the new 128-char
+            # truncation consistent across the two ORM write
+            # boundaries and catches any future regression that
+            # bypasses the agent-side write path.
+            bucket["name"] = _sanitize_name(agent.name)
         else:
             bucket = {
                 "damage": 0,
                 "healing": 0,
                 "strip": 0,
-                "name": agent.name or "",
+                "name": _sanitize_name(agent.name),
                 "prof": int(agent.profession),
                 "elite": int(agent.elite_spec),
             }
@@ -509,11 +603,55 @@ def _persist_player_summaries(
         delete(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == orm_fight.id),
     )
     for account_name, bucket in per_account.items():
+        # v0.10.2 hotfix followup #5: route the loop key (the
+        # ``account_name`` PK) through :func:`_sanitize_name` so the
+        # sanitization contract is centralised at every ORM write
+        # boundary (the same helper ``_save_fight`` uses for
+        # ``OrmFightAgent.account_name``). The ``account_name`` here
+        # is already NUL-stripped (the source ``OrmFightAgent`` was
+        # sanitized in ``_save_fight``) AND bounded to 68 bytes by
+        # the arcdps combo-string layout, so the call is defensive
+        # -- but it keeps the new 128-char truncation consistent
+        # across the two ORM write boundaries.
+        sanitized_account = _sanitize_name(account_name)
+        # Defensive guard: an all-NUL ``account_name`` (from a
+        # malformed arcdps record) would be NUL-stripped to the
+        # empty string by ``_sanitize_name``. The ``String(128) NOT
+        # NULL`` column would happily accept an empty string, so
+        # the INSERT would silently succeed and create a
+        # degenerate row with ``account_name=""``. The
+        # ``source_map`` filter (``if a.is_player and
+        # a.account_name``) already filters this case at the
+        # source_map level (the ORM's NUL-stripped ``account_name``
+        # is the empty string, which is falsy and therefore
+        # excluded), so this guard is a load-bearing coincidence
+        # pin -- if a future refactor bypasses the source_map
+        # filter (e.g. reads the account_name from a different
+        # source), the guard still drops the degenerate row.
+        # The log line is INFO (not WARNING) because the case
+        # cannot happen in the current code path; the log makes
+        # the guard visible to operators who might wonder why a
+        # row is missing.
+        if not sanitized_account:
+            logger.info(
+                "fight %s: skipping summary row for account_name=%r "
+                "(sanitized to empty string after NUL strip; "
+                "degenerate input -- see v0.10.3 parser fix for "
+                "all-NUL account_name detection)",
+                orm_fight.id,
+                account_name,
+            )
+            continue
+        # The ``bucket["name"]`` is already routed through
+        # ``_sanitize_name`` at the bucket-set site (above), so the
+        # value is guaranteed NUL-free and <= 128 chars. The
+        # ``str(...)`` cast is removed because the bucket value is
+        # already a ``str`` post-sanitization.
         db.add(
             OrmFightPlayerSummary(
                 fight_id=orm_fight.id,
-                account_name=account_name,
-                name=str(bucket["name"]),
+                account_name=sanitized_account,
+                name=bucket["name"],
                 profession=int(bucket["prof"]),
                 elite_spec=int(bucket["elite"]),
                 total_damage=int(bucket["damage"]),

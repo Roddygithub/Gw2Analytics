@@ -1357,3 +1357,130 @@ def test_real_evtc_binary_parses_with_realistic_agent_count() -> None:
         assert len(fight.skills) >= 1, (
             f"header claims {fight.header.skill_count} skills but parser read 0"
         )
+
+
+# ---------------------------------------------------------------------------
+# v0.10.2 hotfix followup #9: MAX_EVTC_BYTES cap in ``_read_all``
+# ---------------------------------------------------------------------------
+
+
+def test_read_all_under_cap_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.10.2 hotfix followup #9: a blob under the cap passes through ``_read_all``.
+
+    The 100 MB real cap is monkeypatched down to 1 MB for the
+    test (avoids allocating 100 MB real in test memory). A
+    512 KB blob round-trips unchanged.
+    """
+    import gw2_evtc_parser.parser as parser_mod
+
+    monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024 * 1024)
+    data = b"x" * (512 * 1024)
+    result = parser_mod._read_all(data)
+    assert len(result) == len(data)
+    assert result == data
+
+
+def test_read_all_at_cap_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.10.2 hotfix followup #9: a blob exactly at the cap passes (inclusive).
+
+    The cap is inclusive (the check is ``len(data) > MAX_EVTC_BYTES``,
+    not ``>=``). A blob of exactly the cap size round-trips
+    unchanged.
+    """
+    import gw2_evtc_parser.parser as parser_mod
+
+    monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
+    data = b"x" * 1024
+    result = parser_mod._read_all(data)
+    assert len(result) == 1024
+    assert result == data
+
+
+def test_read_all_over_cap_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.10.2 hotfix followup #9: a blob over the cap raises ``EvtcParseError``.
+
+    The cap is exclusive (1 byte over the cap raises). The
+    error message includes the actual size + the bound in MB
+    + a remediation hint. The test pins the message content
+    via ``pytest.raises(match=...)`` so a future regression
+    that changes the message (e.g. removes the MB hint) fires.
+    """
+    import gw2_evtc_parser.parser as parser_mod
+
+    monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
+    data = b"x" * 1025
+    with pytest.raises(EvtcParseError, match=r"1025 bytes.*exceeds safety bound.*0 MB") as exc_info:
+        parser_mod._read_all(data)
+    # The remediation hint points at the streaming API.
+    assert "parse_events" in str(exc_info.value)
+    assert "split the blob" in str(exc_info.value).lower()
+
+
+def test_read_all_binary_io_over_cap_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.10.2 hotfix followup #9: a ``BinaryIO`` source over the cap raises.
+
+    Mirrors the ``bytes`` over-cap test but with a ``BytesIO``
+    source. The cap is checked AFTER the ``source.read()``
+    call (Option A in the design -- see the ``_read_all``
+    docstring), so the BinaryIO path goes through the same
+    check as the bytes path.
+    """
+    import gw2_evtc_parser.parser as parser_mod
+
+    monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
+    data = BytesIO(b"x" * 1025)
+    with pytest.raises(EvtcParseError, match=r"1025 bytes.*exceeds safety bound") as exc_info:
+        parser_mod._read_all(data)
+    assert "parse_events" in str(exc_info.value)
+
+
+def test_parse_with_oversized_blob_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.10.2 hotfix followup #9: ``PythonEvtcParser.parse()`` propagates the cap.
+
+    The cap is enforced at the ``_read_all`` chokepoint (both
+    ``parse()`` and ``parse_events()`` go through it), so the
+    cap is enforced exactly once per parse, not duplicated.
+    This test pins the propagation through the public
+    ``parse()`` API.
+    """
+    import gw2_evtc_parser.parser as parser_mod
+
+    monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
+    data = b"x" * 2048
+    with pytest.raises(EvtcParseError, match=r"exceeds safety bound") as exc_info:
+        list(PythonEvtcParser().parse(data))
+    # The error message is caller-agnostic (doesn't distinguish
+    # parse() vs parse_events()) so the streaming-API hint
+    # makes sense for both surfaces.
+    assert "parse_events" in str(exc_info.value)
+
+
+def test_parse_events_with_oversized_blob_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.10.2 hotfix followup #9: ``PythonEvtcParser.parse_events()`` propagates the cap.
+
+    Mirrors the ``parse()`` test for ``parse_events()``. The
+    cap is enforced at the same ``_read_all`` chokepoint, so
+    both public methods share the same protection.
+    """
+    import gw2_evtc_parser.parser as parser_mod
+
+    monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
+    data = b"x" * 2048
+    with pytest.raises(EvtcParseError, match=r"exceeds safety bound") as exc_info:
+        list(PythonEvtcParser().parse_events(data))
+    assert "parse_events" in str(exc_info.value)
+
+
+def test_max_evtc_bytes_constant_is_100_mb() -> None:
+    """v0.10.2 hotfix followup #9: the cap is 100 MB (the canonical value per plans/067).
+
+    Pins the cap value. A future bump (e.g. to 200 MB) MUST
+    update this test + the :data:`MAX_EVTC_BYTES` constant in
+    :mod:`gw2_evtc_parser.parser`. The 100 MB value is
+    defense-in-depth: it's 3.3x the API layer's 30 MB cap
+    (per plan 048) and 5-20x typical WvW raid log sizes.
+    """
+    from gw2_evtc_parser.parser import MAX_EVTC_BYTES
+
+    assert MAX_EVTC_BYTES == 100 * 1024 * 1024
+    assert MAX_EVTC_BYTES == 104_857_600

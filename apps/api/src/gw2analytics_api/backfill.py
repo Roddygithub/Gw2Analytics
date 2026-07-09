@@ -82,7 +82,7 @@ from gw2analytics_api.models import (
     OrmFightAgent,
     OrmFightPlayerSummary,
 )
-from gw2analytics_api.services import _persist_player_summaries
+from gw2analytics_api.services import _persist_player_summaries, _sanitize_name
 from gw2analytics_api.storage import get_events
 
 logger = logging.getLogger(__name__)
@@ -337,8 +337,27 @@ def _backfill_pre_phase7(
         db.add(
             OrmFightPlayerSummary(
                 fight_id=fight.id,
-                account_name=agent.account_name,
-                name=agent.name or "",
+                # v0.10.2 hotfix followup #7: route the
+                # ``account_name`` + ``name`` through
+                # :func:`_sanitize_name` so the
+                # sanitization contract is centralised at
+                # every ORM write boundary (mirrors the
+                # services.py fix from followup #5). The
+                # ``OrmFightAgent`` here is already
+                # NUL-stripped (the write path runs
+                # ``_sanitize_name`` before INSERT) AND
+                # bounded to 68 bytes by the arcdps
+                # combo-string layout, so the call is
+                # defensive -- but it keeps the new
+                # 128-char truncation consistent across
+                # the two ORM write boundaries and catches
+                # any future regression that bypasses the
+                # write path's sanitization (e.g. an
+                # operator manually UPDATEing the agent
+                # row via SQL with a > 128 char name, then
+                # running the backfill).
+                account_name=_sanitize_name(agent.account_name),
+                name=_sanitize_name(agent.name),
                 profession=int(agent.profession),
                 elite_spec=int(agent.elite_spec),
                 total_damage=0,

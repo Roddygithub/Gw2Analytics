@@ -152,6 +152,21 @@ MAX_SKILLS: Final[int] = 100_000
 #: but we allow 4 KiB to absorb long custom skill names from addons).
 MAX_SKILL_NAME_BYTES: Final[int] = 4_096
 
+#: v0.10.2 hotfix followup #9: maximum bytes for the entire EVTC blob.
+#: arcdps caps canonical WvW raids at ~5-20 MB; the API layer caps at
+#: 30 MB (per plan 048). The parser's cap is set to 100 MB to give direct
+#: library consumers (CLI tools, Jupyter notebooks, FaaS workers) headroom
+#: for processing larger fight archives without OOM. The cap is checked
+#: once in :func:`_read_all` AFTER the bytes are materialised (Option A in
+#: the v0.10.2 design -- the OOM risk is on the downstream algorithm
+#: allocation, not the ``source.read()`` itself for the 30 MB-100 MB
+#: range; the API layer already caps at 30 MB so anything reaching the
+#: parser is at most 100 MB). The error message includes the actual
+#: size + the bound in MB + a remediation hint ("split the blob or use
+#: the streaming parse_events API for larger archives"). Centralised
+#: here so a future bump (e.g. 200 MB) only needs to touch this constant.
+MAX_EVTC_BYTES: Final[int] = 100 * 1024 * 1024
+
 #: arcdps account-name soft signal. Real arcdps revisions usually
 #: prefix account strings with ``:``; we surface ``account_name``
 #: verbatim and let downstream code decide whether the leading ``:``
@@ -328,13 +343,53 @@ def _read_all(source: BinaryIO | bytes) -> bytes:
 
     For ``bytes``, we return a defensive copy so the caller can mutate
     the input. For ``BinaryIO`` we read everything once.
+
+    v0.10.2 hotfix followup #9: after the materialisation, enforce
+    the :data:`MAX_EVTC_BYTES` cap (100 MB) as a defense-in-depth
+    backstop. The API layer caps at 30 MB (per plan 048), so anything
+    reaching the parser is at most 100 MB; direct library consumers
+    (CLI tools, notebooks, FaaS workers) bypass the API cap and could
+    feed 1 GB+ blobs that OOM the parser's downstream allocations
+    (the agent list, the skill list, the events list). The cap
+    is checked AFTER the materialisation (Option A in the design)
+    because:
+
+    1. The 30-100 MB range doesn't OOM Python on the ``source.read()``
+       call itself (only the downstream algorithm allocations
+       would OOM, and those are caught by the structural caps
+       ``MAX_AGENTS`` + ``MAX_SKILLS`` + ``MAX_SKILL_NAME_BYTES``).
+    2. Reading in chunks + raising mid-read (Option B) would
+       complicate the error path without meaningfully reducing the
+       peak memory (Python still has the partial buffer).
+    3. ``source.seek(0, 2) + source.tell()`` (Option C) requires a
+       seekable stream and would break for ``stdin``-style
+       BinaryIO sources.
+
+    The error message is operator-friendly: it includes the
+    actual size + the bound in MB + a remediation hint pointing
+    at the streaming ``parse_events`` API.
     """
     if isinstance(source, bytes):
-        return bytes(source)
-    if hasattr(source, "read"):
-        return source.read()
-    msg = f"Expected bytes or BinaryIO, got {type(source).__name__}"
-    raise TypeError(msg)
+        data = bytes(source)
+    elif hasattr(source, "read"):
+        data = source.read()
+    else:
+        msg = f"Expected bytes or BinaryIO, got {type(source).__name__}"
+        raise TypeError(msg)
+
+    # v0.10.2 hotfix followup #9: enforce the 100 MB cap AFTER
+    # the materialisation. The check is intentionally at the
+    # chokepoint (both ``parse()`` and ``parse_events()`` go
+    # through ``_read_all``) so the cap is enforced exactly once
+    # per parse, not duplicated in each public method.
+    if len(data) > MAX_EVTC_BYTES:
+        raise EvtcParseError(
+            f"EVTC blob is {len(data)} bytes, exceeds safety bound "
+            f"{MAX_EVTC_BYTES} bytes ({MAX_EVTC_BYTES // (1024 * 1024)} MB); "
+            f"refusing to allocate. Split the blob or use the streaming "
+            f"parse_events API for larger archives."
+        )
+    return data
 
 
 def _iter_fights(data: bytes) -> Iterator[Fight]:
@@ -608,6 +663,7 @@ __all__ = [
     "BUILD_OFFSET",
     "HEADER_SIZE",
     "MAX_AGENTS",
+    "MAX_EVTC_BYTES",
     "MAX_SKILLS",
     "MAX_SKILL_NAME_BYTES",
     "SKILL_COUNT_OFFSET",
