@@ -113,7 +113,7 @@ from gw2analytics_api.services import MAX_NAME_LEN, _sanitize_name
     ],
 )
 def test_sanitize_name_strips_nul_bytes(raw: str | None, expected: str) -> None:
-    """The sanitizer contract: strip 0x00, preserve other chars, coerce None to empty, truncate to 128."""
+    """The sanitizer contract: strip 0x00, preserve other chars, coerce None, truncate to 128."""
     assert _sanitize_name(raw) == expected
 
 

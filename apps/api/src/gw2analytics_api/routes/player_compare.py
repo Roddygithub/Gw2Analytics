@@ -70,6 +70,7 @@ from gw2_analytics.cross_account_timeline import (
     CrossAccountTimelineAggregator,
     CrossAccountTimelineSeries,
 )
+from gw2_analytics.player_profile import FightContribution
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight
 from gw2analytics_api.routes.players import _compute_contributions
@@ -175,8 +176,11 @@ def get_compare_timeline(
     contributions = _compute_contributions(db, fights)
     # Bucket per-account contributions. An account with NO
     # contributions still gets a series entry (matches the
-    # "all requested accounts → all series" contract).
-    per_account_contributions: dict[str, list] = {}
+    # "all requested accounts → all series" contract). The
+    # ``list[FightContribution]`` type argument is REQUIRED
+    # (mypy ``type-arg`` rule) -- ``dict[str, list]`` without
+    # the inner type is rejected by the strict mypy config.
+    per_account_contributions: dict[str, list[FightContribution]] = {}
     for c in contributions:
         per_account_contributions[c.account_name].append(c)
     # ``fight_id_to_started`` mirrors the per-account timeline
