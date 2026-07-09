@@ -441,6 +441,13 @@ Closes 2 real bugs found by real-payload testing on 2026-07-09 (1,605 WvW `.zevt
   it. Add a one-line note so operators discover the override
   without grepping the source. ~3 LoC; v0.10.X followup.
 
+### Fixed (apps/api - v0.10.2 hotfix followup #12)
+
+The 100-row cap on the per-target roll-up lists (`target_dps` + `target_healing` + `target_buff_removal` in `GET /api/v1/fights/{id}/events`; `skills` in `GET /api/v1/fights/{id}/skills`) is the v0.10.3 parser-bug mitigation. The pre-cap aggregator returned ALL groups, so a v0.10.3 regression that misreads `source_agent_id` (or the parser-side skill-table read) can produce hundreds of thousands of unique garbage IDs, the JSON response explodes to multi-MB, the connection drops (HTTP 000), and the analyst sees a Next.js "fetch failed" timeout on the fight drilldown page. The cap slices the per-target lists to the top-100 by damage / healing / strip descending (the aggregators already order by magnitude descending, so the kept rows ARE the analyst-relevant signal — the dropped tail is the noise floor). `event_windows` is NOT capped (it groups by time bucket, naturally bounded by fight duration).
+
+- `apps/api/src/gw2analytics_api/routes/fights.py::get_fight_events` + `get_fight_skills`: cap `target_dps[:100]` + `target_healing[:100]` + `target_buff_removal[:100]` + `skills[:100]` after the aggregator runs. Comment block documents the v0.10.3 root cause + the "top-N is the analyst signal" rationale + the `event_windows`-uncapped exception.
+- `apps/api/tests/test_fight_rollup_cap.py` (NEW, 4 hermetic tests): one per capped list. Each test seeds a fight with 150 unique targets/skills + 150 events with descending magnitudes and asserts the response has exactly 100 rows, in descending order, with the top-100 by magnitude preserved. The 4 tests cover the 4 cap sites independently (DPS + Healing + BuffRemoval on `/events`; per-skill on `/skills`); pure-strip events (`value=0`, `buff_dmg>0`, `is_nondamage=1`) exercise the Phase 8 dual-emit-free path on the BuffRemoval test.
+
 ### Added (apps/api - v0.10.0 plan 031: webhook secret-at-rest envelope encryption, OWASP CWE-256)
 
 The v0.10.0 cycle item B closes the HIGH-severity CWE-256 (plaintext storage of a password) layer on the webhook subsystem. A stolen DB snapshot OR a flawed SELECT-leak no longer surfaces the plaintext HMAC secret directly; the attacker must ALSO have access to the gateway process's `SECRETS_KEK` env var. Implementation is server-side Python `cryptography.fernet.Fernet` (NOT Postgres `pgcrypto` `pgp_sym_encrypt` — the SQL wire exposure of the plaintext KEK in `pg_stat_statements` / `log_min_duration_statement` was a defense-in-depth violation; Python-side encryption keeps the KEK in process memory).

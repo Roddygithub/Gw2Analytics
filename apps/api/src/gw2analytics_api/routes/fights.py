@@ -426,10 +426,25 @@ def get_fight_events(
     return FightEventsSummaryOut(
         fight_id=fight_id,
         duration_s=duration_s,
-        target_dps=[TargetDpsRowOut.model_validate(r.model_dump()) for r in target_dps],
-        target_healing=[TargetHealingRowOut.model_validate(r.model_dump()) for r in target_healing],
+        # v0.10.2 hotfix followup #12: cap the per-target roll-up lists
+        # at 100 rows to bound JSON serialization. The v0.10.3 parser
+        # fix (source_agent_id misread) can produce hundreds of thousands
+        # of unique garbage agent IDs, which the per-target aggregators
+        # happily group by, exploding the response size and causing
+        # the connection to drop (HTTP 000 / Next.js "fetch failed"
+        # timeout). The 100-row cap preserves the top-N analyst signal
+        # (the per-target roll-ups are ordered by damage / healing /
+        # strip descending) while keeping the payload bounded.
+        # ``event_windows`` is NOT capped -- it groups by time bucket,
+        # which is bounded by the fight duration, so the data volume
+        # is naturally bounded.
+        target_dps=[TargetDpsRowOut.model_validate(r.model_dump()) for r in target_dps[:100]],
+        target_healing=[
+            TargetHealingRowOut.model_validate(r.model_dump()) for r in target_healing[:100]
+        ],
         target_buff_removal=[
-            TargetBuffRemovalRowOut.model_validate(r.model_dump()) for r in target_buff_removal
+            TargetBuffRemovalRowOut.model_validate(r.model_dump())
+            for r in target_buff_removal[:100]
         ],
         event_windows=[EventBucketOut.model_validate(b.model_dump()) for b in event_windows],
     )
@@ -564,7 +579,13 @@ def get_fight_skills(
 
     return FightSkillsOut(
         fight_id=fight_id,
-        skills=[SkillUsageRowOut.model_validate(r.model_dump()) for r in skill_rows],
+        # v0.10.2 hotfix followup #12: see get_fight_events for the
+        # rationale. The per-skill roll-up groups by skill_id, which
+        # the v0.10.3 parser bug can also produce garbage values for,
+        # leading to the same response explosion. The 100-row cap
+        # preserves the top-N signal (ordered by total_damage
+        # descending) while bounding the payload.
+        skills=[SkillUsageRowOut.model_validate(r.model_dump()) for r in skill_rows[:100]],
     )
 
 
