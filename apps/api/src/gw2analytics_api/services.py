@@ -476,6 +476,29 @@ def _persist_player_summaries(
         elif isinstance(event, BuffRemovalEvent):
             bucket["strip"] = int(bucket["strip"]) + event.buff_removal
 
+    # v0.10.2 hotfix followup: surface silent 0-summary failures.
+    # If we got past the source_map check (player agents with
+    # account_name exist) but the event loop yielded 0 per_account
+    # entries, the events likely have wrong source_agent_id values
+    # -- the parser misreads the event-stream offset when the skill
+    # table is malformed (see the ``MAX_SKILL_NAME_BYTES`` warning
+    # in :mod:`gw2_evtc_parser`). This is a defensive observability
+    # log so operators can spot the regression in monitoring. The
+    # behavior is unchanged (still 0 summary rows); the WARNING
+    # just makes the silent failure visible. The corresponding
+    # v0.10.3 hotfix should fix the parser-side root cause
+    # (either fail the whole parse on a malformed skill table or
+    # recover the correct event offset by scanning forward for the
+    # cbtevent magic).
+    if not per_account and source_map:
+        logger.warning(
+            "fight %s: %d player agent(s) with account_name but 0 summary "
+            "rows; events likely have wrong source_agent_id (parser skill "
+            "table misreading cascade -- see v0.10.3 parser fix)",
+            orm_fight.id,
+            len(source_map),
+        )
+
     # Re-parse safety: delete the existing rows for this fight_id
     # before inserting the new ones. The CASCADE FK on fight_id
     # means the per-fight rows are removed when the fight is
