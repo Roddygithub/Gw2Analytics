@@ -18,10 +18,11 @@ ignored.
 
 from __future__ import annotations
 
+import base64
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -71,6 +72,14 @@ class Settings(BaseSettings):
         default=["*"],
         validation_alias="CORS_ALLOWED_ORIGINS",
     )
+    # v0.10.0 plan 031: webhook secret at rest envelope encryption.
+    # ``SecretStr`` masks the value in tracebacks / repr / debug
+    # (so the KEK never leaks via the standard Python logging
+    # channels or exception formatting). REQUIRED at startup;
+    # the 44-char validator below fails-fast so a misconfigured
+    # deployment refuses to boot BEFORE the first webhook is
+    # processed (no silent plaintext fallback).
+    secrets_kek: SecretStr = Field(validation_alias="SECRETS_KEK")
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
@@ -91,6 +100,57 @@ class Settings(BaseSettings):
             return v
         msg = f"cors_allowed_origins env value must be a string or list, got {type(v).__name__}"
         raise ValueError(msg)
+
+    @field_validator("secrets_kek", mode="before")
+    @classmethod
+    def _validate_secrets_kek(cls, v: object) -> str:
+        """Enforce the Fernet-key format BEFORE pydantic's SecretStr wrap.
+
+        pydantic runs ``mode="before"`` validators BEFORE the
+        ``SecretStr`` wrap, so ``v`` is the raw env input (a
+        ``str``). Validating the length here surfaces a clear
+        error message that names the field-length expectation +
+        the canonical Python one-liner for generating a fresh
+        KEK. The wrap to ``SecretStr`` happens AFTER this
+        validator returns, so the masked-but-validated form
+        lands in the model.
+        """
+        s = v
+        if s is None or not isinstance(s, str):
+            raise ValueError(
+                f"SECRETS_KEK must be a string; got {type(s).__name__}"
+            )
+        if len(s) != 44:
+            raise ValueError(
+                f"SECRETS_KEK must be exactly 44 URL-safe base64 chars "
+                f"(Fernet 32-byte key); got {len(s)} chars. "
+                f"Generate via `python -c \"from cryptography.fernet "
+                f"import Fernet; print(Fernet.generate_key().decode())\"`."
+            )
+        # Length is necessary but not sufficient: ``"a" * 44`` is
+        # 44 chars but URL-safe-b64-decodes to 33 bytes (44*6/8),
+        # not 32. Fernet's ``Fernet(key)`` constructor rejects
+        # any non-32-byte key with ``ValueError``. The validator
+        # round-trips the base64 decode so a misconfigured
+        # deployment fails loud at app startup instead of crashing
+        # on the first ``encrypt_webhook_secret`` call deep in a
+        # BG task (which would surface as a 500 to the integrator
+        # with no actionable context).
+        try:
+            decoded = base64.urlsafe_b64decode(s)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"SECRETS_KEK must be valid URL-safe base64; "
+                f"got decode error: {exc}"
+            ) from exc
+        if len(decoded) != 32:
+            raise ValueError(
+                f"SECRETS_KEK URL-safe-b64-decodes to {len(decoded)} bytes; "
+                f"Fernet requires exactly 32. Generate via "
+                f"`python -c \"from cryptography.fernet import Fernet; "
+                f"print(Fernet.generate_key().decode())\"`."
+            )
+        return s
 
 
 @lru_cache

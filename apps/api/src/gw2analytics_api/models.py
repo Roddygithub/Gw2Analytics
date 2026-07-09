@@ -234,7 +234,17 @@ class OrmWebhookSubscription(Base):
     # symbolic collision is a footgun in IDE auto-complete).
     filter_payload: Mapped[dict[str, object]] = mapped_column("filter", JSON, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    secret: Mapped[str] = mapped_column(String(64), nullable=False)
+    # v0.10.0 plan 031: secret at rest is Fernet-envelope-encrypted
+    # and stored as raw bytes (CWE-256 closure). The plaintext
+    # ``whsec_<base64>`` secret crosses the wire ONLY at HMAC-sign
+    # time inside ``workers/webhook_dispatch._dispatch_single``;
+    # a stolen DB snapshot is NOT enough to forge signatures --
+    # the attacker must ALSO have access to the ``SECRETS_KEK`` env
+    # var. ``LargeBinary`` mirrors the same byte-preserving pattern
+    # the ``webhook_deliveries.payload`` + ``webhook_dlq.payload``
+    # columns use (v0.9.2 plan 009 Step 1) so HMAC byte-for-byte
+    # integrity is preserved across the decrypt-then-sign flow.
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

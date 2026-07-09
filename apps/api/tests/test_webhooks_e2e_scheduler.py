@@ -60,6 +60,7 @@ import pytest
 import respx as _respx
 import time_machine
 
+from gw2analytics_api.crypto import encrypt_webhook_secret
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (
     UPLOAD_STATUS_COMPLETED,
@@ -112,7 +113,7 @@ def _bootstrap_webhook_environment(
             id=sub_id,
             url=target_url,
             description="plan-007 scheduler test subscription",
-            secret="whsec_" + "s" * 32,
+            ciphertext=encrypt_webhook_secret("whsec_" + "s" * 32),
         )
         sub.filter_payload = {"kind": "upload_completed"}
         sub.created_at = _BASE_TIME

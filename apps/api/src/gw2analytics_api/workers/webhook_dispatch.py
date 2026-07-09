@@ -38,6 +38,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gw2analytics_api.crypto import FernetInvalidToken, decrypt_webhook_secret
 from gw2analytics_api.models import (
     UPLOAD_STATUS_COMPLETED,
     OrmWebhookDelivery,
@@ -193,13 +194,39 @@ def _dispatch_single(
     given upload commit together (or all roll back together if the
     loop crashes).
     """
-    # Defensive: schema + route validator should prevent this, but
-    # if a corrupt row slipped through (manual DB edit, migration
-    # partial), we skip rather than crash the whole dispatch loop.
-    if not sub.secret:
-        logger.warning(
-            "webhook subscription %s has empty secret; skipping delivery",
+    # v0.10.0 plan 031: decrypt the ciphertext BEFORE HMAC signing.
+    # The plaintext secret crosses the wire at HMAC-sign time ONLY.
+    # ``cryptography.fernet.InvalidToken`` is raised when the row's
+    # ciphertext was encrypted under a different KEK OR is otherwise
+    # malformed (manual DB edit OR KEK rotation without migration).
+    # One corrupt row MUST NOT crash the whole dispatch loop -- we
+    # catch per-sub, log + record a delivery-row audit entry, and
+    # continue to the next subscriber.
+    try:
+        plaintext_secret = decrypt_webhook_secret(sub.ciphertext)
+    except FernetInvalidToken as exc:
+        delivery_id = _generate_delivery_id()
+        delivery = OrmWebhookDelivery(
+            id=delivery_id,
+            subscription_id=sub.id,
+            upload_id=upload_id_str,
+            attempt=1,
+            # FernetInvalidToken is a re-export of
+            # cryptography.fernet.InvalidToken; reference __name__
+            # so the audit row uses the canonical "InvalidToken"
+            # (otherwise the literal alias misleads a future reader).
+            error=f"ciphertext corrupt: {FernetInvalidToken.__name__}: {exc}",
+        )
+        delivery.payload = body_bytes
+        delivery.next_attempt_at = _utcnow()
+        db.add(delivery)
+        logger.error(
+            "webhook subscription %s ciphertext corrupt "
+            "(FernetInvalidToken); one corrupt row must NOT crash "
+            "the entire dispatch loop -- recording delivery row + "
+            "skipping; message=%s",
             sub.id,
+            exc,
         )
         return False
 
@@ -217,7 +244,7 @@ def _dispatch_single(
 
     delivery_id = _generate_delivery_id()
     signature = hmac.new(
-        sub.secret.encode("utf-8"),
+        plaintext_secret.encode("utf-8"),
         body_bytes,
         hashlib.sha256,
     ).hexdigest()

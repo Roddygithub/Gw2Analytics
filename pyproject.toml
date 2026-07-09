@@ -86,6 +86,13 @@ S3_ENDPOINT = "localhost:9000"
 S3_ACCESS_KEY = "gw2analytics"
 S3_SECRET_KEY = "gw2analytics-secret"
 S3_BUCKET = "gw2analytics"
+# v0.10.0 plan 031: webhook secret at rest encryption (Fernet envelope).
+# 44 chars = 32 random bytes base64-url encoded (Fernet key format).
+# Deterministic test KEK = base64.urlsafe_b64encode(b"a"*32); re-runs
+# always decrypt the same plaintext regardless of Fernet timestamp.
+# NEVER use this KEK in production; generate via
+# `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+SECRETS_KEK = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
 
 # ---------------------------------------------------------------------------
 # Mypy: project-wide type-check config. Per-package overrides live in

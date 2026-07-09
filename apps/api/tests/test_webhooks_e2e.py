@@ -71,9 +71,12 @@ import time_machine
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import Response
+from pydantic import ValidationError
 from sqlalchemy.orm import Session as _sa  # noqa: N813
 
 from gw2analytics_api import schemas
+from gw2analytics_api.config import Settings
+from gw2analytics_api.crypto import decrypt_webhook_secret, encrypt_webhook_secret
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app
 from gw2analytics_api.models import (
@@ -85,6 +88,7 @@ from gw2analytics_api.models import (
     Upload,
 )
 from gw2analytics_api.routes import webhooks as _webhook_routes
+from gw2analytics_api.workers.webhook_dispatch import dispatch_for_upload
 from gw2analytics_api.workers.webhook_scheduler import process_scheduled_retries
 
 client = TestClient(app)
@@ -597,7 +601,7 @@ def _bootstrap_webhook_environment(
             id=sub_id,
             url=target_url,
             description="plan-007 test subscription",
-            secret="whsec_" + "s" * 32,
+            ciphertext=encrypt_webhook_secret("whsec_" + "s" * 32),
         )
         sub.filter_payload = {"kind": "upload_completed"}
         sub.created_at = _BASE_TIME
@@ -878,7 +882,9 @@ def test_replayed_delivery_byte_for_byte_hmac_matches_original(
     ).encode("utf-8")
     with session_factory() as seed_db:
         sub = seed_db.get(OrmWebhookSubscription, sub_id)
-        secret_bytes = sub.secret.encode("utf-8") if sub else b""
+        secret_bytes = (
+            decrypt_webhook_secret(sub.ciphertext).encode("utf-8") if sub else b""
+        )
     initial_hmac = hmac.new(
         secret_bytes,
         canonical_body_bytes,
@@ -939,3 +945,222 @@ def test_replayed_delivery_byte_for_byte_hmac_matches_original(
         hashlib.sha256,
     ).hexdigest()
     assert replay_hmac == initial_hmac, "replay HMAC re-computation does not match initial dispatch"
+
+
+# --- v0.10.0 plan 031 webhook secret-at-rest hermetic tests ---
+#
+# These 4 hermetic tests lock the v0.10.0 plan 031 invariants:
+#
+# 1. Fernet round-trip yields the original plaintext unchanged.
+# 2. The Settings.secrets_kek field validator accepts 44-char
+#    URL-safe base64 input AND rejects other lengths (too-short
+#    AND too-long) so a misconfigured deployment cannot boot
+#    with a weak KEK.
+# 3. POST /api/v1/webhooks encrypts the secret at rest; the
+#    plaintext is NEVER present in the ciphertext bytes (CWE-256
+#    closure proof at the wire boundary).
+# 4. webhook_dispatch._dispatch_single raises FernetInvalidToken
+#    on a corrupt ciphertext row but the dispatch loop continues
+#    for OTHER valid subscribers -- one corrupt row MUST NOT
+#    crash the whole loop (defensive cross-subscriber isolation).
+
+
+def test_encrypt_decrypt_round_trip_yields_original() -> None:
+    """Plan 031 #1: Fernet round-trip preserves the plaintext unchanged.
+
+    Encrypts a known ``whsec_<base64>`` under the test KEK
+    (configured via pytest-env SECRETS_KEK from pyproject.toml).
+    Hermetic to the crypto module: no DB session needed.
+    """
+    plaintext = "whsec_" + "a" * 43
+    ciphertext = encrypt_webhook_secret(plaintext)
+    assert isinstance(ciphertext, bytes), "Fernet envelope must be bytes"
+    assert plaintext.encode("utf-8") not in ciphertext, (
+        "encrypted envelope must NOT contain the plaintext bytes"
+    )
+    assert decrypt_webhook_secret(ciphertext) == plaintext
+
+
+def test_settings_secrets_kek_validator_accepts_44_rejects_other_lengths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plan 031 #2: validator accepts ONLY 44-char KEKs (Fernet spec).
+
+    Fernet requires 32 random bytes = 44 URL-safe base64 chars.
+    A shorter KEK truncates the AES-256 material; a longer KEK
+    silently truncates too (Fernet's spec is exact). The
+    ``Settings.secrets_kek`` field validator surfaces a clear
+    ``ValidationError`` for any non-44 input.
+    """
+
+    valid_kek = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+    settings = Settings(secrets_kek=valid_kek)
+    assert settings.secrets_kek.get_secret_value() == valid_kek
+
+    # Too short (43 chars) -> ValidationError naming the field
+    # + the canonical length expectation.
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(secrets_kek="a" * 43)
+    assert "SECRETS_KEK" in str(exc_info.value)
+    assert "44 URL-safe base64 chars" in str(exc_info.value)
+
+    # Too long (45 chars) -> ValidationError.
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(secrets_kek="a" * 45)
+    assert "SECRETS_KEK" in str(exc_info.value)
+    assert "44 URL-safe base64 chars" in str(exc_info.value)
+
+    # Length 44 BUT invalid base64 -> decodes to 33 bytes, not 32.
+    # (Length-only check would let a misconfigured deployment
+    # boot cleanly then crash on the first encrypt/decrypt deep
+    # in a BG task.)
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(secrets_kek="a" * 44)
+    assert "32" in str(exc_info.value), (
+        "validator must reject 33-byte decode (length 44 but "
+        "URL-safe-b64-decodes to 33 bytes, not 32); got: "
+        f"{exc_info.value}"
+    )
+
+
+def test_create_webhook_persists_ciphertext_not_plaintext_on_disk() -> None:
+    """Plan 031 #3: DB row carries ciphertext, NEVER plaintext (CWE-256 closure).
+
+    POSTs a webhook subscription + queries the ORM row directly,
+    then asserts the ``whsec_`` plaintext prefix is NEVER present
+    in the raw ``ciphertext`` bytes. This is the CWE-256 closure
+    proof at the wire boundary.
+    """
+    resp = _post_sub()
+    assert resp.status_code == 201
+    sub_id = resp.json()["id"]
+    plaintext_secret = resp.json()["secret"]
+    assert plaintext_secret.startswith("whsec_")
+
+    with get_sessionmaker()() as db:
+        row = db.get(OrmWebhookSubscription, sub_id)
+        assert row is not None
+        assert isinstance(row.ciphertext, bytes)
+        assert plaintext_secret.encode("utf-8") not in row.ciphertext
+        assert b"whsec_" not in row.ciphertext
+        assert decrypt_webhook_secret(row.ciphertext) == plaintext_secret
+
+
+def test_dispatch_skips_corrupted_ciphertext_but_continues_others(
+    session_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plan 031 #4: one corrupt ciphertext MUST NOT crash the whole dispatch loop.
+
+    Seeds TWO active subscriptions:
+    - ``sub_a``: valid ciphertext (canonical encrypt path).
+    - ``sub_b``: CORRUPT ciphertext bytes (NOT a valid Fernet
+      envelope; simulates a KEK-rotation-without-migration OR a
+      manual DB edit).
+    Mocks the outbound POST to return 200 for both. Asserts:
+    - ``sub_a`` fires a delivery with ``delivered_at`` set.
+    - ``sub_b`` records a delivery with ``error`` containing
+      ``FernetInvalidToken``.
+    - The dispatch loop DID NOT raise -- one bad row did NOT
+      freeze the second valid sub.
+    """
+    _, upload_id_str, _fight_id = _bootstrap_webhook_environment(
+        session_factory,
+    )
+
+    sub_id_valid = f"whsub_{_uuid.uuid4()}"
+    sub_id_corrupt = f"whsub_{_uuid.uuid4()}"
+    with session_factory() as seed_db:
+        valid_sub = OrmWebhookSubscription(
+            id=sub_id_valid,
+            url="https://93.184.216.34/valid",
+            description="plan-031 valid sub",
+            ciphertext=encrypt_webhook_secret("whsec_" + "v" * 32),
+        )
+        valid_sub.filter_payload = {"kind": "upload_completed"}
+        valid_sub.created_at = _BASE_TIME
+        seed_db.add(valid_sub)
+        corrupt_sub = OrmWebhookSubscription(
+            id=sub_id_corrupt,
+            url="https://93.184.216.34/corrupt",
+            description="plan-031 corrupt sub",
+            ciphertext=b"not-a-valid-fernet-envelope",
+        )
+        corrupt_sub.filter_payload = {"kind": "upload_completed"}
+        corrupt_sub.created_at = _BASE_TIME
+        seed_db.add(corrupt_sub)
+        seed_db.commit()
+
+    upload_uuid = _uuid.UUID(upload_id_str)
+    with _respx.mock(base_url="https://93.184.216.34") as mock:
+        mock.post("/valid").respond(200, json={"ok": True})
+        # NOTE: do NOT register /corrupt -- the dispatch loop catches
+        # FernetInvalidToken BEFORE any outbound POST is attempted.
+        # Registering /corrupt would trigger respx's assert_all_called
+        # on context-manager exit (respx considers the route "unused").
+        # _bootstrap_webhook_environment seeds a THIRD subscription
+        # against https://93.184.216.34/webhook (the default
+        # target_url). Without this mock, respx blocks the
+        # unmatched route and raises NoMockAddress and the test
+        # crashes. Registering /webhook lets the bootstrap sub get
+        # serviced normally (its delivery row is incidental to
+        # our 2 own subs' assertions).
+        mock.post("/webhook").respond(200, json={"ok": True})
+        # MUST NOT raise even though one sub has corrupt ciphertext.
+        dispatch_for_upload(session_factory, upload_uuid)
+
+    with session_factory() as verify_db:
+        valid_row = verify_db.get(OrmWebhookSubscription, sub_id_valid)
+        valid_deliveries = [
+            d for d in valid_row.deliveries if d.upload_id == upload_id_str
+        ] if valid_row else []
+        assert len(valid_deliveries) == 1
+        assert valid_deliveries[0].delivered_at is not None
+
+        corrupt_row = verify_db.get(OrmWebhookSubscription, sub_id_corrupt)
+        corrupt_deliveries = [
+            d for d in corrupt_row.deliveries if d.upload_id == upload_id_str
+        ] if corrupt_row else []
+        assert len(corrupt_deliveries) == 1
+        assert corrupt_deliveries[0].error is not None
+        # Worker writes
+        # f"ciphertext corrupt: {FernetInvalidToken.__name__}: {exc}"
+        # which renders "InvalidToken" (the alias is a re-export
+        # of cryptography.fernet.InvalidToken -- using .__name__
+        # avoids the misleading literal alias in audit logs).
+        assert "InvalidToken" in corrupt_deliveries[0].error
+        assert corrupt_deliveries[0].delivered_at is None
+
+
+def test_settings_secrets_kek_reads_from_env_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plan 031 (reviewer #2): the env path end-to-end works.
+
+    The previous validator-only test called
+    ``Settings(secrets_kek=valid_kek)`` directly. That bypasses
+    pydantic-settings' env→alias resolution path -- a future
+    engineer who silently drops ``validation_alias="SECRETS_KEK"``
+    OR renames it to ``GW2ANALYTICS_KEK`` would NOT be caught.
+    This test proves the end-to-end contract: with
+    ``SECRETS_KEK`` set in the env (and no kwarg override),
+    ``Settings()`` picks it up via the alias and the validator
+    runs against the env value.
+
+    Includes a negative path (malformed KEK in env still raises
+    ValidationError naming SECRETS_KEK -- proves the validator
+    fires on the env-path branch, not just the kwarg branch).
+    """
+    valid_kek = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+    monkeypatch.setenv("SECRETS_KEK", valid_kek)
+    settings = Settings()
+    assert settings.secrets_kek.get_secret_value() == valid_kek
+
+    # Negative path: malformed KEK in env still triggers
+    # ValidationError via the env path. Without this assertion,
+    # a future config-refactor could silently break the alias
+    # AND keep the kwarg-path validator intact.
+    monkeypatch.setenv("SECRETS_KEK", "a" * 43)
+    with pytest.raises(ValidationError) as exc_info:
+        Settings()
+    assert "SECRETS_KEK" in str(exc_info.value)

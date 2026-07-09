@@ -38,6 +38,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gw2analytics_api.crypto import FernetInvalidToken, decrypt_webhook_secret
 from gw2analytics_api.models import (
     OrmWebhookDelivery,
     OrmWebhookDlq,
@@ -175,13 +176,13 @@ def _attempt_retry(
         delivery.next_attempt_at = _utcnow()
         return False
 
-    if not subscription.secret or delivery.payload is None:
+    if not subscription.ciphertext or delivery.payload is None:
         logger.warning(
-            "retry: missing secret or payload for delivery %s; marking failed",
+            "retry: missing ciphertext or payload for delivery %s; marking failed",
             delivery.id,
         )
         delivery.attempt += 1
-        delivery.error = "missing subscription secret or preserved payload"
+        delivery.error = "missing subscription ciphertext or preserved payload"
         delivery.next_attempt_at = _utcnow()
         return False
 
@@ -191,8 +192,31 @@ def _attempt_retry(
     # round-trip via JSONB) preserves byte-for-byte HMAC integrity
     # across retries + replays.
     body_bytes = delivery.payload
+
+    # Post-plan-031: decrypt the envelope ciphertext on demand.
+    # The KEK is held in the gateway process memory (never crosses
+    # the SQL wire). One bad row MUST NOT crash the whole retry
+    # loop -- catch FernetInvalidToken per-delivery, mark the
+    # delivery failed, and continue with the next one (mirrors
+    # ``webhook_dispatch.py``'s cross-subscriber isolation
+    # discipline).
+    try:
+        secret = decrypt_webhook_secret(subscription.ciphertext)
+    except FernetInvalidToken as exc:
+        logger.warning(
+            "retry: ciphertext corrupt for delivery %s (KEK rotated OR "
+            "manual DB edit?); marking failed AT TERMINAL attempt "
+            "(no further retry to avoid scheduler-spam on a "
+            "structurally-unfixable row)",
+            delivery.id,
+        )
+        delivery.attempt = _MAX_ATTEMPTS
+        delivery.error = f"ciphertext corrupt: {FernetInvalidToken.__name__}: {exc}"
+        delivery.next_attempt_at = None
+        return False
+
     signature = hmac.new(
-        subscription.secret.encode("utf-8"),
+        secret.encode("utf-8"),
         body_bytes,
         hashlib.sha256,
     ).hexdigest()

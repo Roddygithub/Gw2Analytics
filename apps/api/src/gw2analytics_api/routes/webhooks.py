@@ -33,6 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gw2analytics_api.crypto import encrypt_webhook_secret
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import (
     OrmWebhookDelivery,
@@ -217,11 +218,18 @@ def create_webhook(
     """Register a webhook subscription (returns secret ONE time)."""
     _validate_webhook_url(payload.url)
 
+    # v0.10.0 plan 031: secret is Fernet-envelope-encrypted at rest.
+    # Generate the plaintext first, THEN encrypt-and-store; the
+    # plaintext is returned ONCE in the 201 response (one-shot
+    # secret contract per design doc §3.2). The ciphertext column
+    # is the ONLY representation on disk -- the ORM no longer
+    # carries ``secret`` (renamed to ``ciphertext``).
+    plaintext_secret = _generate_secret()
     new_sub = OrmWebhookSubscription(
         id=_generate_subscription_id(),
         url=payload.url,
         description=payload.description,
-        secret=_generate_secret(),
+        ciphertext=encrypt_webhook_secret(plaintext_secret),
     )
     # Use the Python attr name ``filter_payload`` (the SQL column is
     # ``filter`` -- we shadow it on the ORM class to avoid collision
@@ -236,7 +244,7 @@ def create_webhook(
         url=new_sub.url,
         filter=new_sub.filter_payload,
         description=new_sub.description,
-        secret=new_sub.secret,
+        secret=plaintext_secret,
         created_at=new_sub.created_at,
     )
 
