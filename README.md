@@ -9,14 +9,14 @@
 > WvW combat logs (`.zevtc`) are parsed locally and stored in a stable
 > internal model from which all analytics, API, and frontend derive.
 
-**Status:** Latest tagged release: `v0.9.1` · v0.9.2 + v0.10.0 plan 030 (CSV injection guard, OWASP CWE-1236) close-out **committed on `main`** ([Unreleased] in CHANGELOG; tag pending operator ceremony) · **354 active tests** across pytest + vitest + Playwright · strict CI lint + test + typecheck + OpenAPI drift gate active.
+**Status:** Latest tagged release: `v0.9.1` · v0.9.2 / v0.9.3 / v0.10.0 / v0.10.1 / v0.10.2 (hotfix series) close-out **committed on `main`** ([Unreleased] in CHANGELOG; tags pending operator ceremony) · **365+ active tests** across pytest + vitest + Playwright · strict CI lint + test + typecheck + OpenAPI drift gate + schema-drift guard active.
 
 ## Highlights
 
 - 🎯 **Per-target / per-subgroup / per-skill roll-ups** on every fight — DPS, healing, and buff removals via stable pydantic aggregations with deterministic ordering + cross-field invariants.
 - 📈 **Account-level historical timelines** — per-day / per-fight bucketing, linear / log Y-axis, and player-name resolution on the fight drilldown's TargetFilter.
 - 🔌 **Webhook subscriptions** for parse-completion notifications — HMAC-SHA256 signed, 3-attempt retry + DLQ + replay, with SSRF block (HTTPS-only + universal private-IP gate).
-- 🧪 **372+ automated tests** across `pytest` (251), `vitest` (105), and `Playwright` e2e (16) — all green on every PR.
+- 🧪 **365+ automated tests** across `pytest`, `vitest`, and `Playwright` e2e — all green on every PR.
 - 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js 16).
 
 ## Documentation
@@ -150,6 +150,10 @@ pnpm dev   # http://localhost:3000
 | `v0.9.0` | `web` + `apps/api` + planning | TZ-selector on the per-account timeline + 3-step upload wizard + synthetic `.zevtc` demo seeder (+3 vitest cases net) |
 | `v0.9.1` | `apps/api` | Webhook hardening: schema `int`→`str` fix + universal SSRF block (HTTPS-only + private-IP gate) + BG-task closed-session fix + retry/DLQ/replay + OpenAPI drift gate |
 | `v0.9.2` | `apps/api` | Webhook correctness hardening: HMAC byte-for-byte + replay idempotency + `payload` `JSONB`→`LargeBinary` + test isolation conftest (5 atomic commits) |
+| `v0.9.3` | `apps/api` | Plan 117: extract `_aggregate_per_target_rollup` helper in `routes/fights.py` + 100-row cap on per-target rollups (v0.10.2 hotfix #12) + Phase 8 cascade in `event_window.py` (plan 083) |
+| `v0.10.0` | `apps/api` + `web` | Webhook secret-at-rest envelope encryption (OWASP CWE-256) + cross-account comparison timeline (plan 032) + CSV injection guard (OWASP CWE-1236) |
+| `v0.10.1` | `apps/api` + infra | Schema-drift guard at startup + Arq parser worker (Redis-backed) + `ALLOW_INREQUEST_PARSE_FALLBACK=1` for tests/dev (plan 010) |
+| `v0.10.2` | `apps/api` | Hotfix followup series (#1–#12): `agent_id` NUMERIC(20,0) for arcdps uint64 + dedup agent_id/skill_id + NUL-byte sanitization + defensive WARNING on 0-summary + per-target rollup 100-row cap + arq fallback bypass + Next.js 16 HMR `allowedDevOrigins` (in progress) |
 
 See [CHANGELOG.md](./CHANGELOG.md) for the per-commit history.
 
