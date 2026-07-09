@@ -142,11 +142,32 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
     db.add(orm_fight)
     db.flush()
 
+    # v0.10.2 hotfix followup: deduplicate agents by ``agent_id`` before
+    # INSERT. arcdps can yield the same ``agent_id`` multiple times in a
+    # single fight (a player who switches accounts mid-fight triggers a
+    # second agent struct with the same id but a different name /
+    # account_name). Without dedup, the 2nd INSERT explodes on the
+    # ``(fight_id, agent_id)`` composite PK. The first-seen agent wins
+    # (the parser yields them in EVTC order, so the FIRST entry is the
+    # one that was active for the longest portion of the fight). The
+    # dedup is scoped to this loop; the parser's event-stream output
+    # is NOT deduplicated because the source_agent_id attribution in
+    # :func:`_persist_player_summaries` depends on the event order.
+    seen_agent_ids: set[int] = set()
     for agent in cf.agents:
+        agent_id_int = int(agent.id)
+        if agent_id_int in seen_agent_ids:
+            logger.info(
+                "fight %s: deduplicating duplicate agent_id=%s (name=%r, "
+                "is_player=%s); first-seen entry wins",
+                cf.id, agent_id_int, agent.name, agent.is_player,
+            )
+            continue
+        seen_agent_ids.add(agent_id_int)
         db.add(
             OrmFightAgent(
                 fight_id=cf.id,
-                agent_id=int(agent.id),
+                agent_id=agent_id_int,
                 name=agent.name or "",
                 profession=_prof_id(agent.profession),
                 elite_spec=_elite_id(agent.elite),
