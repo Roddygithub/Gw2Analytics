@@ -187,11 +187,33 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
             ),
         )
 
+    # v0.10.2 hotfix followup #3: deduplicate skills by ``skill_id``
+    # before INSERT. Same root cause as the agent dedup above: arcdps
+    # can yield the same ``skill_id`` multiple times in a single
+    # fight (the parser misreads the skill table when ``name_len`` is
+    # garbage from the event stream -- see the
+    # ``MAX_SKILL_NAME_BYTES`` warning in :mod:`gw2_evtc_parser`).
+    # Without dedup, the 2nd INSERT explodes on the ``(fight_id,
+    # skill_id)`` composite PK. First-seen wins (mirrors the agent
+    # policy). The dedup is scoped to this loop; the parser's
+    # event-stream output is NOT deduplicated because the
+    # ``source_skill_id`` attribution in :func:`_persist_player_summaries`
+    # depends on the event order.
+    seen_skill_ids: set[int] = set()
     for skill in cf.skills:
+        skill_id_int = int(skill.id)
+        if skill_id_int in seen_skill_ids:
+            logger.info(
+                "fight %s: deduplicating duplicate skill_id=%s (name=%r); "
+                "first-seen entry wins",
+                cf.id, skill_id_int, skill.name,
+            )
+            continue
+        seen_skill_ids.add(skill_id_int)
         db.add(
             OrmFightSkill(
                 fight_id=cf.id,
-                skill_id=int(skill.id),
+                skill_id=skill_id_int,
                 name=_sanitize_name(skill.name),
             ),
         )
