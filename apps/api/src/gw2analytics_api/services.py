@@ -168,12 +168,22 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
             OrmFightAgent(
                 fight_id=cf.id,
                 agent_id=agent_id_int,
-                name=agent.name or "",
+                name=_sanitize_name(agent.name),
                 profession=_prof_id(agent.profession),
                 elite_spec=_elite_id(agent.elite),
                 is_player=agent.is_player,
-                account_name=agent.account_name,
-                subgroup=agent.subgroup,
+                # Preserve the exact nullable semantic: ``None`` stays
+                # ``None`` (a missing account / subgroup); non-None strings
+                # (including empty strings) are sanitized. The previous
+                # ``_sanitize_name(...) or None`` collapsed empty strings
+                # to ``None`` (since ``"" or None == None``), which
+                # ``test_uploads_e2e_happy_path`` caught.
+                account_name=(
+                    None if agent.account_name is None else _sanitize_name(agent.account_name)
+                ),
+                subgroup=(
+                    None if agent.subgroup is None else _sanitize_name(agent.subgroup)
+                ),
             ),
         )
 
@@ -182,7 +192,7 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
             OrmFightSkill(
                 fight_id=cf.id,
                 skill_id=int(skill.id),
-                name=skill.name or "",
+                name=_sanitize_name(skill.name),
             ),
         )
 
@@ -209,6 +219,33 @@ def _prof_id(p: Profession) -> int:
 
 def _elite_id(e: EliteSpec) -> int:
     return int(e.value)
+
+
+def _sanitize_name(name: str | None) -> str:
+    """Strip NUL (0x00) bytes from a name; coerce None to empty string.
+
+    PostgreSQL TEXT/VARCHAR columns cannot contain 0x00 (the byte is
+    reserved as the C-string terminator in the wire protocol). The
+    arcdps parser can yield skill names with embedded NULs from
+    malformed EVTC skill tables (the ``MAX_SKILL_NAME_BYTES`` check
+    surfaces the boundary as a WARNING and stops reading, but the
+    YIELDED skills before the cut-off may still contain NULs). An
+    unguarded INSERT raises ``psycopg.DataError`` and rolls back the
+    whole transaction, losing the fight row + agents + skills.
+
+    Policy: strip NUL bytes only. Other control characters (tab,
+    newline, etc.) are preserved because they're sometimes part of
+    legitimate skill names (e.g. add-on-supplied custom names). An
+    all-NUL name collapses to the empty string, which the ORM
+    accepts (String(128) NOT NULL with an empty value is valid).
+
+    Used by :func:`_save_fight` for ALL name-like fields (agent.name,
+    skill.name, account_name, subgroup) to centralise the
+    sanitization contract.
+    """
+    if not name:
+        return ""
+    return name.replace("\x00", "")
 
 
 def _persist_event_blob(
