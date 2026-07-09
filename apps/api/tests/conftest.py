@@ -50,6 +50,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
+from arq.connections import RedisSettings
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from sqlalchemy.orm import Session, sessionmaker
@@ -64,6 +65,7 @@ from gw2analytics_api.models import (
     OrmWebhookSubscription,
     Upload,
 )
+from gw2analytics_api.workers import parser_settings
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +92,39 @@ def _isolate_test_state() -> None:
         db.execute(delete(OrmFight))
         db.execute(delete(Upload))
         db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _disable_arq_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the Arq broker at a non-existent host so the lifespan's
+    pool init fails fast (sets ``app.state.arq_pool = None``),
+    AND opt-in to the in-request parse fallback so the route
+    handler doesn't 503 the test upload.
+
+    Two side effects:
+    1. ``RedisSettings(host="127.0.0.1", port=1)`` makes the
+       lifespan's ``create_pool`` call raise ``ConnectionError``
+       on init; the lifespan's broad ``except Exception``
+       catches it + sets the pool to ``None``. Port ``1`` is
+       reserved (``tcpmux``) and refuses connections on every
+       test host seen.
+    2. ``ALLOW_INREQUEST_PARSE_FALLBACK=1`` opts the route
+       handler's :func:`_enqueue_parse` into the in-request
+       fallback path (production raises 503 without this env
+       var; the test env uses the fallback to preserve the
+       pre-v0.10.1 ``wait_for_upload_completion`` contract).
+
+    Without this fixture, the test env's real Redis (if
+    running) would accept the jobs but no Arq worker would
+    dequeue them → ``wait_for_upload_completion`` would time
+    out at 5s.
+    """
+    monkeypatch.setenv("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
+    monkeypatch.setattr(
+        parser_settings.WorkerSettings,
+        "redis_settings",
+        RedisSettings(host="127.0.0.1", port=1),
+    )
 
 
 # ---------------------------------------------------------------------------

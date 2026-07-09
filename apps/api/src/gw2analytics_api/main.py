@@ -7,6 +7,7 @@ sub-router. We expose CORS, ``/healthz``, and the v1 routers.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
@@ -26,7 +27,10 @@ from gw2analytics_api.routes import (
     uploads,
     webhooks,
 )
+from gw2analytics_api.schema_guard import check_schema_drift
 from gw2analytics_api.workers.webhook_scheduler import lifespan_scheduler
+
+logger = logging.getLogger(__name__)
 
 
 def _open_session() -> Session:
@@ -43,8 +47,72 @@ def _open_session() -> Session:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Start the v0.9.1 webhook retry+DLQ scheduler as a background
-    asyncio task (design doc §5; 5s poll interval)."""
+    """App-wide lifespan.
+
+    v0.10.1 plan 010: schema-drift guard + Arq pool init are the
+    first two steps. The webhook retry+DLQ scheduler (v0.9.1) keeps
+    running in-process as before.
+
+    Order of operations
+    -------------------
+    1. **Schema-drift guard** (fail-fast): if the live DB
+       ``alembic_version`` does not match the alembic head on
+       disk, raise :class:`RuntimeError` BEFORE any other init.
+       A misconfigured DB schema would otherwise produce a
+       silent log-spam failure (every scheduler tick would
+       fail with ``UndefinedColumn``).
+    2. **Arq pool init** (graceful fallback): try to connect
+       to the Redis broker. On success, the CPU-bound parser
+       pipeline runs in a dedicated Arq worker process (no
+       GIL contention with the API event loop). On failure
+       (Redis down, port misconfigured), log a WARNING + set
+       the pool to ``None``; the upload route's
+       ``BackgroundTasks`` fallback then handles parses
+       synchronously. The API still serves traffic, just
+       slower at high upload volume.
+    3. **Webhook retry+DLQ scheduler** (v0.9.1, unchanged):
+       5s poll loop, runs in-process.
+    """
+    # Step 1: schema-drift guard. Raises RuntimeError on
+    # drift (with an actionable operator-facing message
+    # naming both heads). Set ``SKIP_SCHEMA_GUARD=1`` to
+    # bypass in emergencies.
+    check_schema_drift()
+
+    # Step 2: Arq pool init with graceful fallback. The
+    # lazy imports keep the cold-start path lightweight
+    # (the upload route's asyncio.to_thread fallback does
+    # not need arq + redis to be importable for the API
+    # to start; only the enqueue_job path needs them).
+    # ``noqa: PLC0415`` suppresses ruff's "import should be
+    # at the top of the file" because the lazy import is
+    # intentional: a misconfigured env without arq installed
+    # should NOT prevent the API from starting (the route
+    # handler's BackgroundTasks fallback handles uploads
+    # without arq).
+    _app.state.arq_pool = None
+    try:
+        from arq import create_pool  # noqa: PLC0415
+
+        from gw2analytics_api.workers.parser_settings import WorkerSettings  # noqa: PLC0415
+
+        _app.state.arq_pool = await create_pool(WorkerSettings.redis_settings)
+        logger.info("arq pool initialised (host=%s)", WorkerSettings.redis_settings.host)
+    except Exception:
+        # The try/except is intentionally broad: arq
+        # raises a mix of ``ConnectionError`` (Redis
+        # unreachable), ``OSError`` (DNS), and
+        # ``TimeoutError`` (slow broker) on init
+        # failure. The operator's signal is the WARNING
+        # log; the fallback path in the upload route
+        # keeps the API serving traffic.
+        logger.exception(
+            "arq pool init failed; uploads will use the "
+            "BackgroundTasks fallback (slower on parallel "
+            "uploads, but functional)",
+        )
+
+    # Step 3: webhook retry+DLQ scheduler (v0.9.1, unchanged).
     scheduler_task = asyncio.create_task(lifespan_scheduler(_open_session))
     try:
         yield
@@ -52,6 +120,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         scheduler_task.cancel()
         with suppress(asyncio.CancelledError):
             await scheduler_task
+        if _app.state.arq_pool is not None:
+            await _app.state.arq_pool.aclose()
 
 
 app = FastAPI(

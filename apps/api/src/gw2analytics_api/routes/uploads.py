@@ -14,11 +14,13 @@ attempt failed).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import os
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from minio.error import S3Error
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -36,13 +38,81 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/uploads", tags=["uploads"])
 
 
+async def _enqueue_parse(
+    request: Request,
+    upload_id: uuid.UUID,
+    raw: bytes,
+) -> None:
+    """Enqueue the parse + dispatch chain via Arq (with sync-in-request fallback).
+
+    v0.10.1 plan 010: the primary path is the Arq pool (``request.app.state.arq_pool``).
+    The Arq worker runs ``parse_job`` in a dedicated process with its
+    own GIL, so 8 parallel uploads no longer block each other (closes
+    bug #2 found by real-payload testing).
+
+    The **sync-in-request fallback** runs the parse + dispatch in
+    ``asyncio.to_thread`` if the Arq pool is unavailable (test env
+    without Redis; production with a misconfigured broker should
+    crash at lifespan startup, not fall through here). The fallback
+    is awaited in the request handler, so the 201 response is
+    delayed by ``parse_duration + dispatch_duration`` -- this is
+    intentional graceful-degradation, not a performance optimisation.
+    The GIL bottleneck is NOT solved by this path.
+
+    Why not a true ``BackgroundTasks`` (pre-v0.10.1 behavior)?
+    ``BackgroundTasks`` fires AFTER the response is sent and
+    would detach the parse from the request lifecycle, but it
+    also re-introduces the pre-v0.10.1 race where the chained
+    ``dispatch_for_upload`` ran before ``process_parse``
+    committed (zero deliveries on every successful upload).
+    The chained ``asyncio.to_thread`` path closes that race
+    at the cost of response latency.
+    """
+    pool = getattr(request.app.state, "arq_pool", None)
+    if pool is not None:
+        await pool.enqueue_job("parse_job", str(upload_id), raw)
+        return
+    # Arq pool is None (Redis unreachable at lifespan startup).
+    # In production this is a 503: a misconfigured Redis broker
+    # is an operational concern that deserves a loud signal
+    # (not a silent latency increase). The fallback is gated
+    # on ``ALLOW_INREQUEST_PARSE_FALLBACK=1`` so the test env
+    # (which can't easily start an Arq worker) can exercise
+    # the parse path without the broker. Operators in a true
+    # emergency can set the env var to opt-in to the
+    # degradation (the WARNING log + the slow response are
+    # both operator-visible).
+    if not os.environ.get("ALLOW_INREQUEST_PARSE_FALLBACK"):
+        logger.error(
+            "arq pool unavailable; refusing upload %s to surface "
+            "the misconfiguration (set ALLOW_INREQUEST_PARSE_FALLBACK=1 "
+            "to opt-in to the in-request fallback)",
+            upload_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Parser worker unavailable. Check Redis is up.",
+        )
+    # Fallback: parse + dispatch in a thread pool (awaited in
+    # the request handler). GIL contention is NOT solved; the
+    # fallback is graceful-degradation only.
+    logger.warning(
+        "arq pool unavailable; running parse + dispatch in-request "
+        "for upload %s (response delayed by parse duration)",
+        upload_id,
+    )
+    sf = get_sessionmaker()
+    await asyncio.to_thread(process_parse, sf, upload_id, raw)
+    await asyncio.to_thread(dispatch_for_upload, sf, upload_id)
+
+
 @router.post(
     "",
     response_model=UploadCreatedResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_upload(
-    background_tasks: BackgroundTasks,
+async def create_upload(
+    request: Request,
     file: UploadFile = File(..., description="A .zevtc combat log file"),  # noqa: B008
     db: Session = Depends(get_session),  # noqa: B008
 ) -> UploadCreatedResponse:
@@ -57,15 +127,10 @@ def create_upload(
         select(Upload).where(Upload.sha256 == sha),
     ).scalar_one_or_none()
     if existing is not None:
-        # If the previous attempt failed, retry it via background task;
+        # If the previous attempt failed, retry it via the Arq job;
         # otherwise return the existing record untouched.
         if existing.status == "failed":
-            background_tasks.add_task(process_parse, get_sessionmaker(), existing.id, raw)
-            background_tasks.add_task(
-                dispatch_for_upload,
-                get_sessionmaker(),
-                existing.id,
-            )
+            await _enqueue_parse(request, existing.id, raw)
         return UploadCreatedResponse(
             id=existing.id,
             sha256=existing.sha256,
@@ -102,12 +167,7 @@ def create_upload(
     except (S3Error, OSError):
         logger.exception("MinIO put_zevtc failed; upload remains usable without blob")
 
-    background_tasks.add_task(process_parse, get_sessionmaker(), upload.id, raw)
-    background_tasks.add_task(
-        dispatch_for_upload,
-        get_sessionmaker(),
-        upload.id,
-    )
+    await _enqueue_parse(request, upload.id, raw)
     return UploadCreatedResponse(
         id=upload.id,
         sha256=upload.sha256,

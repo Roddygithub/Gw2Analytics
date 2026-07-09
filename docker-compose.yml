@@ -34,6 +34,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # v0.10.1 plan 010: Redis broker for the Arq parser worker.
+  # The ``parser_worker.py`` + ``routes/uploads.py`` migration moves
+  # the CPU-bound ``process_parse`` off FastAPI's ``BackgroundTasks``
+  # thread pool (which is bottlenecked by the GIL on parallel
+  # uploads) to a dedicated Arq worker process. Redis is the
+  # Arq broker; the worker is a separate process started via
+  # ``arq gw2analytics_api.workers.parser_settings.WorkerSettings``.
+  redis:
+    image: redis:7-alpine
+    container_name: gw2a-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   pgdata:
   miniodata:

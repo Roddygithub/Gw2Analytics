@@ -295,12 +295,151 @@ The v0.10.0 cycle item C closes the maintainer's most-requested feature in the i
 - `web/tests/components/cross-account-compare-section.test.tsx` (NEW, 2 cases): initial render + radio click.
 - `web/tests/app/players-compare-page.test.tsx` (NEW, 3 cases): empty state / too-many / valid render.
 
+### Added (apps/api + infra - v0.10.1 plan 010: schema-drift guard + Arq parser worker)
+
+Closes 2 real bugs found by real-payload testing on 2026-07-09 (1,605 WvW `.zevtc` files, 2.6 GB, 11 accounts):
+
+- **Bug #1**: in-memory SQLAlchemy ORM registry went stale after the
+  `0009_webhook_secret_at_rest.py` migration was edited. The live DB
+  renamed the column `secret` → `ciphertext`; the running Uvicorn
+  process (started 1h42m BEFORE the migration edit) still held the
+  pre-migration class mappings. The webhook scheduler spammed
+  `psycopg.errors.UndefinedColumn: column webhook_subscriptions.secret
+  does not exist` every 5s — `/tmp/fastapi.log` grew to 253K chars of
+  stack traces.
+- **Bug #2**: CPU-bound `process_parse` blocked FastAPI's
+  `BackgroundTasks` thread pool on parallel uploads. 8 concurrent
+  `.zevtc` uploads all stuck on `pending` after 20s; the GIL serialised
+  the 8 pure-Python parse calls. Pre-existing TODO in
+  `services.py::process_parse` line ~60 already flagged this.
+
+#### Bug #1 fix: schema-drift guard at startup
+- `apps/api/src/gw2analytics_api/schema_guard.py` (NEW): pure helper
+  `check_schema_drift()` that compares the alembic head on disk to
+  the `alembic_version.version_num` row in the DB. Raises
+  `RuntimeError` with an operator-facing message naming both heads so
+  the operator can grep `apps/api/alembic/versions/` for the missing
+  migration. Escape hatch `SKIP_SCHEMA_GUARD=1` for
+  rollback-in-flight scenarios (WARNING-logged so the bypass is
+  visible in `/tmp/fastapi.log`).
+- `apps/api/src/gw2analytics_api/main.py::lifespan`: calls
+  `check_schema_drift()` at the very top, BEFORE any other init. A
+  stale ORM registry now crashes Uvicorn at boot with an actionable
+  error instead of silently spamming the log for hours.
+
+#### Bug #2 fix: Arq parser worker
+- `docker-compose.yml`: added `redis:7-alpine` service (port 6379,
+  healthcheck `redis-cli ping`).
+- `apps/api/pyproject.toml`: added `arq>=0.25` + `redis>=5.0` deps;
+  `uv lock` regenerated (93 packages).
+- `apps/api/src/gw2analytics_api/workers/parser_worker.py` (NEW):
+  async Arq job `parse_job(ctx, upload_id, raw_bytes)` that runs
+  `process_parse` + `dispatch_for_upload` chained via
+  `asyncio.to_thread`. **Closes a pre-existing race**:
+  `dispatch_for_upload` previously ran as a sibling
+  `BackgroundTasks.add_task` BEFORE `process_parse` committed, so
+  it short-circuited and zero webhook deliveries fired on every
+  successful upload. The chain guarantees `dispatch_for_upload`
+  awaits the parse commit.
+- `apps/api/src/gw2analytics_api/workers/parser_settings.py` (NEW):
+  `WorkerSettings` class with `functions=[parse_job]`,
+  `redis_settings=RedisSettings(...)`, `max_jobs=2`,
+  `job_timeout=600`. Runnable via
+  `arq gw2analytics_api.workers.parser_settings.WorkerSettings` in
+  a separate process. `ARQ_REDIS_HOST` + `ARQ_REDIS_PORT` env vars
+  override the localhost default for production deploys.
+- `apps/api/src/gw2analytics_api/main.py::lifespan`: tries to
+  create the Arq pool at startup; on failure logs a WARNING + sets
+  the pool to `None` (graceful fallback). The route handler takes
+  a sync-in-request fallback path that runs the parse + dispatch in
+  `asyncio.to_thread` (preserves the v0.10.0 test contract).
+- `apps/api/src/gw2analytics_api/routes/uploads.py`: route handler
+  is now `async def create_upload(request: Request, ...)`. New
+  helper `_enqueue_parse(request, upload_id, raw)` checks
+  `request.app.state.arq_pool` and either enqueues via Arq OR runs
+  the parse + dispatch in-request (fallback).
+
+#### Public contract change (note for integrators)
+- `UploadCreatedResponse.status` can now legitimately be
+  `"completed"` in the 201 response body when the Arq path's
+  fallback fires (Redis down at request time). Pre-v0.10.1 the
+  response was always `"pending"`. Integrators that poll right
+  after the POST and use `"pending"` as a "still processing"
+  signal should switch to the `GET /uploads/{id}` poll OR check
+  `fight_id !== null`.
+
+#### BREAKING for the failure path (note for integrators)
+- `POST /api/v1/uploads` now returns `HTTP 503 Service Unavailable`
+  (with body `"Parser worker unavailable. Check Redis is up."`)
+  when the Arq worker is unreachable. Pre-v0.10.1 the route
+  always returned 201 (success), 422 (validation), or 5xx
+  (server error). v0.10.1 with Redis down returns 503 — a
+  separate failure class. Integrators that retry on 5xx MUST
+  distinguish 503 (transient infrastructure failure; retry with
+  backoff) from 500 (programming bug; do not retry).
+  Production safety: the 503 surfaces the Redis misconfiguration
+  to operator dashboards instead of silently degrading to
+  multi-second POST latency. The pre-v0.10.1 sync-in-request
+  fallback is gated on `ALLOW_INREQUEST_PARSE_FALLBACK=1` (test
+  + dev environments only; production omits the env var to get
+  the loud 503).
+
+#### Tests (apps/api)
+- `apps/api/tests/conftest.py`: new autouse fixture
+  `_disable_arq_for_tests` points the broker at `localhost:1` so
+  the lifespan's pool creation fails fast (test env always uses
+  the sync-in-request fallback).
+- `apps/api/tests/test_schema_guard.py` (NEW, 4 tests):
+  no-drift passes / drift raises with both heads named /
+  `SKIP_SCHEMA_GUARD` escape hatch / NULL `alembic_version` row.
+- `apps/api/tests/test_uploads_arq.py` (NEW, 4 tests):
+  mock-Arq enqueue contract / sync-in-request fallback path /
+  idempotent re-parse of failed upload / no re-dispatch on
+  re-upload of completed (the pre-v0.10.1 contract is
+  preserved — double-dispatch would be a silent regression).
+- `apps/api/tests/test_parser_worker.py` (NEW, 4 tests): happy
+  path chain (`parse` → `dispatch`) / skip dispatch on parse
+  failure (Arq retry kicks in) / swallow dispatch failure
+  post-parse (no re-parse; manual operator re-dispatch) /
+  asyncio.to_thread contract.
+
+#### Planning
+- `plans/010-v101-schema-drift-guard-and-arq-parser.md` (NEW): the
+  v0.10.1 plan doc covering both bugs (the design output of the
+  round-1 diagnosis).
+
+#### Tests (cumulative)
+- Apps/api pytest: 92 (v0.10.0) → **104** (v0.10.1). Delta: +12
+  from the 3 new plan-010 test files.
+- Web vitest + Playwright: unchanged (the v0.10.1 cycle is
+  backend-only).
+- Total: 339 (v0.10.0) → 351 (v0.10.1).
+
+
 ### Deferred (v0.10.X followups - tracked from plan 032)
 
 - **In-page add/remove accounts in `/players/compare`**: v0.10.0 ships read-only chips; the full in-page add/remove UX is ~50 LoC and is a v0.10.X followup.
 - **Visual regression baseline for `/players/compare`**: a tracked `docs/screenshots/09-players-compare.png` (the route is dynamic; the fixture + e2e spec cover the e2e path; a visual baseline is a v0.10.X followup when the page settles).
 - **Per-account-vs-cross-account rate columns**: a per-second rate field on `CrossAccountTimelinePoint` is a v0.10.X followup; the v0.10.0 wire surface is the totals-only contract (matches the per-account timeline).
 - **900px bug root-cause investigation**: the `width: "100%"` defensive fix is in place but the underlying CSS root cause (likely the `auto-fit minmax(180px, 1fr)` stat grid + a downstream intrinsic-width shrink on `:demo.<N>` accounts) is a v0.10.X followup with a DevTools session.
+- **Port-1 conftest trick robustness** (v0.10.1 plan 010 followup):
+  `_disable_arq_for_tests` points RedisSettings at `localhost:1` to
+  make the lifespan's Arq pool init fail fast. The port-1 trick
+  works on every test host seen so far but is host-dependent
+  (port 1 is reserved `tcpmux` and could be open on exotic
+  configs). The robust alternative is to monkeypatch
+  `arq.create_pool` directly to raise a fake `ConnectionError`.
+  ~5 LoC; v0.10.X followup.
+- **`test_re_upload_completed_does_not_redispatch` parametrize**
+  (v0.10.1 plan 010 followup): the test pins the no-double-dispatch
+  contract for `status == "completed"` but not for `pending` or
+  any other non-failed status. Parametrize over 3-4 statuses to
+  pin the full contract. ~5 LoC; v0.10.X followup.
+- **`WorkerSettings.redis_settings` env-var override docstring**
+  (v0.10.1 plan 010 followup): the env var is read in
+  `parser_settings.py` but the module docstring does not document
+  it. Add a one-line note so operators discover the override
+  without grepping the source. ~3 LoC; v0.10.X followup.
 
 ### Added (apps/api - v0.10.0 plan 031: webhook secret-at-rest envelope encryption, OWASP CWE-256)
 
