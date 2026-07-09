@@ -16,7 +16,7 @@
 - 🎯 **Per-target / per-subgroup / per-skill roll-ups** on every fight — DPS, healing, and buff removals via stable pydantic aggregations with deterministic ordering + cross-field invariants.
 - 📈 **Account-level historical timelines** — per-day / per-fight bucketing, linear / log Y-axis, and player-name resolution on the fight drilldown's TargetFilter.
 - 🔌 **Webhook subscriptions** for parse-completion notifications — HMAC-SHA256 signed, 3-attempt retry + DLQ + replay, with SSRF block (HTTPS-only + universal private-IP gate).
-- 🧪 **339+ automated tests** across `pytest` (241), `vitest` (82), and `Playwright` e2e (16) — all green on every PR.
+- 🧪 **342+ automated tests** across `pytest` (241), `vitest` (85), and `Playwright` e2e (16) — all green on every PR.
 - 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js 16).
 
 ## Documentation
@@ -147,6 +147,9 @@ pnpm dev   # http://localhost:3000
 | `v0.8.7` | `apps/api` | Wire the v0.8.6 health probe into CI as a regression gate |
 | `v0.8.8` | `web` + planning | Visual documentation in README + auto-codegen on `pnpm dev` + advisor audit |
 | `v0.8.9` | `apps/api` + `web` | Per-account timeline `?tz=Continent/City` + per-fight timeline section |
+| `v0.9.0` | `web` + `apps/api` + planning | TZ-selector on the per-account timeline + 3-step upload wizard + synthetic `.zevtc` demo seeder (+3 vitest cases net) |
+| `v0.9.1` | `apps/api` | Webhook hardening: schema `int`→`str` fix + universal SSRF block (HTTPS-only + private-IP gate) + BG-task closed-session fix + retry/DLQ/replay + OpenAPI drift gate |
+| `v0.9.2` | `apps/api` | Webhook correctness hardening: HMAC byte-for-byte + replay idempotency + `payload` `JSONB`→`LargeBinary` + test isolation conftest (5 atomic commits) |
 
 See [CHANGELOG.md](./CHANGELOG.md) for the per-commit history.
 
