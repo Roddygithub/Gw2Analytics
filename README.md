@@ -9,14 +9,14 @@
 > WvW combat logs (`.zevtc`) are parsed locally and stored in a stable
 > internal model from which all analytics, API, and frontend derive.
 
-**Status:** Latest tagged release: `v0.8.9` · v0.9.0 + v0.9.1 + v0.9.2 close-out **committed on `main`** (not yet released; tag pending operator ceremony) · **339 active tests** across pytest + vitest + Playwright · strict CI lint + test + typecheck + OpenAPI drift gate active.
+**Status:** Latest tagged release: `v0.9.1` · v0.9.2 + v0.10.0 plan 030 (CSV injection guard, OWASP CWE-1236) close-out **committed on `main`** ([Unreleased] in CHANGELOG; tag pending operator ceremony) · **354 active tests** across pytest + vitest + Playwright · strict CI lint + test + typecheck + OpenAPI drift gate active.
 
 ## Highlights
 
 - 🎯 **Per-target / per-subgroup / per-skill roll-ups** on every fight — DPS, healing, and buff removals via stable pydantic aggregations with deterministic ordering + cross-field invariants.
 - 📈 **Account-level historical timelines** — per-day / per-fight bucketing, linear / log Y-axis, and player-name resolution on the fight drilldown's TargetFilter.
 - 🔌 **Webhook subscriptions** for parse-completion notifications — HMAC-SHA256 signed, 3-attempt retry + DLQ + replay, with SSRF block (HTTPS-only + universal private-IP gate).
-- 🧪 **342+ automated tests** across `pytest` (241), `vitest` (85), and `Playwright` e2e (16) — all green on every PR.
+- 🧪 **354+ automated tests** across `pytest` (241), `vitest` (97), and `Playwright` e2e (16) — all green on every PR.
 - 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js 16).
 
 ## Documentation
