@@ -228,6 +228,50 @@ The 5 v0.9.1 audit plans (drift base `ef5e4f3`; see `plans/README.md` + `plans/0
 
 
 
+
+### Added (apps/api - v0.9.2 schema `int`→`str` audit-replay hardening)
+
+These land in `apps/api/` + `apps/api/alembic/versions/` as the v0.9.2 followups announced in the 0.9.2 release section's [Deferred (v0.9.2 followups)] block:
+
+- **Plan 009 Step 1+2** (atomic webhook payload): webhook payload is now signed with HMAC byte-for-byte (no JSON re-ordering between dispatch and replay); the regression test in `apps/api/tests/test_webhooks_e2e.py` was hardened against dispatch-time JSON canonicalisation drift.
+- **Plan 009 Step 3** (row-level lock): `apps/api/src/gw2analytics_api/routes/webhooks.py::replay_dlq_delivery` now opens the DLQ lookup with `db.execute(select(OrmWebhookDlq).where(OrmWebhookDlq.id == delivery_id).with_for_update())` so concurrent replay requests collide on the row-level lock (`Postgres SELECT ... FOR UPDATE`); the losing thread sees NULL after the winner deletes + commits.
+- **Plan 009 Step 4** (discriminator-encoding docstring convention): CSS-style header + 3 helper docstrings documenting the `urlsafe_b64encode` vs `b64encode` vs `<uuid>` discriminator contract; cross-referenced from `CONTRIBUTING.md`'s new `## Webhook discriminator IDs` section.
+- **Plan 009 Step 5** (test isolation conftest): a function-scoped autouse `_isolate_test_state` fixture in the new `apps/api/tests/conftest.py` bulk-deletes from 6 tables (uploads, fights, fight_player_summaries, webhook_subscriptions, webhook_deliveries, webhook_dlq) before each test. DELETE order respects FKs; `webhook_dlq.subscription_id` has NO FK so it's deleted between `webhook_deliveries` and `webhook_subscriptions`. Provides explicit `client` + `get_sessionmaker` fixtures for plan-006 regression tests.
+
+### Added (web - v0.9.0 plan/003: synthetic `.zevtc` demo seeder)
+
+- `apps/api/src/gw2analytics_api/scripts/seed_demo.py` (NEW, ~290 LoC): in-process synthetic `.zevtc` builder that emits minimal V1.3 EVTC files (header + agents + skills + a configurable event mix matching the Phase 7 v2 + Phase 8 roll-up trio the parser expects). Posts each file to the LIVE FastAPI server via `httpx.Client` (default `http://127.0.0.1:8000`), then polls `GET /api/v1/uploads/{uuid}` until the parser completes (a 30s budget with 1s interval). All 3 struct-size preconditions use explicit `RuntimeError` raises (not `assert`) so the guards survive `python -O` + `ruff S101`. CLI flags: `--num-fights N` (default 3), `--base-url URL` (default http://127.0.0.1:8000), `--no-poll` (just POST + exit). Unblocks "show me the UI with real data" by populating the same minimal-but-valid fixtures apps/api e2e tests use.
+
+### Added (web - v0.9.0: TZ-selector for the per-account timeline)
+
+- `web/src/components/PlayerTimelineSection.tsx`: the section header gains a 4th affordance — the TZ selector — alongside the existing bucket + scale toggles. Native `<select>` with 25 curated IANA zones. `data-testid="timezone-selector"`. Selection triggers `changeTz` which auto-switches bucket to `"day"`. Pure client state (NOT URL-driven; deviates intentionally from the ProfessionFilter pattern; bucket + scale toggles are pure client state already so a `router.push` would force an async URL/state sync).
+
+### Changed (web - v0.9.0: 3-step upload wizard replaces the legacy 1-step form)
+
+- `web/src/app/upload/page.tsx` (rewrite, 394 → 665 LoC): the legacy 1-step file-pick-and-POST flow replaced with a 3-step wizard: **pick** (file input + client-side `.zevtc` extension guard) → **upload** (POST in flight, spinner + filename + size, "Cancel" best-effort visual) → **parse** (poll `GET /api/v1/uploads/{uuid}` every 2s with hard 30s budget / 15 attempts; reveals drill-down link to `/fights/{fight_id}` on `status="completed"`, or `error_message` + retry on `status="failed"`, or "still parsing" timeout banner) → **done** (terminal state with drill-down link + "Upload another" reset). Driven by `useReducer` over a discriminated union (`pick | upload | parse | done`).
+- `web/src/app/upload/page.module.css` (208 → 364 LoC): adds `.stepIndicator`, `.panel`, `.spinnerRow` + `.spinner` + `@keyframes upload-wizard-spin`, `.buttonRow`, `.muted`, `.warn`.
+- `web/src/lib/api.ts`: adds `fetchUploadStatus(uploadId) -> UploadStatusRow` + `UploadStatusRow` interface (`status` discriminating between `pending` / `completed` / `failed` + optional `fight_id` for the drill-down link + optional `error_message`).
+- `web/tests/app/upload-page.test.tsx` (rewrite, 159 → 198 LoC): replaces 5 legacy smoke cases with 7 wizard cases (renders heading + step indicator aria-current="step" + disabled Next / client-side extension guard / upload → parse auto-transition / poll → done with `/fights/{fight_id}` drill-down link / real ApiError formatting / "Upload another" reset).
+
+### Added (web - v0.9.0: screenshots.mjs sync against seeded DB)
+
+- `web/scripts/screenshots.mjs`: pulls live `account_name` + `fight_id` from `/api/v1/players` + `/api/v1/fights` at script start (replaces the static mock-server fixture URLs that 404'd against the seed_demo-created `:demo.<N>` namespaces). Hard-fails loud when the gateway is empty/unreachable. `GATEWAY_BASE_URL` env override for remote gateways. The 8 captures in `docs/screenshots/` now materialise populated rows against the seeded DB; `/fights/<real-fight-id>` shows the populated 3196px AG Grid vs the prior 900px empty card.
+
+### Added (web - v0.10.0 plan 030: CSV injection guard, OWASP CWE-1236)
+
+The v0.10.0 cycle (per `plans/010-v100-roadmap.md`) is now underway. Item A in the v0.10.0 cycle is the HIGH-severity CSV injection guard:
+
+- `web/src/lib/csv.ts`: new module-level `FORMULA_TRIGGERS = /^[=+\-@\t\r]/` regex (anchored at start; matches the 6 canonical spreadsheet formula-trigger chars). The private `csvEscape(value)` function now has a formula-guard branch that fires BEFORE the RFC 4180 branch: when a value starts with one of the 6 trigger chars, prefix with a literal `'` + wrap in double quotes per RFC 4180. Excel/Sheets drop the leading `'` on display but the formula is no longer parsed. Implementation uses a template literal (the template-literal form is the canonical Way to express \" + ' + value + \" with one escaping layer).
+- `web/tests/lib/csv.test.ts`: 12 NEW hermetic cases (6 trigger-char tests via `it.each` + safe-path alphanumeric + null + undefined + combined formula+dq + combined formula+comma) + 1 PlayerListRow integration test using the canonical inline `type Pr = import(\"@/lib/api\").PlayerListRow` pattern (TS type-position dynamic import; the `await` wrapper is invalid in a type position). Total csv.test.ts: **23/23** pass; full vitest: **97/97** across 15 files.
+- 4 attacker-controllable upload fields are now formula-safe: `name` on `PlayerListRow`/`PlayerProfile`/`PerFightBreakdownRow`, `skill_name` on `SkillUsageRow`, `subgroup` on `SquadRollupRow`, `description` on `WebhookSubscription`. OWASP CWE-1236 class closed on the existing CSV export surface.
+
+### Deferred (v0.10.0 backlog - tracked from `plans/010-v100-roadmap.md` scope)
+
+- **B (security HIGH)**: webhook secret-at-rest encryption (`pgcrypto` envelope + `SECRETS_KEK` env var). The deferred-from-v0.9.1 hardening layer; HMAC verification needs plaintext so we can't hash; the layered defence is "SecretStr for ergonomics" (shipped in v0.9.0 plan 041) + "pgcrypto envelope for at-rest" (this item). Tracked for v0.10.0 item B.
+- **C (UX)**: cross-account timeline comparison (M effort). Reuses v0.8.0 `PlayerTimelineChart` + extends with a multi-series overlay mode. The squad-comparison use case (e.g. "how does my DPS compare to my healer's damage absorbed over the same fight window?") is the maintainer's most-requested feature in the incident log. Tracked for v0.10.0 item C.
+
+
+
 ## [0.9.2] - v0.9.2: webhook correctness hardening (HMAC bytes + replay idempotency + suite-fast)
 
 The v0.9.2 hardening cycle (`plans/009-v092-webhook-rest.md`) closes the 2 deferred v0.9.1 test failures + 1 audit-flagged missing-convention + 1 uninvestigated suite timeout via 5 atomic commits (`85716b6` → `99faa35` → `a247430` → `abd7deb` → `d70c8c6`).
