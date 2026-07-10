@@ -22,7 +22,6 @@ from __future__ import annotations
 import base64
 import ipaddress
 import logging
-import os
 import secrets
 import socket
 import uuid
@@ -33,6 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gw2analytics_api.config import get_settings
 from gw2analytics_api.crypto import encrypt_webhook_secret
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import (
@@ -135,9 +135,10 @@ def _validate_webhook_url(url: str) -> None:
     # (handles IPv4 + IPv6 simultaneously). Fail-closed on DNS
     # errors to block DNS-rebind-style deferred attacks where the A
     # record resolves only later.
-    if not os.environ.get(
-        "GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS"
-    ) and _resolved_address_is_blocked(parsed.hostname):
+    if (
+        not get_settings().gw2analytics_allow_private_webhook_urls
+        and _resolved_address_is_blocked(parsed.hostname)
+    ):
         raise HTTPException(
             status_code=422,
             detail=(

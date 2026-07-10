@@ -70,13 +70,13 @@ check requires nothing.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
+from gw2analytics_api.config import get_settings
 from gw2analytics_api.database import get_sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -119,14 +119,14 @@ def check_schema_drift() -> None:
     at first use) and should NOT be masked behind a
     "schema drift" error message.
     """
-    if os.environ.get("SKIP_SCHEMA_GUARD"):
+    if get_settings().skip_schema_guard:
         # The bypass is logged loudly at WARNING so the
         # operator's terminal (and ``/tmp/fastapi.log``)
         # shows the choice. Removing this branch requires
         # also removing the escape hatch from the
         # ``Operational runbook`` section of the docs.
         logger.warning(
-            "SKIP_SCHEMA_GUARD=1; skipping schema drift check (NOT recommended in production)",
+            "skip_schema_guard=True; skipping schema drift check (NOT recommended in production)",
         )
         return
 

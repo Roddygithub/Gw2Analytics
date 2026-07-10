@@ -80,6 +80,49 @@ class Settings(BaseSettings):
     # deployment refuses to boot BEFORE the first webhook is
     # processed (no silent plaintext fallback).
     secrets_kek: SecretStr = Field(validation_alias="SECRETS_KEK")
+    # v0.10.9 plan 016: centralized env-var reads as Settings
+    # fields. All env-driven config (boolean feature flags + the
+    # comma-separated KEK fallback list) MUST live as Settings
+    # fields so tests can mock them via ``monkeypatch.setenv`` +
+    # a single ``get_settings.cache_clear()``. The grep check at
+    # the end of plan 016's done criteria
+    # (``grep -rE 'os\.environ\.get' apps/api/src/``) is the
+    # audit guard against the next contributor adding a raw
+    # read.
+    arq_redis_host: str = Field(default="localhost", validation_alias="ARQ_REDIS_HOST")
+    arq_redis_port: int = Field(default=6379, validation_alias="ARQ_REDIS_PORT")
+    # ``ALLOW_INREQUEST_PARSE_FALLBACK`` is "1" in tests (per
+    # conftest.py + pytest_env) so the upload route exercises
+    # the in-request fallback. Production defaults to False
+    # (pool-only path; pool unavailability surfaces a loud 503).
+    allow_inrequest_parse_fallback: bool = Field(
+        default=False,
+        validation_alias="ALLOW_INREQUEST_PARSE_FALLBACK",
+    )
+    skip_schema_guard: bool = Field(default=False, validation_alias="SKIP_SCHEMA_GUARD")
+    # SSRF-block-bypass for trusted dev environments. The env
+    # name keeps the ``GW2ANALYTICS_`` prefix per the
+    # operational runbook; the Python name strips it for
+    # readability.
+    gw2analytics_allow_private_webhook_urls: bool = Field(
+        default=False,
+        validation_alias="GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS",
+    )
+    # Comma-separated Fernet key list consulted by
+    # ``crypto._resolve_kek`` after the primary KEK fails to
+    # decrypt (keystore rotation). Defaults to empty list (no
+    # fallback) so v0.10.8 deployments behave unchanged. The
+    # custom ``_split_secrets_kek_fallback`` validator below
+    # mirrors the ``_split_cors_origins`` pattern
+    # (``Annotated[list[str], NoDecode]`` + comma split); JSON-
+    # style ``["a","b"]`` would otherwise crash on the bare
+    # ``a,b`` form operators paste into ``.env``. Owned by
+    # plan 016; plan 015 (KEK rotation) will READ this field
+    # via ``get_settings().secrets_kek_fallback``.
+    secrets_kek_fallback: Annotated[list[str], NoDecode] = Field(
+        default=[],
+        validation_alias="SECRETS_KEK_FALLBACK",
+    )
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
@@ -148,6 +191,37 @@ class Settings(BaseSettings):
                 f'print(Fernet.generate_key().decode())"`.'
             )
         return s
+
+    # v0.10.9 plan 016: comma-split validator for the
+    # ``SECRETS_KEK_FALLBACK`` env var. The
+    # ``Annotated[list[str], NoDecode]`` shape mirrors
+    # ``_split_cors_origins`` above so pydantic-settings does
+    # NOT attempt to JSON-decode the raw string; the bare-csv
+    # form (``kek_a,kek_b``) is what operators paste into
+    # ``.env``, NOT the JSON-list form (``["kek_a","kek_b"]``).
+    @field_validator("secrets_kek_fallback", mode="before")
+    @classmethod
+    def _split_secrets_kek_fallback(cls, v: object) -> list[str]:
+        # ``Annotated[list[str], NoDecode]`` short-circuits
+        # pydantic-settings' default JSON-list parser for THIS
+        # field (matching the ``cors_allowed_origins``
+        # precedent). Empty-string handling differs slightly:
+        # ``SECRETS_KEK_FALLBACK=`` is treated as "no fallback"
+        # (explicit empty) which is SAFER than the wildcard
+        # fallback used for ``CORS_ALLOWED_ORIGINS`` -- an
+        # empty fallback list is the documented pre-v0.10.9
+        # default, so a misconfigured "empty" deployment should
+        # be the safe default (no fallback rotation) rather
+        # than the inverted-state default.
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return []
+            return [s.strip() for s in v.split(",") if s.strip()]
+        if isinstance(v, list):
+            return v
+        msg = f"secrets_kek_fallback env value must be a string or list, got {type(v).__name__}"
+        raise ValueError(msg)
 
 
 @lru_cache

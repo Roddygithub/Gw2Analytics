@@ -31,22 +31,23 @@ the timeout as a job failure).
 
 from __future__ import annotations
 
-import os
-
 from arq.connections import RedisSettings  # arq ships no .pyi stubs; mypy infers Any
 
+from gw2analytics_api.config import get_settings
 from gw2analytics_api.workers.parser_worker import parse_job
 
-# v0.10.1 plan 010 followup (code-reviewer round-3): the
-# Redis host is now read from env so a production deploy
-# behind a remote broker does NOT require a code change.
-# The ``localhost`` / 6379 defaults preserve the v0.10.1
-# dev experience (the local ``docker compose up redis``
-# listens on the default port). The CLI worker process
-# reads these at module import; the FastAPI app's lifespan
-# reads them via the same import chain.
-_REDIS_HOST: str = os.environ.get("ARQ_REDIS_HOST", "localhost")
-_REDIS_PORT: int = int(os.environ.get("ARQ_REDIS_PORT", "6379"))
+# v0.10.9 plan 016: Arq broker host/port from centralized
+# Settings (was raw ``os.environ.get``). The ``localhost``
+# / 6379 defaults preserve the v0.10.1 dev experience (the
+# local ``docker compose up redis`` listens on the default
+# port). The module-level reads ARE cached for the process
+# lifetime (``get_settings`` is ``lru_cache``-wrapped);
+# tests that need to retarget the redis host MUST
+# ``get_settings.cache_clear()`` BEFORE the first import of
+# this module (or the change won't be honored until process
+# restart).
+_REDIS_HOST: str = get_settings().arq_redis_host
+_REDIS_PORT: int = get_settings().arq_redis_port
 
 
 class WorkerSettings:

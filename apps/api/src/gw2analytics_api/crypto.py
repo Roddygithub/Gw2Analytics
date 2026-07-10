@@ -36,11 +36,12 @@ envelope is the locked-in pattern.
 
 from __future__ import annotations
 
-import os
 import threading
 
 from cryptography.fernet import Fernet
 from cryptography.fernet import InvalidToken as FernetInvalidToken
+
+from gw2analytics_api.config import get_settings
 
 # Cache Fernet instances keyed by KEK string. Fernet construction is
 # ~1ms; the hot path (webhook dispatch) decrypts once per sub per
@@ -73,7 +74,7 @@ def _resolve_kek(explicit: str | None) -> str:
     Python one-liner to generate a fresh KEK so the operator has
     the recovery path inline.
     """
-    kek = explicit or os.environ.get("SECRETS_KEK") or ""
+    kek = explicit or get_settings().secrets_kek.get_secret_value() or ""
     if not kek:
         raise RuntimeError(
             "SECRETS_KEK env var is required to encrypt/decrypt webhook "

@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -26,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from gw2analytics_api.config import get_settings
 from gw2analytics_api.database import get_session, get_sessionmaker
 from gw2analytics_api.models import Upload
 from gw2analytics_api.schemas import UploadCreatedResponse, UploadOut
@@ -69,7 +69,7 @@ async def _enqueue_parse(
     at the cost of response latency.
     """
     pool = getattr(request.app.state, "arq_pool", None)
-    if pool is not None and not os.environ.get("ALLOW_INREQUEST_PARSE_FALLBACK"):
+    if pool is not None and not get_settings().allow_inrequest_parse_fallback:
         await pool.enqueue_job("parse_job", str(upload_id), raw)
         return
     # Arq pool is None (Redis unreachable at lifespan startup)
@@ -87,7 +87,7 @@ async def _enqueue_parse(
     # is unreachable, which is the correct loud signal: a
     # misconfigured broker is an operational concern that deserves
     # a 5xx, not a silent latency increase.
-    if not os.environ.get("ALLOW_INREQUEST_PARSE_FALLBACK"):
+    if not get_settings().allow_inrequest_parse_fallback:
         logger.error(
             "arq pool unavailable; refusing upload %s to surface "
             "the misconfiguration (set ALLOW_INREQUEST_PARSE_FALLBACK=1 "
