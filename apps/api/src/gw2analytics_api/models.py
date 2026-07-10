@@ -23,6 +23,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -50,6 +51,18 @@ class Upload(Base):
     """A user-submitted combat log (.zevtc) along with parse status."""
 
     __tablename__ = "uploads"
+
+    # v0.9.8 plan 029 (refreshed for v0.10.4): DB-layer
+    # CHECK constraint on ``status`` so a direct write (psql
+    # / admin script / compromised CI runner) cannot bypass
+    # the service-layer ``UploadStatus`` enum. Mirror of
+    # migration 0012 ``ck_uploads_status``.
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'completed', 'failed')",
+            name="ck_uploads_status",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -196,6 +209,26 @@ class OrmFightPlayerSummary(Base):
 
     __tablename__ = "fight_player_summaries"
 
+    # v0.9.8 plan 029 (refreshed for v0.10.4): DB-layer
+    # CHECK constraints on the 3 magnitude columns so a
+    # direct write cannot persist a negative damage/heal/
+    # strip total. Mirror of migration 0012
+    # ``ck_fight_player_summaries_{damage,healing,buff_removal}_nonneg``.
+    __table_args__ = (
+        CheckConstraint(
+            "total_damage >= 0",
+            name="ck_fight_player_summaries_damage_nonneg",
+        ),
+        CheckConstraint(
+            "total_healing >= 0",
+            name="ck_fight_player_summaries_healing_nonneg",
+        ),
+        CheckConstraint(
+            "total_buff_removal >= 0",
+            name="ck_fight_player_summaries_buff_removal_nonneg",
+        ),
+    )
+
     fight_id: Mapped[str] = mapped_column(
         String(64),
         ForeignKey("fights.id", ondelete="CASCADE"),
@@ -292,6 +325,24 @@ class OrmWebhookDelivery(Base):
     """
 
     __tablename__ = "webhook_deliveries"
+
+    # v0.9.8 plan 029 (refreshed for v0.10.4): DB-layer
+    # CHECK constraints on ``attempt`` (``>= 0``) and
+    # ``status_code`` (in [100, 599] when not NULL) so a
+    # direct write cannot bypass the service-layer guards.
+    # Mirror of migration 0012
+    # ``ck_webhook_deliveries_attempt_nonneg`` +
+    # ``ck_webhook_deliveries_status_code_range``.
+    __table_args__ = (
+        CheckConstraint(
+            "attempt >= 0",
+            name="ck_webhook_deliveries_attempt_nonneg",
+        ),
+        CheckConstraint(
+            "status_code IS NULL OR (status_code >= 100 AND status_code <= 599)",
+            name="ck_webhook_deliveries_status_code_range",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     # FK to webhook_subscriptions.id. NO ondelete cascade -- the
