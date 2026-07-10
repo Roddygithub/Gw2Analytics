@@ -17,6 +17,17 @@ Five plans selected from the v0.9.1 audit (drift base `ef5e4f3`). Each plan addr
 | 007 | [007-v091-webhook-retry-dlq-replay-tests](./007-v091-webhook-retry-dlq-replay-tests.md) | **shipped** (4 NEW tests: scheduler first-attempt success, exponential backoff (single 10s step at attempt 2) → DLQ promotion on hitting ``_MAX_ATTEMPTS = 3``, replay idempotency under concurrent ``ThreadPoolExecutor`` + ``Session.commit`` race-widener, and HMAC byte-for-byte integrity across replays; the multi-tick ``test_retry_scheduler_failure_promotes_to_dlq_after_max_attempts`` landed in standalone ``apps/api/tests/test_webhooks_e2e_scheduler.py`` after an in-session deferral -- flat per-tick ``with``-block structure escapes the nested dedent footgun; original ``pytest.skip()`` placeholder in ``test_webhooks_e2e.py`` replaced with a stub-by-name pointer to the new module; ``time-machine`` dev-dep added; 22 tests collected across the 2 files; pytest --collect-only clean; mypy clean; ruff clean except 1 cosmetic E501 docstring line in the stub pointer) | #4 v0.9.1 retry+DLQ+replay test gap (0 tests on the scheduler tick + DLQ promote + replay idempotency) | M |
 | 008 | [008-v091-openapi-drift-gate-fix](./008-v091-openapi-drift-gate-fix.md) | **shipped** (`src/lib/api/schema.d.ts` un-gitignored + committed as 71 KB baseline; CI `Detect API client drift` step (`git diff --exit-code -- web/src/lib/api/schema.d.ts`) inserted between `OpenAPI: regenerate web TypeScript client` and `Type-check web`; `CONTRIBUTING.md` `## Regenerating the web TypeScript client` section documents the contract — `Schema.d.ts` must be regenerated + committed in the SAME PR as any backend `apps/api/src/gw2analytics_api/routes/*` shape change; `openapi.json` remains gitignored as ephemeral intermediate artifact; deterministic re-regen verified via drift-gate smoke test (no diff after re-run)) | #5 broken OpenAPI drift gate (schema.d.ts is .gitignored, gate never has anything to diff) | S |
 
+## Archived (filled)
+
+Plans whose status reached ``shipped`` / ``closed`` were moved to
+:file:`plans/archive/` to keep the index focused on forward work. The
+archive is searchable (the filenames retain the original numeric
+prefix) and reviewer-friendly (each plan's ``**Status**: DONE
+(shipped in vX)`` line is preserved verbatim).
+
+See :file:`plans/archive/` for the full set; the current top-level
+listings below stay restricted to forward / open plans.
+
 ### Considered but deferred
 
 The Agent B perf + tech-debt re-run surfaced 5 additional findings after the security+correctness pass was over. They are tracked here for the next cycle (v0.9.1 hardening or v0.10):
@@ -1816,3 +1827,6 @@ The v0.8.8 cycle is fully closed: 3 plans executed + CHANGELOG
 - Commit-style: every commit has substance (no empty commits); every feature gets a doc sync in the same cycle (README + CHANGELOG).
 - Code-reviewer pattern: spawn `code-reviewer-minimax-m3` for **every** non-trivial commit with concrete prompt (≤70 words + focus questions).
 - Plan pattern: every plan is self-contained. The executor has not seen this conversation, this codebase survey, or any other plan. If a plan references "the pattern discussed above," it is broken.
+## Archive
+
+0 plans moved to `plans/archive/` (already-shipped cycles v0.7.x → v0.9.38; the canonical shipped history lives in `CHANGELOG.md`). The archive is read-only history: revive a plan by copy-and-modify INTO `plans/`, not by `git mv` reversing.
