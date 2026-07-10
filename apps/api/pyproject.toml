@@ -29,7 +29,7 @@ dependencies = [
     # in a separate process; the FastAPI app only enqueues jobs
     # via ``arq.create_pool``.
     "arq>=0.25",
-    "redis>=5.0",
+    "redis>=8.0.1",
     "gw2_core",
     "gw2_evtc_parser",
     "gw2_analytics",
