@@ -120,10 +120,9 @@ from collections.abc import Callable, Generator
 
 import pytest
 from fastapi.testclient import TestClient
+from minio.error import S3Error
 from sqlalchemy import delete
 from sqlalchemy.orm import Session, sessionmaker
-
-from minio.error import S3Error
 
 from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory
 from gw2analytics_api.main import app
