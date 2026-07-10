@@ -84,7 +84,13 @@ from gw2analytics_api.models import (
     OrmFightPlayerSummary,
 )
 from gw2analytics_api.services import _persist_player_summaries, _sanitize_name
-from gw2analytics_api.storage import get_events
+# v0.10.8 plan 140 Fix-D: switched from module-local binding to
+# live attribute lookup. The module-local binding (``from ... import
+# get_events``) created a snapshot at import time; tests monkeypatching
+# ``gw2analytics_api.storage.get_events`` had no effect on the backfill
+# module's local binding. Live attribute lookup via ``storage.get_events``
+# resolves the monkeypatch path mismatch (test_backfill_eoferror.py:1).
+from gw2analytics_api import storage
 
 logger = logging.getLogger(__name__)
 
@@ -322,7 +328,7 @@ def _backfill_one_fight(
             db.rollback()  # undo the DELETE+INSERT in dry-run mode
         return
 
-    gz_bytes = get_events(fight.events_blob_uri)
+    gz_bytes = storage.get_events(fight.events_blob_uri)
     events = iter_events_from_blob(gz_bytes)
     _persist_player_summaries(db, fight, events)
     if dry_run:

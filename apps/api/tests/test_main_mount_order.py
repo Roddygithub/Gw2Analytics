@@ -38,19 +38,34 @@ route was matched.
 
 from __future__ import annotations
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from gw2analytics_api.main import app
 
 
-def test_compare_route_included_before_players_catchall() -> None:
+def test_compare_route_included_before_players_catchall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The cross-account route MUST be registered BEFORE
     the players catch-all. A misconfiguration here is a
     silent 404 on every cross-account request -- a 100%
     functionality loss for a maintainer-flagged core
     feature (the squad-comparison use case from
     ``docs/ROADMAP.md`` §1).
+
+    v0.10.8 plan 140 Fix-D: monkeypatches the lifespan's
+    schema-drift guard to a no-op so the lifespan's first
+    step does not raise on test DBs whose ``alembic_version``
+    row may differ from the on-disk alembic head. Strict
+    function-scoped pytest monkeypatch restores the original
+    ``check_schema_drift`` automatically after this test.
     """
+    monkeypatch.setattr(
+        "gw2analytics_api.schema_guard.check_schema_drift",
+        lambda: None,
+    )
     with TestClient(app) as client:
         response = client.get(
             "/api/v1/players/compare/timeline",
