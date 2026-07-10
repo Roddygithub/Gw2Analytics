@@ -101,6 +101,22 @@ class FightContribution(BaseModel):
     # for the algorithm + the an upstream reference parser port rationale.
     detected_role: str | None = None
     detected_tags: list[str] | None = None
+    # v0.10.5 plan 135: the condi/power split (additive, nullable for
+    # back-compat with pre-v0.10.5 summary rows). Both columns default to
+    # ``None`` so the pre-v0.10.5 wire contract holds (callers that don't
+    # run the split still produce a valid contribution). The fast-path
+    # projects both columns from the materialised
+    # ``OrmFightPlayerSummary`` row; the slow-path computes them inline
+    # during the events walk. The split is build-date-gated: pre-20240501
+    # arcdps encodes the condi portion implicitly via the skill name
+    # (KNOWN_CONDI_NAMES lookup); post-20240501 arcdps encodes it in the
+    # raw cbtevent ``buff_dmg`` field, but the v0.10.5 parser-side
+    # integration is deferred (see ``advisor-plans/006a``); new fights
+    # stay NULL until that lands.
+    # See ``libs/gw2_analytics/condi_power_split.py`` for the algorithm
+    # + the arcdps-build-date threshold calibration note.
+    power_damage: int | None = None
+    condi_damage: int | None = None
 
 
 class PlayerProfile(BaseModel):

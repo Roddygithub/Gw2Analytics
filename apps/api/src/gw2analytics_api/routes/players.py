@@ -44,6 +44,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from gw2_analytics.condi_power_split import KNOWN_CONDI_NAMES
 from gw2_analytics.player_profile import (
     FightContribution,
     PlayerProfileAggregator,
@@ -183,6 +184,10 @@ def _contributions_from_summary(
             # "unknown" (the pre-migration semantic).
             detected_role=row.detected_role,
             detected_tags=row.detected_tags,
+            # v0.10.5 plan 135: project the condi/power split from the
+            # materialised summary row.
+            power_damage=row.power_damage,
+            condi_damage=row.condi_damage,
         )
         for row in rows
     ]
@@ -228,6 +233,17 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
             int(a.profession),
             int(a.elite_spec),
         )
+
+    # v0.10.5 plan 135: per-fight skill-name map for the
+    # condi/power split (skill-name lookup against KNOWN_CONDI_NAMES).
+    # The route's ``selectinload(OrmFight.skills)`` pre-loads
+    # ``fight.skills`` in the same query as ``fight.agents`` so
+    # the dict-comprehension is in-memory (no extra round-trip).
+    # Pre-20240501 arcdps has no buff_dmg field; the split is
+    # silently 100% power for post-20240501 fights that the
+    # v0.10.4 parser cannot surface buff_dmg on. See
+    # ``advisor-plans/006a`` for the parser-side fix path.
+    skill_name_for_event: dict[int, str | None] = {int(s.skill_id): s.name for s in fight.skills}
 
     # 0-total contributions for the blob=None branch (pre-Phase-7
     # fight OR the parser pass yielded zero events). Matches the
@@ -288,25 +304,45 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
         if identity is None:
             continue
         account_name, name, prof_id, elite_id = identity
-        bucket = per_account.setdefault(
-            account_name,
-            {
+        # First-event / subsequent-event split (clean mirror of
+        # services.py::_persist_player_summaries). The previous
+        # setdefault + ``bucket["set"]`` sentinel was 2-state code
+        # that conflated "first" and "subsequent" in the same dict
+        # as the magnitudes; the explicit ``if account_name in
+        # per_account:`` guard is one-line and matches the services-
+        # side pattern. ``bucket["name"] = name`` runs on every event
+        # so the value is last-seen (the pre-v0.10.5 wire contract).
+        # The bucket's type is inferred from the literal (a
+        # ``dict[str, int | str]``) -- no explicit annotation needed
+        # (the per-v0.10.5 v0.10.5 review consolidated the
+        # per-event ``bucket`` annotation away to a single literal
+        # site, the same way services.py does it).
+        if account_name in per_account:
+            bucket = per_account[account_name]
+        else:
+            bucket = {
                 "damage": 0,
                 "healing": 0,
                 "strip": 0,
+                "power": 0,
+                "condi": 0,
                 "name": name,
                 "prof": prof_id,
                 "elite": elite_id,
-                "set": 0,
-            },
-        )
-        if not bucket["set"]:
-            bucket["set"] = 1
-        else:
-            # Last-seen name overwrites the first-seen value.
-            bucket["name"] = name
+            }
+            per_account[account_name] = bucket
+        bucket["name"] = name
         if isinstance(event, DamageEvent):
             bucket["damage"] = int(bucket["damage"]) + event.damage
+            # v0.10.5 plan 135: inline condi/power split per
+            # DamageEvent (skill-name lookup). NEW-build fights
+            # (buff_dmg not on v2 DamageEvent) default to power;
+            # see advisor-plans/006a for parser-side fix.
+            skill_name = skill_name_for_event.get(event.skill_id)
+            if skill_name in KNOWN_CONDI_NAMES:
+                bucket["condi"] = int(bucket["condi"]) + event.damage
+            else:
+                bucket["power"] = int(bucket["power"]) + event.damage
         elif isinstance(event, HealingEvent):
             bucket["healing"] = int(bucket["healing"]) + event.healing
         elif isinstance(event, BuffRemovalEvent):
@@ -406,7 +442,13 @@ def list_players(
         db.execute(
             select(OrmFight)
             .order_by(OrmFight.started_at.desc())
-            .options(selectinload(OrmFight.agents)),
+            .options(
+                selectinload(OrmFight.agents),
+                # v0.10.5 plan 135: pre-load skills so the slow-path
+                # _contributions_from_blob_walk can build per-fight
+                # skill_name_for_event dict without 2nd round-trip.
+                selectinload(OrmFight.skills),
+            ),
         )
         .scalars()
         .all()
@@ -507,7 +549,10 @@ def get_player_timeline(
         db.execute(
             select(OrmFight)
             .order_by(OrmFight.started_at.desc())
-            .options(selectinload(OrmFight.agents)),
+            .options(
+                selectinload(OrmFight.agents),
+                selectinload(OrmFight.skills),
+            ),
         )
         .scalars()
         .all()
@@ -688,7 +733,10 @@ def get_player(
         db.execute(
             select(OrmFight)
             .order_by(OrmFight.started_at.desc())
-            .options(selectinload(OrmFight.agents)),
+            .options(
+                selectinload(OrmFight.agents),
+                selectinload(OrmFight.skills),
+            ),
         )
         .scalars()
         .all()

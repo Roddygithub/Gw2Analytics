@@ -29,6 +29,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
+from gw2_analytics.condi_power_split import KNOWN_CONDI_NAMES
 from gw2_analytics.role_detection import detect_role_lite
 from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, Event, HealingEvent, Profession
 from gw2_core import Fight as DomainFight
@@ -457,7 +458,7 @@ def _persist_event_blob(
             )
 
 
-def _persist_player_summaries(
+def _persist_player_summaries(  # noqa: PLR0912
     db: Session,
     orm_fight: OrmFight,
     events: list[Event],
@@ -510,6 +511,13 @@ def _persist_player_summaries(
         # Pure NPC fight (no player agents); nothing to materialise.
         return
 
+    # v0.10.5 plan 135: per-fight skill-name map for the condi/power
+    # split. Post-20240501 fights stay condensed (buff_dmg not on v2
+    # DamageEvent); pre-20240501 fights partition via KNOWN_CONDI_NAMES
+    # lookup. The parser-side fix to surface buff_dmg is deferred to
+    # advisor-plans/006a (alt (a) -- extend DamageEvent).
+    skill_name_map: dict[int, str | None] = {int(s.skill_id): s.name for s in orm_fight.skills}
+
     # Per-account accumulator: ``account_name -> {damage, healing, strip, name, prof, elite}``.
     # ``name`` is last-seen (overwritten on every event); ``prof`` /
     # ``elite`` are first-seen (set once on the first event for
@@ -561,6 +569,8 @@ def _persist_player_summaries(
                 "damage": 0,
                 "healing": 0,
                 "strip": 0,
+                "power": 0,
+                "condi": 0,
                 "name": _sanitize_name(agent.name),
                 "prof": int(agent.profession),
                 "elite": int(agent.elite_spec),
@@ -568,6 +578,12 @@ def _persist_player_summaries(
             per_account[account] = bucket
         if isinstance(event, DamageEvent):
             bucket["damage"] = int(bucket["damage"]) + event.damage
+            # v0.10.5 plan 135: per-event condi/power split (skill-name).
+            skill_name = skill_name_map.get(event.skill_id)
+            if skill_name in KNOWN_CONDI_NAMES:
+                bucket["condi"] = int(bucket["condi"]) + event.damage
+            else:
+                bucket["power"] = int(bucket["power"]) + event.damage
         elif isinstance(event, HealingEvent):
             bucket["healing"] = int(bucket["healing"]) + event.healing
         elif isinstance(event, BuffRemovalEvent):
@@ -685,5 +701,8 @@ def _persist_player_summaries(
                 total_buff_removal=int(bucket["strip"]),
                 detected_role=detected_role,
                 detected_tags=detected_tags,
+                # v0.10.5 plan 135: persist the per-event condi/power split.
+                power_damage=int(bucket.get("power", 0)),
+                condi_damage=int(bucket.get("condi", 0)),
             ),
         )
