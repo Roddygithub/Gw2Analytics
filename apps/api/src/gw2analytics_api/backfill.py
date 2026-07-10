@@ -77,13 +77,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from gw2_analytics.role_detection import detect_role_lite
-from gw2analytics_api._event_dispatch import iter_events_from_blob
-from gw2analytics_api.models import (
-    OrmFight,
-    OrmFightAgent,
-    OrmFightPlayerSummary,
-)
-from gw2analytics_api.services import _persist_player_summaries, _sanitize_name
+
 # v0.10.8 plan 140 Fix-D: switched from module-local binding to
 # live attribute lookup. The module-local binding (``from ... import
 # get_events``) created a snapshot at import time; tests monkeypatching
@@ -91,6 +85,13 @@ from gw2analytics_api.services import _persist_player_summaries, _sanitize_name
 # module's local binding. Live attribute lookup via ``storage.get_events``
 # resolves the monkeypatch path mismatch (test_backfill_eoferror.py:1).
 from gw2analytics_api import storage
+from gw2analytics_api._event_dispatch import iter_events_from_blob
+from gw2analytics_api.models import (
+    OrmFight,
+    OrmFightAgent,
+    OrmFightPlayerSummary,
+)
+from gw2analytics_api.services import _persist_player_summaries, _sanitize_name
 
 logger = logging.getLogger(__name__)
 

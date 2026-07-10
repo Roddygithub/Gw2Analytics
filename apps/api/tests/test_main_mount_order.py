@@ -39,7 +39,6 @@ route was matched.
 from __future__ import annotations
 
 import pytest
-
 from fastapi.testclient import TestClient
 
 from gw2analytics_api.main import app
