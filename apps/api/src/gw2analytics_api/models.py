@@ -248,7 +248,7 @@ class OrmFightPlayerSummary(Base):
     total_healing: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_buff_removal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # v0.10.3 plan 083: heuristic role detection (ported from
-    # WvW_Analytics's ``apps/api/src/api/services/roles.py``).
+    # an upstream reference parser's ``(non-public reference).py``).
     # ``detected_role`` is the primary role (DPS / HEAL / STRIP /
     # BOON / MIXED / UNKNOWN); ``String(30)`` covers every
     # current role name + a generous future-proofing margin.

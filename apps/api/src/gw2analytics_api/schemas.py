@@ -332,7 +332,7 @@ class PerFightBreakdownRowOut(BaseModel):
     ``account_name`` via :class:`OrmFightAgent`.
 
     v0.10.3 plan 083: the per-fight role detection (ported from
-    WvW_Analytics) lands as two new fields -- ``detected_role`` and
+    an upstream reference parser) lands as two new fields -- ``detected_role`` and
     ``detected_tags``. Both are ``None`` for pre-v0.10.3 rows (the
     column was added in migration 0011 as ``nullable=True`` and
     pre-migration rows were not backfilled). The frontend surfaces
@@ -349,7 +349,7 @@ class PerFightBreakdownRowOut(BaseModel):
     total_healing: int
     total_buff_removal: int
     # v0.10.3 plan 083: see :class:`OrmFightPlayerSummary` docstring
-    # for the algorithm + the WvW_Analytics port rationale. ``None``
+    # for the algorithm + the an upstream reference parser port rationale. ``None``
     # for pre-migration rows (no backfill).
     detected_role: str | None = None
     detected_tags: list[str] | None = None
@@ -564,6 +564,8 @@ class WebhookSubscriptionCreate(BaseModel):
     the contract.
     """
 
+    model_config = ConfigDict(from_attributes=True)
+
     url: str
     filter: dict[str, object]
     description: str | None = None
@@ -754,3 +756,9 @@ class WebhookDeliveryReplayOut(BaseModel):
     attempt: int
     next_attempt_at: datetime
     restart: bool
+
+
+# v0.10.5 R3.4 (deferred): a route-layer Content-Length cap is the
+# right place for a hard wire-size bound (the Pydantic validator fires
+# AFTER ``fastapi.Request.json()`` has deserialised the body). Document
+# here once the middleware lands.

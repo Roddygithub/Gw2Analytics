@@ -1,7 +1,7 @@
 [project]
 name = "gw2_core"
 version = "0.3.0"
-description = "Stable internal data model for GW2 WvW analytics. Pure Pydantic, no I/O."
+description = "Stable internal data model for GW2 combat events + REST API shapes. Pure Pydantic, no I/O."
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "GW2Analytics team" }]

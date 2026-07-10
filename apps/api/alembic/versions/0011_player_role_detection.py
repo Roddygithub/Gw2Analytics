@@ -7,8 +7,8 @@ Create Date: 2026-07-09
 Why
 ---
 The v0.10.3 plan 083 ports the heuristic role-detection from
-WvW_Analytics (``apps/api/src/api/services/roles.py``) into
-Gw2Analytics. The WvW_Analytics algorithm consumes a ``PlayerStats``
+an upstream reference parser (``(non-public reference).py``) into
+Gw2Analytics. The an upstream reference parser algorithm consumes a ``PlayerStats``
 ORM with 80+ fields (DPS, healing out, barrier, strips, cleanses,
 boon uptimes, ...). Gw2Analytics's ``OrmFightPlayerSummary`` only
 tracks the 3 magnitudes (``total_damage`` / ``total_healing`` /
@@ -17,7 +17,7 @@ tracks the 3 magnitudes (``total_damage`` / ``total_healing`` /
 The v1 lite port (``libs/gw2_analytics/role_detection.py``) uses
 ONLY the 3 magnitudes + ``profession`` (int) + ``elite_spec`` (int)
 + the spec/profession hint tables ported verbatim from
-WvW_Analytics. The output is ``(detected_role, detected_tags)``:
+an upstream reference parser. The output is ``(detected_role, detected_tags)``:
 
 - ``detected_role``: a single string (e.g. ``"DPS"`` / ``"HEAL"`` /
   ``"STRIP"`` / ``"BOON"`` / ``"MIXED"`` / ``"UNKNOWN"``). Stored
@@ -44,7 +44,7 @@ can run on the materialised table directly).
 
 Why ``detected_tags`` is JSON and not ``ARRAY(String)``
 -------------------------------------------------------
-- WvW_Analytics uses ``ARRAY(String)`` for ``detected_tags``.
+- an upstream reference parser uses ``ARRAY(String)`` for ``detected_tags``.
   The list shape is open-ended (e.g. ``"foreign_badges:HEAL"``
   embeds a role name in the tag value); future tag additions
   would require a schema migration.

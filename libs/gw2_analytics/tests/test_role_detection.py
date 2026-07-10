@@ -1,9 +1,9 @@
 """Unit tests for :mod:`gw2_analytics.role_detection` (v1 lite).
 
-The v1 lite algorithm is a port of WvW_Analytics's role-detection
-heuristic (``apps/api/src/api/services/roles.py``) adapted to the
+The v1 lite algorithm is a port of an upstream reference parser's role-detection
+heuristic (``(non-public reference).py``) adapted to the
 3-magnitude ``OrmFightPlayerSummary`` schema (Gw2Analytics's
-tracker is much leaner than WvW_Analytics's 80+ field
+tracker is much leaner than an upstream reference parser's 80+ field
 ``PlayerStats``). The tests cover the 4 archetype classes
 (DPS / HEAL / STRIP / BOON), the MIXED + UNKNOWN fallbacks, the
 off_meta / foreign_badges / high_<axis> tags, the spec-hint

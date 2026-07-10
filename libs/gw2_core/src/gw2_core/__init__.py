@@ -1,10 +1,12 @@
-"""Stable internal data model for GW2 WvW analytics.
+"""Stable internal data model for GW2 combat events + REST API shapes.
 
-This package is the SINGLE SOURCE OF TRUTH for battle data shapes AND
-for the cross-cutting shapes returned by the official GW2 v2 REST API
-(``AccountInfo`` / ``WorldInfo`` / ``Population``). All other packages
-(parser, analytics, api-client, frontend) consume these models. It
-MUST NOT import anyone else.
+This package is the SINGLE SOURCE OF TRUTH for battle data shapes (the
+arcdps ``.zevtc`` discriminated union of ``DamageEvent`` /
+``BuffRemovalEvent`` / ``HealingEvent``) AND for the cross-cutting
+shapes returned by the official GW2 v2 REST API (``AccountInfo`` /
+``WorldInfo`` / ``Population``). All other packages (parser,
+analytics, api-client, frontend) consume these models. It MUST NOT
+import anyone else.
 """
 
 from __future__ import annotations

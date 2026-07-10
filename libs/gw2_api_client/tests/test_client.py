@@ -206,3 +206,35 @@ async def test_async_context_manager_closes_underlying_pool() -> None:
         # We can't easily introspect the closed state without reaching
         # into httpx internals, but if __aexit__ were broken the
         # context manager would itself raise.
+
+
+@pytest.mark.asyncio
+async def test_account_get_silently_drops_unknown_extra_fields() -> None:
+    """v0.10.5 R3.3: ``extra="ignore"`` drops unknown v999 fields from the v2 API response."""
+    with respx.mock(base_url=_BASE_URL) as mock:
+        mock.get("/v2/account").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "X",
+                    "name": "Y",
+                    "world": 1,
+                    "future_field_v999": {"nested": "ignored"},
+                },
+            ),
+        )
+        async with _client() as c:
+            info = await c.account_get()
+    assert info.id == "X"
+    assert "future_field_v999" not in info.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_account_get_429_cascade_exactly_three_attempts() -> None:
+    """v0.10.5 R3.3: 3 consecutive 429s raise RateLimitError on the 3rd (not 4th) attempt."""
+    with respx.mock(base_url=_BASE_URL) as mock:
+        route = mock.get("/v2/account").mock(return_value=httpx.Response(429))
+        async with _client() as c:
+            with pytest.raises(GuildWars2RateLimitError, match="rate-limited"):
+                await c.account_get()
+    assert route.call_count == 3

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2026-07-10
+
+### Added
+
+- v0.10.3 plan 083 Feature 1: heuristic role detection (`libs/gw2_analytics/role_detection.py`; 12 NEW tests in `tests/test_role_detection.py`)
+- v0.10.3 plan 083 Feature 3A: per-player timeline overlay (`per_player_timeline.py` aggregator + `GET /api/v1/fights/{id}/timeline/players` + `PerPlayerTimelineOut` schema)
+- v0.10.3 plan 123: Janthir Wilds elite specs (`LUMINARY`/`PARAGON`/`TROUBADOUR`/...)
+- v0.10.3 plan 119: role-detection backfill (`backfill_role_detection` + `--roles-only` CLI flag)
+
+### Migration
+
+- v0.10.3 migration `0011_player_role_detection` adds `detected_role` + `detected_tags` columns to `fight_player_summaries`
+
 ## [Unreleased]
 
 ### Fixed (libs/gw2_analytics - v0.9.27 plan 083: Phase 8 cascade in event_window.py)

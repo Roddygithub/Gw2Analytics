@@ -37,6 +37,10 @@ from pathlib import Path
 
 import pytest
 
+# v0.10.5 audit R2.3: hoist `import gw2_evtc_parser.parser as parser_mod`
+# to the top of the file (PLC0415 compliance for the 7 monkeypatch tests
+# below that target `parser_mod.MAX_EVTC_BYTES`).
+import gw2_evtc_parser.parser as parser_mod
 from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, HealingEvent, Profession
 from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
 from gw2_evtc_parser.parser import (
@@ -46,9 +50,15 @@ from gw2_evtc_parser.parser import (
     AGENT_SIZE,
     EVENT_SIZE,
     HEADER_SIZE,
+    MAX_EVTC_BYTES,
     MAX_SKILL_NAME_BYTES,
     SKILL_COUNT_OFFSET,
 )
+
+# v0.10.5 audit R2.3: hoist `import gw2_evtc_parser.parser as parser_mod`
+# to the top of the file (PLC0415 compliance for the 7 monkeypatch tests
+# below that target `parser_mod.MAX_EVTC_BYTES`).
+
 
 # ---------------------------------------------------------------------------
 # Synthetic fixture
@@ -1371,7 +1381,6 @@ def test_read_all_under_cap_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     test (avoids allocating 100 MB real in test memory). A
     512 KB blob round-trips unchanged.
     """
-    import gw2_evtc_parser.parser as parser_mod
 
     monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024 * 1024)
     data = b"x" * (512 * 1024)
@@ -1387,7 +1396,6 @@ def test_read_all_at_cap_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     not ``>=``). A blob of exactly the cap size round-trips
     unchanged.
     """
-    import gw2_evtc_parser.parser as parser_mod
 
     monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
     data = b"x" * 1024
@@ -1405,7 +1413,6 @@ def test_read_all_over_cap_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     via ``pytest.raises(match=...)`` so a future regression
     that changes the message (e.g. removes the MB hint) fires.
     """
-    import gw2_evtc_parser.parser as parser_mod
 
     monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
     data = b"x" * 1025
@@ -1425,7 +1432,6 @@ def test_read_all_binary_io_over_cap_raises(monkeypatch: pytest.MonkeyPatch) -> 
     docstring), so the BinaryIO path goes through the same
     check as the bytes path.
     """
-    import gw2_evtc_parser.parser as parser_mod
 
     monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
     data = BytesIO(b"x" * 1025)
@@ -1443,7 +1449,6 @@ def test_parse_with_oversized_blob_raises(monkeypatch: pytest.MonkeyPatch) -> No
     This test pins the propagation through the public
     ``parse()`` API.
     """
-    import gw2_evtc_parser.parser as parser_mod
 
     monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
     data = b"x" * 2048
@@ -1462,7 +1467,6 @@ def test_parse_events_with_oversized_blob_raises(monkeypatch: pytest.MonkeyPatch
     cap is enforced at the same ``_read_all`` chokepoint, so
     both public methods share the same protection.
     """
-    import gw2_evtc_parser.parser as parser_mod
 
     monkeypatch.setattr(parser_mod, "MAX_EVTC_BYTES", 1024)
     data = b"x" * 2048
@@ -1480,7 +1484,6 @@ def test_max_evtc_bytes_constant_is_100_mb() -> None:
     defense-in-depth: it's 3.3x the API layer's 30 MB cap
     (per plan 048) and 5-20x typical WvW raid log sizes.
     """
-    from gw2_evtc_parser.parser import MAX_EVTC_BYTES
-
+    # ``MAX_EVTC_BYTES`` is now imported at top-of-file (v0.10.5 audit R2.3).
     assert MAX_EVTC_BYTES == 100 * 1024 * 1024
     assert MAX_EVTC_BYTES == 104_857_600

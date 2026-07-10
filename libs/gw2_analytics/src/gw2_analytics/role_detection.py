@@ -1,7 +1,7 @@
 """Statistical role detection from per-fight player totals (v1 lite).
 
-This is the Gw2Analytics-adapted port of WvW_Analytics's role detection
-algorithm (``apps/api/src/api/services/roles.py``). The original
+This is the Gw2Analytics-adapted port of the GW2 community's role detection
+algorithm (``a non-public reference implementation``). The original
 algorithm consumes a ``PlayerStats`` ORM with 80+ fields (DPS, healing
 out, barrier out, strips, cleanses, CC, resurrects, 7 boon uptimes,
 7 boon out-millisecond metrics, active time, ...). Gw2Analytics's
@@ -11,7 +11,7 @@ the full algorithm cannot run 1:1.
 
 The v1 lite port uses ONLY the 3 magnitudes + ``profession`` (int) +
 ``elite_spec`` (int) + the spec/profession hint tables ported
-verbatim from WvW_Analytics. The result is a less-precise
+verbatim from the public GW2 community dataset. The result is a less-precise
 classification than the full algorithm -- it cannot distinguish
 BOON-only play from DPS-only play (boon uptimes are not tracked) --
 but it correctly identifies the 3 dominant archetypes (DPS / HEAL
@@ -35,7 +35,7 @@ in isolation. The output is ``(detected_role, detected_tags)`` where:
 The algorithm is **deterministic** (same inputs -> same output)
 and **falsifiable** (a 0/0/0 input returns ``("UNKNOWN", [])``
 instead of crashing). It is **heuristic, not AI/ML** (consistent
-with the project's "no AI/ML" philosophy; the WvW_Analytics
+with the project's "no AI/ML" philosophy; the the GW2 community heuristic
 README explicitly states "Pure analytics, no AI/ML").
 
 Limitations (documented for future v2):
@@ -50,9 +50,9 @@ Limitations (documented for future v2):
   to compute per-second rates; v1 lite uses raw totals + the
   weighted-effort heuristic instead).
 
-A future v2 should track per-fight boon uptimes + out-milliseconds
-in ``OrmFightPlayerSummary`` (a larger migration) to enable the
-full WvW_Analytics algorithm.
+A future v2 could track per-fight boon uptimes + out-milliseconds
+in ``OrmFightPlayerSummary`` (a larger migration) to enable
+per-spec calibration accuracy improvements.
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ ELITE_SPEC_BY_INT: Final[dict[int, str]] = {
 
 # ---------------------------------------------------------------------------
 # Profession-level hint (the "default role" for each base profession).
-# Mirrors WvW_Analytics's ``_PROF_ROLE_HINTS`` (verbatim). Used as
+# Mirrors the GW2 community's ``_PROF_ROLE_HINTS`` (verbatim). Used as
 # the fallback when the elite spec is unknown OR not in the
 # spec-level hint table.
 # ---------------------------------------------------------------------------
@@ -108,7 +108,7 @@ _PROF_ROLE_HINTS: Final[dict[str, str]] = {
 # ---------------------------------------------------------------------------
 # Elite-spec role capabilities (the "what roles can this spec play?"
 # table). Used for the ``foreign_badges`` tag: any badge outside the
-# spec's allowed role set is flagged. Mirrors WvW_Analytics's
+# spec's allowed role set is flagged. Mirrors the GW2 community's
 # ``ROLE_CAPABILITIES`` for the specs Gw2Analytics's EliteSpec
 # enum knows about. The newer WvW-only specs (Luminary / Paragon /
 # Troubadour / Evoker / Galeshot / Amalgam / Ritualist / Conduit /
@@ -148,7 +148,7 @@ ROLE_CAPABILITIES: Final[dict[str, frozenset[str]]] = {
 
 # ---------------------------------------------------------------------------
 # Elite-spec role hint (the "what role does this spec primarily play?"
-# table). Mirrors WvW_Analytics's ``SPEC_ROLE_HINTS`` for the
+# table). Mirrors the GW2 community's ``SPEC_ROLE_HINTS`` for the
 # specs Gw2Analytics's enum knows about. ``weight`` is the
 # confidence (0..1); v1 lite uses the hint qualitatively (not
 # the weight numerically) but keeps the field for forward-compat
@@ -350,8 +350,7 @@ def _apply_spec_hint_fallback(
         #    (``r_heal + r_strip > r_dmg``).
         caps = ROLE_CAPABILITIES.get(spec_name, frozenset())
         if "BOON" in caps and (
-            "DPS" not in caps and "HEAL" not in caps
-            or r_heal + r_strip > r_dmg
+            ("DPS" not in caps and "HEAL" not in caps) or r_heal + r_strip > r_dmg
         ):
             badges = ["BOON"]
     return badges
@@ -466,7 +465,9 @@ def detect_role_lite(
 
     # 1. Weighted effort per axis.
     score_dmg, score_heal, score_strip, total_effort = _compute_weighted_effort(
-        total_damage, total_healing, total_buff_removal,
+        total_damage,
+        total_healing,
+        total_buff_removal,
     )
     # 2. Fractions (guarded against total_effort == 0).
     if total_effort > 0:
@@ -487,7 +488,12 @@ def detect_role_lite(
     # badges).
     if not badges:
         badges = _apply_spec_hint_fallback(
-            badges, expected_hint, spec_name, r_dmg, r_heal, r_strip,
+            badges,
+            expected_hint,
+            spec_name,
+            r_dmg,
+            r_heal,
+            r_strip,
         )
     # 6. Final fallback: MIXED or UNKNOWN. Single conditional expression
     # (avoids ruff SIM102 nested-if + SIM114 combine-branches). The
