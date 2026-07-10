@@ -20,6 +20,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (libs/gw2_analytics - v0.9.27 plan 085: squad_rollup subgroup-loop extraction)
+
+- **libs/gw2_analytics v0.9.27 plan 085**: `squad_rollup.py` had 3
+  byte-identical per-stream for-loops (damage / healing / strip), each
+  looking up the source agent's subgroup, accumulating the per-event
+  contribution into a per-subgroup total, and counting a hit. A 4th
+  event type (or any change to the accumulation shape) would have needed
+  editing 3 sites in lockstep. Plan 085 factors the shared body into one
+  module-level `_accumulate_subgroup_totals(events, agent_id_to_subgroup,
+  contribution_attr, total_dict, hit_dict)` helper called once per stream
+  ([plan 085](./plans/085-v0927-squad-rollup-dual-stream-loop-extraction.md)).
+  `source_agent_id` is statically typed across the 3 event members, so
+  only the contribution attribute is a dynamic (`getattr`) access. The
+  per-loop `grand_hits` accumulator is dropped in favour of
+  `sum(hit_count.values())` (the shared hit dict already counts every
+  event exactly once). Behaviour is byte-identical: same rows, ordering,
+  DPS/HPS/BPS, negative-duration `ValueError`, and cross-field invariants.
+- **libs/gw2_analytics/tests/test_squad_rollup_refactor.py** (NEW): 6
+  hermetic tests covering the helper directly (empty stream, empty-subgroup
+  fallback, map-driven routing, the shared-hit-dict mechanism the
+  `grand_hits` change relies on, and buff-removal contribution) plus a
+  refactored-aggregator output check on a mixed multi-stream input
+  (a subgroup appearing in two streams). The pre-existing
+  `test_squad_rollup.py` remains the full aggregator regression contract.
+
+#### Validation
+
+- `uv run pytest libs/gw2_analytics/tests/`: 152 passed (146 pre-existing + 6 new).
+- `uv run ruff check libs/gw2_analytics/`: clean.
+- `uv run mypy libs apps --no-incremental`: clean.
+
 ### Fixed (libs/gw2_analytics - v0.9.27 plan 083: Phase 8 cascade in event_window.py)
 
 The Phase 8 cycle that added `BuffRemovalEvent` as the third `Event` discriminated-union member in `libs/gw2_core/src/gw2_core/models.py` cascaded the change to `target_buff_removal.py` (the per-target strip rollup) but NOT to `event_window.py` (the per-bucket time-rollup aggregator). The per-bucket `EventBucket` schema was missing the `buff_removal_total` field, so the per-fight timeline chart (`apps/web/src/app/fights/[id]/page.tsx`'s `<PerFightTimelineChart>`) had no per-bucket strip band — a researcher investigating "which 5s window saw the most corrupting concentration" had no timeline answer, only the per-target rollup which is blind to per-bucket chronology. Plan 083 closes the gap:

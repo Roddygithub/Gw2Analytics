@@ -81,6 +81,39 @@ from gw2_core import BuffRemovalEvent, DamageEvent, HealingEvent
 _DEFAULT_RATE: Final[float] = 0.0
 
 
+def _accumulate_subgroup_totals(
+    events: Iterable[DamageEvent] | Iterable[HealingEvent] | Iterable[BuffRemovalEvent],
+    agent_id_to_subgroup: Mapping[int, str],
+    contribution_attr: str,
+    total_dict: dict[str, int],
+    hit_dict: dict[str, int],
+) -> int:
+    """Accumulate one event stream into the per-subgroup totals.
+
+    Shared body of the 3 (formerly byte-identical) per-stream loops.
+    For each event: look up the source agent's subgroup (default ``""``
+    for unattributed sources), add the event's ``contribution_attr``
+    value into ``total_dict[subgroup]``, and count 1 hit into
+    ``hit_dict[subgroup]``. ``total_dict`` and ``hit_dict`` are mutated
+    in place; ``hit_dict`` is shared across the 3 streams so its value
+    sum is the grand hit-count.
+
+    Returns the grand total of ``contribution_attr`` across the stream
+    (the per-stream sum the aggregator's invariant check compares
+    against). ``source_agent_id`` is statically typed on all 3 event
+    members; only the contribution attribute differs per stream, so it
+    is the sole dynamic (``getattr``) access.
+    """
+    grand = 0
+    for e in events:
+        subgroup = agent_id_to_subgroup.get(e.source_agent_id, "")
+        contribution: int = getattr(e, contribution_attr)
+        total_dict[subgroup] += contribution
+        hit_dict[subgroup] += 1
+        grand += contribution
+    return grand
+
+
 class SquadRollupRow(BaseModel):
     """One roll-up row: damage + healing + buff-removal + rates for one subgroup.
 
@@ -143,29 +176,20 @@ class SquadRollupAggregator:
         total_healing: dict[str, int] = defaultdict(int)
         total_strip: dict[str, int] = defaultdict(int)
         hit_count: dict[str, int] = defaultdict(int)
-        grand_damage = 0
-        grand_healing = 0
-        grand_strip = 0
-        grand_hits = 0
 
-        for dmg in damage_events:
-            subgroup = agent_id_to_subgroup.get(dmg.source_agent_id, "")
-            total_damage[subgroup] += dmg.damage
-            hit_count[subgroup] += 1
-            grand_damage += dmg.damage
-            grand_hits += 1
-        for heal in healing_events:
-            subgroup = agent_id_to_subgroup.get(heal.source_agent_id, "")
-            total_healing[subgroup] += heal.healing
-            hit_count[subgroup] += 1
-            grand_healing += heal.healing
-            grand_hits += 1
-        for strip in strip_events:
-            subgroup = agent_id_to_subgroup.get(strip.source_agent_id, "")
-            total_strip[subgroup] += strip.buff_removal
-            hit_count[subgroup] += 1
-            grand_strip += strip.buff_removal
-            grand_hits += 1
+        # ``hit_count`` is shared across the 3 streams: every event
+        # increments it once, so the sum of its values is the grand
+        # hit-count across all streams (no separate accumulator needed).
+        grand_damage = _accumulate_subgroup_totals(
+            damage_events, agent_id_to_subgroup, "damage", total_damage, hit_count
+        )
+        grand_healing = _accumulate_subgroup_totals(
+            healing_events, agent_id_to_subgroup, "healing", total_healing, hit_count
+        )
+        grand_strip = _accumulate_subgroup_totals(
+            strip_events, agent_id_to_subgroup, "buff_removal", total_strip, hit_count
+        )
+        grand_hits = sum(hit_count.values())
 
         rate_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_RATE
         rows = [
