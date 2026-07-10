@@ -67,16 +67,17 @@ DELETEs + INSERTs, so a partial backfill (one fight's
 
 from __future__ import annotations
 
-import gzip
 import logging
+from collections.abc import Callable
 
 from minio.error import S3Error
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
-from gw2_core import Event
+from gw2_analytics.role_detection import detect_role_lite
+from gw2analytics_api._event_dispatch import iter_events_from_blob
 from gw2analytics_api.models import (
     OrmFight,
     OrmFightAgent,
@@ -87,14 +88,18 @@ from gw2analytics_api.storage import get_events
 
 logger = logging.getLogger(__name__)
 
-# Module-level adapter: the canonical ``Event`` dispatch (DamageEvent
-# vs HealingEvent vs BuffRemovalEvent) is the same as the one in
-# :mod:`gw2analytics_api.routes.players`. We duplicate the adapter
-# here rather than importing the route's private ``_EVENT_TYPE_ADAPTER``
-# so the backfill module has no dependency on the route module (the
-# route module is wired to FastAPI + the per-target roll-up wire
-# format, neither of which the backfill needs).
-_EVENT_TYPE_ADAPTER: TypeAdapter[Event] = TypeAdapter(Event)
+# v0.9.10 plan 035: opt-in progress callback signature. The
+# CLI wires a callback that logs a progress line every N
+# fights; the library's ``run_backfill`` accepts the callback
+# as an optional kwarg so non-CLI callers (tests, future
+# dashboards) can opt-in without changing the signature.
+# The callback receives the running ``(backfilled, skipped,
+# failed)`` counts + the most recent ``fight_id`` (None if
+# the loop has not yet visited any fight). The callback is
+# invoked AFTER the per-fight state is updated (success or
+# skip) but BEFORE the count is returned -- the canonical
+# "last event fires last" ordering.
+ProgressCallback = Callable[[int, int, int, str | None], None]
 
 
 def run_backfill(
@@ -103,6 +108,7 @@ def run_backfill(
     fight_id: str | None = None,
     limit: int | None = None,
     dry_run: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[int, int, int]:
     """Materialise the per-(fight, account) summary rows.
 
@@ -167,12 +173,19 @@ def run_backfill(
             # match these rows anyway.
             logger.debug("fight %s has no player agents; skipping", fight.id)
             skipped += 1
+            # v0.9.10 plan 035 (semantic fix v2): fire the progress
+            # callback on the SKIP branch too, so the operator sees
+            # progress lines even on datasets with many NPC-only fights
+            # (where every visit goes through this path and the
+            # ``backfilled`` count never increments).
+            if progress_callback is not None:
+                progress_callback(backfilled, skipped, failed, fight.id)
             continue
 
         try:
             _backfill_one_fight(db, fight, player_agents, dry_run=dry_run)
-        except (S3Error, OSError, SQLAlchemyError, ValidationError) as exc:
-            # The 4 caught exception types are the per-fight
+        except (S3Error, OSError, EOFError, SQLAlchemyError, ValidationError) as exc:
+            # The 5 caught exception types are the per-fight
             # failure modes the backfill is designed to survive:
             #
             # - ``S3Error``: a single missing MinIO blob (the
@@ -186,6 +199,14 @@ def run_backfill(
             # - ``OSError``: gzip decode errors on a corrupted
             #   blob (the gzip module raises ``OSError`` with
             #   ``errno.EIO`` on bad CRC + length).
+            # - ``EOFError``: ``gzip.decompress`` on a truncated
+            #   blob raises ``EOFError`` (NOT a subclass of
+            #   ``OSError`` — it inherits from ``Exception``
+            #   directly). A partially-uploaded blob whose gzip
+            #   trailer is missing produces this error. The fight
+            #   is counted as ``failed`` and the next fight is
+            #   processed (same blameless-error contract as the
+            #   other 4 types).
             # - ``SQLAlchemyError``: constraint violations,
             #   transient DB issues, etc.
             # - ``ValidationError``: a single malformed event
@@ -201,12 +222,28 @@ def run_backfill(
             logger.exception("failed backfilling fight %s: %s", fight.id, exc)
             db.rollback()
             failed += 1
+            # v0.9.10 plan 035 (semantic fix v2): fire the progress
+            # callback on the FAIL branch too, so the operator sees
+            # the running per-row counts even when transient failures
+            # accumulate.
+            if progress_callback is not None:
+                progress_callback(backfilled, skipped, failed, fight.id)
             continue
 
         if not dry_run:
             db.commit()
         backfilled += 1
         logger.info("backfilled fight %s (%d player agents)", fight.id, len(player_agents))
+
+        # v0.9.10 plan 035: progress callback. Fires ONCE per visit
+        # AFTER the count is updated (on the SUCCESS branch — the
+        # SKIP and FAIL branches have their own invocations above).
+        # The CLI uses the callback to throttle progress logs via
+        # ``total % N == 0``; non-CLI callers can wire richer
+        # behaviour (metrics, dashboards) without re-implementing
+        # the loop.
+        if progress_callback is not None:
+            progress_callback(backfilled, skipped, failed, fight.id)
 
     return backfilled, skipped, failed
 
@@ -286,8 +323,7 @@ def _backfill_one_fight(
         return
 
     gz_bytes = get_events(fight.events_blob_uri)
-    jsonl = gzip.decompress(gz_bytes)
-    events = [_EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line]
+    events = iter_events_from_blob(gz_bytes)
     _persist_player_summaries(db, fight, events)
     if dry_run:
         db.rollback()  # undo the DELETE+INSERT in dry-run mode
@@ -367,4 +403,89 @@ def _backfill_pre_phase7(
         )
 
 
-__all__ = ["run_backfill"]
+def backfill_role_detection(
+    db: Session,
+    *,
+    fight_id: str | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+) -> tuple[int, int, int]:
+    """Backfill ``detected_role`` + ``detected_tags`` on existing summary rows.
+
+    Discovers ``OrmFightPlayerSummary`` rows where
+    ``detected_role IS NULL`` (pre-v0.10.3 rows), runs
+    :func:`detect_role_lite` on the 3 magnitudes already on each
+    row, and UPDATEs the row in-place. No blob re-download, no
+    re-parse — the heuristic only needs ``total_damage``,
+    ``total_healing``, ``total_buff_removal``, ``profession``,
+    and ``elite_spec``, all of which are already on the summary
+    row.
+
+    Returns ``(updated, skipped, failed)`` count tuple. The
+    caller (CLI script, test suite) is responsible for reporting
+    the counts to the operator.
+
+    Parameters
+    ----------
+    db:
+        An open :class:`sqlalchemy.orm.Session`. The caller owns
+        the lifecycle.
+    fight_id:
+        If set, backfill only rows for the single fight with
+        this id. Useful for targeted runs + the test suite.
+    limit:
+        If set, cap the number of rows processed.
+    dry_run:
+        If True, compute the role/tags but skip the ``db.commit()``.
+        The counts are still returned.
+
+    Idempotency
+    -----------
+    The discovery query filters ``WHERE detected_role IS NULL``,
+    so re-running on already-populated rows is a no-op.
+    """
+    stmt = select(OrmFightPlayerSummary).where(
+        OrmFightPlayerSummary.detected_role.is_(None),
+    )
+    if fight_id is not None:
+        stmt = stmt.where(OrmFightPlayerSummary.fight_id == fight_id)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+
+    rows = list(db.execute(stmt).scalars().all())
+    updated = 0
+    skipped = 0
+    failed = 0
+
+    for row in rows:
+        role, tags = detect_role_lite(
+            total_damage=row.total_damage,
+            total_healing=row.total_healing,
+            total_buff_removal=row.total_buff_removal,
+            profession_int=row.profession,
+            elite_spec_int=row.elite_spec,
+        )
+        row.detected_role = role
+        row.detected_tags = tags
+        updated += 1
+
+    if updated > 0:
+        try:
+            if dry_run:
+                db.rollback()
+            else:
+                db.commit()
+        except SQLAlchemyError:
+            logger.exception("failed committing role detection backfill")
+            db.rollback()
+            failed = updated
+            updated = 0
+
+    return updated, skipped, failed
+
+
+__all__ = [
+    "ProgressCallback",
+    "backfill_role_detection",
+    "run_backfill",
+]  # v0.9.10 plan 035
