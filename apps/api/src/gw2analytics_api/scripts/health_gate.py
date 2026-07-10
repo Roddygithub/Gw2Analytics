@@ -54,11 +54,45 @@ Modes
 - No flags: print the probe response and return 0
   (debug mode).
 
+Error handling (v0.9.10 plan 036)
+---------------------------------
+
+The gate has 4 distinct CI failure modes, each with a
+clear, actionable error message that identifies (a) what
+went wrong, (b) where in the script it happened, (c) the
+canonical fix:
+
+1. **Missing baseline file** (``--check-delta PATH`` is
+   called with a path that doesn't exist): the script
+   prints a clear error + exits 1. The error message
+   identifies the path + reminds the operator that the
+   baseline must be created via the ``--save-baseline``
+   step BEFORE the e2e suite.
+2. **Malformed JSON baseline** (the baseline file exists
+   but contains invalid JSON): the script prints a clear
+   error + exits 1. The error message identifies the path
+   + reminds the operator that the canonical fix is to
+   re-run the ``--save-baseline`` step.
+3. **Probe 5xx** (the in-process ``TestClient`` returns
+   5xx from ``/api/v1/health/summary``): the script
+   prints a clear error + exits 1. The error message
+   identifies the status code + the URL + reminds the
+   operator that the issue is with the upstream health
+   probe (NOT the drift delta).
+4. **Probe response missing ``drift_count``** (the
+   probe returns 200 but the JSON is missing the
+   expected field): the script prints a clear error +
+   exits 1. The error message identifies the missing
+   field + the canonical shape (``SummaryDrift``
+   TypedDict) + reminds the operator that the probe
+   response shape has likely changed.
+
 Exit codes
 ----------
 
 - ``0``: gate passed (or saved baseline, or debug).
-- ``1``: gate failed (delta exceeds budget).
+- ``1``: gate failed (delta exceeds budget, or any of
+  the 4 error paths above).
 """
 
 from __future__ import annotations
@@ -86,27 +120,66 @@ from gw2analytics_api.main import app
 MAX_DRIFT_DELTA: Final[int] = 2
 
 
+def _error_and_exit(msg: str) -> int:
+    """Print ``msg`` to stderr + return 1 (canonical CI exit).
+
+    v0.9.10 plan 036: the gate's 4 distinct error paths
+    each route through this helper so the message format
+    is uniform (``CI gate ERROR: <msg>``). Stderr is the
+    canonical CI failure channel (GitHub Actions UI
+    surfaces stderr as a failure log line).
+    """
+    print(f"CI gate ERROR: {msg}", file=sys.stderr)
+    return 1
+
+
 def _fetch_drift() -> SummaryDrift:
     """Hit /api/v1/health/summary via in-process TestClient.
 
-    The :class:`SummaryDrift` TypedDict is the canonical
-    response shape; this function returns the raw JSON
-    so the caller can compare to the baseline without
-    re-parsing the TypedDict. The
-    :func:`test_health_summary_shape_contract` test in
-    ``apps/api/tests/test_health_summary.py`` pins the
-    shape contract.
+    v0.9.10 plan 036: raises :class:`RuntimeError` with a
+    clear, actionable message if the probe returns 5xx OR
+    the response is missing the ``drift_count`` field. The
+    errors are caught by the caller and converted to a
+    clear ``_error_and_exit`` message.
     """
     client = TestClient(app)
-    response = client.get("/api/v1/health/summary")
-    response.raise_for_status()
+    try:
+        response = client.get("/api/v1/health/summary")
+    except Exception as exc:
+        raise RuntimeError(
+            f"failed to hit /api/v1/health/summary via "
+            f"TestClient: {exc!r}. This is a CI-script "
+            f"failure (the FastAPI app failed to "
+            f"initialise); check the test setup."
+        ) from exc
+    if not response.is_success:
+        raise RuntimeError(
+            f"/api/v1/health/summary returned HTTP "
+            f"{response.status_code}: {response.text!r}. "
+            f"The issue is with the upstream health probe "
+            f"itself (NOT the drift delta). The canonical "
+            f"fix is to debug the health route -- the "
+            f"drift delta is meaningless if the probe "
+            f"can't return a valid response."
+        )
+    data = response.json()
+    if "drift_count" not in data:
+        raise RuntimeError(
+            "/api/v1/health/summary response is missing "
+            "the 'drift_count' field. The canonical "
+            "shape is SummaryDrift (see "
+            "gw2analytics_api.health). The probe "
+            "response shape has likely changed; check "
+            "the v0.8.7+ CHANGELOG."
+        )
     # ``response.json()`` is typed as ``Any`` by FastAPI;
     # we trust the :class:`SummaryDrift` annotation
     # because the
-    # :func:`test_health_summary_shape_contract` test
-    # pins the shape contract. ``cast`` is explicit (no
-    # ``type: ignore`` comment to maintain).
-    return cast(SummaryDrift, response.json())
+    # :func:`test_health_summary_shape_contract` test in
+    # ``apps/api/tests/test_health_summary.py`` pins the
+    # shape contract. ``cast`` is explicit (no
+    # ``# type: ignore`` comment to maintain).
+    return cast(SummaryDrift, data)
 
 
 def _save_baseline(path: str) -> int:
@@ -118,7 +191,10 @@ def _save_baseline(path: str) -> int:
     "ground truth" against which the post-e2e drift is
     measured).
     """
-    data = _fetch_drift()
+    try:
+        data = _fetch_drift()
+    except RuntimeError as exc:
+        return _error_and_exit(str(exc))
     print(f"Health probe baseline: {data}")
     with Path(path).open("w") as f:
         json.dump(data, f)
@@ -133,19 +209,54 @@ def _check_delta(path: str) -> int:
     any larger delta is a signal that the v0.8.4
     materialise silently broke (the e2e suite
     legitimately adds up to 2 fights of drift).
+
+    v0.9.10 plan 036: 4 distinct error paths with
+    clear, actionable error messages (see module
+    docstring).
     """
-    data = _fetch_drift()
+    try:
+        data = _fetch_drift()
+    except RuntimeError as exc:
+        return _error_and_exit(str(exc))
     print(f"Health probe post-e2e: {data}")
 
-    with Path(path).open() as f:
-        baseline = json.load(f)
-    print(f"Health probe baseline: {baseline}")
+    baseline_path = Path(path)
+    if not baseline_path.exists():
+        return _error_and_exit(
+            f"baseline file does not exist: {path!r}. "
+            f"The canonical workflow is to run "
+            f"`--save-baseline {path}` BEFORE the e2e "
+            f"suite (in the .github/workflows/ci.yml "
+            f"Health probe baseline step) and "
+            f"`--check-delta {path}` AFTER the e2e "
+            f"suite. If the baseline was deleted, "
+            f"re-run the --save-baseline step."
+        )
+    try:
+        with baseline_path.open() as f:
+            baseline = json.load(f)
+    except json.JSONDecodeError as exc:
+        return _error_and_exit(
+            f"baseline file {path!r} is malformed JSON: "
+            f"{exc.msg} at line {exc.lineno} column "
+            f"{exc.colno}. The canonical fix is to "
+            f"re-run the `--save-baseline {path}` "
+            f"step (a partial write from a crashed "
+            f"--save-baseline run is the most common "
+            f"cause)."
+        )
 
-    # JSON integers deserialize to Python ``int``, so the
-    # ``int()`` casts are not strictly needed. They are
-    # omitted because the
-    # :class:`SummaryDrift` TypedDict pins the field
-    # types at the boundary.
+    if "drift_count" not in baseline:
+        return _error_and_exit(
+            f"baseline file {path!r} is missing the "
+            f"'drift_count' field. The canonical shape "
+            f"is SummaryDrift (see "
+            f"gw2analytics_api.health). The baseline "
+            f"was likely created against an older API "
+            f"version; re-run `--save-baseline {path}` "
+            f"against the current API."
+        )
+
     delta = data["drift_count"] - baseline["drift_count"]
     # The ``>=`` is the off-by-one fix: the e2e suite
     # legitimately adds ``+1`` to ``drift_count`` (the
