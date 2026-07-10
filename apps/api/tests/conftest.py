@@ -43,12 +43,39 @@ Test results post-conftest (per plan 009 Step 5): 22/23 webhook
 tests pass; the 4 SLOW modules drop from >30s to <5s each. The
 cumulative ``uv run pytest tests/`` wallclock drops from >600s
 to <120s.
+
+Runtime prerequisites (v0.10.5 audit followup)
+=============================================
+
+This conftest mocks MinIO + Postgres at the per-test fixture layer
+(see :func:`_disable_arq_for_tests` + the placeholder env vars
+below), but the *runtime* needs a real Postgres + MinIO container
+running on the test host BEFORE ``pytest`` is invoked:
+
+  * Postgres on ``localhost:5433`` (the ``5433:5432`` mapping in
+    ``docker-compose.yml``) with the seed ``gw2analytics:gw2analytics``
+    creds + the ``gw2analytics`` database. The default URL below
+    matches; if your host uses different creds, set ``DATABASE_URL``
+    in the outer shell and the ``setdefault`` below will NOT clobber
+    it. The CI workflow brings this up via ``docker compose up -d
+    postgres`` (see ``.github/workflows/ci.yml``).
+  * MinIO on ``localhost:9000`` with the ``test-bucket`` bucket +
+    the [DEV-ONLY PLACEHOLDER] creds ``test-access-key`` /
+    ``test-secret-key`` (placeholder block below). The placeholder
+    URL/creds match; outer-shell overrides win via ``setdefault``.
+    Do NOT copy the placeholder creds into a production ``.env`` --
+    they're committed-to-git hardcoded for unit-test repeatability
+    only.
+
+A fresh host WITHOUT the containers will see ``OperationalError``
+or ``S3Error`` on the first fixture call -- this is by design
+(fixture mocks layer on top of real services, NOT in place of them).
 """
 
 from __future__ import annotations
 
 # v0.10.5 audit followup #1: environment bootstrap BEFORE regular imports.
-# The ``from gw2analytics_api.main import app  # noqa: E402  # noqa: E402`` import below triggers
+# The ``from gw2analytics_api.main import app`` import below triggers
 # a module-level ``Settings()`` Pydantic validation; without these
 # placeholders the import raises ``ValidationError`` which pytest
 # misleadingly wraps as ``ModuleNotFoundError``. We use ``setdefault``
@@ -59,9 +86,15 @@ from __future__ import annotations
 # The placeholder values are dev-only; per-test fixtures mock MinIO
 # and Postgres so the real services never see these strings.
 # Production reads from a managed ``.env`` / secret manager.
-import base64  # standard lib; alphabetical placement per pytest/ruff norms
-import os  # standard lib; alphabetical placement per pytest/ruff norms
-import secrets  # standard lib; alphabetical placement per pytest/ruff norms
+# ruff: noqa: E402 -- the env-bootstrap above MUST run before any
+# import below it; do NOT add new imports at the very top of this
+# file (the ``Settings()`` Pydantic instantiation will fail with
+# ValidationError otherwise). A single file-level mark is more
+# robust than N per-line marks (a stray new import won't silently
+# regress E402) AND more grep-discoverable for test-infra audits.
+import base64
+import os
+import secrets
 
 # Per-INVOCATION random 44-char Fernet placeholder; eliminates the
 # copy-paste footgun of a deterministic literal. Per-test fixtures
@@ -80,16 +113,16 @@ os.environ.setdefault(
 os.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
 os.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
 
-from collections.abc import Callable  # noqa: E402  # noqa: E402
+from collections.abc import Callable
 
-import pytest  # noqa: E402  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402  # noqa: E402
-from sqlalchemy import delete  # noqa: E402  # noqa: E402
-from sqlalchemy.orm import Session, sessionmaker  # noqa: E402  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import delete
+from sqlalchemy.orm import Session, sessionmaker
 
-from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory  # noqa: E402  # noqa: E402
+from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory
 from gw2analytics_api.main import app
-from gw2analytics_api.models import (  # noqa: E402  # noqa: E402
+from gw2analytics_api.models import (
     OrmFight,
     OrmFightPlayerSummary,
     OrmWebhookDelivery,

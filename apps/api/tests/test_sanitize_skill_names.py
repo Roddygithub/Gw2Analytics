@@ -154,7 +154,7 @@ def test_sanitize_name_truncation_is_idempotent() -> None:
 
 
 def test_sanitize_name_default_max_length_is_128() -> None:
-    """v0.10.2 hotfix followup #5: the default ``max_length`` matches the String(128) column constraint.
+    """v0.10.2 hotfix followup #5: default ``max_length`` matches the String(128) column.
 
     Pins the contract that the helper's default truncation cap is
     in lockstep with the ORM column constraint. A future schema
@@ -176,15 +176,14 @@ def test_sanitize_name_default_max_length_is_128() -> None:
 
 
 def test_sanitize_name_custom_max_length() -> None:
-    """v0.10.2 hotfix followup #5: callers can override the truncation cap (defense for future schema bumps).
+    """v0.10.2 hotfix followup #5: caller-overridable cap (defense for schema bumps).
 
-    The ``max_length`` parameter is exposed so a future
-    ``String(256)`` migration (or a per-column override for
-    e.g. an ``OrmFightEvent.payload`` TEXT column) can use the
-    same helper with a different cap. The test pins the
-    parameter is wired correctly: 50-char cap yields a 50-char
-    output for a 200-char input, AND a 50-char input
-    round-trips unchanged.
+    Future schema bumps may lift the column cap (e.g. ``String(256)``
+    migration OR per-column override for ``OrmFightEvent.payload``
+    TEXT). The ``max_length`` parameter is exposed so callers can
+    adjust the per-call cap. The test pins the parameter is wired
+    correctly: 50-char cap yields 50-char output for a 200-char
+    input, AND a 50-char input round-trips unchanged.
     """
     assert _sanitize_name("A" * 200, max_length=50) == "A" * 50
     assert _sanitize_name("A" * 50, max_length=50) == "A" * 50
