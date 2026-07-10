@@ -100,7 +100,6 @@ def _make_cbtevent(
         0,
         0,
         0,
-        0,
     )[:_EVENT_SIZE]
 
 
