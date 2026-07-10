@@ -56,11 +56,7 @@ def iter_events_from_blob(gz_bytes: bytes) -> list[Event]:
     /api/v1/upload polling interval.
     """
     jsonl = gzip.decompress(gz_bytes)
-    return [
-        _EVENT_TYPE_ADAPTER.validate_json(line)
-        for line in jsonl.splitlines()
-        if line.strip()
-    ]
+    return [_EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line.strip()]
 
 
 __all__ = ["iter_events_from_blob"]

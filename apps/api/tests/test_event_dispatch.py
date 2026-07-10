@@ -45,7 +45,6 @@ import json
 import pytest
 
 from gw2_core import DamageEvent, HealingEvent
-
 from gw2analytics_api._event_dispatch import iter_events_from_blob
 
 
@@ -115,7 +114,10 @@ def test_iter_events_from_blob_round_trips_single_damage_event() -> None:
     assert events[0].source_agent_id == 42
     assert events[0].target_agent_id == 99
     assert events[0].skill_id == 7
-    assert events[0].damage == 500def test_iter_events_from_blob_drops_whitespace_only_lines() -> None:
+    assert events[0].damage == 500
+
+
+def test_iter_events_from_blob_drops_whitespace_only_lines() -> None:
     """Trailing empty + whitespace-only lines are dropped, not parsed.
 
     The parser can emit trailing blank separators between events; the
@@ -124,7 +126,7 @@ def test_iter_events_from_blob_round_trips_single_damage_event() -> None:
     semantics in :func:`iter_events_from_blob`'s splitlines
     comprehension.
 
-    All four whitespace classes the parser may encounter are pinned:
+    All seven whitespace classes the parser may encounter are pinned:
 
     * ``b""`` -- fully empty line (was caught by the prior ``if line``
       filter; the round-2 ``if line.strip()`` keeps the behaviour).
@@ -140,7 +142,10 @@ def test_iter_events_from_blob_round_trips_single_damage_event() -> None:
     this test pins the cross-platform correctness so a future
     "optimization" to a non-stripping filter regresses loudly.
     """
-    valid = b'{"event_type":"DAMAGE","time_ms":1000,"source_agent_id":42,"target_agent_id":99,"skill_id":7,"damage":500}'
+    valid = (
+        b'{"event_type":"DAMAGE","time_ms":1000,'
+        b'"source_agent_id":42,"target_agent_id":99,"skill_id":7,"damage":500}'
+    )
     # Every whitespace class Python's ``.strip()`` strips: space, tab,
     # newline, carriage return, form feed, vertical tab. Each is padded
     # around the valid JSON to assert the dispatch still surfaces the
@@ -162,6 +167,7 @@ def test_iter_events_from_blob_round_trips_single_damage_event() -> None:
     events = iter_events_from_blob(gz)
 
     assert len(events) == 1
+    assert isinstance(events[0], DamageEvent)
     assert events[0].damage == 500
 
 
