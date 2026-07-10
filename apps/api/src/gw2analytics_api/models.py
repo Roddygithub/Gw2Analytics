@@ -33,6 +33,7 @@ from sqlalchemy import (
     Text,
     Uuid,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gw2analytics_api.database import Base
@@ -65,7 +66,22 @@ class Upload(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
-    sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # v0.10.5 plan 006 fix: ``unique=True`` (NOT ``index=True``).
+    # Earlier the column carried both flags (``unique=True,
+    # index=True``) which emitted 2 indexes on the column -- a
+    # non-unique ``ix_uploads_sha256`` backing index AND a
+    # unique-backed ``uploads_sha256_key`` index. The
+    # non-unique index is dead weight (the UNIQUE already
+    # covers lookups on the same column) and was the source of
+    # the post-0013 alembic-check drift flagged in
+    # ``advisor-plans/006`` (the ``uploads_sha256`` index
+    # nameplate collision with the constraint's auto-index).
+    # ``unique=True`` alone creates exactly one
+    # unique-backed index (Postgres uses the constraint name
+    # ``uploads_sha256_key`` as the index name on
+    # ``op.create_unique_constraint``), so the
+    # schema-after-migration matches the ORM.
+    sha256: Mapped[str] = mapped_column(String(64), unique=True)
     original_filename: Mapped[str] = mapped_column(String(255))
     size_bytes: Mapped[int] = mapped_column(Integer)
     uploaded_at: Mapped[datetime] = mapped_column(
@@ -266,6 +282,18 @@ class OrmFightPlayerSummary(Base):
     # algorithm + the rationale.
     detected_role: Mapped[str | None] = mapped_column(String(30), nullable=True)
     detected_tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # v0.10.5 plan 135: condi/power split (additive nullable). The
+    # split is build-date-gated: pre-20240501 arcdps uses skill-name
+    # lookup (KNOWN_CONDI_NAMES), post-20240501 arcdps encodes condi in
+    # the raw cbtevent ``buff_dmg`` field (deferred until parser-side
+    # integration lands; see ``advisor-plans/006a``). NULL means "split
+    # unavailable" (pre-v0.10.5 row, or post-20240501 fight that the
+    # v0.10.4 parser did not surface buff_dmg on). The fast-path projects
+    # both columns; the slow-path computes them inline during the blob
+    # walk. See ``libs/gw2_analytics/condi_power_split.py`` for the
+    # algorithm + the calibration note.
+    power_damage: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    condi_damage: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class OrmWebhookSubscription(Base):
@@ -286,7 +314,15 @@ class OrmWebhookSubscription(Base):
     # Python attr is ``filter_payload`` to shadow the Python builtin
     # ``filter()`` (which shadows nothing in practice but the
     # symbolic collision is a footgun in IDE auto-complete).
-    filter_payload: Mapped[dict[str, object]] = mapped_column("filter", JSON, nullable=False)
+    # v0.10.5 plan 006 option (b): revert ORM column to JSONB(astext_type=Text()).
+    # The migration history declares the column JSONB (in 0006_webhooks);
+    # the v2 ORM drifted to JSON (dropping the GIN-indexability contract).
+    # ``advisor-plans/005`` lists this as drift item C.11; reverting the
+    # ORM brings the schema back into lockstep with the migration history
+    # without requiring a migration-side type flip.
+    filter_payload: Mapped[dict[str, object]] = mapped_column(
+        "filter", JSONB(astext_type=Text()), nullable=False
+    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # v0.10.0 plan 031: secret at rest is Fernet-envelope-encrypted
     # and stored as raw bytes (CWE-256 closure). The plaintext
