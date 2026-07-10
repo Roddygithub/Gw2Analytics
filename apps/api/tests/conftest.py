@@ -91,6 +91,7 @@ from __future__ import annotations
 # robust than N per-line marks (a stray new import won't silently
 # regress E402) AND more grep-discoverable for test-infra audits.
 import base64
+import io
 import os
 import secrets
 
@@ -122,6 +123,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from sqlalchemy.orm import Session, sessionmaker
+
+from minio.error import S3Error
 
 from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory
 from gw2analytics_api.main import app
@@ -204,6 +207,111 @@ def _disable_arq_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# v0.10.8 plan 140 Fix-B: in-memory FakeMinio for the S3 read-path mocks
+# ---------------------------------------------------------------------------
+# The classes below replace the bare ``MagicMock`` returned by the
+# ``_mock_s3`` autouse fixture (v0.10.7 plan 139 Followup-1). The bare
+# MagicMock surfaced ``TypeError: a bytes-like object is required, not
+# 'MagicMock'`` on every ``storage.get_events(...)`` call because the
+# sub-MagicMock returned from ``client.get_object(bucket, key).read()``
+# was not real bytes for ``gzip.decompress(...)``. The class-based fake
+# stores bytes on ``put_object`` and returns them as real ``bytes`` from
+# ``get_object(...).read()``. The 8 MagicMock-BytesIO failures (4 in
+# test_uploads_e2e.py + 4 in test_fight_rollup_cap.py) collapse on this
+# single change.
+# ---------------------------------------------------------------------------
+
+
+class _FakeHttpResponse:
+    """Mock urllib3.HTTPResponse for :class:`FakeMinio` read-path.
+
+    The MinIO ``get_object`` production method returns a
+    ``urllib3.HTTPResponse``-like object. Our fake mirrors only the
+    three methods :func:`gw2analytics_api.storage.get_events` calls:
+    ``.read() -> bytes`` + ``.close() -> None`` +
+    ``.release_conn() -> None``.
+    """
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def read(self) -> bytes:
+        return self._data
+
+    def close(self) -> None:
+        """No-op: the in-memory blob has no socket to close."""
+
+    def release_conn(self) -> None:
+        """No-op: the in-memory blob has no urllib3 pool to release."""
+
+
+class FakeMinio:
+    """Hermetic in-memory blob store for the S3 read-path mocks.
+
+    Implements the 4 MinIO API surface methods used by the test suite:
+
+    * :meth:`bucket_exists` -- :func:`storage._ensure_bucket` first call.
+    * :meth:`make_bucket` -- :func:`storage._ensure_bucket` create call.
+    * :meth:`put_object` -- :func:`put_zevtc` + :func:`put_events`.
+    * :meth:`get_object` -- :func:`get_events`.
+
+    On :meth:`get_object` for a missing key, raises a real
+    :class:`minio.error.S3Error` so the route handlers' ``except
+    S3Error`` clauses match production behavior. Function-scoped (the
+    ``_mock_s3`` fixture instantiates a fresh ``FakeMinio`` per test)
+    so each test sees hermetic state without docker-compose MinIO.
+    """
+
+    def __init__(self) -> None:
+        self._buckets: set[str] = set()
+        self._storage: dict[str, dict[str, bytes]] = {}
+
+    def bucket_exists(self, bucket: str) -> bool:
+        return bucket in self._buckets
+
+    def make_bucket(self, bucket: str) -> None:
+        self._buckets.add(bucket)
+        self._storage.setdefault(bucket, {})
+
+    def put_object(
+        self,
+        bucket: str,
+        key: str,
+        data: io.BytesIO,
+        length: int,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        # MinIO's put_object consumes the BytesIO stream; the
+        # upstream contract is ``data`` is a file-like object that
+        # yields ``length`` bytes. Read exactly ``length`` bytes if
+        # positive, otherwise drain the stream for backwards compat
+        # with tests that pass length=0.
+        self._buckets.add(bucket)  # implicit create on first write
+        self._storage.setdefault(bucket, {})
+        self._storage[bucket][key] = (
+            data.read(length) if length > 0 else data.read()
+        )
+
+    def get_object(self, bucket: str, key: str) -> _FakeHttpResponse:
+        if bucket not in self._storage or key not in self._storage[bucket]:
+            # ``S3Error(code, message, resource, request_id, host_id, response)``.
+            # ``NoSuchKey`` is the production code our routes map to 404.
+            raise S3Error(
+                "NoSuchKey",
+                f"object {key!r} not found in bucket {bucket!r}",
+                key,
+                None,
+                None,
+                None,
+            )
+        return _FakeHttpResponse(self._storage[bucket][key])
+
+    def remove_object(self, bucket: str, key: str) -> None:
+        if bucket in self._storage:
+            self._storage[bucket].pop(key, None)
+
+
+# ---------------------------------------------------------------------------
 # v0.9.2 plan 006 regression test fixtures
 # ---------------------------------------------------------------------------
 # The ``test_background_task_session_alive_at_invocation`` regression
@@ -258,42 +366,25 @@ def get_sessionmaker() -> Callable[[], sessionmaker[Session]]:
 
 
 @pytest.fixture(autouse=True)
-def _mock_s3(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Hermetic MinIO S3 client for the entire test suite.
+def _mock_s3(monkeypatch: pytest.MonkeyPatch) -> FakeMinio:
+    """Hermetic MinIO S3 client for the entire test suite (Fix-B).
 
-    v0.10.7 plan 139 Followup-1: the prior pattern leaked S3
-    calls to the real MinIO container via the
-    :func:`gw2analytics_api.storage.get_minio` factory +
-    :class:`gw2analytics_api.config.Settings` chain. The
-    conftest setdefault env vars
-    (``S3_ACCESS_KEY=test-access-key`` etc.) don't match the
-    real MinIO creds (``gw2analytics``/``gw2analytics-secret``
-    per docker-compose.yml), so 26 tests failed with
-    ``S3Error: code: InvalidAccessKeyId`` on the first
-    :func:`minio.api.bucket_exists` call.
+    v0.10.7 plan 139 Followup-1 introduced this fixture with a bare
+    :class:`MagicMock` for the S3 patch, which surfaced 8 follow-on
+    failures with ``TypeError: a bytes-like object is required, not
+    'MagicMock'`` because ``storage.get_events``'s sub-MagicMock
+    ``response.read()`` returned another MagicMock instead of real
+    bytes for ``gzip.decompress``. v0.10.8 plan 140 Fix-B replaces
+    the bare MagicMock with a :class:`FakeMinio` instance that
+    captures bytes on ``put_object`` and returns them on
+    ``get_object(...).read()``, so the entire read-path is hermetic.
 
-    This fixture monkeypatches the factory to return a fresh
-    :class:`MagicMock` per test. All :func:`put_zevtc`,
-    :func:`put_events`, and :func:`get_events` calls now hit
-    the mock and return ``MagicMock()`` defaults. The
-    hermetic test suite no longer depends on docker-compose
-    state.
-
-    Tests that want to verify the real S3 path (e.g. an
-    end-to-end test of the storage layer) can accept the
-    ``_mock_s3`` fixture as a parameter and replace the
-    patch with a real client:
-
-    .. code-block:: python
-
-        def test_real_s3(_mock_s3: MagicMock) -> None:
-            from gw2analytics_api.storage import get_minio
-            _mock_s3.stop()
-            assert get_minio() is not None
+    Each test gets a fresh :class:`FakeMinio` (function-scoped) so
+    the suite never depends on docker-compose MinIO state.
     """
-    mock_minio = MagicMock()
+    fake_minio = FakeMinio()
     monkeypatch.setattr(
         "gw2analytics_api.storage.get_minio",
-        lambda: mock_minio,
+        lambda: fake_minio,
     )
-    return mock_minio
+    return fake_minio
