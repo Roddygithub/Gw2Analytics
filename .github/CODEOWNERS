@@ -36,11 +36,27 @@
 /libs/gw2_evtc_parser/**    @Roddygithub
 /libs/gw2_api_client/**     @Roddygithub
 
-# Apps/api: route table, schemas, scripts, alembic migrations.
-# Most code lives here; the same cascade rationale applies for
-# regressions but the blast radius is contained (apps/api only).
-# Still gated for parity + future-proofing.
-# /apps/api/** removed: apps/api IS the surface area for normal
-# feature PRs; gating every API change on a maintainer review
-# would bottleneck the team. The PR-level CI gates handle that.
+# v0.10.7 plan 139: high-risk non-lib paths. Round-2 reviewer
+# flagged these as P0 data risk / infra breakages:
+#   - apps/api/alembic/versions/**: schema migrations. A bad
+#     migration = P0 data corruption/loss or full-table lock.
+#     The rule is NARROW (only migration files, not the rest of
+#     apps/api) so it doesn't bottleneck normal feature PRs.
+#   - docker-compose.yml: infra port + service config. A bad
+#     port can break the dev stack for the entire team. Reviewed
+#     by the owner so the same person who set up the port in
+#     plans/136-138 also gates future port changes.
+#   - Makefile: CI bootstrap targets. A bad target = CI broken
+#     for everyone until reverted.
+# All 3 are gated because they touch blast-radius surfaces
+# wider than a single PR can roll back quickly.
+/apps/api/alembic/versions/** @Roddygithub
+/docker-compose.yml          @Roddygithub
+/Makefile                    @Roddygithub
+
+# Apps/api surface (routes, schemas, scripts): NOT gated. The
+# apps/api IS the surface area for normal feature PRs; gating
+# every API change on a maintainer review would bottleneck the
+# team. The per-PR CI gates (ruff + mypy + pytest) handle that.
+# Migrations and infra are gated above; feature code is not.
 
