@@ -20,6 +20,21 @@ Field-shape sanity (locked against ``libs/gw2_core/src/gw2_core/models.py``):
 
 Future regressions that break empty-line handling, the discriminator
 lookup, OR event ordering will be caught by these tests.
+
+MODULE-PURE-UNIT HYGIENE WARNING
+=================================
+
+ALL 3 tests in this module are intentionally pure-unit (NO DB, NO
+network, NO filesystem). The module-local ``_isolate_test_state``
+autouse fixture is a NO-OP shadow of the conftest's DB-cleanup
+autouse (``apps/api/tests/conftest.py``).
+
+If a FUTURE test added to this module DOES need Postgres, you MUST
+either REMOVE THIS SHADOW entirely (to let the conftest's autouse
+run again) OR scope the shadow to the specific pure-unit tests via
+a marker + ``pytest_collection_modifyitems``. Leaving a DB-touching
+test running under the no-op shadow produces silent cross-test
+contamination (no per-test cleanup).
 """
 
 from __future__ import annotations
@@ -66,6 +81,13 @@ def _isolate_test_state() -> None:
     v0.10.5 audit followup: ALL 3 tests in this module are pure-unit
     (NO DB). If a future test added here DOES need Postgres, REMOVE
     THIS SHADOW or scope it to the specific pure-unit tests.
+
+    Scope note: this shadow disables ONLY the conftest's
+    ``_isolate_test_state`` DB-cleanup autouse. The conftest's
+    other autouse ``_disable_arq_for_tests`` still runs (and
+    monkeypatches ``arq.create_pool`` + sets
+    ``ALLOW_INREQUEST_PARSE_FALLBACK=1``); those don't touch DB so
+    they're irrelevant for these pure-gzip tests.
     """
 
 
