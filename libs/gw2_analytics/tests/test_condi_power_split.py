@@ -7,6 +7,8 @@ Pattern model: ``libs/gw2_analytics/tests/test_role_detection_voe_specs.py``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from gw2_analytics.condi_power_split import (
     KNOWN_CONDI_NAMES,
     split_condi_power,
@@ -14,7 +16,7 @@ from gw2_analytics.condi_power_split import (
 from gw2_core import DamageEvent
 
 
-def _skill_lookup(table: dict[int, str]):
+def _skill_lookup(table: dict[int, str]) -> Callable[[int], str | None]:
     def get(skill_id: int) -> str | None:
         return table.get(skill_id)
 
