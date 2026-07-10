@@ -22,9 +22,25 @@
 # future `.github/scripts/*` or `.github/actions/*` repos.
 .github/** @Roddygithub
 
-# Belt-and-braces: pin the `gw2_core` library to a maintainer
-# review. This is the lowest-level library (events, models); changes
-# here cascade into gw2_analytics + gw2_evtc_parser + gw2_api_client
-# + the api app, so a regression surfaces as a P0 outage. A required
-# review adds 1 human checkpoint before the cascade ships.
-/libs/gw2_core/** @Roddygithub
+# Belt-and-braces: pin ALL ws-cascade libs to maintainer review.
+# Each of these ships its own changes that ripple into apps/api:
+#   - gw2_core:           events, models (lowest layer)
+#   - gw2_analytics:      per-target aggregators, role detection
+#   - gw2_evtc_parser:    arcdps evtc log parsing
+#   - gw2_api_client:     GW2 community API client (auth, worlds)
+# A regression in any one cascades as a P0 outage in apps/api.
+# The 1-review-per-lib rule adds a human checkpoint before the
+# cascade ships, complementing the per-PR CI gates.
+/libs/gw2_core/**           @Roddygithub
+/libs/gw2_analytics/**      @Roddygithub
+/libs/gw2_evtc_parser/**    @Roddygithub
+/libs/gw2_api_client/**     @Roddygithub
+
+# Apps/api: route table, schemas, scripts, alembic migrations.
+# Most code lives here; the same cascade rationale applies for
+# regressions but the blast radius is contained (apps/api only).
+# Still gated for parity + future-proofing.
+# /apps/api/** removed: apps/api IS the surface area for normal
+# feature PRs; gating every API change on a maintainer review
+# would bottleneck the team. The PR-level CI gates handle that.
+

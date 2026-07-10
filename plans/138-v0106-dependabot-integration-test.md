@@ -38,20 +38,37 @@ dependabot cycle.
 - [ ] Verify CODEOWNERS flags the PR for `@Roddygithub` review.
 - [ ] Verify the merge button is disabled until approval granted.
 
-### Scenario 3 — major bump on a blacklisted action
+### Scenario 3 — major bump on a blacklisted action (operator-controllable)
 
-- [ ] (Cannot auto-trigger.) Instead, observe dependabot's weekly run.
-- [ ] Confirm no PR is opened for any of:
+- [ ] Open a hand-crafted branch that bumps `actions/checkout@v4`
+      -> `actions/checkout@v8` in `.github/workflows/ci.yml`. Open
+      a PR. Confirm the PR is allowed to be created (dependabot's
+      `ignore:` filter only suppresses DEPENDABOT-emitted PRs; the
+      `ignore` block does not block human-authored PRs).
+- [ ] Confirm CODEOWNERS flags this PR for `@Roddygithub` review
+      (the `.github/**` rule fires; the auto-merge workflow's
+      paths-ignore also blocks auto-merge).
+
+### Scenario 4 — observe next dependabot cycle
+
+- [ ] Observe dependabot's weekly run on the github-actions
+      ecosystem. Confirm NO dependabot PR is opened for:
       actions/checkout, actions/upload-artifact, actions/setup-node,
-      astral-sh/setup-uv, pnpm/action-setup (all filtered by ignore:).
+      astral-sh/setup-uv, pnpm/action-setup, dependabot/fetch-metadata
+      (all 6 filtered by ignore: for the actions + the action
+      itself). Depends on timing — record the date the cycle ran.
+- [ ] Operator-controllable ALTERNATIVE: `gh workflow run
+      dependabot-auto-merge.yml` does NOT trigger dependabot's
+      cycle (dependabot has its own scheduler). The observation
+      step is non-falsifiable on the day; record the timestamp so
+      future post-mortems can correlate.
 
-### Scenario 4 — minor bump on fetch-metadata
+### Scenario 5 — fetch-metadata SHA pin operator-initiated update
 
-- [ ] Observe next weekly cycle.
-- [ ] Confirm `dependabot/fetch-metadata` PR is NOT opened (the
-      `[major, minor, patch]` ignore filter suppresses all
-      dependabot-emitted bumps for this action — operator must
-      bump the SHA manually).
+- [ ] (operator-initiated.) Manually bump `dependabot/fetch-metadata@v2`
+      to a fresh SHA via PR after upstream releases. Confirms the
+      `[major, minor, patch]` ignore does NOT block human PRs (only
+      dependabot PRs); the SHA pin lands via CODEOWNERS review + CI.
 
 ## Verification commands (for the user)
 
@@ -78,7 +95,9 @@ uv run pytest apps/api/tests --no-header -q
 
 ## Acceptance bar
 
-- All 4 scenarios pass.
+- Scenarios 1, 2, 3, 5 pass (operator-controllable inside one PR cycle).
+- Scenario 4 is a post-cycle observation record (non-falsifiable on
+  the day; track via timestamp).
 - `pytest apps/api/tests` exits 0 with no env var overrides.
 - `git log --oneline origin/main -1` matches local HEAD.
 - Branch-protection `gh api` returns a non-null protection rule.
@@ -94,9 +113,13 @@ uv run pytest apps/api/tests --no-header -q
    - **CODEOWNERS layer**: delete `.github/CODEOWNERS` file (no
      revert needed).
 
-2. **Hard reset to known-good a812d7**: `git reset --hard aa812d7
-   && git push --force-with-lease origin main`. Loses all v0.10.6
-   work but restores a CI-green state.
+2. **Hard reset to known-good `9f70aaf`** (the post-port-fix HEAD
+   that includes docker-compose port-5432 + CODEOWNERS + plans/138):
+   `git reset --hard 9f70aaf && git push --force-with-lease origin
+   main`. The PRE-port-fix anchor `aa812d7` no longer applies (it
+   used port 5433 in docker-compose) so reverting to `aa812d7`
+   would re-introduce the port-5432 conflict. The CI-green state
+   is `9f70aaf`, not `aa812d7`.
 
 3. **Test-suite won't run after port fix**: the dev host has a
    foreign postgres on port 5432 (`wvw-postgres`). Run
