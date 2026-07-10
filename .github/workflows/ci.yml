@@ -279,7 +279,7 @@ jobs:
       # failure only) and uploaded as a build artifact below.
       # ----------------------------------------------------------------
       - name: "Visual regression e2e (PR only)"
-        if: false  # v0.10.8 plan 141: temporarily disabled (all 7 dependabot PRs were failing on this gate; per plans/141 diagnosis this is the workflow-side root cause). Restore `github.event_name == 'pull_request'` after #14, #12, #13 PRs auto-merge cleanly.
+        if: github.event_name == 'pull_request'
         working-directory: web
         run: pnpm exec playwright test --project=visual-regression
 
