@@ -38,16 +38,20 @@ dependabot cycle.
 - [ ] Verify CODEOWNERS flags the PR for `@Roddygithub` review.
 - [ ] Verify the merge button is disabled until approval granted.
 
-### Scenario 3 — major bump on a blacklisted action (operator-controllable)
+### Scenario 3 — invalid bump on a blacklisted action (operator-controllable)
 
 - [ ] Open a hand-crafted branch that bumps `actions/checkout@v4`
-      -> `actions/checkout@v8` in `.github/workflows/ci.yml`. Open
-      a PR. Confirm the PR is allowed to be created (dependabot's
-      `ignore:` filter only suppresses DEPENDABOT-emitted PRs; the
-      `ignore` block does not block human-authored PRs).
+      -> `actions/checkout@v999` in `.github/workflows/ci.yml`. Open
+      a PR. The `@v999` ref does NOT exist (similar classification
+      to dependabot's historic `@v7` bug for actions that only ship
+      `@v4`); the goal of this scenario is to confirm CI rejects an
+      invalid bump with a `Set up job` failure on a HUMAN-authored PR.
 - [ ] Confirm CODEOWNERS flags this PR for `@Roddygithub` review
       (the `.github/**` rule fires; the auto-merge workflow's
       paths-ignore also blocks auto-merge).
+- [ ] Confirm the CI pipeline reports `Set up job` failure on the
+      `@v999` ref (this is the SAME failure mode as the dependabot
+      bug; proving human PRs surface the same defense).
 
 ### Scenario 4 — observe next dependabot cycle
 
@@ -69,6 +73,12 @@ dependabot cycle.
       to a fresh SHA via PR after upstream releases. Confirms the
       `[major, minor, patch]` ignore does NOT block human PRs (only
       dependabot PRs); the SHA pin lands via CODEOWNERS review + CI.
+- Step-by-step:
+  - [ ] Find the latest released SHA at
+        <https://github.com/dependabot/fetch-metadata/releases>
+  - [ ] Edit `.github/workflows/dependabot-auto-merge.yml`:
+        `uses: dependabot/fetch-metadata@<sha>` (full SHA, not tag)
+  - [ ] Open PR; expect CODEOWNERS review + green CI + manual merge
 
 ## Verification commands (for the user)
 
@@ -99,6 +109,17 @@ uv run pytest apps/api/tests --no-header -q
 - Scenario 4 is a post-cycle observation record (non-falsifiable on
   the day; track via timestamp).
 - `pytest apps/api/tests` exits 0 with no env var overrides.
+- pytest_env precedence TRAP verification (this shipped during the
+  port-5432 fix; verify the new default behavior is the documented
+  behavior):
+  - [ ] `unset DATABASE_URL && uv run pytest apps/api/tests` exits 0
+        AND connects to port 5432. Proves pytest_env's URL is the
+        authoritative default once committed.
+  - [ ] `DATABASE_URL=postgresql://...:5433/... uv run pytest`
+        exits non-zero (or skips with auth failure). Proves pytest_env's
+        `overwrite=True` default is in effect (shell override does NOT
+        win). If shell override DOES win, that is a v0.10.7 candidate
+        (consider setting `pytest_env.overwrite = False` in conftest).
 - `git log --oneline origin/main -1` matches local HEAD.
 - Branch-protection `gh api` returns a non-null protection rule.
 
