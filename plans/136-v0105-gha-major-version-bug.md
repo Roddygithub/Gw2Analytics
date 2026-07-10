@@ -18,7 +18,7 @@ This document captures the investigation + the long-term fix.
 | #1 | actions/checkout | `@v7` | `@v4` | Auto-merged → commit `56c8378` |
 | #2 | actions/upload-artifact | `@v7` | `@v4` | Open |
 | #3 | pnpm/action-setup | `@v6` | `@v4` | Open |
-| #4 | astral-sh/setup-uv | `@v7` | (latest at time of writing; verify on Marketplace) | Open — dependabot emitted a v7 ref the action does not ship |
+| #4 | astral-sh/setup-uv | `@v7` | unknown (do not trust dependabot's metadata for this action) | Open — dependabot emitted a v7 ref the action does not ship |
 | #5 | actions/setup-node | `@v6` | `@v4` | Open |
 
 (PR #8 was a no-op since Phase 1A already absorbed the bump.)
@@ -54,50 +54,56 @@ when actually CI is broken at the infrastructure layer.
 
 ## Why dependabot picked the wrong tags
 
-The exact mechanism dependabot used to compute these invalid majors
-is not auditable from inside the dependabot logs. Two likely classes:
-
-**Theory A — action's internal version vs published git tags.**
-Some actions publish an internal `version` field in `action.yml`
-that does not track the repo's git tag sequence. If dependabot
-prefers this internal version when computing major bumps, it
-can pick `v7` for an action whose topmost git tag is `v5`.
-
-**Theory B — dependabot ecosystem metadata bug.**
-For GitHub-owned actions that have not published a new major in
-years (`actions/checkout`, `actions/setup-node`, `actions/upload-artifact`
-still ship `v4` only), dependabot's internal "latest major" map
-appears to disagree with the real tag stream. We were unable to
-reproduce the bug locally to confirm which theory applies.
-
-In either case the fix is the same: **disable dependabot auto-merge
-for the `github-actions` ecosystem** so a human reviews every PR
-before it lands on `main`.
+Not investigated end-to-end. The exact mechanism is not auditable
+from inside dependabot logs, and a deep investigation is out of
+scope for this fix (would require running dependabot standalone
+with a controlled fixture repo, then filing an upstream ticket
+with reproduction logs). The actionable conclusion is: **make the
+dependabot integration human-in-the-loop for any change that
+touches `.github/workflows/**`**, regardless of root cause.
 
 ## Long-term fix (Phase 2 v0.10.6)
 
 Two complementary changes to `.github/dependabot.yml`:
 
-### Change A — disable auto-merge for the GHA ecosystem
+### Change A — isolate `.github/workflows/**` from dependabot auto-merge
 
-This is the **primary defense** — applies regardless of the metadata bug:
+Dependabot does not expose a per-ecosystem `automerged: false` knob.
+The only reliable way to force human review on `.github/workflows/**`
+edits is one of the following GitHub-Actions-side mechanisms:
+
+**A1.** Branch-protection rule on `main` requiring at least one
+human `approval` review when the diff touches `.github/workflows/**`.
+This works regardless of whether dependabot opened the PR.
+
+**A2.** A `.github/dependabot-auto-merge.yml` workflow that ONLY
+auto-merges dependabot PRs whose path filter EXCLUDES
+`.github/**`. Set `paths-ignore` on the auto-merge workflow:
 
 ```yaml
-- package-ecosystem: "github-actions"
-  directory: "/"
-  schedule:
-    interval: "weekly"
-  # Disable dependabot's auto-merge for workflow PRs so a human
-  # reviews every change before it lands on main. See plans/136.
-  open-pull-requests-limit: 5
+name: Dependabot auto-merge
+on: pull_request
+jobs:
+  dependabot-auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Auto-merge
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-(`open-pull-requests-limit` is set alongside removing
-`automerged: true` from the workflow automerge config — dependabot
-does not let you disable auto-merge per-ecosystem via `automerged:
-false`, but it WILL NOT auto-merge when the PR's `auto-merge`
-label/property isn't set on the bot side. Together with required
-status checks, this constitutes a human-in-the-loop gate.)
+In this project's `.github/dependabot.yml` ecosystem block,
+restrict auto-merge to non-workflow ecosystems (uv workspace, npm)
+via the auto-merge workflow's `paths-ignore: ['.github/**']`. The
+`github-actions` ecosystem PRs then fall through to manual review.
+
+Either A1 or A2 (or both together) constitutes the real prevention.
+`open-pull-requests-limit: N` is NOT a prevention — it only caps
+the queue depth.
 
 ### Change B — cap major bumps via `ignore` blocks
 
