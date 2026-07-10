@@ -161,12 +161,11 @@ SECRETS_KEK = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
 # Mypy: project-wide type-check config. Per-package overrides live in
 # each member's pyproject.toml.
 #
-# v0.10.5 dep-cycle: ``exclude`` was added to mirror the
-# ``mypy.ini`` exclude-regex (which prepends a duplicate
-# ``.*conftest\\.py`` token). Without this carve-out, mypy
-# flagged "Duplicate module named 'conftest' (also at libs/gw2_core/
-# tests/conftest.py)" — pytest discovers conftest.py by FILENAME
-# convention so module-name collisions are safe to suppress here.
+# v0.10.5 dep-cycle note: ``mypy.ini`` is the SINGLE SOURCE OF TRUTH
+# for mypy config (mypy's precedence picks mypy.ini over this
+# ``[tool.mypy]`` block when both exist, which would make any
+# exclusion added here silently dead config). The conftest.py
+# carve-out lives in mypy.ini only — do NOT duplicate it here.
 # ---------------------------------------------------------------------------
 
 [tool.mypy]
@@ -176,7 +175,6 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
 check_untyped_defs = true
-exclude = "(?x)(\\.venv|node_modules|web/|build/|dist/|apps/api/alembic/versions/|.*conftest\\.py)"
 
 # fastapi_mcp is imported in main.py and used at runtime
 # (FastApiMCP(app).mount()) but ships no type stubs. Silence the
