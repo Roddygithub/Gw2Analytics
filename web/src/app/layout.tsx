@@ -1,7 +1,25 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { PlayerSearchBar } from "@/components/PlayerSearchBar";
+import { API_BASE_URL } from "@/lib/env";
 import "./globals.css";
+
+// v0.9.9 plan 033: belt-and-braces fail-fast assertion at
+// server boot. ``lib/env.ts`` already throws on a missing
+// ``API_BASE_URL`` in production; this second check runs at
+// module load time inside the layout so any server boot
+// (including one that bypasses ``lib/env.ts`` callers via
+// a future refactor) still surfaces the canonical error.
+if (
+  process.env.NODE_ENV === "production" &&
+  (!API_BASE_URL || API_BASE_URL === "http://localhost:8000")
+) {
+  throw new Error(
+    "API_BASE_URL is required in production and must NOT " +
+      "fall back to localhost. Set it in your deployment " +
+      "environment (e.g. Caddy, Docker, Kubernetes).",
+  );
+}
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
