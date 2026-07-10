@@ -222,9 +222,15 @@ class CrossAccountTimelineAggregator:
         here -- adding it would be a tautological guard.
         """
         for s in series_list:
-            if s.points and sorted(
-                s.points, key=lambda p: (p.started_at, p.fight_id), reverse=True,
-            ) != s.points:
+            if (
+                s.points
+                and sorted(
+                    s.points,
+                    key=lambda p: (p.started_at, p.fight_id),
+                    reverse=True,
+                )
+                != s.points
+            ):
                 raise ValueError(
                     f"series {s.account_name!r} not recency-first sorted: {s.points!r}"
                 )
@@ -252,9 +258,7 @@ def _day_bucketed_points(
     day_first_started: dict[str, Any] = {}
     for c in sorted_contributions:
         started_at = fight_id_to_started[c.fight_id]
-        aware_utc = (
-            started_at.replace(tzinfo=UTC) if started_at.tzinfo is None else started_at
-        )
+        aware_utc = started_at.replace(tzinfo=UTC) if started_at.tzinfo is None else started_at
         day_key = aware_utc.astimezone(tz).date().isoformat()
         day_first_fight.setdefault(day_key, c.fight_id)
         day_first_started.setdefault(day_key, started_at)
@@ -273,7 +277,7 @@ def _day_bucketed_points(
     ]
 
 
-def _combine_day_midnight(started_at: Any, tz: ZoneInfo) -> Any:
+def _combine_day_midnight(started_at: datetime, tz: ZoneInfo) -> datetime:
     """Return the day-midnight in the requested TZ, serialised as UTC for wire compat.
 
     Mirrors the per-account timeline's ``_combine_day_midnight``
@@ -284,7 +288,10 @@ def _combine_day_midnight(started_at: Any, tz: ZoneInfo) -> Any:
     """
     aware_utc = started_at.replace(tzinfo=UTC) if started_at.tzinfo is None else started_at
     local_midnight = aware_utc.astimezone(tz).replace(
-        hour=0, minute=0, second=0, microsecond=0,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
     )
     return local_midnight.astimezone(UTC)
 
