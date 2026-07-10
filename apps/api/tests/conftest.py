@@ -117,7 +117,6 @@ os.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
 os.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
 
 from collections.abc import Callable, Generator
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -296,13 +295,17 @@ class FakeMinio:
         if bucket not in self._storage or key not in self._storage[bucket]:
             # ``S3Error(code, message, resource, request_id, host_id, response)``.
             # ``NoSuchKey`` is the production code our routes map to 404.
+            # v0.10.8 plan 140 cleanup: explicit ``code=`` / ``message=`` keyword
+            # args bypass mypy's overload-resolution ambiguity (the
+            # ``S3Error`` constructor has 2 overloads; positional ``str``
+            # for the 1st arg disambiguates to the wrong one).
             raise S3Error(
-                "NoSuchKey",
-                f"object {key!r} not found in bucket {bucket!r}",
-                key,
-                None,
-                None,
-                None,
+                code="NoSuchKey",
+                message=f"object {key!r} not found in bucket {bucket!r}",
+                resource=key,
+                request_id=None,
+                host_id=None,
+                response=None,
             )
         return _FakeHttpResponse(self._storage[bucket][key])
 

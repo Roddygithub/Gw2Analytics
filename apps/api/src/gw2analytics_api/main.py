@@ -27,7 +27,16 @@ from gw2analytics_api.routes import (
     uploads,
     webhooks,
 )
-from gw2analytics_api.schema_guard import check_schema_drift
+# v0.10.8 plan 140 plan 140 Fix-E: switched from module-local binding to
+# live attribute lookup. The module-local binding (``from ... import
+# check_schema_drift``) created a snapshot at import time; conftest.py
+# autouse fixtures monkeypatching ``gw2analytics_api.schema_guard.
+# check_schema_drift`` then had no effect on main.py's local binding,
+# surfacing ``alembic.util.exc.CommandError: Path doesn't exist: alembic``
+# when the lifespan ran. Live attribute lookup via
+# ``schema_guard.check_schema_drift()`` resolves the monkeypatch path
+# mismatch (test_main_mount_order.py:1 Fix-D residual failure).
+from gw2analytics_api import schema_guard
 from gw2analytics_api.workers.webhook_scheduler import lifespan_scheduler
 
 logger = logging.getLogger(__name__)
@@ -77,7 +86,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # drift (with an actionable operator-facing message
     # naming both heads). Set ``SKIP_SCHEMA_GUARD=1`` to
     # bypass in emergencies.
-    check_schema_drift()
+    schema_guard.check_schema_drift()
 
     # Step 2: Arq pool init with graceful fallback. The
     # lazy imports keep the cold-start path lightweight
