@@ -6,7 +6,9 @@ Usage:
 
 Idempotent: re-running finds the new section and refuses to re-insert.
 """
+
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -61,6 +63,7 @@ All 3 plans touch DIFFERENT sibling modules. Plan 084 is a single multi-file PR 
 
 ## v0.9.22 audit (closed)
 """
+
 
 def main() -> int:
     text = README_PATH.read_text(encoding="utf-8")

@@ -117,15 +117,13 @@ class Settings(BaseSettings):
         """
         s = v
         if s is None or not isinstance(s, str):
-            raise ValueError(
-                f"SECRETS_KEK must be a string; got {type(s).__name__}"
-            )
+            raise ValueError(f"SECRETS_KEK must be a string; got {type(s).__name__}")
         if len(s) != 44:
             raise ValueError(
                 f"SECRETS_KEK must be exactly 44 URL-safe base64 chars "
                 f"(Fernet 32-byte key); got {len(s)} chars. "
-                f"Generate via `python -c \"from cryptography.fernet "
-                f"import Fernet; print(Fernet.generate_key().decode())\"`."
+                f'Generate via `python -c "from cryptography.fernet '
+                f'import Fernet; print(Fernet.generate_key().decode())"`.'
             )
         # Length is necessary but not sufficient: ``"a" * 44`` is
         # 44 chars but URL-safe-b64-decodes to 33 bytes (44*6/8),
@@ -140,15 +138,14 @@ class Settings(BaseSettings):
             decoded = base64.urlsafe_b64decode(s)
         except (ValueError, TypeError) as exc:
             raise ValueError(
-                f"SECRETS_KEK must be valid URL-safe base64; "
-                f"got decode error: {exc}"
+                f"SECRETS_KEK must be valid URL-safe base64; got decode error: {exc}"
             ) from exc
         if len(decoded) != 32:
             raise ValueError(
                 f"SECRETS_KEK URL-safe-b64-decodes to {len(decoded)} bytes; "
                 f"Fernet requires exactly 32. Generate via "
-                f"`python -c \"from cryptography.fernet import Fernet; "
-                f"print(Fernet.generate_key().decode())\"`."
+                f'`python -c "from cryptography.fernet import Fernet; '
+                f'print(Fernet.generate_key().decode())"`.'
             )
         return s
 

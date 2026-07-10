@@ -119,7 +119,7 @@ def test_two_players_get_two_series_with_source_side_attribution() -> None:
     events: list[Event] = [
         _dmg(1_000, 1, 1_000),  # Alice @ 1s
         _dmg(1_500, 2, 2_000),  # Bob @ 1.5s
-        _dmg(2_000, 1, 500),    # Alice @ 2s
+        _dmg(2_000, 1, 500),  # Alice @ 2s
     ]
     series = PerPlayerTimelineAggregator().aggregate(events, agents, window_s=1)
     assert len(series) == 2
@@ -221,7 +221,7 @@ def test_zero_fill_aligns_all_series_to_max_bucket_index() -> None:
         _FakeAgent(agent_id=2, account_name=":b.2", is_player=True),
     ]
     events: list[Event] = [
-        _dmg(0, 1, 100),      # Alice @ bucket 0
+        _dmg(0, 1, 100),  # Alice @ bucket 0
         _dmg(5_000, 2, 200),  # Bob @ bucket 5
     ]
     series = PerPlayerTimelineAggregator().aggregate(events, agents, window_s=1)
@@ -262,10 +262,7 @@ def test_contiguous_points_per_series() -> None:
     assert len(series) == 1
     assert len(series[0].points) == 8  # buckets 0..7
     for i in range(7):
-        assert (
-            series[0].points[i].window_end_ms
-            == series[0].points[i + 1].window_start_ms
-        )
+        assert series[0].points[i].window_end_ms == series[0].points[i + 1].window_start_ms
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ v0.9.37 header is NOT already present, and places it just before
 always closest to the top of the closed history block) holds. Refuses
 to re-run on consecutive invocations.
 """
+
 from __future__ import annotations
 
 import sys

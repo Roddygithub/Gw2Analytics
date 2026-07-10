@@ -9,6 +9,7 @@ invariant (newest before oldest) is preserved. Refuses to re-run on
 consecutive invocations: a second call prints a "no-op (already present)"
 banner and exits 0 so the basher+grep pipe in the parent turn stays clean.
 """
+
 from __future__ import annotations
 
 import sys

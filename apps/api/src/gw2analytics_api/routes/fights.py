@@ -464,9 +464,7 @@ def get_fight_player_timeline(
         # The aggregator's field names match the wire
         # schema's field names 1:1, so the round-trip is
         # mechanical -- no manual field mapping.
-        series=[
-            PerPlayerTimelineSeriesOut.model_validate(s.model_dump()) for s in series
-        ],
+        series=[PerPlayerTimelineSeriesOut.model_validate(s.model_dump()) for s in series],
     )
 
 

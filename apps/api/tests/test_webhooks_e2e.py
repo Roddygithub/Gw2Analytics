@@ -882,9 +882,7 @@ def test_replayed_delivery_byte_for_byte_hmac_matches_original(
     ).encode("utf-8")
     with session_factory() as seed_db:
         sub = seed_db.get(OrmWebhookSubscription, sub_id)
-        secret_bytes = (
-            decrypt_webhook_secret(sub.ciphertext).encode("utf-8") if sub else b""
-        )
+        secret_bytes = decrypt_webhook_secret(sub.ciphertext).encode("utf-8") if sub else b""
     initial_hmac = hmac.new(
         secret_bytes,
         canonical_body_bytes,
@@ -1111,16 +1109,18 @@ def test_dispatch_skips_corrupted_ciphertext_but_continues_others(
 
     with session_factory() as verify_db:
         valid_row = verify_db.get(OrmWebhookSubscription, sub_id_valid)
-        valid_deliveries = [
-            d for d in valid_row.deliveries if d.upload_id == upload_id_str
-        ] if valid_row else []
+        valid_deliveries = (
+            [d for d in valid_row.deliveries if d.upload_id == upload_id_str] if valid_row else []
+        )
         assert len(valid_deliveries) == 1
         assert valid_deliveries[0].delivered_at is not None
 
         corrupt_row = verify_db.get(OrmWebhookSubscription, sub_id_corrupt)
-        corrupt_deliveries = [
-            d for d in corrupt_row.deliveries if d.upload_id == upload_id_str
-        ] if corrupt_row else []
+        corrupt_deliveries = (
+            [d for d in corrupt_row.deliveries if d.upload_id == upload_id_str]
+            if corrupt_row
+            else []
+        )
         assert len(corrupt_deliveries) == 1
         assert corrupt_deliveries[0].error is not None
         # Worker writes

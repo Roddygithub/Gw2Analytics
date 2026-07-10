@@ -357,7 +357,9 @@ class PerPlayerTimelineAggregator:
         events_list = list(events)
         PerPlayerTimelineAggregator._check_equal_length(series)
         expected = PerPlayerTimelineAggregator._compute_expected_per_account(
-            events_list, source_map, series,
+            events_list,
+            source_map,
+            series,
         )
         PerPlayerTimelineAggregator._check_sum_preservation(series, expected)
         PerPlayerTimelineAggregator._check_contiguous_points(series)
@@ -391,12 +393,8 @@ class PerPlayerTimelineAggregator:
         3x that. The ``series_by_account`` index turns the
         per-event check into O(1).
         """
-        series_by_account: dict[str, PerPlayerTimelineSeries] = {
-            s.account_name: s for s in series
-        }
-        expected: dict[str, list[int]] = {
-            s.account_name: [0, 0, 0] for s in series
-        }
+        series_by_account: dict[str, PerPlayerTimelineSeries] = {s.account_name: s for s in series}
+        expected: dict[str, list[int]] = {s.account_name: [0, 0, 0] for s in series}
         for e in events_list:
             account = source_map.get(e.source_agent_id)
             if account is None or account not in series_by_account:

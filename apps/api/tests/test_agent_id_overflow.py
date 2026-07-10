@@ -104,8 +104,7 @@ def test_max_uint64_agent_id_persists_without_overflow() -> None:
             .all()
         )
         assert len(agents) == 1, (
-            f"expected exactly 1 fight_agent with agent_id = 2^64 - 1, "
-            f"got {len(agents)}"
+            f"expected exactly 1 fight_agent with agent_id = 2^64 - 1, got {len(agents)}"
         )
         assert int(agents[0].agent_id) == MAX_UINT64
         assert agents[0].name == f"V102 Warrior {suffix}"
@@ -168,10 +167,6 @@ def test_max_uint64_agent_id_inserted_via_orm_directly() -> None:
         # Post-v0.10.2: the commit succeeds.
         db.commit()
 
-        roundtripped = (
-            db.query(OrmFightAgent)
-            .filter(OrmFightAgent.fight_id == fight.id)
-            .one()
-        )
+        roundtripped = db.query(OrmFightAgent).filter(OrmFightAgent.fight_id == fight.id).one()
         assert int(roundtripped.agent_id) == MAX_UINT64
         assert roundtripped.name == f"V102 Direct {suffix}"

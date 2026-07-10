@@ -6,7 +6,9 @@ Usage:
 
 Idempotent: re-running finds the new section and refuses to re-insert.
 """
+
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 

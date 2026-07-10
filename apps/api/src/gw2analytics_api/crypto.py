@@ -78,8 +78,8 @@ def _resolve_kek(explicit: str | None) -> str:
         raise RuntimeError(
             "SECRETS_KEK env var is required to encrypt/decrypt webhook "
             "secrets at rest. Generate via "
-            "`python -c \"from cryptography.fernet import Fernet; "
-            "print(Fernet.generate_key().decode())\"`."
+            '`python -c "from cryptography.fernet import Fernet; '
+            'print(Fernet.generate_key().decode())"`.'
         )
     return kek
 

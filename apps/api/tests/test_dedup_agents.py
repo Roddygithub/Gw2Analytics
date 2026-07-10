@@ -107,9 +107,7 @@ def test_duplicate_agent_id_is_deduped_on_insert() -> None:
             break
         time.sleep(0.1)
     else:
-        pytest.fail(
-            f"upload {upload_id} did not reach terminal status within 5s"
-        )
+        pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
     final_status = upload_resp.json()["status"]
     assert final_status == "completed", (
         f"expected 'completed', got {final_status!r}; "
