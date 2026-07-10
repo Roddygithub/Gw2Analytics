@@ -48,20 +48,10 @@ the input. The :class:`TargetDpsRow` schema stays unchanged.
 
 from __future__ import annotations
 
-from collections import defaultdict
-from collections.abc import Iterable
-from itertools import pairwise
-from typing import Final
-
 from pydantic import BaseModel, ConfigDict, Field
 
+from gw2_analytics._per_target_base import PerTargetRollupBase, PerTargetRollupSpec
 from gw2_core import DamageEvent
-
-# DPS sentinel when ``duration_s <= 0``: invalid (zero/negative) duration
-# collapses to 0.0 rather than raising -- the canonical ``DamageEvent``
-# stream from the parser will always pair with a known fight duration
-# so the zero path is purely defensive.
-_DEFAULT_DPS: Final[float] = 0.0
 
 
 class TargetDpsRow(BaseModel):
@@ -83,103 +73,28 @@ class TargetDpsRow(BaseModel):
     name: str | None = None
 
 
-class TargetDpsAggregator:
+# DPS aggregator config: the 4 field-name slugs that specialise the
+# shared :class:`PerTargetRollupBase` for damage roll-ups.
+_DPS_SPEC = PerTargetRollupSpec(
+    event_attr="damage",
+    total_field="total_damage",
+    count_field="attack_count",
+    rate_field="dps",
+)
+
+
+class TargetDpsAggregator(PerTargetRollupBase[DamageEvent, TargetDpsRow]):
     """Stateless aggregator: events -> per-target DPS roll-up rows.
 
-    Instantiate once and reuse -- the class holds no state.
+    Instantiate once and reuse -- the class holds no state. The
+    accumulate / rate / sort / invariant logic lives in
+    :class:`~gw2_analytics._per_target_base.PerTargetRollupBase`; this
+    subclass supplies only the damage-specific field names via
+    :data:`_DPS_SPEC`.
     """
 
-    def aggregate(
-        self,
-        events: Iterable[DamageEvent],
-        duration_s: float,
-        name_map: dict[int, str | None] | None = None,
-    ) -> list[TargetDpsRow]:
-        """Compute the roll-up from a stream of damage events.
-
-        ``duration_s`` is the fight duration (the time-bucket the DPS
-        rate is measured against). Passed by the caller so the
-        aggregator stays free of cross-source metadata.
-
-        ``name_map`` is an OPTIONAL ``{agent_id: name}`` lookup for
-        player-name denormalisation (v0.8.3). ``None`` (the default)
-        leaves every row's ``name`` field as ``None`` -- the
-        canonical backward-compat case. An empty dict has the same
-        effect (no names resolved). Agents not present in the map
-        resolve to ``None`` (NPCs without a registered arcdps
-        char-name); the route surfaces this as ``null`` on the wire
-        and the frontend falls back to the raw ``target_agent_id``.
-        """
-        if duration_s < 0:
-            msg = f"duration_s must be >= 0, got {duration_s!r}"
-            raise ValueError(msg)
-
-        total_by_target: dict[int, int] = defaultdict(int)
-        count_by_target: dict[int, int] = defaultdict(int)
-        grand_total = 0
-        for e in events:
-            total_by_target[e.target_agent_id] += e.damage
-            count_by_target[e.target_agent_id] += 1
-            grand_total += e.damage
-
-        dps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_DPS
-        # ``name_map.get(target)`` returns ``None`` for missing keys
-        # AND for explicit ``None`` values -- both cases surface as
-        # ``name=None`` on the row, which is the intended
-        # "unresolved" sentinel. No need to distinguish.
-        rows = [
-            TargetDpsRow(
-                target_agent_id=target,
-                total_damage=total_by_target[target],
-                attack_count=count_by_target[target],
-                dps=total_by_target[target] * dps_factor,
-                name=(name_map or {}).get(target),
-            )
-            for target in total_by_target
-        ]
-        # Sort: highest total_damage first; ties broken by ascending target_agent_id.
-        rows.sort(key=lambda r: (-r.total_damage, r.target_agent_id))
-
-        self._check_invariants(rows, grand_total)
-        return rows
-
-    @staticmethod
-    def _check_invariants(
-        rows: list[TargetDpsRow],
-        expected_sum: int,
-    ) -> None:
-        """Raise ``ValueError`` if any cross-field invariant is violated."""
-        actual_sum = sum(r.total_damage for r in rows)
-        if actual_sum != expected_sum:
-            msg = f"sum of row.total_damage ({actual_sum}) != sum of event.damage ({expected_sum})"
-            raise ValueError(msg)
-        for r in rows:
-            if r.attack_count < 1:
-                msg = (
-                    f"TargetDpsRow({r.target_agent_id}).attack_count "
-                    f"({r.attack_count}) must be >= 1"
-                )
-                raise ValueError(msg)
-        # Pydantic field constraints already guarantee ``ge=0`` for total_damage;
-        # the cross-row ordering invariant is the only ordering contract.
-        # ``pairwise`` pairs each row with its immediate successor;
-        # equivalent to ``zip(rows, rows[1:], strict=False)`` but
-        # the canonical idiom for adjacent-pair iteration (ruff RUF007).
-        for prev, curr in pairwise(rows):
-            if prev.total_damage < curr.total_damage:
-                msg = (
-                    f"rows not ordered by (total_damage DESC, "
-                    f"target_agent_id ASC): {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
-            if (
-                prev.total_damage == curr.total_damage
-                and prev.target_agent_id >= curr.target_agent_id
-            ):
-                msg = (
-                    f"tie on total_damage not broken by target_agent_id ASC: {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
+    def __init__(self) -> None:
+        super().__init__(_DPS_SPEC, TargetDpsRow)
 
 
 __all__ = ["TargetDpsAggregator", "TargetDpsRow"]

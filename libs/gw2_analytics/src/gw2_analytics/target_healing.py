@@ -59,20 +59,10 @@ reads only ``healing`` from each event and is unchanged.
 
 from __future__ import annotations
 
-from collections import defaultdict
-from collections.abc import Iterable
-from itertools import pairwise
-from typing import Final
-
 from pydantic import BaseModel, ConfigDict, Field
 
+from gw2_analytics._per_target_base import PerTargetRollupBase, PerTargetRollupSpec
 from gw2_core import HealingEvent
-
-# HPS sentinel when ``duration_s <= 0``: invalid (zero/negative)
-# duration collapses to 0.0 rather than raising -- the canonical
-# ``HealingEvent`` stream from the parser will always pair with a
-# known fight duration so the zero path is purely defensive.
-_DEFAULT_HPS: Final[float] = 0.0
 
 
 class TargetHealingRow(BaseModel):
@@ -99,7 +89,17 @@ class TargetHealingRow(BaseModel):
     name: str | None = None
 
 
-class TargetHealingAggregator:
+# HPS aggregator config: the 4 field-name slugs that specialise the
+# shared :class:`PerTargetRollupBase` for healing roll-ups.
+_HPS_SPEC = PerTargetRollupSpec(
+    event_attr="healing",
+    total_field="total_healing",
+    count_field="heal_count",
+    rate_field="hps",
+)
+
+
+class TargetHealingAggregator(PerTargetRollupBase[HealingEvent, TargetHealingRow]):
     """Stateless aggregator: events -> per-target healing roll-up rows.
 
     Instantiate once and reuse -- the class holds no state.
@@ -112,100 +112,15 @@ class TargetHealingAggregator:
     stream into per-kind iterators at the route layer can call both
     aggregators on the same ``duration_s`` to get one combined
     damage + healing per-target view without changing either
-    aggregator's signature.
+    aggregator's signature. The shared accumulate / rate / sort /
+    invariant logic lives in
+    :class:`~gw2_analytics._per_target_base.PerTargetRollupBase`; this
+    subclass supplies only the healing-specific field names via
+    :data:`_HPS_SPEC`.
     """
 
-    def aggregate(
-        self,
-        events: Iterable[HealingEvent],
-        duration_s: float,
-        name_map: dict[int, str | None] | None = None,
-    ) -> list[TargetHealingRow]:
-        """Compute the roll-up from a stream of healing events.
-
-        ``duration_s`` is the fight duration (the time-bucket the
-        HPS rate is measured against). Passed by the caller so the
-        aggregator stays free of cross-source metadata.
-
-        ``name_map`` is an OPTIONAL ``{agent_id: name}`` lookup for
-        player-name denormalisation (v0.8.3). See
-        :meth:`~gw2_analytics.target_dps.TargetDpsAggregator.aggregate`
-        for the full contract; this method is a strict parallel.
-        """
-        if duration_s < 0:
-            msg = f"duration_s must be >= 0, got {duration_s!r}"
-            raise ValueError(msg)
-
-        total_by_target: dict[int, int] = defaultdict(int)
-        count_by_target: dict[int, int] = defaultdict(int)
-        grand_total = 0
-        for e in events:
-            total_by_target[e.target_agent_id] += e.healing
-            count_by_target[e.target_agent_id] += 1
-            grand_total += e.healing
-
-        hps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_HPS
-        # ``name_map or {}`` -- see the parallel branch in
-        # :meth:`~gw2_analytics.target_dps.TargetDpsAggregator.aggregate`
-        # for the rationale (``dict.get`` returns ``None`` for missing
-        # keys AND for explicit ``None`` values; both surface as the
-        # ``name=None`` sentinel on the row).
-        rows = [
-            TargetHealingRow(
-                target_agent_id=target,
-                total_healing=total_by_target[target],
-                heal_count=count_by_target[target],
-                hps=total_by_target[target] * hps_factor,
-                name=(name_map or {}).get(target),
-            )
-            for target in total_by_target
-        ]
-        # Sort: highest total_healing first; ties broken by ascending target_agent_id.
-        rows.sort(key=lambda r: (-r.total_healing, r.target_agent_id))
-
-        self._check_invariants(rows, grand_total)
-        return rows
-
-    @staticmethod
-    def _check_invariants(
-        rows: list[TargetHealingRow],
-        expected_sum: int,
-    ) -> None:
-        """Raise ``ValueError`` if any cross-field invariant is violated."""
-        actual_sum = sum(r.total_healing for r in rows)
-        if actual_sum != expected_sum:
-            msg = (
-                f"sum of row.total_healing ({actual_sum}) != sum of event.healing ({expected_sum})"
-            )
-            raise ValueError(msg)
-        for r in rows:
-            if r.heal_count < 1:
-                msg = (
-                    f"TargetHealingRow({r.target_agent_id}).heal_count "
-                    f"({r.heal_count}) must be >= 1"
-                )
-                raise ValueError(msg)
-        # Pydantic field constraints already guarantee ``ge=0`` for total_healing;
-        # the cross-row ordering invariant is the only ordering contract.
-        # ``pairwise`` pairs each row with its immediate successor;
-        # equivalent to ``zip(rows, rows[1:], strict=False)`` but
-        # the canonical idiom for adjacent-pair iteration (ruff RUF007).
-        for prev, curr in pairwise(rows):
-            if prev.total_healing < curr.total_healing:
-                msg = (
-                    f"rows not ordered by (total_healing DESC, "
-                    f"target_agent_id ASC): {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
-            if (
-                prev.total_healing == curr.total_healing
-                and prev.target_agent_id >= curr.target_agent_id
-            ):
-                msg = (
-                    f"tie on total_healing not broken by "
-                    f"target_agent_id ASC: {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
+    def __init__(self) -> None:
+        super().__init__(_HPS_SPEC, TargetHealingRow)
 
 
 __all__ = ["TargetHealingAggregator", "TargetHealingRow"]

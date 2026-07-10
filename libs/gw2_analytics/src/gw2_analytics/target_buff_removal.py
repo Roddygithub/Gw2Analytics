@@ -61,20 +61,10 @@ reads only ``buff_removal`` from each event and is unchanged.
 
 from __future__ import annotations
 
-from collections import defaultdict
-from collections.abc import Iterable
-from itertools import pairwise
-from typing import Final
-
 from pydantic import BaseModel, ConfigDict, Field
 
+from gw2_analytics._per_target_base import PerTargetRollupBase, PerTargetRollupSpec
 from gw2_core import BuffRemovalEvent
-
-# BPS sentinel when ``duration_s <= 0``: invalid (zero/negative)
-# duration collapses to 0.0 rather than raising -- the canonical
-# ``BuffRemovalEvent`` stream from the parser will always pair with a
-# known fight duration so the zero path is purely defensive.
-_DEFAULT_BPS: Final[float] = 0.0
 
 
 class TargetBuffRemovalRow(BaseModel):
@@ -103,7 +93,17 @@ class TargetBuffRemovalRow(BaseModel):
     name: str | None = None
 
 
-class TargetBuffRemovalAggregator:
+# BPS aggregator config: the 4 field-name slugs that specialise the
+# shared :class:`PerTargetRollupBase` for buff-removal roll-ups.
+_BPS_SPEC = PerTargetRollupSpec(
+    event_attr="buff_removal",
+    total_field="total_buff_removal",
+    count_field="strip_count",
+    rate_field="bps",
+)
+
+
+class TargetBuffRemovalAggregator(PerTargetRollupBase[BuffRemovalEvent, TargetBuffRemovalRow]):
     """Stateless aggregator: events -> per-target buff-removal roll-up rows.
 
     Instantiate once and reuse -- the class holds no state.
@@ -118,102 +118,15 @@ class TargetBuffRemovalAggregator:
     at the route layer can call all three aggregators on the same
     ``duration_s`` to get one combined damage + healing +
     buff-removal per-target view without changing any aggregator's
-    signature.
+    signature. The shared accumulate / rate / sort / invariant logic
+    lives in
+    :class:`~gw2_analytics._per_target_base.PerTargetRollupBase`; this
+    subclass supplies only the buff-removal-specific field names via
+    :data:`_BPS_SPEC`.
     """
 
-    def aggregate(
-        self,
-        events: Iterable[BuffRemovalEvent],
-        duration_s: float,
-        name_map: dict[int, str | None] | None = None,
-    ) -> list[TargetBuffRemovalRow]:
-        """Compute the roll-up from a stream of buff-removal events.
-
-        ``duration_s`` is the fight duration (the time-bucket the
-        BPS rate is measured against). Passed by the caller so the
-        aggregator stays free of cross-source metadata.
-
-        ``name_map`` is an OPTIONAL ``{agent_id: name}`` lookup for
-        player-name denormalisation (v0.8.3). See
-        :meth:`~gw2_analytics.target_dps.TargetDpsAggregator.aggregate`
-        for the full contract; this method is a strict parallel.
-        """
-        if duration_s < 0:
-            msg = f"duration_s must be >= 0, got {duration_s!r}"
-            raise ValueError(msg)
-
-        total_by_target: dict[int, int] = defaultdict(int)
-        count_by_target: dict[int, int] = defaultdict(int)
-        grand_total = 0
-        for e in events:
-            total_by_target[e.target_agent_id] += e.buff_removal
-            count_by_target[e.target_agent_id] += 1
-            grand_total += e.buff_removal
-
-        bps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_BPS
-        # ``name_map or {}`` -- see the parallel branch in
-        # :meth:`~gw2_analytics.target_dps.TargetDpsAggregator.aggregate`
-        # for the rationale (``dict.get`` returns ``None`` for missing
-        # keys AND for explicit ``None`` values; both surface as the
-        # ``name=None`` sentinel on the row).
-        rows = [
-            TargetBuffRemovalRow(
-                target_agent_id=target,
-                total_buff_removal=total_by_target[target],
-                strip_count=count_by_target[target],
-                bps=total_by_target[target] * bps_factor,
-                name=(name_map or {}).get(target),
-            )
-            for target in total_by_target
-        ]
-        # Sort: highest total_buff_removal first; ties broken by ascending target_agent_id.
-        rows.sort(key=lambda r: (-r.total_buff_removal, r.target_agent_id))
-
-        self._check_invariants(rows, grand_total)
-        return rows
-
-    @staticmethod
-    def _check_invariants(
-        rows: list[TargetBuffRemovalRow],
-        expected_sum: int,
-    ) -> None:
-        """Raise ``ValueError`` if any cross-field invariant is violated."""
-        actual_sum = sum(r.total_buff_removal for r in rows)
-        if actual_sum != expected_sum:
-            msg = (
-                f"sum of row.total_buff_removal ({actual_sum}) != "
-                f"sum of event.buff_removal ({expected_sum})"
-            )
-            raise ValueError(msg)
-        for r in rows:
-            if r.strip_count < 1:
-                msg = (
-                    f"TargetBuffRemovalRow({r.target_agent_id}).strip_count "
-                    f"({r.strip_count}) must be >= 1"
-                )
-                raise ValueError(msg)
-        # Pydantic field constraints already guarantee ``ge=0`` for
-        # total_buff_removal; the cross-row ordering invariant is the
-        # only ordering contract. ``pairwise`` pairs each row with its
-        # immediate successor; equivalent to
-        # ``zip(rows, rows[1:], strict=False)`` but the canonical
-        # idiom for adjacent-pair iteration (ruff RUF007).
-        for prev, curr in pairwise(rows):
-            if prev.total_buff_removal < curr.total_buff_removal:
-                msg = (
-                    f"rows not ordered by (total_buff_removal DESC, "
-                    f"target_agent_id ASC): {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
-            if (
-                prev.total_buff_removal == curr.total_buff_removal
-                and prev.target_agent_id >= curr.target_agent_id
-            ):
-                msg = (
-                    f"tie on total_buff_removal not broken by "
-                    f"target_agent_id ASC: {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
+    def __init__(self) -> None:
+        super().__init__(_BPS_SPEC, TargetBuffRemovalRow)
 
 
 __all__ = ["TargetBuffRemovalAggregator", "TargetBuffRemovalRow"]

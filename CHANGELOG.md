@@ -20,6 +20,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (libs/gw2_analytics - v0.9.27 plan 084: per-target aggregator DRY consolidation)
+
+- **libs/gw2_analytics v0.9.27 plan 084**: the 3 per-target roll-up
+  aggregators (`target_dps.py` / `target_healing.py` /
+  `target_buff_removal.py`) were byte-for-byte near-clones (~120 lines
+  each of identical accumulate-by-target loop, per-second rate factor,
+  row construction, deterministic sort, and cross-field invariant
+  checks; only 4 field-name slugs differed). Plan 084 factors the shared
+  body into a new `libs/gw2_analytics/src/gw2_analytics/_per_target_base.py`
+  (`PerTargetRollupBase[TEvent, TRow]` + a frozen `PerTargetRollupSpec`
+  config dataclass carrying the 4 slugs). Each of the 3 modules now keeps
+  its public `Target*Row` Pydantic schema and shrinks to a thin subclass
+  (~35 lines) that injects a spec + row class.
+  ([plan 084](./plans/084-v0927-per-target-aggregators-template-duplication.md)).
+  The refactor is INTERNAL: the 3 public `Target*Aggregator` class names,
+  the 3 `Target*Row` names, and the
+  `aggregate(events, duration_s, name_map=None)` signature are unchanged,
+  so the wire contract consumed by `apps/api` (`routes/fights.py`) and the
+  generated web TypeScript client is preserved. Net ~314 lines deleted vs
+  ~191 added in the shared base. Behaviour is byte-identical (same rows,
+  ordering, DPS/HPS/BPS math, negative-duration `ValueError`, and
+  invariants). The base additionally validates at construction that the
+  spec slugs are real row fields (fails loud on a typo'd slug regardless
+  of input size).
+- **libs/gw2_analytics/tests/test_per_target_rollup_base.py** (NEW): 12
+  hermetic tests — invariant guards exercised directly via a synthetic
+  subclass (sum mismatch, wrong ordering, tie-break, sub-1 count via
+  `model_construct`), the construction-time spec-slug validation (bad slug
+  raises, real specs construct cleanly), and a cross-check that the 3 real
+  subclasses round-trip identically (same ordering + totals + rate) on
+  parallel fixtures. The pre-existing `test_target_{dps,healing,buff_removal}`
+  suites remain the per-module regression contract, unchanged.
+
+#### Validation
+
+- `uv run pytest libs/gw2_analytics/tests/`: 158 passed (146 pre-existing + 12 new).
+- `uv run ruff check libs/gw2_analytics/`: clean.
+- `uv run mypy libs apps --no-incremental`: clean (107 source files; `apps/api` consumer typing unaffected).
+
 ### Fixed (libs/gw2_analytics - v0.9.27 plan 083: Phase 8 cascade in event_window.py)
 
 The Phase 8 cycle that added `BuffRemovalEvent` as the third `Event` discriminated-union member in `libs/gw2_core/src/gw2_core/models.py` cascaded the change to `target_buff_removal.py` (the per-target strip rollup) but NOT to `event_window.py` (the per-bucket time-rollup aggregator). The per-bucket `EventBucket` schema was missing the `buff_removal_total` field, so the per-fight timeline chart (`apps/web/src/app/fights/[id]/page.tsx`'s `<PerFightTimelineChart>`) had no per-bucket strip band — a researcher investigating "which 5s window saw the most corrupting concentration" had no timeline answer, only the per-target rollup which is blind to per-bucket chronology. Plan 083 closes the gap:
