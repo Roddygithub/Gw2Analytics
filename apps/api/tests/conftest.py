@@ -94,6 +94,7 @@ import base64
 import io
 import os
 import secrets
+from unittest.mock import MagicMock
 
 # Per-INVOCATION random 44-char Fernet placeholder; eliminates the
 # copy-paste footgun of a deterministic literal. Per-test fixtures
@@ -298,17 +299,24 @@ class FakeMinio:
             # args bypass mypy's overload-resolution ambiguity (the
             # ``S3Error`` constructor has 2 overloads; positional ``str``
             # for the 1st arg disambiguates to the wrong one).
-            # The ``response`` kwarg defaults to ``None`` and is omitted
-            # because mypy's strict BaseHTTPResponse annotation rejects
-            # explicit None (the default is fine -- FakeMinio is purely
-            # in-memory and the production NoSuchKey path also produces
-            # no response object).
+            # v0.10.8 plan 143 final-1: pass ``response=MagicMock()`` to
+            # satisfy the S3Error constructor's required positional
+            # ``response`` (the upstream minio signature now treats it
+            # as required; passing ``None`` would trip
+            # ``union-attr=Item "None" of "BaseHTTPResponse | None" has
+            # no attribute "release_conn"`` on the success branches
+            # elsewhere in the schema). MagicMock is a hermetic no-op on
+            # attribute access -- the route handlers only touch
+            # ``response.read`` / ``.close`` / ``.release_conn`` on the
+            # SUCCESS path; the NoSuchKey path we'reasserting here never
+            # touches ``response`` (the S3Error is caught + mapped to 404).
             raise S3Error(
                 code="NoSuchKey",
                 message=f"object {key!r} not found in bucket {bucket!r}",
                 resource=key,
                 request_id=None,
                 host_id=None,
+                response=MagicMock(),
             )
         return _FakeHttpResponse(self._storage[bucket][key])
 
