@@ -69,7 +69,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           # Full history for `uv sync --frozen` and exact blame.
           fetch-depth: 0
