@@ -33,6 +33,7 @@ def _bind_client(request: pytest.FixtureRequest) -> None:
 
 
 def _post_compare_fight(n_players: int, suffix: str | None = None) -> tuple[str, list[str]]:
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = suffix or _uuid.uuid4().hex[:8]
     base_id = 2_000_000_000 + int(suffix, 16)
     base_skill = 2_000_000 + int(suffix[:4], 16) if len(suffix) >= 4 else 2_000_000
@@ -71,6 +72,7 @@ def _post_compare_fight(n_players: int, suffix: str | None = None) -> tuple[str,
 
 
 def test_compare_2_accounts_recency_first() -> None:
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=2, suffix=suffix)
     resp = client.get(
@@ -85,6 +87,7 @@ def test_compare_2_accounts_recency_first() -> None:
 
 
 def test_compare_3_accounts_max_inclusive() -> None:
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=3, suffix=suffix)
     resp = client.get(
@@ -95,6 +98,7 @@ def test_compare_3_accounts_max_inclusive() -> None:
 
 
 def test_compare_4_accounts_at_max_boundary() -> None:
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=4, suffix=suffix)
     resp = client.get(
@@ -105,6 +109,7 @@ def test_compare_4_accounts_at_max_boundary() -> None:
 
 
 def test_compare_1_account_returns_422() -> None:
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=2, suffix=suffix)
     resp = client.get("/api/v1/players/compare/timeline", params=[("accounts", account_names[0])])
@@ -112,6 +117,7 @@ def test_compare_1_account_returns_422() -> None:
 
 
 def test_compare_5_accounts_returns_422() -> None:
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=5, suffix=suffix)
     resp = client.get(
@@ -121,6 +127,7 @@ def test_compare_5_accounts_returns_422() -> None:
 
 
 def test_compare_day_bucket_collapses_per_day() -> None:
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=2, suffix=suffix)
     resp = client.get(
@@ -141,6 +148,7 @@ def test_compare_day_bucket_collapses_per_day() -> None:
 
 
 def test_compare_unknown_tz_returns_422() -> None:
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=2, suffix=suffix)
     resp = client.get(
@@ -157,6 +165,7 @@ def test_compare_unknown_tz_returns_422() -> None:
 
 
 def test_compare_unknown_account_returns_empty_points_series() -> None:
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=1, suffix=suffix)
     known = account_names[0]
