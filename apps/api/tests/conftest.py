@@ -59,19 +59,23 @@ from __future__ import annotations
 # The placeholder values are dev-only; per-test fixtures mock MinIO
 # and Postgres so the real services never see these strings.
 # Production reads from a managed ``.env`` / secret manager.
-import os as _os_for_settings
+import base64  # standard lib; alphabetical placement per pytest/ruff norms
+import os  # standard lib; alphabetical placement per pytest/ruff norms
+import secrets  # standard lib; alphabetical placement per pytest/ruff norms
 
-_fernet_placeholder = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="  # 44-char Fernet placeholder
-assert len(_fernet_placeholder) == 44, (
-    f"SECRETS_KEK placeholder must be exactly 44 chars (Fernet url-safe base64); got {len(_fernet_placeholder)}"
-)
-_os_for_settings.environ.setdefault("S3_BUCKET", "test-bucket")
-_os_for_settings.environ.setdefault("S3_ENDPOINT", "http://localhost:9000")
-_os_for_settings.environ.setdefault("S3_ACCESS_KEY", "test-access-key")
-_os_for_settings.environ.setdefault("S3_SECRET_KEY", "test-secret-key")
-_os_for_settings.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
-_os_for_settings.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
-_os_for_settings.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
+# Per-INVOCATION random 44-char Fernet placeholder; eliminates the
+# copy-paste footgun of a deterministic literal. Per-test fixtures
+# mock MinIO+Postgres so cross-invocation key rotation is not a
+# test-stability concern (no cross-invocation ciphertext assertions).
+# Length is 44 by CONSTRUCTION (32 bytes base64-urlsafe-encoded).
+_fernet_placeholder = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+os.environ.setdefault("S3_BUCKET", "test-bucket")
+os.environ.setdefault("S3_ENDPOINT", "http://localhost:9000")
+os.environ.setdefault("S3_ACCESS_KEY", "test-access-key")
+os.environ.setdefault("S3_SECRET_KEY", "test-secret-key")
+os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+os.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
+os.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
 
 from collections.abc import Callable
 

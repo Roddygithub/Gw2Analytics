@@ -10,7 +10,7 @@ import uuid as _uuid
 
 from _fixtures import make_cbtevent, make_minimal_zevtc
 from fastapi.testclient import TestClient
-from gw2_analytics_api.main import app
+from gw2analytics_api.main import app
 
 client = TestClient(app)
 
