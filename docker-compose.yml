@@ -6,8 +6,14 @@ services:
       POSTGRES_USER: gw2analytics
       POSTGRES_PASSWORD: gw2analytics
       POSTGRES_DB: gw2analytics
+    # v0.10.6: standardized to `5432:5432` so the dev host port
+    # matches `pyproject.toml`'s `[tool.pytest_env] DATABASE_URL`
+    # AND `.github/workflows/ci.yml`'s postgres service. If the dev
+    # host already has another postgres on port 5432 (e.g. `wvw-postgres`
+    # from a sibling workspace), the operator must free the port
+    # with `docker rm -f wvw-postgres` BEFORE bringing this one up.
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

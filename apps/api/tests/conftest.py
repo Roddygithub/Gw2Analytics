@@ -44,7 +44,7 @@ tests pass; the 4 SLOW modules drop from >30s to <5s each. The
 cumulative ``uv run pytest tests/`` wallclock drops from >600s
 to <120s.
 
-Runtime prerequisites (v0.10.5 audit followup)
+Runtime prerequisites (v0.10.6 followup)
 =============================================
 
 This conftest mocks MinIO + Postgres at the per-test fixture layer
@@ -52,13 +52,15 @@ This conftest mocks MinIO + Postgres at the per-test fixture layer
 below), but the *runtime* needs a real Postgres + MinIO container
 running on the test host BEFORE ``pytest`` is invoked:
 
-  * Postgres on ``localhost:5433`` (the ``5433:5432`` mapping in
-    ``docker-compose.yml``) with the seed ``gw2analytics:gw2analytics``
-    creds + the ``gw2analytics`` database. The default URL below
-    matches; if your host uses different creds, set ``DATABASE_URL``
-    in the outer shell and the ``setdefault`` below will NOT clobber
-    it. The CI workflow brings this up via ``docker compose up -d
-    postgres`` (see ``.github/workflows/ci.yml``).
+  * Postgres on ``localhost:5432`` (v0.10.6 standardized to align
+    with ``pyproject.toml`` [tool.pytest_env] + ``docker-compose.yml``
+    + ``.github/workflows/ci.yml``'s postgres service). The default
+    URL below uses port 5432; if your host already has another
+    postgres on port 5432 (e.g. ``wvw-postgres`` from a sibling
+    workspace), free the port first with
+    ``docker rm -f wvw-postgres`` BEFORE bringing this container
+    up. The dev ``docker compose up -d postgres`` works as-is
+    otherwise.
   * MinIO on ``localhost:9000`` with the ``test-bucket`` bucket +
     the [DEV-ONLY PLACEHOLDER] creds ``test-access-key`` /
     ``test-secret-key`` (placeholder block below). The placeholder
@@ -66,10 +68,6 @@ running on the test host BEFORE ``pytest`` is invoked:
     Do NOT copy the placeholder creds into a production ``.env`` --
     they're committed-to-git hardcoded for unit-test repeatability
     only.
-
-A fresh host WITHOUT the containers will see ``OperationalError``
-or ``S3Error`` on the first fixture call -- this is by design
-(fixture mocks layer on top of real services, NOT in place of them).
 """
 
 from __future__ import annotations
@@ -106,9 +104,13 @@ os.environ.setdefault("S3_BUCKET", "test-bucket")
 os.environ.setdefault("S3_ENDPOINT", "http://localhost:9000")
 os.environ.setdefault("S3_ACCESS_KEY", "test-access-key")
 os.environ.setdefault("S3_SECRET_KEY", "test-secret-key")
+# v0.10.6: standardizes to port 5432 to align with pytest_env +
+# docker-compose + CI service. If a foreign container occupies the
+# port on the dev host (e.g. ``wvw-postgres``), the operator must
+# free it before pytest can run.
 os.environ.setdefault(
     "DATABASE_URL",
-    "postgresql://gw2analytics:gw2analytics@localhost:5433/gw2analytics",
+    "postgresql://gw2analytics:gw2analytics@localhost:5432/gw2analytics",
 )
 os.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
 os.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
