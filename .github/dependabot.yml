@@ -33,3 +33,10 @@ updates:
         update-types: ["major"]
       - dependency-name: "pnpm/action-setup"
         update-types: ["major"]
+      # v0.10.6 plan 136 (code-review fix):
+      # `dependabot/fetch-metadata` is itself a GitHub action
+      # subject to the same dependabot-metadata bug. If dependabot
+      # bumps it to a non-existent major, the very workflow that
+      # gates auto-merge breaks.
+      - dependency-name: "dependabot/fetch-metadata"
+        update-types: ["major"]

@@ -23,6 +23,14 @@ on:
     paths-ignore:
       - '.github/**'
 
+# v0.10.6 plan 136 (code-review fix): prevent rapid
+# `opened` -> `synchronize` re-runs from racing on the same PR.
+# Without this, two `gh pr merge --auto --squash` invocations
+# can conflict on the GitHub merge queue.
+concurrency:
+  group: ${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
@@ -44,7 +52,13 @@ jobs:
         if: |
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
           steps.metadata.outputs.update-type == 'version-update:semver-minor'
-        run: gh pr merge --auto --squash "$PR_URL"
+        # v0.10.6 plan 136 (code-review fix): append the update-type to
+        # the GitHub step summary so a future post-mortem can audit
+        # exactly which ecosystem + bump type landed. Helps isolate
+        # the next dependabot-metadata regression.
+        run: |
+          echo "dependabot-auto-merge :: ecosystem=${{ steps.metadata.outputs.package-ecosystem }} update-type=${{ steps.metadata.outputs.update-type }} dependency=${{ steps.metadata.outputs.dependency-name }}"
+          gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
