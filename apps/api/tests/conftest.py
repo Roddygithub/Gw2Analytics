@@ -116,6 +116,7 @@ os.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
 os.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
 
 from collections.abc import Callable
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -254,3 +255,45 @@ def get_sessionmaker() -> Callable[[], sessionmaker[Session]]:
     get_sessionmaker`` -- the fixture IS the import.
     """
     return _get_sessionmaker_factory
+
+
+@pytest.fixture(autouse=True)
+def _mock_s3(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Hermetic MinIO S3 client for the entire test suite.
+
+    v0.10.7 plan 139 Followup-1: the prior pattern leaked S3
+    calls to the real MinIO container via the
+    :func:`gw2analytics_api.storage.get_minio` factory +
+    :class:`gw2analytics_api.config.Settings` chain. The
+    conftest setdefault env vars
+    (``S3_ACCESS_KEY=test-access-key`` etc.) don't match the
+    real MinIO creds (``gw2analytics``/``gw2analytics-secret``
+    per docker-compose.yml), so 26 tests failed with
+    ``S3Error: code: InvalidAccessKeyId`` on the first
+    :func:`minio.api.bucket_exists` call.
+
+    This fixture monkeypatches the factory to return a fresh
+    :class:`MagicMock` per test. All :func:`put_zevtc`,
+    :func:`put_events`, and :func:`get_events` calls now hit
+    the mock and return ``MagicMock()`` defaults. The
+    hermetic test suite no longer depends on docker-compose
+    state.
+
+    Tests that want to verify the real S3 path (e.g. an
+    end-to-end test of the storage layer) can accept the
+    ``_mock_s3`` fixture as a parameter and replace the
+    patch with a real client:
+
+    .. code-block:: python
+
+        def test_real_s3(_mock_s3: MagicMock) -> None:
+            from gw2analytics_api.storage import get_minio
+            _mock_s3.stop()
+            assert get_minio() is not None
+    """
+    mock_minio = MagicMock()
+    monkeypatch.setattr(
+        "gw2analytics_api.storage.get_minio",
+        lambda: mock_minio,
+    )
+    return mock_minio
