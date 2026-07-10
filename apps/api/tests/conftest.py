@@ -298,13 +298,17 @@ class FakeMinio:
             # args bypass mypy's overload-resolution ambiguity (the
             # ``S3Error`` constructor has 2 overloads; positional ``str``
             # for the 1st arg disambiguates to the wrong one).
+            # The ``response`` kwarg defaults to ``None`` and is omitted
+            # because mypy's strict BaseHTTPResponse annotation rejects
+            # explicit None (the default is fine -- FakeMinio is purely
+            # in-memory and the production NoSuchKey path also produces
+            # no response object).
             raise S3Error(
                 code="NoSuchKey",
                 message=f"object {key!r} not found in bucket {bucket!r}",
                 resource=key,
                 request_id=None,
                 host_id=None,
-                response=None,
             )
         return _FakeHttpResponse(self._storage[bucket][key])
 
