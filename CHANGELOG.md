@@ -20,6 +20,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (apps/api - v0.10.9 plan 144: player-compare KeyError crash)
+
+- **apps/api v0.10.9 plan 144**: `GET /api/v1/players/compare/timeline`
+  raised `KeyError` on any non-empty dataset and was therefore broken in
+  production since v0.10.0 (plan 032). `get_compare_timeline` built
+  `per_account_contributions` as a plain `dict` and did an unconditional
+  `d[c.account_name].append(c)`, which `KeyError`s on the first
+  contribution of every account; the endpoint only survived the empty-DB
+  path. It also never scoped the result to the *requested* accounts.
+  Extract a pure `_group_contributions_by_account(contributions,
+  requested_accounts)` helper that pre-seeds the dict from the deduped
+  requested accounts and appends only requested accounts' contributions
+  ([plan 144](./plans/144-v0109-player-compare-keyerror-fix.md)). This
+  matches `CrossAccountTimelineAggregator`'s "one series per dict key"
+  contract: every requested account gets a series (empty `points` if it
+  attended no fights), and non-requested accounts are dropped. Surfaced
+  as finding C1 of the [2026-07-10 audit](./plans/AUDIT-2026-07-10-79c4501.md).
+- **apps/api/tests/test_player_compare_grouping.py** (NEW): 4 hermetic
+  (no-DB) tests pinning the helper — empty contributions pre-seed all
+  requested accounts, contributions route to the right account,
+  non-requested accounts are dropped, unknown requested accounts get an
+  empty list. The DB-backed `test_player_compare.py` validates the
+  end-to-end route on CI.
+
+#### Validation
+
+- `uv run pytest apps/api/tests/test_player_compare_grouping.py`: 4 passed.
+- `uv run ruff check` + `uv run mypy libs apps --no-incremental`: clean (106 source files).
+- The Postgres-backed `test_player_compare.py` was NOT run locally (no Docker); it validates the end-to-end route on CI.
+
 ### Fixed (libs/gw2_analytics - v0.9.27 plan 083: Phase 8 cascade in event_window.py)
 
 The Phase 8 cycle that added `BuffRemovalEvent` as the third `Event` discriminated-union member in `libs/gw2_core/src/gw2_core/models.py` cascaded the change to `target_buff_removal.py` (the per-target strip rollup) but NOT to `event_window.py` (the per-bucket time-rollup aggregator). The per-bucket `EventBucket` schema was missing the `buff_removal_total` field, so the per-fight timeline chart (`apps/web/src/app/fights/[id]/page.tsx`'s `<PerFightTimelineChart>`) had no per-bucket strip band — a researcher investigating "which 5s window saw the most corrupting concentration" had no timeline answer, only the per-target rollup which is blind to per-bucket chronology. Plan 083 closes the gap:
