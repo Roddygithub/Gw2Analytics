@@ -59,6 +59,7 @@ empty data" is more useful for the analyst UX than a 404).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -76,6 +77,30 @@ from gw2analytics_api.models import OrmFight
 from gw2analytics_api.routes.players import _compute_contributions
 
 router = APIRouter(prefix="/api/v1/players", tags=["players"])
+
+
+def _group_contributions_by_account(
+    contributions: Iterable[FightContribution],
+    requested_accounts: Iterable[str],
+) -> dict[str, list[FightContribution]]:
+    """Group contributions by account, pre-seeded with the requested accounts.
+
+    The dict is seeded with one empty list per requested account so
+    :class:`CrossAccountTimelineAggregator` (which emits one series per
+    dict KEY) yields exactly one series per requested account -- an
+    account with no contributions still gets a series with empty
+    ``points``. Contributions whose ``account_name`` was not requested
+    are dropped. Pre-seeding also makes the append safe: a plain
+    ``dict[...] = {}`` with an unconditional ``d[k].append`` raises
+    ``KeyError`` on the first contribution (the v0.10.0 plan 032 defect
+    this helper replaces).
+    """
+    grouped: dict[str, list[FightContribution]] = {account: [] for account in requested_accounts}
+    for c in contributions:
+        bucket = grouped.get(c.account_name)
+        if bucket is not None:
+            bucket.append(c)
+    return grouped
 
 
 # Maximum accounts per compare request. The chart's readability
@@ -174,21 +199,17 @@ def get_compare_timeline(
         .all()
     )
     contributions = _compute_contributions(db, fights)
-    # Bucket per-account contributions. An account with NO
-    # contributions still gets a series entry (matches the
-    # "all requested accounts → all series" contract). The
-    # ``list[FightContribution]`` type argument is REQUIRED
-    # (mypy ``type-arg`` rule) -- ``dict[str, list]`` without
-    # the inner type is rejected by the strict mypy config.
-    per_account_contributions: dict[str, list[FightContribution]] = {}
-    for c in contributions:
-        per_account_contributions[c.account_name].append(c)
+    # Bucket per-account contributions, pre-seeded with the requested
+    # (deduped) accounts so every requested account gets a series and
+    # an account with NO contributions still gets an empty-``points``
+    # series (the "all requested accounts -> all series" contract).
+    per_account_contributions = _group_contributions_by_account(contributions, deduped_accounts)
     # ``fight_id_to_started`` mirrors the per-account timeline
     # route's lookup table. The ``.get(fight_id, fight_id)``
     # fallback is the same defensive guard.
     fight_id_to_started = {f.id: f.started_at for f in fights}
     return CrossAccountTimelineAggregator().aggregate(
-        per_account_contributions=dict(per_account_contributions),
+        per_account_contributions=per_account_contributions,
         fight_id_to_started=fight_id_to_started,
         bucket=bucket,
         tz=parsed_tz,
