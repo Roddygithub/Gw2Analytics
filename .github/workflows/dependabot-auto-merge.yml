@@ -14,6 +14,21 @@
 #     (dependabot doesn't even open those PRs).
 #   - Anything else that touches .github/** (catches the case where
 #     a minor/patch bump is still incorrect) requires a human.
+#
+# ENTERPRISE ORG WARNING (v0.10.6 plan 136 round-3 code-review fix):
+# On repos hosted in organizations where the default `GITHUB_TOKEN`
+# is restricted to read-only at the org level, the `gh pr merge --auto`
+# call below will fail with `403 Resource not accessible by integration`.
+# Before relying on this workflow, the org admin MUST either:
+#   (a) allow-list this workflow's permissions in the org's
+#       "GitHub Actions" page (`GITHUB_TOKEN` -> choose this workflow
+#       -> set permissions to write on contents + pull-requests), or
+#   (b) enable the repo's "Allow GitHub Actions to create and approve
+#       pull requests" setting in repo Settings -> Actions -> General.
+# Without either (a) or (b), auto-merge silently fails on every PR and
+# this workflow becomes a no-op. Defense-in-depth: combine with the
+# branch-protection rule in plans/137 so even if auto-merge fails,
+# the workflow still cannot land an invalid tag on `main`.
 
 name: Dependabot auto-merge
 
