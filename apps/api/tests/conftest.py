@@ -48,7 +48,7 @@ to <120s.
 from __future__ import annotations
 
 # v0.10.5 audit followup #1: environment bootstrap BEFORE regular imports.
-# The ``from gw2analytics_api.main import app`` import below triggers
+# The ``from gw2analytics_api.main import app  # noqa: E402  # noqa: E402`` import below triggers
 # a module-level ``Settings()`` Pydantic validation; without these
 # placeholders the import raises ``ValidationError`` which pytest
 # misleadingly wraps as ``ModuleNotFoundError``. We use ``setdefault``
@@ -73,20 +73,23 @@ os.environ.setdefault("S3_BUCKET", "test-bucket")
 os.environ.setdefault("S3_ENDPOINT", "http://localhost:9000")
 os.environ.setdefault("S3_ACCESS_KEY", "test-access-key")
 os.environ.setdefault("S3_SECRET_KEY", "test-secret-key")
-os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql://gw2analytics:gw2analytics@localhost:5433/gw2analytics",
+)
 os.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
 os.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
 
-from collections.abc import Callable
+from collections.abc import Callable  # noqa: E402  # noqa: E402
 
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import delete
-from sqlalchemy.orm import Session, sessionmaker
+import pytest  # noqa: E402  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402  # noqa: E402
+from sqlalchemy import delete  # noqa: E402  # noqa: E402
+from sqlalchemy.orm import Session, sessionmaker  # noqa: E402  # noqa: E402
 
-from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory
+from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory  # noqa: E402  # noqa: E402
 from gw2analytics_api.main import app
-from gw2analytics_api.models import (
+from gw2analytics_api.models import (  # noqa: E402  # noqa: E402
     OrmFight,
     OrmFightPlayerSummary,
     OrmWebhookDelivery,
