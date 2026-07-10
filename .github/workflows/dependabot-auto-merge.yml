@@ -1,0 +1,50 @@
+# Dependabot auto-merge (v0.10.6 plan 136 Change A2)
+#
+# Auto-merges dependabot PRs EXCEPT those that touch `.github/**`
+# (`paths-ignore`). When the diff does touch `.github/**`, this
+# workflow does not fire at all, leaving the PR for human review —
+# the only reliable way to prevent dependabot from auto-merging an
+# invalid major tag on a GitHub Action (see plans/136).
+#
+# Combined with the `ignore:` block on the `github-actions` ecosystem
+# in .github/dependabot.yml (cap majors for stale actions), this
+# guarantees:
+#   - Minor + patch bumps to .github/workflows/** land automatically.
+#   - Major bumps to any GHA action are filtered by `ignore:`
+#     (dependabot doesn't even open those PRs).
+#   - Anything else that touches .github/** (catches the case where
+#     a minor/patch bump is still incorrect) requires a human.
+
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - '.github/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dependabot-auto-merge:
+    # Only auto-merge when dependabot opened the PR. Non-dependabot
+    # PRs always require human review regardless of path.
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-merge patch + minor for non-workflow ecosystems
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

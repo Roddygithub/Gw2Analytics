@@ -4,11 +4,32 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
   - package-ecosystem: "npm"
     directory: "/web"
     schedule:
       interval: "weekly"
+
+  # v0.10.6 plan 136: dependabot emits invalid major tags for
+  # these GitHub-owned or developer actions (the v7 ref does not
+  # exist on the Marketplace). The `ignore` block + the new
+  # `.github/workflows/dependabot-auto-merge.yml` (which has its
+  # own `paths-ignore` for `.github/**`) together force human
+  # review on workflow edits and cap dependabot to minor + patch
+  # updates for these specific actions.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "actions/checkout"
+        update-types: ["major"]
+      - dependency-name: "actions/upload-artifact"
+        update-types: ["major"]
+      - dependency-name: "actions/setup-node"
+        update-types: ["major"]
+      - dependency-name: "astral-sh/setup-uv"
+        update-types: ["major"]
+      - dependency-name: "pnpm/action-setup"
+        update-types: ["major"]
