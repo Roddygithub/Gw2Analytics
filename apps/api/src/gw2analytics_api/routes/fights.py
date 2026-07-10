@@ -7,13 +7,11 @@ GET events: aggregated damage + time-bucketed roll-ups for one fight.
 
 from __future__ import annotations
 
-import gzip
 import logging
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error
-from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -29,6 +27,7 @@ from gw2_analytics.target_buff_removal import (
 from gw2_analytics.target_dps import TargetDpsAggregator, TargetDpsRow
 from gw2_analytics.target_healing import TargetHealingAggregator, TargetHealingRow
 from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
+from gw2analytics_api._event_dispatch import iter_events_from_blob
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightSkill
 from gw2analytics_api.schemas import (
@@ -53,12 +52,9 @@ from gw2analytics_api.storage import get_events
 
 logger = logging.getLogger(__name__)
 
-# Module-level adapter: ``Event`` is a Pydantic discriminated union
-# over ``DamageEvent`` + ``HealingEvent`` (see gw2_core.models). The
-# TypeAdapter instance is the canonical entry-point for round-tripping
-# a heterogeneous JSONL line; instantiating it at module-load time
-# (rather than per-request) is the recommended Pydantic v2 pattern.
-_EVENT_TYPE_ADAPTER: TypeAdapter[Event] = TypeAdapter(Event)
+# Event dispatch (decompress + discriminated-union validation) lives in
+# the canonical ``_event_dispatch`` hub -- a single ``TypeAdapter[Event]``
+# shared across backfill + this route + routes/players (v0.9.38 plan 116).
 
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
 
@@ -131,21 +127,16 @@ def _load_fight_events(
         )
         raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable") from None
 
+    # Decompress + discriminated-union validation is centralised in the
+    # ``_event_dispatch`` hub (single ``TypeAdapter[Event]``). The
+    # ``OSError`` guard maps a corrupt (non-gzip) blob to 502 exactly as
+    # the previous inline ``gzip.decompress`` did; a ``ValidationError``
+    # on a malformed line still propagates (500) as before.
     try:
-        jsonl = gzip.decompress(gz_bytes)
+        events: list[Event] = iter_events_from_blob(gz_bytes)
     except OSError as exc:
         logger.exception("events blob %s not gzip-decodable", fight.events_blob_uri)
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "events blob corrupt") from exc
-
-    # ``TypeAdapter(Event).validate_json(line)`` is the canonical
-    # Pydantic v2 entry point for discriminated-union round-trip;
-    # it materialises the matching subclass via the ``event_type``
-    # literal carried on every line. The adapter instance is
-    # module-level so the discriminator validation table is built
-    # once at import time.
-    events: list[Event] = [
-        _EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line
-    ]
     if not events:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable")
     return events

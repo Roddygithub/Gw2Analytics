@@ -19,7 +19,12 @@ Public surface
 ==============
 
 - :func:`iter_events_from_blob` -- decompress + parse a gzipped
-  JSONL blob into ``list[Event]``.
+  JSONL blob into ``list[Event]`` (used by the list-materialising
+  callers: ``backfill`` and ``routes/fights``).
+- :func:`validate_event_line` -- validate a single JSONL line into
+  its concrete ``Event`` subclass (used by the streaming caller
+  ``routes/players``, which walks the blob line-by-line and never
+  materialises the full event list).
 """
 
 from __future__ import annotations
@@ -35,8 +40,22 @@ from gw2_core import Event
 # load (the recommended Pydantic v2 pattern) builds the
 # discriminator validation table ONCE instead of per-call. The
 # adapter is private to this module -- callers should use
-# :func:`iter_events_from_blob`, not the adapter directly.
+# :func:`iter_events_from_blob` / :func:`validate_event_line`, not the
+# adapter directly.
 _EVENT_TYPE_ADAPTER: TypeAdapter[Event] = TypeAdapter(Event)
+
+
+def validate_event_line(line: str | bytes) -> Event:
+    """Validate one JSONL line into its concrete :class:`Event` subclass.
+
+    The ``event_type`` literal on the line materialises the matching
+    subclass (``DamageEvent`` / ``HealingEvent`` / ``BuffRemovalEvent``)
+    via the discriminated union. This is the per-line primitive that the
+    streaming caller (``routes/players``) uses to avoid materialising the
+    full event list; :func:`iter_events_from_blob` builds on it for the
+    list-materialising callers.
+    """
+    return _EVENT_TYPE_ADAPTER.validate_json(line)
 
 
 def iter_events_from_blob(gz_bytes: bytes) -> list[Event]:
@@ -56,10 +75,10 @@ def iter_events_from_blob(gz_bytes: bytes) -> list[Event]:
     /api/v1/upload polling interval.
     """
     jsonl = gzip.decompress(gz_bytes)
-    return [_EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line.strip()]
+    return [validate_event_line(line) for line in jsonl.splitlines() if line.strip()]
 
 
-__all__ = ["iter_events_from_blob"]
+__all__ = ["iter_events_from_blob", "validate_event_line"]
 
 
 # Round 2 fix: ``if line`` -> ``if line.strip()`` drops whitespace-only

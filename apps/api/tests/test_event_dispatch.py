@@ -40,12 +40,14 @@ contamination (no per-test cleanup).
 from __future__ import annotations
 
 import gzip
+import importlib
+import inspect
 import json
 
 import pytest
 
-from gw2_core import DamageEvent, HealingEvent
-from gw2analytics_api._event_dispatch import iter_events_from_blob
+from gw2_core import BuffRemovalEvent, DamageEvent, HealingEvent
+from gw2analytics_api._event_dispatch import iter_events_from_blob, validate_event_line
 
 
 def _gz_jsonl(lines: list[dict[str, object]]) -> bytes:
@@ -209,3 +211,52 @@ def test_iter_events_from_blob_returns_mixed_damage_healing_in_order() -> None:
     assert isinstance(events[0], DamageEvent)
     assert isinstance(events[1], HealingEvent)
     assert [e.event_type for e in events] == ["DAMAGE", "HEALING"]
+
+
+# ---------------------------------------------------------------------------
+# v0.9.38 plan 116: single-source-of-truth adapter across the apps/api
+# surface. The per-line ``validate_event_line`` primitive backs the
+# streaming caller (routes/players); the route modules no longer define
+# their own ``TypeAdapter(Event)`` (the duplication the plan removed).
+# ---------------------------------------------------------------------------
+def test_validate_event_line_dispatches_each_subtype() -> None:
+    """The per-line primitive materialises the matching Event subclass."""
+    dmg = validate_event_line(
+        b'{"event_type":"DAMAGE","time_ms":1,"source_agent_id":1,'
+        b'"target_agent_id":2,"skill_id":3,"damage":10}'
+    )
+    heal = validate_event_line(
+        b'{"event_type":"HEALING","time_ms":1,"source_agent_id":1,'
+        b'"target_agent_id":2,"skill_id":3,"healing":10}'
+    )
+    strip = validate_event_line(
+        b'{"event_type":"BUFF_REMOVAL","time_ms":1,"source_agent_id":1,'
+        b'"target_agent_id":2,"skill_id":3,"buff_removal":10}'
+    )
+    assert isinstance(dmg, DamageEvent)
+    assert isinstance(heal, HealingEvent)
+    assert isinstance(strip, BuffRemovalEvent)
+
+
+def test_iter_events_from_blob_builds_on_validate_event_line() -> None:
+    """The list helper and the per-line helper agree on one line."""
+    line = (
+        b'{"event_type":"DAMAGE","time_ms":1,"source_agent_id":1,'
+        b'"target_agent_id":2,"skill_id":3,"damage":10}'
+    )
+    (via_list,) = iter_events_from_blob(gzip.compress(line))
+    via_line = validate_event_line(line)
+    assert via_list == via_line
+
+
+@pytest.mark.parametrize("module_name", ["routes.fights", "routes.players"])
+def test_route_modules_no_longer_define_local_adapter(module_name: str) -> None:
+    """Regression guard: the route modules delegate to the dispatch hub.
+
+    A re-introduced local ``TypeAdapter(Event)`` in either route module
+    would resurrect the triplicate-adapter drift plan 116 removed.
+    """
+    module = importlib.import_module(f"gw2analytics_api.{module_name}")
+    source = inspect.getsource(module)
+    assert "TypeAdapter(Event)" not in source
+    assert "_event_dispatch import" in source

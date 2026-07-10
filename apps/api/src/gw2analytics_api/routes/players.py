@@ -40,7 +40,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error
-from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -50,7 +49,8 @@ from gw2_analytics.player_profile import (
     PlayerProfileAggregator,
 )
 from gw2_analytics.role_detection import detect_role_lite
-from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, Event, HealingEvent, Profession
+from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, HealingEvent, Profession
+from gw2analytics_api._event_dispatch import validate_event_line
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary
 from gw2analytics_api.schemas import (
@@ -64,10 +64,11 @@ from gw2analytics_api.storage import get_events
 
 logger = logging.getLogger(__name__)
 
-# Module-level adapter: same pattern as
-# :mod:`gw2analytics_api.routes.fights` -- a single ``TypeAdapter``
-# instance for the heterogeneous JSONL line dispatch.
-_EVENT_TYPE_ADAPTER: TypeAdapter[Event] = TypeAdapter(Event)
+# Per-line event validation uses the canonical ``_event_dispatch`` hub
+# (single shared ``TypeAdapter[Event]``). This route walks the blob
+# line-by-line (streaming), so it uses the per-line ``validate_event_line``
+# primitive rather than the list-materialising ``iter_events_from_blob``
+# to keep the memory profile flat on large WvW fights (v0.9.38 plan 116).
 
 router = APIRouter(prefix="/api/v1/players", tags=["players"])
 
@@ -297,9 +298,12 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
     # Per-account accumulator: ``account_name -> {damage, healing, strip, name, prof, elite}``.
     per_account: dict[str, dict[str, int | str]] = {}
     for line in jsonl.splitlines():
-        if not line:
+        # Drop empty AND whitespace-only separators, matching the shared
+        # ``iter_events_from_blob`` filter (v0.9.38 plan 116) so all three
+        # event-consuming surfaces treat a blob identically.
+        if not line.strip():
             continue
-        event = _EVENT_TYPE_ADAPTER.validate_json(line)
+        event = validate_event_line(line)
         identity = agent_map.get(event.source_agent_id)
         if identity is None:
             continue

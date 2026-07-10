@@ -20,6 +20,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (apps/api - v0.9.38 plan 116: finish event-adapter DRY consolidation)
+
+- **apps/api v0.9.38 plan 116**: complete the single-source-of-truth
+  `Event` dispatch consolidation. The `_event_dispatch.py` hub (one
+  shared `TypeAdapter[Event]`) already backed `backfill.py`, but
+  `routes/fights.py` and `routes/players.py` still each defined their own
+  duplicate `_EVENT_TYPE_ADAPTER = TypeAdapter(Event)` and hand-rolled the
+  gzip-decompress + validate loop
+  ([plan 116](./plans/116-v0938-event-type-adapter-triplicate-dry-consolidation.md)).
+  Both duplicates are removed:
+  - `_event_dispatch.py` gains `validate_event_line(line) -> Event` (the
+    per-line primitive); `iter_events_from_blob(gz_bytes) -> list[Event]`
+    now builds on it.
+  - `routes/fights.py::_load_fight_events` (which materialises a
+    `list[Event]`) delegates to `iter_events_from_blob`, keeping its exact
+    error contract (missing blob -> 404, non-gzip blob -> `OSError` -> 502,
+    empty -> 404, malformed line -> `ValidationError` -> 500). The
+    now-unused `gzip` + `TypeAdapter` imports are dropped.
+  - `routes/players.py::_contributions_from_blob_walk` STREAMS the blob
+    line-by-line (never materialising the full list), so it keeps its own
+    decompress loop and only swaps the per-line validate call to the hub's
+    `validate_event_line` — no memory regression on large WvW fights. Its
+    empty-line filter is aligned to the hub's `if not line.strip()` so all
+    three surfaces treat a blob identically.
+  Net: 3 `TypeAdapter(Event)` instances reduced to 1; no behaviour change
+  on real parser output (whitespace-only separator handling is unified,
+  strictly more lenient).
+- **apps/api/tests/test_event_dispatch.py**: +4 hermetic tests — the
+  per-line `validate_event_line` dispatches each of the 3 subclasses, the
+  list helper and per-line helper agree, and a parametrised regression
+  guard asserts neither route module re-introduces a local
+  `TypeAdapter(Event)`.
+
+#### Validation
+
+- `uv run pytest apps/api/tests/test_event_dispatch.py`: 7 passed (3 pre-existing + 4 new).
+- `uv run ruff check` + `uv run mypy libs apps --no-incremental`: clean (105 source files).
+- `uv run pytest apps/api/tests/ --collect-only`: no import errors across the suite.
+- Route integration tests (`apps/api/tests/routes/`, `test_fights_*`, `test_players.py`) require Postgres and were NOT run locally (no Docker in the dev env); they run on CI for the branch.
+
 ### Fixed (libs/gw2_analytics - v0.9.27 plan 083: Phase 8 cascade in event_window.py)
 
 The Phase 8 cycle that added `BuffRemovalEvent` as the third `Event` discriminated-union member in `libs/gw2_core/src/gw2_core/models.py` cascaded the change to `target_buff_removal.py` (the per-target strip rollup) but NOT to `event_window.py` (the per-bucket time-rollup aggregator). The per-bucket `EventBucket` schema was missing the `buff_removal_total` field, so the per-fight timeline chart (`apps/web/src/app/fights/[id]/page.tsx`'s `<PerFightTimelineChart>`) had no per-bucket strip band — a researcher investigating "which 5s window saw the most corrupting concentration" had no timeline answer, only the per-target rollup which is blind to per-bucket chronology. Plan 083 closes the gap:
