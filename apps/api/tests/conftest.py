@@ -116,7 +116,7 @@ os.environ.setdefault(
 os.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
 os.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from unittest.mock import MagicMock
 
 import pytest
@@ -332,15 +332,23 @@ class FakeMinio:
 
 
 @pytest.fixture
-def client() -> TestClient:
-    """Fresh ``TestClient(app)`` per test.
+def client() -> Generator[TestClient, None, None]:
+    """Fresh ``TestClient(app)`` per test with proper lifespan (Fix-C).
 
-    Mirrors the module-level ``client = TestClient(app)`` at the top
-    of ``test_uploads_e2e.py``; the regression test prefers
-    fixture-injected ``client`` for explicitness (the test signature
-    advertises its dependencies).
+    v0.10.8 plan 140 Fix-C: extends the prior fixture to a context-manager
+    generator (``with TestClient(app) as c: yield c``) so each test has
+    its own lifespan entry/exit -- schema-drift guard, arq pool init,
+    and scheduler teardown run per test.
+
+    Replaces module-level ``client = TestClient(app)`` declarations in
+    test files (which fired the app lifespan AT IMPORT TIME -- before
+    pytest autouse fixtures like :func:`_disable_arq_for_tests` could
+    monkeypatch ``arq.create_pool``). The lifespan then tripped on a
+    real Redis connection attempt and surfaced ``RuntimeError ... lifespan
+    context`` in test_player_compare.py + test_main_mount_order.py.
     """
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture

@@ -8,12 +8,31 @@ from __future__ import annotations
 import time
 import uuid as _uuid
 
+import pytest
+
 from _fixtures import make_cbtevent, make_minimal_zevtc
 from fastapi.testclient import TestClient
 
 from gw2analytics_api.main import app
 
-client = TestClient(app)
+# v0.10.8 plan 140 Fix-C: replace the prior ``client = TestClient(app)``
+# (which fired the app lifespan AT IMPORT TIME -- before pytest autouse
+# fixtures like ``_disable_arq_for_tests`` could monkeypatch
+# ``arq.create_pool``) with a per-test binding.
+client: TestClient | None = None
+
+
+@pytest.fixture(autouse=True)
+def _bind_client(request: pytest.FixtureRequest) -> None:
+    """Bind the module-level ``client`` to the per-test conftest fixture.
+
+    Avoids rewriting every test in this file to take ``client`` as a
+    parameter; the global ``client`` name is rebound per-test to the
+    conftest's per-test TestClient (which uses the ``with TestClient(app)
+    as c:`` context manager for proper lifespan entry/exit).
+    """
+    global client  # noqa: PLW0603
+    client = request.getfixturevalue("client")
 
 
 def _post_compare_fight(n_players: int, suffix: str | None = None) -> tuple[str, list[str]]:
