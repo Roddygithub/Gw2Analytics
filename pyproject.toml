@@ -11,7 +11,7 @@ license = { text = "MIT" }
 
 [dependency-groups]
 dev = [
-    "ruff>=0.7",
+    "ruff>=0.15.21",
     "mypy>=1.13",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
