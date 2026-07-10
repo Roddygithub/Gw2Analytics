@@ -57,6 +57,15 @@ jobs:
     if: github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
+      # v0.10.6 plan 137 (round-4 code-review fix): surface the
+      # ENTERPRISE ORG WARNING in the Actions UI itself, not just
+      # buried in the YAML comment. A misconfigured org admin
+      # sees this annotation in the run summary immediately.
+      - name: Enterprise org GITHUB_TOKEN check
+        if: github.actor == 'dependabot[bot]'
+        run: |
+          echo "::warning::If this auto-merge fails with '403 Resource not accessible by integration', your org's default GITHUB_TOKEN is restricted to read-only. See the workflow header comment for remediation (token allow-list OR 'Allow GitHub Actions to create and approve pull requests')."
+
       - name: Dependabot metadata
         id: metadata
         uses: dependabot/fetch-metadata@v2

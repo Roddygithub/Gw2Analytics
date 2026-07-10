@@ -33,16 +33,19 @@ updates:
         update-types: ["major"]
       - dependency-name: "pnpm/action-setup"
         update-types: ["major"]
-      # v0.10.6 plan 136 (round-3 code-review fix):
+      # v0.10.6 plan 137 (round-4 code-review fix):
       # `dependabot/fetch-metadata` is itself a GitHub action
-      # subject to the same dependabot-metadata bug. If dependabot
-      # bumps it to a non-existent major OR minor, the very
-      # workflow that gates auto-merge breaks. So we ignore both
-      # `major` AND `minor` for this one. Patch bumps still flow
-      # through (those have reliable tags). Future hardening:
-      # switch to `dependabot/fetch-metadata@<commit-sha>` style
-      # pin once an enterprise org-wide SHA-pin convention lands.
+      # subject to the same dependabot-metadata bug AND a
+      # critical security gate (it scopes our auto-merge policy).
+      # We ignore ALL dependabot bumps (major + minor + patch)
+      # for this one action and rely on operator-initiated manual
+      # updates via PR. This prevents a dependabot-emitted invalid
+      # ref (any semver bucket) from silently breaking the
+      # auto-merge workflow. Future hardening: switch to a SHA
+      # pin (`dependabot/fetch-metadata@<commit-sha>`) once the
+      # enterprise org-wide SHA-pin convention lands.
       - dependency-name: "dependabot/fetch-metadata"
         update-types:
           - "major"
           - "minor"
+          - "patch"

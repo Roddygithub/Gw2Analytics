@@ -55,7 +55,7 @@ there:
   "required_pull_request_reviews": {
     "required_approving_review_count": 1,
     "dismiss_stale_reviews": true,
-    "require_code_owner_reviews": false,
+    "require_code_owner_reviews": true,
     "require_last_push_approval": true
   },
   "restrictions": null,
