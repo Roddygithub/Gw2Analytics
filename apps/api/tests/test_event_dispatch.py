@@ -115,22 +115,47 @@ def test_iter_events_from_blob_round_trips_single_damage_event() -> None:
     assert events[0].source_agent_id == 42
     assert events[0].target_agent_id == 99
     assert events[0].skill_id == 7
-    assert events[0].damage == 500
-
-
-def test_iter_events_from_blob_drops_whitespace_only_lines() -> None:
+    assert events[0].damage == 500def test_iter_events_from_blob_drops_whitespace_only_lines() -> None:
     """Trailing empty + whitespace-only lines are dropped, not parsed.
 
     The parser can emit trailing blank separators between events; the
     helper must NOT raise ``ValidationError`` on an empty line AND
-    MUST NOT surface empty-string events. Pins ``if line`` semantics
-    in :func:`iter_events_from_blob`'s splitlines comprehension.
+    MUST NOT surface empty-string events. Pins ``if line.strip()``
+    semantics in :func:`iter_events_from_blob`'s splitlines
+    comprehension.
+
+    All four whitespace classes the parser may encounter are pinned:
+
+    * ``b""`` -- fully empty line (was caught by the prior ``if line``
+      filter; the round-2 ``if line.strip()`` keeps the behaviour).
+    * ``b"   "`` -- ASCII space-only (the original surfaced bug).
+    * ``b"\t"`` -- tab-only (the original surfaced bug).
+    * ``b"\r\n"`` -- Windows line ending split by ``splitlines()``
+      produces a ``b"\r"`` line that ``.strip()`` truncates to ``b""``.
+    * ``b"\r"`` -- legacy Mac carriage-return alone.
+    * ``b"\f"`` -- form feed (rare but valid JSON separator).
+    * ``b"\v"`` -- vertical tab.
+
+    Python's ``bytes.strip()`` covers all of them per the stdlib docs;
+    this test pins the cross-platform correctness so a future
+    "optimization" to a non-stripping filter regresses loudly.
     """
+    valid = b'{"event_type":"DAMAGE","time_ms":1000,"source_agent_id":42,"target_agent_id":99,"skill_id":7,"damage":500}'
+    # Every whitespace class Python's ``.strip()`` strips: space, tab,
+    # newline, carriage return, form feed, vertical tab. Each is padded
+    # around the valid JSON to assert the dispatch still surfaces the
+    # single valid event.
     blob = (
-        b'{"event_type":"DAMAGE","time_ms":1000,"source_agent_id":42,"target_agent_id":99,"skill_id":7,"damage":500}'
-        b"\n\n"
-        b"   \n"
-        b"\t\n"
+        valid
+        + b"\n"  # plain newline
+        + b"\r"  # carriage return alone (legacy Mac)
+        + b"\r\n"  # Windows line ending
+        + b"\n\n"  # two consecutive newlines
+        + b"   \n"  # ASCII space separator
+        + b"\t\n"  # tab separator
+        + b"\f\n"  # form feed separator
+        + b"\v\n"  # vertical tab separator
+        + b"   \r\n"  # mixed whitespace + Windows line ending
     )
     gz = gzip.compress(blob)
 

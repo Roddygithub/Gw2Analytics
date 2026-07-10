@@ -66,20 +66,5 @@ def iter_events_from_blob(gz_bytes: bytes) -> list[Event]:
 __all__ = ["iter_events_from_blob"]
 
 
-# ---------------------------------------------------------------------------
-# v0.10.5 audit followup (round 2 fix): whitespace-only separator handling
-# ---------------------------------------------------------------------------
-# Pre-v0.10.5 inline copies used the filter ``if line`` which dropped only
-# fully-empty ``b""`` separators. Whitespace-only lines (``b"   "``,
-# ``b"\t"`` -- truthy as bytes but not valid JSON) leaked through to
-# ``TypeAdapter.validate_json`` and raised ``pydantic_core.ValidationError``.
-#
-# The round-2 fix replaces the filter with ``if line.strip()`` so that
-# BOTH empty AND whitespace-only separators are dropped in one pass. The
-# change is pinned by
-# ``apps/api/tests/test_event_dispatch.py::test_iter_events_from_blob_drops_whitespace_only_lines``.
-# Same bug was latent in ``apps/api/src/gw2analytics_api/routes/players.py``
-# (route was cached behind the conftest env-bootstrap smoke which masked
-# the ValidationError as an opaque MNF) -- resolved transitively by
-# routing through this helper.
-# ---------------------------------------------------------------------------
+# Round 2 fix: ``if line`` -> ``if line.strip()`` drops whitespace-only
+# separators pre-validate. Pinned by test_iter_events_from_blob_drops_whitespace_only_lines.
