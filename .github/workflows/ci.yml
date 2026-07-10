@@ -233,7 +233,7 @@ jobs:
       # post-mortem is in the GitHub Actions artifacts tab.
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: web/playwright-report/
@@ -249,7 +249,7 @@ jobs:
       # via ``npx playwright show-trace``.
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-traces
           path: web/test-results/
@@ -290,7 +290,7 @@ jobs:
       # image viewer to see exactly which pixels regressed.
       - name: "Upload visual regression diffs on failure"
         if: failure() && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual-regression-diffs
           path: web/tests/e2e/.visual-regression-output/
