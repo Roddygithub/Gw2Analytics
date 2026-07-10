@@ -1,16 +1,45 @@
-# Caddy reverse-proxy for self-hosted deployment.
-# Replace *placeholder.tld with your real domain in production.
+# GW2Analytics — Caddy reverse-proxy for self-hosted deployment.
+#
+# BEFORE deploying to production, replace every `{placeholder.tld}` token by
+# setting the placeholder snippet (`{placeholder.tld}`) — Caddy ships the
+# snippet evaluator for `*.{placeholder.tld}` matches. The wildcard matches
+# all subdomains of your real domain; for a single-domain deployment, drop
+# the wildcard and use literal hostnames.
+#
+# Security policy (plan 008, v0.10.x hardening):
+#   - Strict-Transport-Security: 2-year HSTS with includeSubDomains + preload.
+#     Operator MUST verify HTTPS stability before any future HSTS change
+#     (a 2-year lock + broken HTTPS = bricked subdomain).
+#   - frame-ancestors 'none': clickjacking defense for the web dashboard.
+#   - Content-Security-Policy: 'self' + 'unsafe-inline' for styles (matches
+#     Next.js SSR output style tags). Future inline `<script>` injections
+#     require explicit relaxation — coordinate with plan 011 (Next.js
+#     `headers()` fallback) to keep these two layers consistent.
+#   - X-Content-Type-Options: nosniff (MIME-type confusion defense).
+#   - Referrer-Policy: strict-origin-when-cross-origin (anti-tracking for
+#     cross-origin + same-origin pass-through for dashboard analytics).
+#
+# Layered defense: this file ships the headers at the reverse-proxy layer.
+# The same headers are also emitted at the Next.js application layer via
+# web/next.config.ts (plan 011) — a misconfigured proxy still has the app
+# layer as a safety net. KEEP THE TWO FILES SYNCHRONIZED.
 
 (common) {
     encode gzip zstd
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    }
 }
 
-api.placeholder.tld {
+api.{placeholder.tld} {
     import common
     reverse_proxy localhost:8000
 }
 
-placeholder.tld {
+{placeholder.tld} {
     import common
     reverse_proxy localhost:3000
 }
