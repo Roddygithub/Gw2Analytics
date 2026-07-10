@@ -1,0 +1,30 @@
+# CODEOWNERS (v0.10.6 plan 137)
+#
+# Routes review requests to specific owners when a PR touches a
+# matching path. Combined with the branch-protection rule applied
+# via `gh api PUT .../branches/main/protection` (see plans/137), the
+# `require_code_owner_reviews: true` setting causes GitHub to block
+# the merge button on any PR touching the listed paths until the
+# owner grants a review.
+#
+# This file is the repo-side half of the Change A1 layer; the
+# branch-protection rule is the GitHub-side half. Both must be in
+# place for the founding `.github/**` gate. (just one without the
+# other leaves a gap dependabot can exploit.)
+#
+# Owner handle is `@Roddygithub`; replace with the actual team
+# handle for production deployments.
+
+# v0.10.6 plan 137: any change to .github/** requires review
+# by the repo's admin team. Prevents a patched workflow from
+# landing without human eyes.
+# Covers workflows, dependabot config, this file itself, and any
+# future `.github/scripts/*` or `.github/actions/*` repos.
+.github/** @Roddygithub
+
+# Belt-and-braces: pin the `gw2_core` library to a maintainer
+# review. This is the lowest-level library (events, models); changes
+# here cascade into gw2_analytics + gw2_evtc_parser + gw2_api_client
+# + the api app, so a regression surfaces as a P0 outage. A required
+# review adds 1 human checkpoint before the cascade ships.
+/libs/gw2_core/** @Roddygithub
