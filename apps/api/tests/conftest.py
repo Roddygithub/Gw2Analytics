@@ -47,6 +47,32 @@ to <120s.
 
 from __future__ import annotations
 
+# v0.10.5 audit followup #1: environment bootstrap BEFORE regular imports.
+# The ``from gw2analytics_api.main import app`` import below triggers
+# a module-level ``Settings()`` Pydantic validation; without these
+# placeholders the import raises ``ValidationError`` which pytest
+# misleadingly wraps as ``ModuleNotFoundError``. We use ``setdefault``
+# (NOT ``=``) so an outer CI / dev shell with the real env vars
+# already set is not clobbered -- only dev laptops that lack the var
+# receive the placeholder.
+#
+# The placeholder values are dev-only; per-test fixtures mock MinIO
+# and Postgres so the real services never see these strings.
+# Production reads from a managed ``.env`` / secret manager.
+import os as _os_for_settings
+
+_fernet_placeholder = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="  # 44-char Fernet placeholder
+assert len(_fernet_placeholder) == 44, (
+    f"SECRETS_KEK placeholder must be exactly 44 chars (Fernet url-safe base64); got {len(_fernet_placeholder)}"
+)
+_os_for_settings.environ.setdefault("S3_BUCKET", "test-bucket")
+_os_for_settings.environ.setdefault("S3_ENDPOINT", "http://localhost:9000")
+_os_for_settings.environ.setdefault("S3_ACCESS_KEY", "test-access-key")
+_os_for_settings.environ.setdefault("S3_SECRET_KEY", "test-secret-key")
+_os_for_settings.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+_os_for_settings.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
+_os_for_settings.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
+
 from collections.abc import Callable
 
 import pytest
