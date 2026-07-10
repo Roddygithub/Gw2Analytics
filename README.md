@@ -9,7 +9,7 @@
 > WvW combat logs (`.zevtc`) are parsed locally and stored in a stable
 > internal model from which all analytics, API, and frontend derive.
 
-**Status:** Latest tagged release: `v0.9.1` · v0.10.2 (hotfix series) close-out **committed on `main`** ([Unreleased] in CHANGELOG; tags pending operator ceremony) · **v0.10.3** + **v0.10.4** cycle close-out committed (heuristic role detection + per-player timeline overlay + blob cache + CI hardening + security headers; see Release Tags table) · **1,150+ active tests** (353 pytest + 797 vitest) across pytest + vitest + Playwright · strict CI lint + test + typecheck + OpenAPI drift gate + schema-drift guard active.
+**Status:** Latest tagged release: `v0.9.1` · **v0.10.2–v0.10.8** cycle close-out **committed on `main`** ([Unreleased] in CHANGELOG; tags pending operator ceremony) — heuristic role detection + per-player timeline overlay + blob cache + containerised Postgres standardisation on `:5432` + pgcrypto-free secret-at-rest envelope encryption (OWASP CWE-256) + Caddyfile security headers (HSTS + CSP + frame-ancestors) + CI security hardening (pip-audit + pnpm audit) + cluster-dep recovery (6 HIGH-risk dependabot PRs deferred to v0.10.9 with `redis>=5.0,<8`, `ag-grid-{community,react} ^34`, `jsdom ^25`, `@types/node ^20.19` ceiling pins; see Release Tags table for the v0.10.3 row that scopes the cycle family). · **1,150+ active tests** (353 pytest + 797 vitest) across pytest + vitest + Playwright · strict CI lint + test + typecheck + OpenAPI drift gate + schema-drift guard + mypy --strict active.
 
 ## Highlights
 
