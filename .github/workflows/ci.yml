@@ -131,7 +131,7 @@ jobs:
         run: rm -f /tmp/health_baseline.json
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 9
 
