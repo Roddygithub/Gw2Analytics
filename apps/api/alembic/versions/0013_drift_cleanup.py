@@ -68,7 +68,69 @@ that allows duplicates would silently corrupt the
 NOT safe if the v0.10.5+ ingestion path has populated them with
 non-NULL values.
 
-If you need to roll back: restore from a pre-0013 backup.
+If you need to roll back: restore from a pre-0013 backup,
+OR apply both the **manual-recovery SQL block** below AND
+``alembic stamp 0012_check_constraints`` (the stamp alone only
+updates the version bookkeeping -- it does NOT undo the SQL
+state; the operator must run the SQL block FIRST, then stamp).
+Manual recovery (partial-failure or operator rollback)
+-----------------------------------------------------
+
+If ``alembic upgrade head`` partially failed (e.g. an unexpected
+schema mismatch after the 9 ``op.drop_index`` calls but before the
+UNIQUE constraint or the 2 columns), the database can be returned
+to v0.10.3-closed state with psql-only SQL. This block is also
+the recommended recovery path when ``alembic downgrade`` would
+have been the right tool but is not available because the
+downgrade raises ``NotImplementedError``:
+
+.. code-block:: sql
+
+    -- 1. Drop the additive condi/power columns (safe; data unused
+    --    by the pre-v0.10.5 ORM + route layer).
+    ALTER TABLE fight_player_summaries
+        DROP COLUMN IF EXISTS condi_damage;
+    ALTER TABLE fight_player_summaries
+        DROP COLUMN IF EXISTS power_damage;
+
+    -- 2. Drop the uploads.sha256 UNIQUE constraint (restores
+    --    the pre-0013 "app-layer ON CONFLICT" dedup semantic).
+    --    The ORM-side ``unique=True`` flag (commit 8b381b0 in
+    --    models.py) will re-emit the constraint on the next
+    --    ``alembic upgrade`` via SQLAlchemy autogenerate. The
+    --    operator must therefore EITHER (a) ``git revert`` the
+    --    ORM commit before the next ``alembic upgrade``, OR (b)
+    --    downgrade ``Upload.sha256`` to
+    --    ``mapped_column(String(64))`` (no ``unique=``,
+    --    no ``index=``) so the autogenerate does not re-apply
+    --    the constraint.
+    ALTER TABLE uploads
+        DROP CONSTRAINT IF EXISTS uploads_sha256_key;
+
+    -- 3. The 9 dropped indexes are CORRECT (they were stale per
+    --    the v2 ORM models); do NOT recreate them. Recreating
+    --    the 8 non-uploads indexes would just re-flag them on
+    --    the next ``alembic check`` invocation; the ix_uploads_sha256
+    --    was the redundant non-unique backing index for the UNIQUE
+    --    constraint.
+
+    -- 4. After running the above, stamp the alembic version so
+    --    future ``alembic upgrade`` calls do not try to
+    --    re-apply 0013_drift_cleanup:
+    --
+    --    psql ... -c "UPDATE alembic_version SET version_num =
+    --    '0012_check_constraints' WHERE version_num =
+    --    '0013_drift_cleanup';"
+    --
+    -- OR run ``alembic stamp 0012_check_constraints`` to do the
+    -- same via alembic's own bookkeeping.
+
+The post-recovery schema state matches v0.10.3-closed (commit
+``84138d0`` on origin/main). Operators MUST also revert the v0.10.5
+audit-followups commit (the 2 atomic commits that landed 0013 +
+the condi/power wiring) on origin/main BEFORE the next
+``alembic upgrade`` to avoid re-triggering the same drift.
+
 """
 
 from __future__ import annotations
