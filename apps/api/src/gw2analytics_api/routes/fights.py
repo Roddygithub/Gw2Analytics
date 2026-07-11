@@ -7,6 +7,7 @@ GET events: aggregated damage + time-bucketed roll-ups for one fight.
 
 from __future__ import annotations
 
+import concurrent.futures
 import functools
 import logging
 import threading
@@ -72,6 +73,15 @@ logger = logging.getLogger(__name__)
 # serialises the wrapped function calls, capping memory peak at
 # one decompressed blob in flight at a time.
 #
+# v0.10.11+ plan 144 (this commit): the per-URI lock is
+# AUGMENTED with a true singleflight on the cold-cache miss path.
+# The singleflight collapses N concurrent callers on a cold cache
+# to 1 fetcher + N-1 waiters + 0 redundant MinIO GETs (the prior
+# latch collapsed to N MinIO GETs + N decompressed blobs in RAM,
+# sequentialised). The per-URI latch stays as defence-in-depth:
+# the future dict + the lock are both bounded, and the lock further
+# caps the in-flight ``_IN_FLIGHT_FUTURES`` peak to ``maxsize=8``.
+#
 # Why a regular dict + meta-lock instead of ``defaultdict``:
 # ``collections.defaultdict.__missing__`` is NOT thread-safe --
 # 4 threads can each see a missing key, each invoke the factory,
@@ -89,6 +99,18 @@ logger = logging.getLogger(__name__)
 # restarts or the LRU entry is evicted.
 _BLOB_URI_LOCKS: dict[str, threading.Lock] = {}
 _BLOB_URI_LOCKS_META_LOCK = threading.Lock()
+
+
+# v0.10.11+ plan 144: singleflight state for ``_cached_get_events``.
+# Tracking a per-URI ``concurrent.futures.Future`` in a dict lets N
+# concurrent cold-cache callers share ONE MinIO GET (1 fetcher + N-1
+# ``future.result()`` waiters). The fut-dict is bounded by the latch
+# above -- the latch's max-in-flight = 1 means at most one ``Future``
+# can be in flight per URI at any time. Same double-checked-locking
+# pattern as ``_BLOB_URI_LOCKS``: ``defaultdict.__missing__`` is NOT
+# thread-safe, so we use a plain ``dict`` + meta-lock + atomic helper.
+_IN_FLIGHT_FUTURES: dict[str, concurrent.futures.Future[bytes]] = {}
+_IN_FLIGHT_FUTURES_META_LOCK = threading.Lock()
 
 
 def _get_blob_uri_lock(blob_uri: str) -> threading.Lock:
@@ -110,18 +132,96 @@ def _get_blob_uri_lock(blob_uri: str) -> threading.Lock:
     return lock
 
 
+def _get_or_create_inflight_future(
+    blob_uri: str,
+) -> tuple[concurrent.futures.Future[bytes], bool]:
+    """Atomically fetch (or create) the singleflight ``Future`` for one URI.
+
+    Returns ``(future, is_fetcher)`` where ``is_fetcher True`` means
+    THIS thread must run the underlying ``get_events`` and call
+    ``future.set_result`` (or ``set_exception``); ``is_fetcher False``
+    means another thread is the fetcher -- this thread should block
+    on ``future.result()``.
+
+    Uses the same double-checked-locking pattern as
+    :func:`_get_blob_uri_lock`: the fast path is a lock-free dict
+    lookup; the slow path (first caller for a new URI) re-checks
+    under the meta-lock before creating + inserting a ``Future``.
+    The double-check is the defaultdict-race defence: the first
+    reader to win the meta-lock inserts the Future; subsequent
+    readers see the inserted value on the lock-free fast path.
+    """
+    fut = _IN_FLIGHT_FUTURES.get(blob_uri)
+    if fut is not None:
+        return fut, False
+    with _IN_FLIGHT_FUTURES_META_LOCK:
+        fut = _IN_FLIGHT_FUTURES.get(blob_uri)
+        if fut is None:
+            fut = concurrent.futures.Future()
+            _IN_FLIGHT_FUTURES[blob_uri] = fut
+    return fut, True
+
+
 @functools.lru_cache(maxsize=8)
 def _cached_get_events(blob_uri: str) -> bytes:
-    """LRU-cached MinIO GET for the gzipped events blob.
+    """LRU + singleflight-cached MinIO GET for the gzipped events blob.
 
-    Sequential calls (the v0.9.4 plan 014 contract): cache hit
-    short-circuits. Concurrent calls (this plan's contract): the
-    per-URI lock ensures exactly ONE MinIO GET per (blob_uri,
-    cold-cache) event; the other N-1 callers block on the lock and
-    pick up the populated cache value when the lock releases.
+    Three-cooperative layers protect concurrent cold-cache callers:
+
+    1. ``functools.lru_cache(maxsize=8)`` -- the POST-COMPLETION
+       cache (plan 014). Subsequent calls (after the future has
+       resolved) hit this layer without entering the function body.
+    2. The singleflight ``_IN_FLIGHT_FUTURES`` dict -- the IN-FLIGHT
+       cache (plan 144). Concurrent callers on a cold cache share
+       the SAME ``Future``; the fetcher runs ``get_events`` on
+       its OWN thread (preserves the synchronous API -- no async
+       refactor), then N-1 waiters block on ``future.result()``.
+       The fetcher clears the dict entry in the ``finally`` block
+       so a retry (post-exception or otherwise) starts fresh.
+    3. The per-URI ``_BLOB_URI_LOCKS`` latch (plan 029) -- the
+       MEMORY-PEAK cap. Belt-and-suspenders: the singleflight
+       collapses the underlying fetches (1 GET per cold URI), but
+       the latch bridges the nanosecond race-window between
+       ``_IN_FLIGHT_FUTURES.pop()`` in the ``finally`` block and
+       the lru_cache decorator's atomic cache-write at function
+       return -- a 5th concurrent caller could otherwise open a
+       redundant ``Future`` during that brief window. The latch
+       also bounds the ``_IN_FLIGHT_FUTURES`` peak to ``maxsize=8``
+       (the same bound the lru_cache uses).
+
+    Sequential calls (post-completion) hit the ``lru_cache``
+    short-circuit without entering the function body. Concurrent
+    calls (cold cache) collapse to a single MinIO GET + N-1
+    ``future.result()`` waits. Exceptions (e.g. ``S3Error``)
+    propagate to all N waiters via ``future.set_exception`` +
+    ``future.result()`` re-raise; the dict entry is cleared so a
+    retry starts a fresh fetch.
     """
-    with _get_blob_uri_lock(blob_uri):
-        return get_events(blob_uri)
+    future, is_fetcher = _get_or_create_inflight_future(blob_uri)
+    if not is_fetcher:
+        # Concurrent caller: block on the in-flight future. Exceptions
+        # propagate via ``future.result()`` re-raise.
+        return future.result()
+    # First caller on cold cache: run the fetch on THIS thread, set
+    # the future + clear the dict entry, return the resolved bytes.
+    try:
+        with _get_blob_uri_lock(blob_uri):
+            result = get_events(blob_uri)
+        future.set_result(result)
+        return result
+    except Exception as exc:
+        # Propagate to all N waiters via the future channel. ``Exception``
+        # (not ``BaseException``) is the right choice: ``KeyboardInterrupt``
+        # + ``SystemExit`` should propagate without enabling the broadcast,
+        # so a shutdown signal aborts all N waiters independently of the
+        # cache layer's success/failure semantics.
+        future.set_exception(exc)
+        raise
+    finally:
+        # Always clear the dict -- the in-flight window is closed
+        # regardless of success or failure. A retry starts fresh.
+        with _IN_FLIGHT_FUTURES_META_LOCK:
+            _IN_FLIGHT_FUTURES.pop(blob_uri, None)
 
 
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])

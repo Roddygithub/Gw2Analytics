@@ -311,3 +311,133 @@ def test_get_blob_uri_lock_helper_returns_same_instance() -> None:
     b = _get_blob_uri_lock("s3://bucket/events/REPEATED.jsonl.gz")
     assert a is b
     assert hasattr(a, "acquire") and hasattr(a, "release")
+
+
+# ---------------------------------------------------------------------------
+# Singleflight contract tests (plan 144)
+# ---------------------------------------------------------------------------
+
+
+def test_singleflight_collapses_to_single_fetcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Singleflight: N concurrent callers on cold cache => exactly ONE underlying get_events.
+
+    The pre-singleflight latch (plan 029) serialises get_events
+    calls but DOES NOT deduplicate concurrent misses -- the lru_cache
+    pre-check fires for all N concurrent callers, each enters the
+    function body, each calls ``get_events`` once (sequentialised).
+    After the singleflight (plan 144), the FIRST concurrent caller
+    becomes the ``is_fetcher`` thread and runs ``get_events`` once;
+    the N-1 waiters block on ``future.result()`` and share the
+    resolved bytes via the Future broadcast.
+
+    This test pins the call-count collapse contract: exactly ONE
+    ``get_events`` fired even with 4 concurrent callers.
+    """
+    call_count = {"n": 0}
+
+    def fake_get_events(uri: str) -> bytes:
+        call_count["n"] += 1
+        # The time.sleep is the latch's serialisation signal; without
+        # it, all 4 callers could race through before any of them sets
+        # the cache. The latch + singleflight BOTH rely on this delay.
+        time.sleep(0.05)
+        return gzip.compress(b"event")
+
+    monkeypatch.setattr(
+        "gw2analytics_api.routes.fights.get_events", fake_get_events
+    )
+
+    barrier = threading.Barrier(4)
+
+    def call() -> bytes:
+        barrier.wait(timeout=2.0)
+        return _cached_get_events("s3://bucket/events/SINGLEFLIGHT.jsonl.gz")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: call(), range(4)))
+
+    # Pre-singleflight: call_count == 4 (latch alone). Post-singleflight: 1.
+    assert call_count["n"] == 1, (
+        f"Singleflight collapsed 4 concurrent cold-cache callers to "
+        f"{call_count['n']} underlying fetch(es); expected 1. The Future "
+        f"broadcast missed and the N-1 waiters fell through to a fresh "
+        f"call to ``get_events``."
+    )
+    # All 4 callers receive the SAME bytes (single fetcher's output,
+    # broadcast via ``future.set_result`` + ``future.result()``).
+    assert all(r == results[0] for r in results), (
+        "Singleflight waiters received bytes different from the fetcher's "
+        "result -- the Future broadcast missed."
+    )
+
+
+def test_singleflight_exception_propagates_to_all_waiters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Singleflight: get_events S3Error on a cold URI propagates to N concurrent waiters.
+
+    After this commit, the fetcher thread calls ``future.set_exception``
+    BEFORE propagating the exception. All N concurrent waiters see
+    the SAME exception class via ``future.result()`` (which re-raises).
+    The ``finally`` block also clears the in-flight Future from the
+    dict so a retry (post-exception, post-resolution) starts a fresh
+    singleflight fetch.
+
+    Unlike pool.map (which surfaces only the FIRST exception), this
+    test uses an explicit Future-collection pattern so each caller's
+    exception is captured independently.
+    """
+    attempt = {"n": 0}
+
+    def fake_get_events(uri: str) -> bytes:
+        attempt["n"] += 1
+        time.sleep(0.05)
+        if attempt["n"] == 1:
+            raise _FakeS3Error()
+        return gzip.compress(b"event")
+
+    monkeypatch.setattr(
+        "gw2analytics_api.routes.fights.get_events", fake_get_events
+    )
+
+    barrier = threading.Barrier(4)
+    capture: list[tuple[bytes | None, BaseException | None]] = [  # type: ignore[misc]
+        (None, None)
+    ] * 4
+
+    def call(idx: int) -> None:
+        barrier.wait(timeout=2.0)
+        try:
+            bytes_result = _cached_get_events("s3://bucket/events/EXC.jsonl.gz")
+            capture[idx] = (bytes_result, None)
+        except Exception as exc:
+            capture[idx] = (None, exc)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(call, range(4)))
+
+    # All 4 callers raised an exception (the fake S3Error).
+    exceptions = [exc for _, exc in capture if exc is not None]
+    successes = [res for res, _ in capture if res is not None]
+    assert len(exceptions) == 4, (
+        f"Singleflight exception broadcast missed: only {len(exceptions)} "
+        f"of 4 concurrent callers saw the S3Error; the remaining "
+        f"{len(successes)} caller(s) got stale data."
+    )
+    for exc in exceptions:
+        assert isinstance(exc, S3Error), (
+            f"Singleflight surfaced a non-S3Error exception: {exc!r}"
+        )
+
+    # Retry post-exception must succeed (the dict entry was cleared in
+    # the fetcher's ``finally`` block, so the retry hits the function
+    # body again as a fresh fetcher).
+    result = _cached_get_events("s3://bucket/events/EXC.jsonl.gz")
+    assert gzip.decompress(result) == b"event"
+    assert attempt["n"] == 2, (
+        f"Expected 2 get_events calls (1 exception + 1 success on retry), "
+        f"got {attempt['n']}. The singleflight dict cleanup in the ``finally`` "
+        f"block may have failed -- the retry hit a stale entry."
+    )
