@@ -623,20 +623,14 @@ def get_fight_squads(
     return FightSquadsOut(
         fight_id=fight_id,
         duration_s=duration_s,
-        squads=[
-            SquadRollupRowOut.model_validate(
-                {
-                    "subgroup": r.subgroup,
-                    "total_damage": r.total_damage,
-                    "total_healing": r.total_healing,
-                    "total_buff_removal": r.total_buff_removal,
-                    "dps": r.dps,
-                    "hps": r.hps,
-                    "bps": r.bps,
-                },
-            )
-            for r in squad_rows
-        ],
+        # A2 PR 3.1 thin-route rewrite: the manual dict-construction
+        # {"subgroup": r.subgroup, "total_damage": r.total_damage,
+        # ...} mapping is replaced with r.model_dump() because the
+        # aggregator's SquadRollupRow is a Pydantic v2 BaseModel that
+        # emits a canonical dict via model_dump() -- the
+        # SquadRollupRowOut schema's field names are 1:1 with
+        # SquadRollupRow, so the round-trip is mechanical.
+        squads=[SquadRollupRowOut.model_validate(r.model_dump()) for r in squad_rows],
     )
 
 
