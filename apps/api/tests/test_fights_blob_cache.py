@@ -6,7 +6,7 @@ import gzip
 
 import pytest
 
-from gw2analytics_api.routes.fights import _cached_get_events
+from gw2analytics_api.routes.fights.blob_cache import _cached_get_events
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +25,7 @@ def test_cache_dedupes_minio_get_per_blob_uri(monkeypatch: pytest.MonkeyPatch) -
         return gzip.compress(b"event")
 
     monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.get_events",
+        "gw2analytics_api.routes.fights.blob_cache.get_events",
         fake_get_events,
     )
     _cached_get_events("s3://bucket/events/FIGHT123.jsonl.gz")
@@ -42,7 +42,7 @@ def test_cache_invalidates_on_new_blob_uri(monkeypatch: pytest.MonkeyPatch) -> N
         return gzip.compress(b"event")
 
     monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.get_events",
+        "gw2analytics_api.routes.fights.blob_cache.get_events",
         fake_get_events,
     )
     _cached_get_events("s3://bucket/events/FIGHT123.jsonl.gz")
@@ -53,7 +53,7 @@ def test_cache_invalidates_on_new_blob_uri(monkeypatch: pytest.MonkeyPatch) -> N
 def test_cache_maxsize_evicts_oldest(monkeypatch: pytest.MonkeyPatch) -> None:
     """9 calls with 9 distinct URIs trigger at least 1 eviction."""
     monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.get_events",
+        "gw2analytics_api.routes.fights.blob_cache.get_events",
         lambda uri: gzip.compress(b"event"),
     )
     for i in range(9):

@@ -52,7 +52,7 @@ import time
 import pytest
 from minio.error import S3Error
 
-from gw2analytics_api.routes.fights import (
+from gw2analytics_api.routes.fights.blob_cache import (
     _BLOB_URI_LOCKS,
     _cached_get_events,
     _get_blob_uri_lock,
@@ -157,7 +157,7 @@ def test_concurrent_calls_to_same_uri_are_serialised(
         return gzip.compress(b"event")
 
     monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.get_events", fake_get_events
+        "gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events
     )
 
     # 4 concurrent calls on the same URI. Barrier releases them simultaneously.
@@ -203,7 +203,7 @@ def test_concurrent_calls_to_distinct_uris_run_in_parallel(
         time.sleep(per_call_latency_s)
         return gzip.compress(b"event")
 
-    monkeypatch.setattr("gw2analytics_api.routes.fights.get_events", fake_get_events)
+    monkeypatch.setattr("gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events)
 
     barrier = threading.Barrier(4)
     uris = [f"s3://bucket/events/FIGHT{i}.jsonl.gz" for i in range(4)]
@@ -244,7 +244,7 @@ def test_lock_releases_on_exception_does_not_poison_cache(
             raise _FakeS3Error()
         return gzip.compress(b"event")
 
-    monkeypatch.setattr("gw2analytics_api.routes.fights.get_events", fake_get_events)
+    monkeypatch.setattr("gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events)
 
     # First call: S3Error-shaped exception propagates to the caller.
     with pytest.raises(S3Error):
@@ -271,7 +271,7 @@ def test_lock_dict_keys_bounded_by_maxsize_plus_inflight(
 ) -> None:
     """After 9 distinct URI calls, the lock dict has at most 9 keys (one per URI)."""
     monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.get_events",
+        "gw2analytics_api.routes.fights.blob_cache.get_events",
         lambda uri: gzip.compress(b"event"),
     )
 
@@ -346,7 +346,7 @@ def test_singleflight_collapses_to_single_fetcher(
         return gzip.compress(b"event")
 
     monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.get_events", fake_get_events
+        "gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events
     )
 
     barrier = threading.Barrier(4)
@@ -399,7 +399,7 @@ def test_singleflight_exception_propagates_to_all_waiters(
         return gzip.compress(b"event")
 
     monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.get_events", fake_get_events
+        "gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events
     )
 
     barrier = threading.Barrier(4)
