@@ -1,8 +1,42 @@
-"""/api/v1/fights`` endpoints.
+"""``/api/v1/fights`` sub-pack: FastAPI router + extracted cache primitive.
 
-GET list : paginated metadata list of all fights the API has parsed.
-GET detail: a single fight with its embedded agents.
-GET events: aggregated damage + time-bucketed roll-ups for one fight.
+The package's main entry-point is the FastAPI :data:`router`
+(registered via ``app.include_router(router)`` in
+:mod:`gw2analytics_api.main`); the 7 endpoint handlers listed below
+hang off it. The :mod:`.blob_cache` submodule is the canvas for the
+A2 god-module refactor: PR 1 extracted the singleflight + per-URI
+latch + LRU cache primitive out of this module into a dedicated
+submodule so its contract can be tested hermetically (without the
+TestClient stack).
+
+Submodules
+==========
+
+- :mod:`gw2analytics_api.routes.fights.blob_cache` -- the canonical
+  per-URI blob-cache primitive (``lru_cache(maxsize=8)`` + per-URI
+  ``threading.Lock`` + ``concurrent.futures.Future`` singleflight).
+  Independent of FastAPI; the only consumer in this package is
+  :func:`_load_fight_events`. Direct submodule imports are
+  encouraged for consumers (the apps/api tests +
+  ``apps/api/tests/conftest.py`` autouse fixture chain) -- the
+  underscore-prefix names there are deliberately internal to the
+  cache primitive and are NOT re-exported via this package's
+  namespace (per PEP 8 underscore-prefix = module-private).
+
+Endpoints (registered via ``app.include_router(router)`` in main)
+=================================================================
+
+- :func:`list_fights` -- paginated metadata list of all fights the
+  API has parsed.
+- :func:`get_fight` -- a single fight with its embedded agents.
+- :func:`get_fight_events` -- aggregated damage + healing + time-bucketed
+  roll-ups for one fight.
+- :func:`get_fight_squads` -- per-subgroup roll-up for one fight.
+- :func:`get_fight_skills` -- per-skill hit count + damage / heal /
+  strip totals.
+- :func:`get_fight_timeline` -- per-fight temporal view (3-series
+  ``M:SS`` relative time).
+- :func:`get_fight_player_timeline` -- per-player timeline overlay.
 """
 
 from __future__ import annotations

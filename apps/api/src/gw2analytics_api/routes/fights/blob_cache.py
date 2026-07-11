@@ -38,16 +38,29 @@ Public surface
 - :func:`_cached_get_events` -- the three-layer cache wrapper.
 - :func:`clear_blob_caches` -- test-isolation helper that clears
   the lru_cache layer AND drops the per-URI locks + in-flight
-  Futures. Wired into the conftest.py autouse fixture chain in a
-  future PR of the A2 god-module refactor (after PR 1 stabilises
-  the cache-only split).
+  Futures. Wired into ``apps/api/tests/conftest.py``'s autouse
+  fixture chain in A2 PR 1.1 (post commit 1565066).
 - :data:`_BLOB_URI_LOCKS` + :data:`_BLOB_URI_LOCKS_META_LOCK` --
-  the per-URI latch state (consumed directly by the latch +
-  singleflight tests for invariant pinning).
+  the per-URI latch state (consumed directly by the cache tests
+  for invariant pinning).
 - :data:`_IN_FLIGHT_FUTURES` + :data:`_IN_FLIGHT_FUTURES_META_LOCK` --
   the singleflight state.
 - :func:`_get_blob_uri_lock` + :func:`_get_or_create_inflight_future`
   -- the atomic helpers used by :func:`_cached_get_events`.
+
+Test monkeypatch contract (READ BEFORE PATCHING)
+================================================
+
+The cache primitive's :func:`_cached_get_events` resolves
+:func:`get_events` via THIS module's namespace (NOT via
+:mod:`apps.api.routes.fights`'s). Tests MUST hit the monkeypatch
+target ``gw2analytics_api.routes.fights.blob_cache.get_events``;
+patching ``gw2analytics_api.routes.fights.get_events`` is a NO-OP
+post the A2 god-module refactor (commit 1565066) because the call
+site reads from the submodule's globals. The 2 cache test files
+(``test_fights_blob_cache_thundering_herd.py`` +
+``test_fights_blob_cache.py``) already retarget their 9 monkeypatch
+sites accordingly.
 """
 
 from __future__ import annotations

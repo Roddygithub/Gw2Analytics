@@ -136,6 +136,7 @@ from gw2analytics_api.models import (
     OrmWebhookSubscription,
     Upload,
 )
+from gw2analytics_api.routes.fights.blob_cache import clear_blob_caches
 
 
 @pytest.fixture(autouse=True)
@@ -173,6 +174,34 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(monkeypatch, "setenv", _setenv_and_clear)
     monkeypatch.setattr(monkeypatch, "delenv", _delenv_and_clear)
+
+
+@pytest.fixture(autouse=True)
+def _clear_blob_caches() -> None:
+    """Clear all 3 blob-cache layers (LRU + per-URI locks + in-flight Futures).
+
+    Centralised isolation helper for the cache primitive in
+    :mod:`gw2analytics_api.routes.fights.blob_cache`. The helper
+    :func:`clear_blob_caches` resets the lru_cache layer + drops
+    the per-URI ``_BLOB_URI_LOCKS`` dict + drops the in-flight
+    ``_IN_FLIGHT_FUTURES`` dict -- closing the latent gap the
+    pre-A2 per-test ``_clear_cache`` autouse fixtures (in
+    :file:`test_fights_blob_cache_thundering_herd.py` +
+    :file:`test_fights_blob_cache.py`) had where they cleared the
+    LRU + the locks but NOT the in-flight Futures (the singleflight
+    state that can leak across tests on hot reload).
+
+    Function-scoped (autouse); runs before every test in
+    apps/api/tests/. Cost: O(1) for the LRU ``cache_clear`` +
+    O(N) for the dict clears where N is bounded by ``maxsize=8``
+    + any leaked Futures from interrupted test paths.
+
+    Wired into the apps/api conftest in A2 PR 1.1 (post commit
+    1565066). The 9 monkeypatch sites in the 2 cache test files
+    already retarget the ``blob_cache.get_events`` namespace per
+    the contract documented in blob_cache.py's module docstring.
+    """
+    clear_blob_caches()
 
 
 @pytest.fixture(autouse=True)
