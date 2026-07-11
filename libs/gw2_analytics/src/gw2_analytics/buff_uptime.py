@@ -1,4 +1,4 @@
-"""Buff uptime tracker (v0.10.5 plan 137).
+"""Buff uptime tracker (v0.10.5 plan 137; Phase 9 forward-extended).
 
 Pydantic v2 re-implementation of the chronological buff-history
 pattern. The :class:`BuffState` model stores an append-only list of
@@ -23,11 +23,32 @@ Invariants
   appending. The helper :func:`append_stacks` is provided for
   convenience and raises :class:`ValueError` on a backward-time
   append.
+
+Phase 9 extension: :func:`accumulate_buff_events` folds a stream of
+``BoonApplyEvent`` records into per-skill-id :class:`BuffState`
+instances. Single linear scan over the event stream -- no sort,
+no reverse. The 3-way ``kind`` discriminator (``apply``,
+``remove_single``, ``remove_all``) translates to stack deltas:
+
+- ``apply``         -> ``stacks += event.stacks``
+- ``remove_single`` -> ``stacks -= 1`` (clamped at 0)
+- ``remove_all``    -> ``stacks = 0``
+
+The resulting :class:`BuffState` carries no pre-seed entry: the
+first event for a skill_id becomes the first history entry, and
+read-side functions (:func:`total_uptime_ms`,
+:func:`interval_uptime_pct`) treat the pre-first-event interval as
+implicitly 0-stacks. This keeps the history minimal ("every entry
+came from a real event") without affecting the uptime arithmetic.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from gw2_core import BoonApplyEvent
 
 
 class NonMonotonicHistoryError(ValueError):
@@ -162,10 +183,71 @@ def interval_uptime_pct(
     return max(0.0, min(100.0, pct))
 
 
+def accumulate_buff_events(
+    events: Iterable[BoonApplyEvent],
+) -> dict[int, BuffState]:
+    """Build per-skill-id :class:`BuffState` instances from a stream of :class:`BoonApplyEvent`s.
+
+    Each unique ``skill_id`` in the stream gets its own
+    :class:`BuffState`. The history is event-driven only (no
+    pre-seed entry): the first event for a skill_id becomes the
+    first history entry, and read-side functions
+    (:func:`total_uptime_ms`, :func:`interval_uptime_pct`) treat the
+    implicitly-0-stacks pre-first-event interval as 0-stacks.
+
+    The 3-way ``kind`` discriminator translates to stack deltas:
+
+    - ``apply``         -> ``new_stacks = current_stacks + event.stacks``
+    - ``remove_single`` -> ``new_stacks = max(0, current_stacks - 1)``
+    - ``remove_all``    -> ``new_stacks = 0``
+
+    Parameters
+    ----------
+    events:
+        The :class:`BoonApplyEvent` stream (typically the output of
+        :meth:`PythonEvtcParser.parse_events` filtered to ``BoonApplyEvent``
+        via :func:`isinstance`).
+
+    Returns
+    -------
+    Mapping ``skill_id -> BuffState`` for every distinct skill_id
+    in the stream. An empty stream returns ``{}``.
+
+    Complexity
+    ----------
+    ``O(len(events) + distinct_skill_ids)``.
+    """
+    per_skill: dict[int, BuffState] = {}
+    for event in events:
+        skill_id = event.skill_id
+        if skill_id not in per_skill:
+            per_skill[skill_id] = BuffState()
+        state = per_skill[skill_id]
+        current_stacks = state.history[-1][1] if state.history else 0
+        if event.kind == "apply":
+            new_stacks = current_stacks + event.stacks
+        elif event.kind == "remove_single":
+            new_stacks = max(0, current_stacks - 1)
+        elif event.kind == "remove_all":
+            new_stacks = 0
+        else:
+            # Forward-compat fallback for any future ``kind`` literal
+            # not in the current 3-way enumeration. Pydantic will raise
+            # at validation time for unknowns today (the Literal[...] type
+            # rejects unknown strings before this branch runs); the
+            # fall-through keeps static-type narrowing complete and
+            # would also catch any future ``kind`` Pydantic accepts but
+            # the aggregator doesn't yet know about.
+            new_stacks = current_stacks + event.stacks
+        per_skill[skill_id] = state.append_stacks(event.time_ms, new_stacks)
+    return per_skill
+
+
 __all__ = [
     "BuffState",
     "NegativeStacksError",
     "NonMonotonicHistoryError",
+    "accumulate_buff_events",
     "interval_uptime_pct",
     "total_uptime_ms",
 ]
