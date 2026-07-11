@@ -3,14 +3,19 @@
 The package's main entry-point is the FastAPI :data:`router`
 (registered via ``app.include_router(router)`` in
 :mod:`gw2analytics_api.main`); the 7 endpoint handlers listed below
-hang off it. The :mod:`.blob_cache` submodule is the canvas for the
-A2 god-module refactor: PR 1 extracted the singleflight + per-URI
-latch + LRU cache primitive out of this module into a dedicated
-submodule so its contract can be tested hermetically (without the
-TestClient stack).
+hang off it. The A2 god-module refactor (plan 021) decomposed the
+pre-A2 ``routes/fights.py`` god module into 4 extracted submodules
+dedicated to single concerns (the cache primitive, the blob loader,
+the ORM dict-builders, the aggregation glue) plus this thin
+package-level router that composes them so each piece can be
+tested + iterated + reasoned-about in isolation.
 
 Submodules
 ==========
+
+The 4 submodules below are the deliverables of plan 021's A2 plan.
+The decomposition lets a future maintainer (PR 3, deferred) refactor
+one piece at a time without an avalanche.
 
 - :mod:`gw2analytics_api.routes.fights.blob_cache` -- the canonical
   per-URI blob-cache primitive (``lru_cache(maxsize=8)`` + per-URI
@@ -22,6 +27,41 @@ Submodules
   underscore-prefix names there are deliberately internal to the
   cache primitive and are NOT re-exported via this package's
   namespace (per PEP 8 underscore-prefix = module-private).
+
+- :mod:`gw2analytics_api.routes.fights.blob_loader` -- the
+  shared DB fight-row lookup (``OrmFight`` select by ``id``)
+  + the gzipped-blob fetch via :func:`_cached_get_events` + the
+  gzip-decompress + event-split + the canonical 404/502
+  :class:`HTTPException` contract. FastAPI-coupled; the 5 read-side
+  endpoints (``/events`` + ``/squads`` + ``/skills`` + the 2
+  timeline variants ``/timeline`` + ``/timeline/players``) all call
+  this helper. Hermetically testable through ``clear_blob_caches`` +
+  the ``_cached_get_events`` monkeypatch contract documented in
+  the submodule.
+
+- :mod:`gw2analytics_api.routes.fights.mappers` -- the 3 ORM
+  dict-builder helpers (:func:`agent_id_to_name` +
+  :func:`agent_id_to_subgroup` + :func:`skill_id_to_name`) that
+  resolve the fight's agents + skills rows into maps the
+  per-target / squad / skill aggregators thread through.
+  :func:`agent_id_to_name` returns ``dict[int, str | None]``
+  (NPCs may carry ``None`` for un-registered char-names);
+  :func:`agent_id_to_subgroup` + :func:`skill_id_to_name` return
+  ``dict[int, str]`` (the parser surfaces empty strings for
+  unknown skills + empty subgroups, never ``None`` -- the
+  respective aggregators convert empties to the ``name=""`` /
+  ``subgroup=""`` rollup bucket). Pure SQLAlchemy queries (no
+  FastAPI coupling, no HTTPException translations).
+
+- :mod:`gw2analytics_api.routes.fights.aggregators` -- the
+  per-target trio dispatch helper :func:`_aggregate_per_target_rollup`
+  + the per-subgroup :func:`aggregate_squad_rollup` + the
+  per-skill :func:`aggregate_skill_usage` wrappers. Wraps the
+  library-side aggregators (``Target{Dps,Healing,BuffRemoval}Agg``
+  + ``SquadRollupAggregator`` + ``SkillUsageAggregator``) with
+  the shared 3-stream (damage + healing + buff-removal) fanout
+  so the route handlers stay thin (one wrapper call per
+  roll-up branch).
 
 Endpoints (registered via ``app.include_router(router)`` in main)
 =================================================================
