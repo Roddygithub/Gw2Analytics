@@ -128,23 +128,63 @@ def test_two_disjoint_players_two_profiles() -> None:
     assert [p.total_damage for p in profiles] == [1_000, 500]
 
 
-def test_dedup_same_fight_account_pair_folds_silently() -> None:
-    """Same (account_name, fight_id) twice -> folded; attendance stays 1."""
+def test_dedup_same_fight_account_pair_accumulates_magnitudes() -> None:
+    """v0.9.6 plan 023: same (account_name, fight_id) twice -> magnitudes accumulate.
+
+    The ``attended_fight_ids`` set still collapses to a single
+    fight, so ``fights_attended`` stays 1, but the per-character
+    totals are summed (a class swap / reconnect emits a new
+    agent under the same account_name).
+    """
     profiles = PlayerProfileAggregator().aggregate(
         [
-            _contrib("fid-1", ":a", total_damage=500),
-            _contrib("fid-1", ":a", total_damage=300),
+            _contrib("fid-1", ":a", total_damage=500, total_healing=100),
+            _contrib("fid-1", ":a", total_damage=300, total_healing=200, total_buff_removal=10),
         ],
     )
-    # Dedup is "first occurrence wins" because the second pair
-    # short-circuits before its totals are accumulated. So the
-    # profile's ``total_damage`` is 500, NOT 800.
     assert len(profiles) == 1
     p = profiles[0]
     assert p.account_name == ":a"
     assert p.fights_attended == 1
-    assert p.total_damage == 500
+    assert p.total_damage == 800
+    assert p.total_healing == 300
+    assert p.total_buff_removal == 10
     assert p.attended_fight_ids == ["fid-1"]
+
+
+def test_player_profile_accumulates_per_character_contributions() -> None:
+    """v0.9.6 plan 023: 2 characters in 1 fight contribute their magnitudes."""
+    profiles = PlayerProfileAggregator().aggregate(
+        [
+            _contrib(
+                "fid-1",
+                ":acct.1234",
+                name="CharA",
+                profession=Profession.WARRIOR,
+                elite=EliteSpec.BERSERKER,
+                total_damage=1000,
+                total_healing=0,
+                total_buff_removal=0,
+            ),
+            _contrib(
+                "fid-1",
+                ":acct.1234",
+                name="CharB",
+                profession=Profession.MESMER,
+                elite=EliteSpec.MIRAGE,
+                total_damage=500,
+                total_healing=200,
+                total_buff_removal=10,
+            ),
+        ],
+    )
+    assert len(profiles) == 1
+    p = profiles[0]
+    assert p.fights_attended == 1  # set semantics
+    assert p.total_damage == 1500  # 1000 + 500
+    assert p.total_healing == 200  # 0 + 200
+    assert p.total_buff_removal == 10  # 0 + 10
+    assert p.name == "CharB"  # last-seen name wins
 
 
 # ---------------------------------------------------------------------------

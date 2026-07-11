@@ -343,3 +343,21 @@ def test_cross_fight_math_sum_3_fights_mixed_player_npc() -> None:
     assert len(agg.combatant_rollups) == 1
     assert agg.combatant_rollups[0].player_attendance == 3
     assert agg.combatant_rollups[0].account_name == ":shared"
+
+
+def test_multi_fight_dedups_reconnecting_players_per_fight() -> None:
+    """v0.9.6 plan 022: a single account with 2 combatants in 1 fight counts as 1 attendance."""
+    fight = _fight(
+        "fid-1",
+        [
+            _player(1, account_name=":acct.1234", name="CharA"),
+            _player(2, account_name=":acct.1234", name="CharA"),
+        ],
+    )
+    agg = MultiFightAggregator().aggregate([fight])
+    assert agg.fight_ids == ["fid-1"]
+    assert agg.total_agents == 2
+    assert agg.total_players == 1  # deduped to one attendance
+    assert len(agg.combatant_rollups) == 1
+    assert agg.combatant_rollups[0].account_name == ":acct.1234"
+    assert agg.combatant_rollups[0].player_attendance == 1  # not 2

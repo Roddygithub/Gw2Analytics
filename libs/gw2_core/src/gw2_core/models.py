@@ -240,11 +240,19 @@ class EventType(StrEnum):
     fall through to ``event_count`` without breaking
     ``damage_total`` / ``healing_total`` / ``buff_removal_total``
     accounting.
+
+    Spike (Plan 024) adds ``BOON_APPLY`` and ``CC`` as the first two
+    members of the v0.9.0 combat-readout event vocabulary. They are
+    emitted from arcdps statechange records (``is_statechange != 0``)
+    once the parser is extended; until then they exist only as
+    Pydantic shapes for API/aggregator design.
     """
 
     DAMAGE = "DAMAGE"
     HEALING = "HEALING"
     BUFF_REMOVAL = "BUFF_REMOVAL"
+    BOON_APPLY = "BOON_APPLY"
+    CC = "CC"
 
 
 class BaseEvent(BaseModel):
@@ -309,6 +317,47 @@ class BuffRemovalEvent(BaseEvent):
     buff_removal: int = Field(..., ge=0)
 
 
+class BoonApplyEvent(BaseEvent):
+    """One outgoing boon-apply event.
+
+    Spike (Plan 024) prototype for the v0.9.0 combat-readout Boons
+    table. ``duration_ms`` is the total duration of the applied boon
+    stack; ``stacks`` is the number of stacks (relevant for stacking
+    boons such as might). Emitted from arcdps ``BuffApply``
+    statechange records (``is_statechange == 69``) once the parser is
+    extended; until then this model exists only for API/aggregator
+    design.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.BOON_APPLY] = EventType.BOON_APPLY
+    duration_ms: int = Field(
+        ..., ge=0, description="Total duration of the applied boon stack in milliseconds."
+    )
+    stacks: int = Field(..., ge=0, description="Number of boon stacks applied.")
+
+
+class CCEvent(BaseEvent):
+    """One crowd-control event.
+
+    Spike (Plan 024) prototype for the v0.9.0 combat-readout Damage
+    table ``CC appliqués`` column. ``cc_value`` is the magnitude of
+    the crowd-control effect (defiance-bar damage or duration in
+    milliseconds — exact semantics TBD during parser integration).
+    Emitted from arcdps defiance-bar / breakbar statechange records
+    once the parser is extended; until then this model exists only
+    for API/aggregator design.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.CC] = EventType.CC
+    cc_value: int = Field(
+        ..., ge=0, description="Crowd-control magnitude (defiance damage or duration ms)."
+    )
+
+
 # Discriminated union for forward-compat downstream consumers that
 # accept "any event" (e.g. the EventWindowAggregator buckets damage +
 # healing in one shot without forcing the caller to split the stream)
@@ -323,7 +372,8 @@ class BuffRemovalEvent(BaseEvent):
 # so mypy treats the right-hand side as a type expression without
 # any ``# type: ignore``.
 type Event = Annotated[
-    DamageEvent | HealingEvent | BuffRemovalEvent, Field(discriminator="event_type")
+    DamageEvent | HealingEvent | BuffRemovalEvent | BoonApplyEvent | CCEvent,
+    Field(discriminator="event_type"),
 ]  # PEP 695 type statement; mypy accepts at the type-expression slot
 
 
@@ -376,7 +426,9 @@ __all__ = [
     "AccountInfo",
     "Agent",
     "BaseEvent",
+    "BoonApplyEvent",
     "BuffRemovalEvent",
+    "CCEvent",
     "DamageEvent",
     "EliteSpec",
     "Event",

@@ -11,6 +11,8 @@ third (buff-removal) accumulator added.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 from pydantic import ValidationError
 
@@ -227,3 +229,47 @@ class TestPerFightTimelineAggregator:
         # though the type-checker should reject the line first.
         with pytest.raises(ValidationError):
             row.total_damage = 999  # type: ignore[misc]
+
+    def test_aggregate_accepts_generator_without_draining_it(self) -> None:
+        """v0.9.6 plan 021: passing a generator does NOT crash on invariants."""
+
+        def gen() -> Iterator[DamageEvent | HealingEvent | BuffRemovalEvent]:
+            yield DamageEvent(
+                time_ms=0,
+                source_agent_id=1,
+                target_agent_id=2,
+                skill_id=1,
+                damage=100,
+            )
+            yield DamageEvent(
+                time_ms=1500,
+                source_agent_id=1,
+                target_agent_id=2,
+                skill_id=1,
+                damage=200,
+            )
+            yield HealingEvent(
+                time_ms=3000,
+                source_agent_id=1,
+                target_agent_id=2,
+                skill_id=1,
+                healing=50,
+            )
+            yield BuffRemovalEvent(
+                time_ms=3000,
+                source_agent_id=1,
+                target_agent_id=2,
+                skill_id=1,
+                buff_removal=5,
+            )
+
+        rows = PerFightTimelineAggregator().aggregate(gen(), window_s=1)
+        assert len(rows) == 4
+        assert rows[0].total_damage == 100
+        assert rows[1].total_damage == 200
+        # Bucket 2 is zero-filled between events at 1500 ms and 3000 ms.
+        assert rows[2].total_damage == 0
+        assert rows[2].total_healing == 0
+        assert rows[2].total_buff_removal == 0
+        assert rows[3].total_healing == 50
+        assert rows[3].total_buff_removal == 5

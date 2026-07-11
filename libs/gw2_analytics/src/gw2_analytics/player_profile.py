@@ -171,7 +171,6 @@ class PlayerProfileAggregator:
         first_seen_profession: dict[str, Profession] = {}
         first_seen_elite: dict[str, EliteSpec] = {}
         last_seen_name: dict[str, str] = {}
-        seen_pairs: set[tuple[str, str]] = set()
         attended_fight_ids: dict[str, set[str]] = {}
         total_damage: dict[str, int] = {}
         total_healing: dict[str, int] = {}
@@ -179,24 +178,21 @@ class PlayerProfileAggregator:
 
         for c in contributions:
             acct = c.account_name
-            # First-seen anchor: ``setdefault`` is the canonical
-            # "insert if absent, do not overwrite" idiom. The first
-            # contribution to land for an account wins.
+            # v0.9.6 plan 023: a single account can emit multiple
+            # ``FightContribution`` records for the same fight (one per
+            # character -- a class swap / squad move / reconnect emits a
+            # new agent under the same ``account_name``). We ACCUMULATE
+            # the per-character magnitudes; the ``attended_fight_ids``
+            # set below handles the dedup automatically (set semantics
+            # collapse the duplicates). The pre-plan-023
+            # ``if key in seen_pairs: continue`` early-skip silently
+            # dropped the second character's contribution; the fix
+            # moves the per-magnitude accumulation OUTSIDE the
+            # dedup check.
             first_seen_profession.setdefault(acct, c.profession)
             first_seen_elite.setdefault(acct, c.elite)
             # Last-seen char-name: every contribution overwrites.
             last_seen_name[acct] = c.name
-            # Dedup on (account_name, fight_id): the same account
-            # appearing twice in the same fight (route layer bug,
-            # manual table fixup) silently folds to a single
-            # contribution. ``seen_pairs.add(...)`` returns None if
-            # the pair was already present; the subsequent accumulation
-            # steps are skipped in that case so ``fights_attended``
-            # stays at the actual count of distinct fights.
-            key = (acct, c.fight_id)
-            if key in seen_pairs:
-                continue
-            seen_pairs.add(key)
             attended_fight_ids.setdefault(acct, set()).add(c.fight_id)
             total_damage[acct] = total_damage.get(acct, 0) + c.total_damage
             total_healing[acct] = total_healing.get(acct, 0) + c.total_healing

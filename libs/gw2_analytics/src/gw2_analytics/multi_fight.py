@@ -178,8 +178,20 @@ class MultiFightAggregator:
             # empty-account quirk filter + deterministic per-fight
             # ordering + cross-field invariants.
             per_fight = self._inner.aggregate(fight)
+            # v0.9.6 plan 022: dedup per-fight before incrementing
+            # attendance. A player who reconnects / swaps class /
+            # moves squad within a single fight has multiple
+            # combatants with the same account_name; we count
+            # attendance ONCE per fight per account (the player is
+            # either "in this fight" or "not in this fight", not
+            # "in this fight N times"). The state is per-fight, so
+            # re-initialise inside the outer loop.
+            seen_accounts_this_fight: set[str] = set()
             for c in per_fight.combatants:
                 acct = c.account_name
+                if acct in seen_accounts_this_fight:
+                    continue
+                seen_accounts_this_fight.add(acct)
                 first_seen_profession.setdefault(acct, c.profession)
                 first_seen_elite.setdefault(acct, c.elite)
                 last_seen_name[acct] = c.name

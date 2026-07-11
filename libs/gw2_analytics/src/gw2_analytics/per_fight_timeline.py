@@ -181,6 +181,17 @@ class PerFightTimelineAggregator:
         # doesn't need them.
         _ = (agents, duration_s)
 
+        # v0.9.6 plan 021: accumulate expected sums in the first
+        # loop so the invariant check does NOT drain the input
+        # iterator twice. The route layer passes a ``list[Event]``
+        # today, but the aggregator's signature is
+        # ``Iterable[Event]``; a caller passing a generator would
+        # otherwise hit a ``ValueError`` when ``_check_invariants``
+        # tries to ``list(events)`` after the first loop already
+        # drained it.
+        expected_damage = 0
+        expected_healing = 0
+        expected_strip = 0
         for e in events:
             # ``e.time_ms`` is integers >= 0 (Pydantic-validated upstream),
             # so integer division yields a stable bucket index. Mirrors
@@ -189,10 +200,13 @@ class PerFightTimelineAggregator:
             last_bucket_index = max(last_bucket_index, bucket_index)
             if isinstance(e, DamageEvent):
                 damage_by_bucket[bucket_index] += e.damage
+                expected_damage += e.damage
             elif isinstance(e, HealingEvent):
                 healing_by_bucket[bucket_index] += e.healing
+                expected_healing += e.healing
             elif isinstance(e, BuffRemovalEvent):
                 strip_by_bucket[bucket_index] += e.buff_removal
+                expected_strip += e.buff_removal
 
         rows: list[PerFightTimelineRow] = []
         for idx in range(last_bucket_index + 1):
@@ -206,13 +220,15 @@ class PerFightTimelineAggregator:
                 )
             )
 
-        self._check_invariants(rows, events)
+        self._check_invariants(rows, expected_damage, expected_healing, expected_strip)
         return list(rows)
 
     @staticmethod
     def _check_invariants(
         rows: list[PerFightTimelineRow],
-        events: Iterable[Event],
+        expected_damage: int,
+        expected_healing: int,
+        expected_strip: int,
     ) -> None:
         """Raise ``ValueError`` if any cross-field invariant is violated.
 
@@ -223,15 +239,6 @@ class PerFightTimelineAggregator:
         :meth:`EventWindowAggregator._check_invariants` with the
         3 kind extensions.
         """
-        # Sum-preservation: the total across all rows must equal
-        # the total across all events for each of the 3 kinds.
-        # We materialise the events once (the input is an
-        # Iterable; the consumer may pass a generator) so the
-        # check doesn't drain the stream twice.
-        events_list = list(events)
-        expected_damage = sum(e.damage for e in events_list if isinstance(e, DamageEvent))
-        expected_healing = sum(e.healing for e in events_list if isinstance(e, HealingEvent))
-        expected_strip = sum(e.buff_removal for e in events_list if isinstance(e, BuffRemovalEvent))
         actual_damage = sum(r.total_damage for r in rows)
         actual_healing = sum(r.total_healing for r in rows)
         actual_strip = sum(r.total_buff_removal for r in rows)

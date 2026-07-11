@@ -173,6 +173,16 @@ MAX_EVTC_BYTES: Final[int] = 100 * 1024 * 1024
 #: is present (an empty account_name is also valid).
 ACCOUNT_NAME_PREFIX: Final[bytes] = b":"
 
+#: Maximum uncompressed size for a single .zevtc zip entry.
+#: Defends against zip-bomb DoS: a 42-byte zip header can claim a
+#: 4 GB uncompressed payload (zip-bomb convention). We refuse to
+#: extract any entry whose declared uncompressed size exceeds
+#: this bound. 500 MB is well above the realistic upper bound for
+#: a single GW2 combat log (a 5-minute WvW raid is typically
+#: 1-10 MB); 500 MB accommodates the longest possible fights
+#: with headroom.
+_MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE: Final[int] = 500 * 1024 * 1024  # 500 MB
+
 
 # ---------------------------------------------------------------------------
 # Implementation
@@ -617,11 +627,28 @@ def _decode_agent(data: bytes, offset: int) -> Agent:
 
 
 def _first_entry(zf: zipfile.ZipFile) -> bytes:
-    """Return the bytes of the first entry in an open zip."""
+    """Return the bytes of the first entry in an open zip.
+
+    v0.9.6 plan 020: refuse to extract any entry whose declared
+    uncompressed size exceeds ``_MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE``
+    (zip-bomb DoS defence). ``ZipFile.getinfo(...).file_size`` is
+    the declared uncompressed size on the central directory --
+    reading it does NOT materialise the payload, so the check is
+    O(1).
+    """
     names = zf.namelist()
     if not names:
         raise EvtcParseError("zevtc has no entries (empty zip)")
-    return zf.read(names[0])
+    name = names[0]
+    info = zf.getinfo(name)
+    if info.file_size > _MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE:
+        raise EvtcParseError(
+            f"zip entry {name!r} declared uncompressed size "
+            f"({info.file_size} bytes) exceeds safety bound "
+            f"{_MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE} bytes; "
+            f"refusing to extract (zip-bomb protection)"
+        )
+    return zf.read(name)
 
 
 def read_zevtc_archive(path: Path) -> bytes:

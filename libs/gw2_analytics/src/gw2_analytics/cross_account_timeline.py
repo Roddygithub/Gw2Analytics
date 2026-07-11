@@ -58,7 +58,6 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
-from typing import Any
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -116,7 +115,7 @@ class CrossAccountTimelineAggregator:
     def aggregate(
         self,
         per_account_contributions: Mapping[str, Iterable[FightContribution]],
-        fight_id_to_started: Mapping[str, Any],
+        fight_id_to_started: Mapping[str, datetime],
         bucket: str = "fight",
         tz: ZoneInfo | None = None,
     ) -> list[CrossAccountTimelineSeries]:
@@ -168,7 +167,7 @@ class CrossAccountTimelineAggregator:
     def _aggregate_one_account(
         account_name: str,
         contributions: Iterable[FightContribution],
-        fight_id_to_started: Mapping[str, Any],
+        fight_id_to_started: Mapping[str, datetime],
         bucket: str,
         tz: ZoneInfo,
     ) -> CrossAccountTimelineSeries:
@@ -183,7 +182,7 @@ class CrossAccountTimelineAggregator:
         sorted_contributions = sorted(
             (c for c in contributions if c.account_name == account_name),
             key=lambda c: (
-                fight_id_to_started.get(c.fight_id, c.fight_id),
+                fight_id_to_started[c.fight_id],
                 c.fight_id,
             ),
             reverse=True,
@@ -197,7 +196,7 @@ class CrossAccountTimelineAggregator:
             points = [
                 CrossAccountTimelinePoint(
                     fight_id=c.fight_id,
-                    started_at=fight_id_to_started.get(c.fight_id, c.fight_id),
+                    started_at=fight_id_to_started[c.fight_id],
                     total_damage=c.total_damage,
                     total_healing=c.total_healing,
                     total_buff_removal=c.total_buff_removal,
@@ -238,7 +237,7 @@ class CrossAccountTimelineAggregator:
 
 def _day_bucketed_points(
     sorted_contributions: list[FightContribution],
-    fight_id_to_started: Mapping[str, Any],
+    fight_id_to_started: Mapping[str, datetime],
     tz: ZoneInfo,
 ) -> list[CrossAccountTimelinePoint]:
     """Collapse fights sharing a calendar day into one point per day.
@@ -255,7 +254,7 @@ def _day_bucketed_points(
         lambda: {"damage": 0, "healing": 0, "strip": 0},
     )
     day_first_fight: dict[str, str] = {}
-    day_first_started: dict[str, Any] = {}
+    day_first_started: dict[str, datetime] = {}
     for c in sorted_contributions:
         started_at = fight_id_to_started[c.fight_id]
         aware_utc = started_at.replace(tzinfo=UTC) if started_at.tzinfo is None else started_at
