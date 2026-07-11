@@ -141,7 +141,7 @@ def interval_uptime_pct(state: BuffState, fight_end_ms: int, fight_start_ms: int
 
 Both maintain the chronological-history invariant (the caller of `BuffState.append_stacks_at(time, stacks)` must ensure monotonic time). The docstring spells this out so a future maintainer doesn't break the invariant.
 
-### Step 3: 3-way `BuffChangeKind` enum + dispatch
+### Step 3: 4-byte→3-kind `BuffChangeKind` enum + dispatch
 
 ```python
 class BuffChangeKind(Enum):
@@ -150,20 +150,35 @@ class BuffChangeKind(Enum):
     REMOVE_ALL = "remove_all"
 
 def decode_buff_change(is_buffremove_byte: int) -> BuffChangeKind:
-    """arcdps 2023+ 3-way dispatch via the is_buffremove byte (0/1/2)."""
+    """arcdps 2025+ 4-byte→3-kind dispatch via the is_buffremove byte.
+
+    The arcdps.h cbtbuffremove enum: 0=NONE (→ APPLY in this project's
+    buff-emit context), 1=ALL (→ REMOVE_ALL), 2=SINGLE (→ REMOVE_SINGLE),
+    3=MANUAL (→ REMOVE_SINGLE per arcdps's "use for in/out volume"
+    guidance -- collapses onto REMOVE_SINGLE rather than adding a
+    4th enum value).
+    """
 ```
 
-This is the calibration-2025-12 fix: REMOVE_ALL on untracked buffs (condi cleanses) MUST be +1, NOT +weighted. The 3-way dispatch makes the bug invisible to the caller.
+This is the calibration-2025-12 fix: REMOVE_ALL on untracked buffs (condi cleanses) MUST be +1, NOT +weighted. The 4-byte→3-kind dispatch makes the bug invisible to the caller.
+
+> **2026-07-11 realignment note**: the original plan 137 spec mapped
+> ``1 → REMOVE_SINGLE`` and ``2 → REMOVE_ALL`` (the SWAP vs arcdps.h).
+> The correct mapping per arcdps.h `cbtbuffremove` is ``1 → REMOVE_ALL``
+> and ``2 → REMOVE_SINGLE``. The realignment was shipped in v0.10.6+
+> (Phase 9 step 4); the pre-realignment test assertions were updated
+> to the corrected mapping (see Spec Test 4 below).
 
 ### Step 4: Tests
 
-5 hermetic tests:
+6 hermetic tests:
 
 1. `BuffState` rejects invalid history entry (`[1, "x"]` fails validation).
 2. `total_uptime_ms` on a 2-pair history sums correctly: `[(0, 0), (1000, 5), (2000, 0)]` + fight_end=3000 → uptime = 5000 (5 stacks × 1000 ms).
 3. `interval_uptime_pct` returns 50.0 for half-the-time active.
-4. `decode_buff_change(0)` → APPLY, `decode_buff_change(1)` → REMOVE_SINGLE, `decode_buff_change(2)` → REMOVE_ALL.
-5. `decode_buff_change(99)` → safe default (REMOVE_SINGLE — matches a public GW2 community reference implementation's "unknown byte" fallback).
+4. `decode_buff_change` mapping per the arcdps.h cbtbuffremove enum (RE-ALIGNED 2026-07-11): `decode_buff_change(0)` → APPLY (CBTB_NONE), `decode_buff_change(1)` → REMOVE_ALL (CBTB_ALL), `decode_buff_change(2)` → REMOVE_SINGLE (CBTB_SINGLE), `decode_buff_change(3)` → REMOVE_SINGLE (CBTB_MANUAL collapse).
+5. `decode_buff_change(99)` → safe default (REMOVE_SINGLE — forward-compat for future arcdps byte values).
+6. `decode_buff_change(-1)` → raises `ValueError` (struct format is signed; negative is structurally invalid).
 
 ## Test plan
 

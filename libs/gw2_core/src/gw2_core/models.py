@@ -320,9 +320,13 @@ class BuffRemovalEvent(BaseEvent):
 class BoonApplyEvent(BaseEvent):
     """One outgoing boon-state-change event (Phase 9 / advisor-plan 026).
 
-    Forward-compatible union of ALL 3 arcdps ``is_buffremove`` byte
-    values (``0`` = apply, ``1`` = single-stack remove, ``2`` =
-    all-stack remove) gated on the ``kind`` discriminator literal.
+    Forward-compatible union of ALL 4 arcdps ``is_buffremove`` byte
+    values (the arcdps.h ``cbtbuffremove`` enum: ``0`` = NONE in
+    the buff-emit context the parser interprets as apply, ``1``
+    = ALL, ``2`` = SINGLE, ``3`` = MANUAL -- the latter collapses
+    onto ``remove_single`` per arcdps's "use for in/out volume"
+    guidance; see :func:`gw2_analytics.buff_dispatch.decode_buff_change`)
+    gated on the ``kind`` discriminator literal.
     Pre-Phase-9 spike (Plan 024) called this class a "boon-apply"
     event; Phase 9 collapses the apply + 2-remove variants into one
     class because the wire shape (time_ms + source/target agent id +
@@ -352,8 +356,13 @@ class BoonApplyEvent(BaseEvent):
     kind: Literal["apply", "remove_single", "remove_all"] = Field(
         default="apply",
         description=(
-            "arcdps 2023+ ``is_buffremove`` byte decoded: ``0`` = apply, "
-            "``1`` = single-stack remove, ``2`` = all-stack remove. "
+            "arcdps 2025+ ``cbtbuffremove`` byte decoded: ``0`` = NONE "
+            "(interpreted as apply in the buff-emit context), "
+            "``1`` = ALL (all-stack remove), ``2`` = SINGLE (single-stack "
+            "remove), ``3`` = MANUAL (auto-remove on all-stack or "
+            "out-of-combat; collapses to remove_single per arcdps's "
+            "'use for in/out volume' guidance). Mapping verified against "
+            "the arcdps.h cbtbuffremove enum + ship via Phase 9 step 4. "
             "Defaults to ``'apply'`` for forward-compat with pre-Phase-9 "
             "wire payloads that omit the field."
         ),

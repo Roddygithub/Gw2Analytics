@@ -117,7 +117,14 @@ def test_boon_apply_event_default_kind_is_apply() -> None:
 
 
 def test_boon_apply_event_remove_single_kind() -> None:
-    """``kind='remove_single'`` is the arcdps ``is_buffremove == 1`` case."""
+    """``kind='remove_single'`` is the arcdps ``is_buffremove == 2`` case
+    (CBTB_SINGLE; single-stack strip / cleanse). The ``is_buffremove == 3``
+    case (CBTB_MANUAL -- auto-removed on all-stack or out-of-combat) ALSO
+    maps to ``remove_single`` per :func:`gw2_analytics.buff_dispatch.decode_buff_change`'s
+    CTDB_MANUAL→REMOVE_SINGLE collapse, but the discriminator literal does
+    NOT surface that sub-cases -- it stays at 3 values for the
+    BoonApplyEvent.kind Literal backward-compat surface.
+    """
     event = BoonApplyEvent(
         time_ms=6_500,
         source_agent_id=10,
@@ -131,8 +138,14 @@ def test_boon_apply_event_remove_single_kind() -> None:
 
 
 def test_boon_apply_event_remove_all_kind() -> None:
-    """``kind='remove_all'`` is the arcdps ``is_buffremove == 2`` case
-    (a condi cleanse wipes every stack at once; up to GW2's 25-stack cap).
+    """``kind='remove_all'`` is the arcdps ``is_buffremove == 1`` case
+    (CBTB_ALL; all-stack remove -- a condi cleanse wipes every stack
+    at once, up to GW2's 25-stack cap). Mapped via
+    :func:`gw2_analytics.buff_dispatch.decode_buff_change` per the
+    arcdps.h ``cbtbuffremove`` enum (verified 2026-07-11). Pre-
+    realignment (plan 137 v0.10.5) shipped the SWAPPED mapping
+    (``1 → REMOVE_SINGLE``, ``2 → REMOVE_ALL``); the realignment is
+    a pure test-data-mapping fix with no observed-data rollback.
     """
     event = BoonApplyEvent(
         time_ms=7_500,
