@@ -260,3 +260,110 @@ def test_is_buffremove_and_is_ninety_dont_collide_with_neighbouring_slots() -> N
     is_buffremove, is_ninety = _unpack_cbtevent(blob)
     assert is_buffremove == 127
     assert is_ninety == -128
+
+
+def test_is_statechange_offset_48_empirical_lock() -> None:
+    """Byte 48 of the cbtevent record reads as ``is_statechange`` (struct slot 12).
+
+    The 2026-07-11 F1 calibration pilot confirmed this byte position is
+    empirically correct for rev=1 arcdps logs (verified on 12 real
+    WvW fixtures ranging 75 KB to ~12 MB; see
+    ``advisor-plans/026-phase-9-conditions.md``). The existing
+    ``parse_events`` reads tuple slot 12 (= byte offset 48) as
+    ``is_statechange`` and applies the filter
+    ``if is_statechange != 0: continue``. A struct byte-shift regression
+    MUST fail this assertion at the unit-test boundary BEFORE the
+    production filter silently misclassifies state-change records.
+    """
+    record = bytearray(64)  # all zeros
+    record[48] = 1  # byte at offset 48 set to 1 (a known statechange value)
+    unpacked = _EVENT_STRUCT.unpack_from(bytes(record), 0)
+    assert unpacked[12] == 1, (
+        f"is_statechange byte should be at offset 48 (struct slot 12). "
+        f"Read {unpacked[12]} from slot 12 of the unpack tuple."
+    )
+
+
+def test_is_buffremove_offset_52_empirical_lock_F1() -> None:
+    """Byte 52 of the cbtevent record reads as ``is_buffremove`` (struct slot 16).
+
+    The 2026-07-11 F1 calibration pilot confirmed this byte position
+    is empirically correct for rev=1 arcdps logs. The byte value
+    corresponds to arcdps's ``cbtbuffremove`` enum (0=APPLY,
+    1=REMOVE_ALL, 2=REMOVE_SINGLE, 3=REMOVE_SINGLE-CBTB_MANUAL-collapsed).
+    ``buff_dispatch.decode_buff_change`` (commit ``529cb90``) converts
+    this byte to the ``BoonApplyEvent.kind`` discriminator literal.
+    """
+    record = bytearray(64)
+    record[52] = 2  # cbtbuffremove = REMOVE_SINGLE
+    unpacked = _EVENT_STRUCT.unpack_from(bytes(record), 0)
+    assert unpacked[16] == 2, (
+        f"is_buffremove byte should be at offset 52 (struct slot 16). "
+        f"Read {unpacked[16]} from slot 16 of the unpack tuple."
+    )
+
+
+def test_is_ninety_offset_53_empirical_lock_F1() -> None:
+    """Byte 53 of the cbtevent record reads as ``is_ninety`` (struct slot 17).
+
+    The 2026-07-11 F1 calibration pilot confirmed this byte position
+    is empirically correct for rev=1 arcdps logs. arcdps writes 1 to
+    ``is_ninety`` when the event was a 90%-threshold hit (e.g.
+    Quickness expired at the 90% mark). Renamed from ``_pad61`` in
+    v0.10.6 (commit ``328833d``).
+    """
+    record = bytearray(64)
+    record[53] = 1  # is_ninety = 1
+    unpacked = _EVENT_STRUCT.unpack_from(bytes(record), 0)
+    assert unpacked[17] == 1, (
+        f"is_ninety byte should be at offset 53 (struct slot 17). "
+        f"Read {unpacked[17]} from slot 17 of the unpack tuple."
+    )
+
+
+def test_cbtbuffremove_kinds_tuple_shape_locked() -> None:
+    """``_CBTBUFREMOVE_KINDS`` literal contents are pinned (3-tuple shape).
+
+    The Phase 9 Step 2-EMIT-BRANCH predicate / tuple-length /
+    indexing contract relies on this tuple having exactly 3
+    entries in this exact order. A future maintainer adding,
+    removing, or re-ordering entries silently widens the emit
+    range (the per-yield ``assert`` only checks ``byte - 1``
+    fits in ``len(_CBTBUFREMOVE_KINDS)``, which adapts to any
+    length change).
+
+    This module-level self-test pins the LITERAL contents (not
+    just length). If a maintainer changes the literal string
+    values (e.g. ``"remove_single"`` -> ``"manual_remove"``),
+    fires at the test boundary BEFORE downstream buff-uptime
+    consumers start emitting mismatched ``BoonApplyEvent.kind``
+    discriminator literals.
+
+    The expected shape:
+
+        _CBTBUFREMOVE_KINDS = (
+            "remove_all",      # byte 1: CBTB_ALL
+            "remove_single",   # byte 2: CBTB_SINGLE
+            "remove_single",   # byte 3: CBTB_MANUAL (collapsed per arcdps)
+        )
+
+    Indexed by ``is_buffremove - 1`` at the emit site in
+    :meth:`PythonEvtcParser.parse_events`. Keep this test in
+    sync with the constant's docstring.
+    """
+    from gw2_evtc_parser.parser import _CBTBUFREMOVE_KINDS
+
+    # Tuple-equality owns both axes (literal content AND length);
+    # a separate ``len()`` assert would be redundant -- Python
+    # ``==`` on tuples compares both arity AND element-wise
+    # contents, so a single assert covers both drift modes.
+    expected = ("remove_all", "remove_single", "remove_single")
+    assert _CBTBUFREMOVE_KINDS == expected, (
+        f"_CBTBUFREMOVE_KINDS shape drifted: expected {expected!r} "
+        f"(3 entries indexed by [byte-1] for the arcdps REMOVE "
+        f"range {1, 2, 3}), got {_CBTBUFREMOVE_KINDS!r}. If you "
+        f"intentionally added a 4th entry for a future arcdps "
+        f"sentinel, update this test AND the predicate `in (1, "
+        f"2, 3)` above the yield in parse_events so both stay "
+        f"in sync."
+    )

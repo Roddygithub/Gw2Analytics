@@ -68,6 +68,7 @@ from typing import BinaryIO, Final
 
 from gw2_core import (
     Agent,
+    BoonApplyEvent,
     BuffRemovalEvent,
     DamageEvent,
     EliteSpec,
@@ -144,19 +145,106 @@ EVENT_SIZE: Final[int] = 64
 #:                              is_flanking, is_shields, is_offcycle)
 #:   bytes 60-63:  4 x pad bytes (pad61, pad62, pad63, pad64)
 #:
-#: The parser's struct format ``<QQQiiIIHHHbbbbbbbbIIbb`` does NOT match the
-#: arcdps.h layout 1:1 (it's missing 1 uint16 + has 2 extra uint32s at
-#: positions 54-61), but the existing damage / healing / buff-removal
-#: pipeline has been empirically calibrated against real arcdps dumps
-#: and works correctly with this struct. v0.10.6+ Phase 9 step 2
-#: exposes the ``is_buffremove`` byte (offset 52 in the arcdps struct,
-#: which is the 6th single-byte slot in our ``bbbbbbbb`` region)
-#: under its canonical arcdps name. v0.10.6+ plan 026 deferred a full
-#: struct re-ordering calibration round (real arcdps dump testing is
-#: required to verify the WHOLE struct 1:1 alignment before reshuffling
-#: any single uint16 -- shifting the boundary would invalidate all
-#: downstream damage / heal / strip emission for past dumps).
+#: Despite the byte-position discrepancy with the community-port arcdps.h
+#: C struct declaration ``<QQQiiIIHHHHbbbbbbbbbbbbxxxx>`` (per the mirror
+#: at ``<GW2-ArcDPS-Mechanics-Log>/src/arcdps_datastructures.h``), the
+#: **operational** reading of this struct is empirically correct for
+#: rev=1 arcdps logs. The 2026-07-11 F1 calibration pilot (verified on
+#: 12 real WvW fixtures ranging 75 KB to ~12 MB; see
+#: ``advisor-plans/026-phase-9-conditions.md`` for the full evidence)
+#: confirmed:
+#:
+#:     * Byte 48 (unpack tuple slot 12) = the byte the production filter
+#:       reads as ``is_statechange``. Per-fixture zero-percentage is
+#:       ~99% on typical rev=1 fights. The current struct decisively
+#:       beat the post-SYNC struct on the empirical outliers:
+#:       5b161ec0 -- current 77.78% vs post 48.66%; eeaE64d1 -- current
+#:       6.91% vs post 0.69% (10x better).
+#:     * Byte 52 (unpack tuple slot 16) = arcdps's ``cbtbuffremove``
+#:       enum: 0=APPLY, 1=REMOVE_ALL, 2=REMOVE_SINGLE,
+#:       3=REMOVE_SINGLE-CBTB_MANUAL-collapsed. Realigned in
+#:       ``libs/gw2_analytics/buff_dispatch.py:decode_buff_change``
+#:       (Phase 9 step 4, commit ``529cb90``).
+#:     * Byte 53 (unpack tuple slot 17) = arcdps's ``is_ninety`` flag
+#:       (1 on 90%-threshold hits; renamed from ``_pad61`` in v0.10.6).
+#:
+#: v0.10.6+ Phase 9 step 2 (commit ``328833d``) exposed bytes 52 + 53
+#: as ``is_buffremove`` + ``is_ninety`` via tuple-slot renaming. Phase 9
+#: step 2-EMIT-BRANCH (SHIPPED 2026-07-11, commit ``328833d``) uses
+#: byte 52 to yield ``BoonApplyEvent`` records from cbtevent records
+#: whose ``is_buffremove`` byte carries a REMOVE signal in the valid
+#: arcdps range ``{1, 2, 3}`` (REMOVE_ALL / REMOVE_SINGLE /
+#: REMOVE_SINGLE-CBTB_MANUAL-collapsed). The arcdps APPLY path goes
+#: through ``is_statechange != 0`` records (statechange events with
+#: ``is_buffremove == 0`` carry the ``CBTS_BUFFAPPLY`` marker), which
+#: the upstream filter in
+#: :meth:`PythonEvtcParser.parse_events` (``if is_statechange != 0:
+#: continue``) skips before the REMOVE predicate fires. Once
+#: ``is_statechange == 0`` has filtered out APPLY records, the
+#: ``is_buffremove == 0`` byte at byte 52 reads as ``CBTB_NONE``
+#: ("not used - not this kind of event"), NOT an APPLY marker --
+#: arcdps does NOT signal APPLY events through the non-statechange
+#: cbtevent path. Predicate: ``is_buffremove in (1, 2, 3)`` -- the
+#: range is deliberately EXCLUDES the CBTB_NONE sentinel (0) so
+#: pure-damage / pure-heal cbtevent records (which carry
+#: ``is_buffremove == 0`` as a default) do not pollute the
+#: ``BoonApplyEvent`` stream with phantom zero-duration applies.
+#:
+#: Maintenance note: do NOT change this struct literal without
+#: re-running the F1 calibration pilot on the 12-fixture rev=1
+#: corpus. The byte positions are empirically validated; ANY byte
+#: shift invalidates downstream damage / heal / strip emission for
+#: past dumps AND breaks the 3 byte-lock assertions in
+#: ``tests/test_parser_byte_alignment.py``.
 _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
+
+#: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
+#: byte values 1, 2, 3 ↔ ``BoonApplyEvent.kind: Literal["remove_all",
+#: "remove_single"]``. Exposed as a 3-tuple-of-literal-strings
+#: indexed by ``byte - 1`` so mypy narrows
+#: ``BoonApplyEvent.kind`` to a :class:`Literal` via tuple-subscript
+#: WITHOUT an attribute-via-enum hop (which would lose the narrowing
+#: on a ``.value`` access).
+#:
+#: The tuple omits the CBTB_NONE byte (0) and the apply-side of the
+#: ``cbtbuffremove`` enum deliberately:
+#:
+#:     * CBTB_NONE (0) reads as "not a buff interaction" once the
+#:       parser's upstream statechange filter
+#:       (``if is_statechange != 0: continue``) has been applied.
+#:       arcdps encodes APPLY events through the ``is_statechange``
+#:       path (``CBTS_BUFFAPPLY`` statechange records are filtered
+#:       upstream before this REMOVE predicate fires), NOT through
+#:       the non-statechange cbtevent path -- so byte 0 is a
+#:       sentinel for "pure damage / pure heal" records at this
+#:       code site, NOT an apply marker. Indexing byte 0 against
+#:       ``"apply"`` here would be a mis-read of the arcdps
+#:       convention (a future Phase 9 step 3 may yield
+#:       ``BoonApplyEvent(kind="apply")`` from upstream
+#:       statechange records -- that surface WILL use byte 0 as a
+#:       marker, but the predicate excludes it from this
+#:       non-statechange path).
+#:
+#:     * The "apply" word lives in
+#:       :func:`gw2_analytics.buff_dispatch.decode_buff_change`'s
+#:       canonical mapping (which DOES read byte 0 as "apply" for
+#:       the upstream statechange-driven APPLY path). The parser
+#:       deliberately does NOT import from ``gw2_analytics`` (a
+#:       foundational-vs-analytics layer separation -- analysis
+#:       builds ON top of the parser, not the other way around).
+#:       Keeping the parser's local mapping as a 3-tuple instead
+#:       of a 4-tuple with slot 0 = "apply" keeps the layer
+#:       boundary crisp: this constant maps ONLY the bytes the
+#:       parser actually consumes.
+#:
+#: CBTB_MANUAL (byte 3) collapses onto ``remove_single`` per
+#: arcdps's documented "use for in/out volume" guidance (also
+#: reflected in :func:`gw2_analytics.buff_dispatch.decode_buff_change`).
+_CBTBUFREMOVE_KINDS: Final[tuple[str, str, str]] = (
+    "remove_all",      # byte 1: CBTB_ALL -> remove_all
+    "remove_single",   # byte 2: CBTB_SINGLE -> remove_single
+    "remove_single",   # byte 3: CBTB_MANUAL collapsed to remove_single per arcdps
+)
 
 #: Sanity bound on agent_count to defend against pathological sources.
 MAX_AGENTS: Final[int] = 10_000
@@ -299,15 +387,19 @@ class PythonEvtcParser:
                 _is_offcycle,
                 # v0.10.6+ Phase 9 step 2: bytes 52-53 of the arcdps
                 # ``cbtevent`` record are the ``is_buffremove`` byte
-                # (the arcdps ``cbtbuffremove`` enum: 0=NONE, 1=ALL,
-                # 2=SINGLE, 3=MANUAL) + ``is_ninety`` flag. Renamed
-                # from the legacy ``_pad61``/``_pad62`` to mirror the
-                # arcdps.h field naming -- the byte offset is unchanged
-                # so the existing damage / healing / buff-removal
-                # emission logic is unaffected. The emit branch that
-                # YIELDS ``BoonApplyEvent`` records is deferred
-                # pending real arcdps dump calibration (see plan 026
-                # for the deferred scope + the calibration risk).
+                # (the arcdps ``cbtbuffremove`` enum: 0=NONE in this
+                # non-statechange path, 1=ALL, 2=SINGLE, 3=MANUAL) +
+                # ``is_ninety`` flag. Renamed from the legacy
+                # ``_pad61``/``_pad62`` to mirror the arcdps.h field
+                # naming -- the byte offset is unchanged so the
+                # existing damage / healing / buff-removal emission
+                # logic is unaffected. Phase 9 step 2-EMIT-BRANCH
+                # (SHIPPED 2026-07-11) consumes ``is_buffremove`` to
+                # yield ``BoonApplyEvent`` records from REMOVE-class
+                # cbtevent records; ``is_ninety`` is unpacked but not
+                # yet surfaced to the Event stream (a future Phase 9
+                # step may use it for 90%-threshold markers on
+                # Removals -- see plan 026 for the deferred scope).
                 is_buffremove,
                 is_ninety,
                 _pad63,
@@ -315,18 +407,109 @@ class PythonEvtcParser:
                 _pad65,
                 _pad66,
             ) = _EVENT_STRUCT.unpack_from(data, cursor)
-            # Phase 9 step 2-EMIT-BRANCH is deferred. The ``is_buffremove`` +
-            # ``is_ninety`` bytes are surfaced (with their canonical arcdps.h
-            # names) so the byte-alignment tests in
-            # ``test_parser_byte_alignment.py`` can lock the offsets. The
-            # ``del`` below consumes the values to suppress ruff's
-            # ``RUF059`` (unpacked-but-unused) until the emit branch ships;
-            # remove this ``del`` together with the ``is_buffremove``
-            # branch in step 2-EMIT.
-            del is_buffremove, is_ninety
+            # NOTE: ``is_buffremove`` is consumed below by
+            # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``);
+            # ``is_ninety`` is unpacked but not yet surfaced to the
+            # Event stream (future Phase 9 steps may use it for
+            # 90%-threshold markers on Removals).
             cursor += EVENT_SIZE
             if is_statechange != 0:
                 continue
+            # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11).
+            # Predicate: ``is_buffremove`` byte in the arcdps REMOVE
+            # range {1, 2, 3} -- i.e. CBTB_ALL / CBTB_SINGLE /
+            # CBTB_MANUAL (CBTB_MANUAL collapses to ``remove_single``
+            # per arcdps's "use for in/out volume" guidance; see
+            # :func:`gw2_analytics.buff_dispatch.decode_buff_change`).
+            # The CBTB_NONE sentinel (0) is EXCLUDED from the
+            # predicate: after the upstream ``is_statechange != 0``
+            # filter (which skips the APPLY-class statechange records
+            # that carry ``is_buffremove == 0`` as part of the
+            # ``CBTS_BUFFAPPLY`` marker), a non-statechange cbtevent
+            # that carries ``is_buffremove == 0`` is a pure damage /
+            # pure heal record with NO buff-interaction context --
+            # arcdps does NOT encode APPLY events through the
+            # non-statechange path. Yielding a ``BoonApplyEvent`` for
+            # the 0 case would pollute the stream with a
+            # zero-duration phantom ``apply`` per damage / heal
+            # event (every cbtevent the test fixtures pin via the
+            # default `_build_event_record` helper has ``is_buffremove
+            # == 0``). Values >= 4 are reserved (future arcdps use);
+            # the predicate emits nothing for those -- the
+            # unknown-byte fallback matches
+            # ``gw2_analytics.buff_dispatch.decode_buff_change``.
+            #
+            # Layer-separation rationale: the parser does NOT import
+            # from ``gw2_analytics`` (parsing is a foundational layer;
+            # analytics builds ON top of the parser, not the other
+            # way around). The mapping is inline below via the 3-tuple
+            # :data:`_CBTBUFREMOVE_KINDS` indexed by ``byte - 1`` --
+            # mypy narrows ``BoonApplyEvent.kind`` to a
+            # :class:`Literal` via tuple-subscript WITHOUT an
+            # attribute-via-enum hop (which would lose the narrowing
+            # on a ``.value`` access). The tuple is INTENTIONALLY a
+            # 3-tuple (NOT a 4-tuple with slot 0 = ``"apply"``) for
+            # the layer-boundary reasons spelled out in the constant's
+            # own docstring; it maps ONLY the bytes the parser
+            # actually consumes, keeping the parser's local mapping
+            # crisply distinct from
+            # :func:`gw2_analytics.buff_dispatch.decode_buff_change`'s
+            # 4-tuple mapping (which DOES use byte 0 = ``"apply"`` for
+            # the upstream statechange-driven APPLY path).
+            # ``duration_ms`` is conservatively 0 (cbtevent lacks a
+            # duration field); ``stacks`` is 1 (conservative default
+            # for the REMOVE_SINGLE / REMOVE_MANUAL case; REMOVE_ALL
+            # uses the same single-marker default because the
+            # cbtevent record does not carry the pre-remove stack
+            # count).
+            #
+            # Defensive invariant: the predicate filters to {1, 2, 3}
+            # and the emit tuple is a 3-tuple indexed by ``byte - 1``,
+            # so ``byte - 1`` MUST land in [0, 3). If a future
+            # maintainer widens the predicate back to [0..3] (or to
+            # ``>= 0``) WITHOUT re-extending ``_CBTBUFREMOVE_KINDS``,
+            # this assertion fires at the yield site with a clear
+            # diagnostic BEFORE the BAD emit pollutes the
+            # ``BoonApplyEvent`` stream. The assertion and the
+            # predicate and the tuple length form a 3-line contract
+            # -- keep them in sync.
+            if is_buffremove in (1, 2, 3):
+                # Defensive invariant: the predicate filters to {1, 2, 3}
+                # and the emit tuple is a 3-tuple indexed by ``byte - 1``,
+                # so ``byte - 1`` MUST land in [0, 3). If a future
+                # maintainer widens the predicate back to [0..3] (or to
+                # ``>= 0``) WITHOUT re-extending ``_CBTBUFREMOVE_KINDS``,
+                # this assertion fires at the yield site with a clear
+                # diagnostic BEFORE the BAD emit pollutes the
+                # ``BoonApplyEvent`` stream. The assertion and the
+                # predicate and the tuple length form a 3-line contract
+                # -- keep them in sync. (See ``test_parser_byte_alignment``
+                # for the module-level self-test pinning the literal
+                # contents of ``_CBTBUFREMOVE_KINDS``.)
+                assert 0 <= is_buffremove - 1 < len(_CBTBUFREMOVE_KINDS), (
+                    f"Phase 9 Step 2-EMIT drift: predicate matched "
+                    f"is_buffremove={is_buffremove} but "
+                    f"_CBTBUFREMOVE_KINDS has {len(_CBTBUFREMOVE_KINDS)} "
+                    f"slots (expected 3). The predicate, the tuple "
+                    f"length, and the indexing '[byte - 1]' must stay "
+                    f"in sync."
+                )
+                yield BoonApplyEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent,
+                    target_agent_id=dst_agent,
+                    skill_id=skill_id,
+                    duration_ms=0,
+                    stacks=1,
+                    # Index by ``byte - 1`` so the 3-tuple aligns with
+                    # the REMOVE byte range [1, 2, 3] (byte 0 is the
+                    # CBTB_NONE sentinel excluded by the predicate).
+                    kind=_CBTBUFREMOVE_KINDS[is_buffremove - 1],
+                )
+            # Suppress ruff RUF059 (unused-variable on the is_ninety
+            # unpack above); re-emit once the 90%-threshold marker
+            # is added to BoonApplyEvent in a future Phase 9 step.
+            del is_ninety
             magnitude = max(0, value)
             buff_strip = max(0, buff_dmg)
             if is_nondamage == 0:
