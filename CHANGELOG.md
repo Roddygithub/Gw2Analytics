@@ -62,35 +62,6 @@ The parser's :meth:`PythonEvtcParser.parse_events` now yields :class:`~gw2_core.
 
 - 8 hermetic predicate-boundary tests in ``test_parser_emit_buff.py`` (Step 2) cover the FULL arcdps REMOVE byte range {1, 2, 3} + the sentinel {0} + the out-of-range bytes {4, 5, 127, -128} + statechange-driven records + the canonical CBTS_BUFFAPPLY flavor + the no-magnitude REMOVE edge case. 5 NEW tests for Step 3 cover mid-combat APPLY + co-emit-with-damage + mutual exclusion with REMOVE + zero-ev_buff regression + statechange-filter lock.
 
-### Fixed (apps/api - v0.10.9 plan 144: player-compare KeyError crash)
-
-- **apps/api v0.10.9 plan 144**: `GET /api/v1/players/compare/timeline`
-  raised `KeyError` on any non-empty dataset and was therefore broken in
-  production since v0.10.0 (plan 032). `get_compare_timeline` built
-  `per_account_contributions` as a plain `dict` and did an unconditional
-  `d[c.account_name].append(c)`, which `KeyError`s on the first
-  contribution of every account; the endpoint only survived the empty-DB
-  path. It also never scoped the result to the *requested* accounts.
-  Extract a pure `_group_contributions_by_account(contributions,
-  requested_accounts)` helper that pre-seeds the dict from the deduped
-  requested accounts and appends only requested accounts' contributions
-  ([plan 144](./plans/144-v0109-player-compare-keyerror-fix.md)). This
-  matches `CrossAccountTimelineAggregator`'s "one series per dict key"
-  contract: every requested account gets a series (empty `points` if it
-  attended no fights), and non-requested accounts are dropped. Surfaced
-  as finding C1 of the [2026-07-10 audit](./plans/AUDIT-2026-07-10-79c4501.md).
-- **apps/api/tests/test_player_compare_grouping.py** (NEW): 4 hermetic
-  (no-DB) tests pinning the helper — empty contributions pre-seed all
-  requested accounts, contributions route to the right account,
-  non-requested accounts are dropped, unknown requested accounts get an
-  empty list. The DB-backed `test_player_compare.py` validates the
-  end-to-end route on CI.
-
-#### Validation
-
-- `uv run pytest apps/api/tests/test_player_compare_grouping.py`: 4 passed.
-- `uv run ruff check` + `uv run mypy libs apps --no-incremental`: clean (106 source files).
-- The Postgres-backed `test_player_compare.py` was NOT run locally (no Docker); it validates the end-to-end route on CI.
 
 ### Fixed (libs/gw2_analytics - v0.9.27 plan 083: Phase 8 cascade in event_window.py)
 
@@ -4179,6 +4150,38 @@ The pre-existing ``test_fights_blob_cache_thundering_herd.py::test_concurrent_ca
 
 - Replaced the broken assertion ``assert all(r == results[0] for r in results)`` with ``assert all(gzip.decompress(r) == b"event" for r in results)`` -- the precise-but-stable contract: every caller received gzip bytes that DECOMPRESS to the same payload, regardless of gzip-header timestamp drift.
 - Verified: 10/10 isolated test runs PASS post-fix; full apps/api test_fights_blob_cache_thundering_herd.py suite (8 tests) PASS; no flake.
+
+## [0.10.9] - 2026-07-11: apps/api player-compare KeyError crash fix (plan 144 followup)
+
+### Fixed (apps/api - v0.10.9 plan 144: player-compare KeyError crash)
+
+- **apps/api v0.10.9 plan 144**: `GET /api/v1/players/compare/timeline`
+  raised `KeyError` on any non-empty dataset and was therefore broken in
+  production since v0.10.0 (plan 032). `get_compare_timeline` built
+  `per_account_contributions` as a plain `dict` and did an unconditional
+  `d[c.account_name].append(c)`, which `KeyError`s on the first
+  contribution of every account; the endpoint only survived the empty-DB
+  path. It also never scoped the result to the *requested* accounts.
+  Extract a pure `_group_contributions_by_account(contributions,
+  requested_accounts)` helper that pre-seeds the dict from the deduped
+  requested accounts and appends only requested accounts' contributions
+  ([plan 144](./plans/144-v0109-player-compare-keyerror-fix.md)). This
+  matches `CrossAccountTimelineAggregator`'s "one series per dict key"
+  contract: every requested account gets a series (empty `points` if it
+  attended no fights), and non-requested accounts are dropped. Surfaced
+  as finding C1 of the [2026-07-10 audit](./plans/AUDIT-2026-07-10-79c4501.md).
+- **apps/api/tests/test_player_compare_grouping.py** (NEW): 4 hermetic
+  (no-DB) tests pinning the helper — empty contributions pre-seed all
+  requested accounts, contributions route to the right account,
+  non-requested accounts are dropped, unknown requested accounts get an
+  empty list. The DB-backed `test_player_compare.py` validates the
+  end-to-end route on CI.
+
+#### Validation
+
+- `uv run pytest apps/api/tests/test_player_compare_grouping.py`: 4 passed.
+- `uv run ruff check` + `uv run mypy libs apps --no-incremental`: clean (106 source files).
+- The Postgres-backed `test_player_compare.py` was NOT run locally (no Docker); it validates the end-to-end route on CI.
 
 ## [0.10.3] - 2026-07-10
 
