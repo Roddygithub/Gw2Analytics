@@ -562,6 +562,61 @@ The v0.10.0 cycle item B closes the HIGH-severity CWE-256 (plaintext storage of 
 - The KEK is the sole decryption key. Loss of `SECRETS_KEK` OR a rotation without running a re-encrypt migration will permanently fail ALL existing webhook subscriptions (dispatch raises `FernetInvalidToken` on every POST, caught + logged but never recovered). Operators MUST store the KEK in a secrets manager (Vault / AWS Secrets Manager / sealed-secrets / etc.) and NEVER commit to git. Future KEK rotation is tracked for a v0.10.0+ dedicated rotation script (out of scope for plan 031).- Postgres `pgcrypto` was REJECTED for this implementation despite being a natural-looking choice; the KEK as a SQL parameter would cross the SQL wire on every encrypt/decrypt (visible in `pg_stat_statements` / verbose `log_min_duration_statement`). Defense-in-depth requires the KEK to stay inside the Python process memory.
 
 
+## [0.10.10] - 2026-07-11: apps/api cold-phase flake fix on thundering-herd test
+
+### Fixed (apps/api - v0.10.10 cold-phase flake on thundering-herd test, pre-existing on main)
+
+The pre-existing ``test_fights_blob_cache_thundering_herd.py::test_concurrent_calls_to_same_uri_are_serialised`` was failing ~1/3 of CI runs (a deterministic test bug masked by ``gzip``-timestamp coincidence: 4 concurrent ``gzip.compress(b"event")`` calls produce different bytes unless they happen within the same wallclock second). The fix is in the test (the production code's latch contract was always correct):
+
+- Replaced the broken assertion ``assert all(r == results[0] for r in results)`` with ``assert all(gzip.decompress(r) == b"event" for r in results)`` -- the precise-but-stable contract: every caller received gzip bytes that DECOMPRESS to the same payload, regardless of gzip-header timestamp drift.
+- Verified: 10/10 isolated test runs PASS post-fix; full apps/api test_fights_blob_cache_thundering_herd.py suite (8 tests) PASS; no flake.
+
+## [0.10.9] - 2026-07-11: apps/api player-compare KeyError crash fix (plan 144 followup)
+
+### Fixed (apps/api - v0.10.9 plan 144: player-compare KeyError crash)
+
+- **apps/api v0.10.9 plan 144**: `GET /api/v1/players/compare/timeline`
+  raised `KeyError` on any non-empty dataset and was therefore broken in
+  production since v0.10.0 (plan 032). `get_compare_timeline` built
+  `per_account_contributions` as a plain `dict` and did an unconditional
+  `d[c.account_name].append(c)`, which `KeyError`s on the first
+  contribution of every account; the endpoint only survived the empty-DB
+  path. It also never scoped the result to the *requested* accounts.
+  Extract a pure `_group_contributions_by_account(contributions,
+  requested_accounts)` helper that pre-seeds the dict from the deduped
+  requested accounts and appends only requested accounts' contributions
+  ([plan 144](./plans/144-v0109-player-compare-keyerror-fix.md)). This
+  matches `CrossAccountTimelineAggregator`'s "one series per dict key"
+  contract: every requested account gets a series (empty `points` if it
+  attended no fights), and non-requested accounts are dropped. Surfaced
+  as finding C1 of the [2026-07-10 audit](./plans/AUDIT-2026-07-10-79c4501.md).
+- **apps/api/tests/test_player_compare_grouping.py** (NEW): 4 hermetic
+  (no-DB) tests pinning the helper — empty contributions pre-seed all
+  requested accounts, contributions route to the right account,
+  non-requested accounts are dropped, unknown requested accounts get an
+  empty list. The DB-backed `test_player_compare.py` validates the
+  end-to-end route on CI.
+
+#### Validation
+
+- `uv run pytest apps/api/tests/test_player_compare_grouping.py`: 4 passed.
+- `uv run ruff check` + `uv run mypy libs apps --no-incremental`: clean (106 source files).
+- The Postgres-backed `test_player_compare.py` was NOT run locally (no Docker); it validates the end-to-end route on CI.
+
+## [0.10.3] - 2026-07-10
+
+### Added
+
+- v0.10.3 plan 083 Feature 1: heuristic role detection (`libs/gw2_analytics/role_detection.py`; 12 NEW tests in `tests/test_role_detection.py`)
+- v0.10.3 plan 083 Feature 3A: per-player timeline overlay (`per_player_timeline.py` aggregator + `GET /api/v1/fights/{id}/timeline/players` + `PerPlayerTimelineOut` schema)
+- v0.10.3 plan 123: Janthir Wilds elite specs (`LUMINARY`/`PARAGON`/`TROUBADOUR`/...)
+- v0.10.3 plan 119: role-detection backfill (`backfill_role_detection` + `--roles-only` CLI flag)
+
+### Migration
+
+- v0.10.3 migration `0011_player_role_detection` adds `detected_role` + `detected_tags` columns to `fight_player_summaries`
+
+
 ## [0.9.2] - v0.9.2: webhook correctness hardening (HMAC bytes + replay idempotency + suite-fast)
 
 The v0.9.2 hardening cycle (`plans/009-v092-webhook-rest.md`) closes the 2 deferred v0.9.1 test failures + 1 audit-flagged missing-convention + 1 uninvestigated suite timeout via 5 atomic commits (`85716b6` → `99faa35` → `a247430` → `abd7deb` → `d70c8c6`).
@@ -4141,61 +4196,6 @@ route already handles the union via
 - Library surface is intentionally minimal so future
   ``MultiFightAggregator`` / ``SingleEventAggregator`` siblings
   can be added without breaking this contract.
-
-## [0.10.10] - 2026-07-11: apps/api cold-phase flake fix on thundering-herd test
-
-### Fixed (apps/api - v0.10.10 cold-phase flake on thundering-herd test, pre-existing on main)
-
-The pre-existing ``test_fights_blob_cache_thundering_herd.py::test_concurrent_calls_to_same_uri_are_serialised`` was failing ~1/3 of CI runs (a deterministic test bug masked by ``gzip``-timestamp coincidence: 4 concurrent ``gzip.compress(b"event")`` calls produce different bytes unless they happen within the same wallclock second). The fix is in the test (the production code's latch contract was always correct):
-
-- Replaced the broken assertion ``assert all(r == results[0] for r in results)`` with ``assert all(gzip.decompress(r) == b"event" for r in results)`` -- the precise-but-stable contract: every caller received gzip bytes that DECOMPRESS to the same payload, regardless of gzip-header timestamp drift.
-- Verified: 10/10 isolated test runs PASS post-fix; full apps/api test_fights_blob_cache_thundering_herd.py suite (8 tests) PASS; no flake.
-
-## [0.10.9] - 2026-07-11: apps/api player-compare KeyError crash fix (plan 144 followup)
-
-### Fixed (apps/api - v0.10.9 plan 144: player-compare KeyError crash)
-
-- **apps/api v0.10.9 plan 144**: `GET /api/v1/players/compare/timeline`
-  raised `KeyError` on any non-empty dataset and was therefore broken in
-  production since v0.10.0 (plan 032). `get_compare_timeline` built
-  `per_account_contributions` as a plain `dict` and did an unconditional
-  `d[c.account_name].append(c)`, which `KeyError`s on the first
-  contribution of every account; the endpoint only survived the empty-DB
-  path. It also never scoped the result to the *requested* accounts.
-  Extract a pure `_group_contributions_by_account(contributions,
-  requested_accounts)` helper that pre-seeds the dict from the deduped
-  requested accounts and appends only requested accounts' contributions
-  ([plan 144](./plans/144-v0109-player-compare-keyerror-fix.md)). This
-  matches `CrossAccountTimelineAggregator`'s "one series per dict key"
-  contract: every requested account gets a series (empty `points` if it
-  attended no fights), and non-requested accounts are dropped. Surfaced
-  as finding C1 of the [2026-07-10 audit](./plans/AUDIT-2026-07-10-79c4501.md).
-- **apps/api/tests/test_player_compare_grouping.py** (NEW): 4 hermetic
-  (no-DB) tests pinning the helper — empty contributions pre-seed all
-  requested accounts, contributions route to the right account,
-  non-requested accounts are dropped, unknown requested accounts get an
-  empty list. The DB-backed `test_player_compare.py` validates the
-  end-to-end route on CI.
-
-#### Validation
-
-- `uv run pytest apps/api/tests/test_player_compare_grouping.py`: 4 passed.
-- `uv run ruff check` + `uv run mypy libs apps --no-incremental`: clean (106 source files).
-- The Postgres-backed `test_player_compare.py` was NOT run locally (no Docker); it validates the end-to-end route on CI.
-
-## [0.10.3] - 2026-07-10
-
-### Added
-
-- v0.10.3 plan 083 Feature 1: heuristic role detection (`libs/gw2_analytics/role_detection.py`; 12 NEW tests in `tests/test_role_detection.py`)
-- v0.10.3 plan 083 Feature 3A: per-player timeline overlay (`per_player_timeline.py` aggregator + `GET /api/v1/fights/{id}/timeline/players` + `PerPlayerTimelineOut` schema)
-- v0.10.3 plan 123: Janthir Wilds elite specs (`LUMINARY`/`PARAGON`/`TROUBADOUR`/...)
-- v0.10.3 plan 119: role-detection backfill (`backfill_role_detection` + `--roles-only` CLI flag)
-
-### Migration
-
-- v0.10.3 migration `0011_player_role_detection` adds `detected_role` + `detected_tags` columns to `fight_player_summaries`
-
 
 ## [0.2.0] - Phase 3 depth: multi-fight rollup
 
