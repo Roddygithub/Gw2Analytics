@@ -170,8 +170,22 @@ def test_concurrent_calls_to_same_uri_are_serialised(
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda _: call(), range(4)))
 
-    # All 4 callers received the same bytes.
-    assert all(r == results[0] for r in results)
+    # All 4 callers received gzip bytes that DECOMPRESS to the same payload.
+    # The raw bytes differ because each ``gzip.compress`` writes a fresh
+    # timestamp into the gzip header; the latch serialises the calls
+    # (``max_in_flight == 1``) but the lru_cache does NOT deduplicate
+    # concurrent misses (see module docstring). Asserting on the
+    # decompressed payload is the precise-but-stable contract: pytest's
+    # prior flaky 1/3 behaviour stemmed from asserting raw ``results[0]``
+    # equality, which passes when all 4 ``gzip.compress`` calls fall
+    # within the same wallclock second (~2/3 of runs) and fails when
+    # they straddle a second boundary (~1/3 of runs -- the observed
+    # F1-style flake).
+    assert all(gzip.decompress(r) == b"event" for r in results), (
+        "At least one caller received bytes that do not decompress to "
+        "the shared ``b'event'`` payload (latch breached the per-call "
+        "serialisation contract)."
+    )
     # The latch's actual contract: max-in-flight == 1.
     assert max_in_flight == 1, (
         f"Per-URI lock did not serialise concurrent calls: "
