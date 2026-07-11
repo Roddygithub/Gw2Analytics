@@ -63,9 +63,15 @@ from gw2_analytics.target_healing import TargetHealingAggregator, TargetHealingR
 from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 from gw2analytics_api._event_dispatch import build_event_iterator
 from gw2analytics_api.database import get_session
-from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightSkill
+from gw2analytics_api.models import OrmFight, OrmFightAgent
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession
 from gw2analytics_api.routes.fights.blob_cache import _cached_get_events
+from gw2analytics_api.routes.fights.blob_loader import _load_fight_events
+from gw2analytics_api.routes.fights.mappers import (
+    agent_id_to_name,
+    agent_id_to_subgroup,
+    skill_id_to_name,
+)
 from gw2analytics_api.schemas import (
     AgentOut,
     EventBucketOut,
@@ -108,68 +114,6 @@ router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
 # only edits one site.
 _PER_FIGHT_DEFAULT_WINDOW_S: int = 5
 _PER_FIGHT_MAX_WINDOW_S: int = 600
-
-
-# ---------------------------------------------------------------------------
-# Shared blob-load + decompress + event-split helper
-# ---------------------------------------------------------------------------
-
-
-def _load_fight_events(
-    db: Session,
-    fight_id: str,
-) -> list[Event]:
-    """Load + decompress + parse the events blob for one fight.
-
-    Centralises the blob-load + decompress + event-split pattern
-    that :func:`get_fight_events`, :func:`get_fight_squads`, and
-    :func:`get_fight_skills` all share. The helper enforces the
-    canonical 404 / 502 contract:
-
-    - ``404 Not Found``: fight id is unknown OR
-      ``events_blob_uri is None`` OR the blob is missing in MinIO
-      (``S3Error`` -- closes the loop if the upload succeeded but
-      the MinIO write failed silently or was evicted).
-    - ``404 Not Found``: the events list is empty after the
-      ``jsonl.splitlines()`` pass. Defensive: the parser writes
-      no empty blobs, but a 0-byte blob (manual PUT, replication
-      drift) still honours the "no event data available" contract
-      so the response never confuses "parser ran, nothing
-      happened" with "data unavailable".
-    - ``502 Bad Gateway``: the blob is present but
-      ``gzip.decompress`` failed. A fight row with a corrupt blob
-      is still a valid row; this is a blob-store consistency issue
-      rather than a client error.
-
-    Returns the parsed :class:`Event` list so the caller can split
-    by ``isinstance`` at the call site and feed the per-kind
-    streams to the aggregators (the v0.7.0 SquadRollup + SkillUsage
-    aggregators accept paired single-typed streams; the per-target
-    trio each accept one single-typed stream).
-    """
-    fight = db.get(OrmFight, fight_id)
-    if fight is None or fight.events_blob_uri is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
-
-    try:
-        gz_bytes = _cached_get_events(fight.events_blob_uri)
-    except S3Error:
-        logger.warning(
-            "events blob %s missing in MinIO for fight %s",
-            fight.events_blob_uri,
-            fight_id,
-        )
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable") from None
-
-    try:
-        events = list(build_event_iterator(gz_bytes=gz_bytes))
-    except (OSError, EOFError) as exc:
-        logger.exception("events blob %s not gzip-decodable", fight.events_blob_uri)
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "events blob corrupt") from exc
-
-    if not events:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable")
-    return events
 
 
 def _aggregate_per_target_rollup(
@@ -587,14 +531,7 @@ def get_fight_events(
     # (the explicit-``None`` and missing-key cases collapse to the
     # same sentinel on the row, which the frontend falls back to
     # the raw ``target_agent_id`` for).
-    agent_id_to_name: dict[int, str | None] = {
-        a.agent_id: a.name
-        for a in db.execute(
-            select(OrmFightAgent).where(OrmFightAgent.fight_id == fight_id),
-        )
-        .scalars()
-        .all()
-    }
+    agent_id_to_name_map = agent_id_to_name(db, fight_id)
 
     duration_s = max(e.time_ms for e in events) / 1000.0
     # Plan 117: the 3 per-target roll-ups (DPS + Healing + BuffRemoval)
@@ -609,19 +546,19 @@ def get_fight_events(
     # aggregation concerns.
     target_dps_rows = _aggregate_per_target_rollup(
         events,
-        agent_id_to_name,
+        agent_id_to_name_map,
         duration_s,
         DamageEvent,
     )
     target_healing_rows = _aggregate_per_target_rollup(
         events,
-        agent_id_to_name,
+        agent_id_to_name_map,
         duration_s,
         HealingEvent,
     )
     target_buff_removal_rows = _aggregate_per_target_rollup(
         events,
-        agent_id_to_name,
+        agent_id_to_name_map,
         duration_s,
         BuffRemovalEvent,
     )
@@ -704,21 +641,14 @@ def get_fight_squads(
     # table is small (typically 5-50 rows), so the lazy load here
     # is acceptable. An empty subgroup is a valid value that
     # surfaces in the empty-string bucket.
-    agent_id_to_subgroup: dict[int, str] = {
-        a.agent_id: (a.subgroup or "")
-        for a in db.execute(
-            select(OrmFightAgent).where(OrmFightAgent.fight_id == fight_id),
-        )
-        .scalars()
-        .all()
-    }
+    agent_id_to_subgroup_map = agent_id_to_subgroup(db, fight_id)
 
     duration_s = max(e.time_ms for e in events) / 1000.0
     squad_rows = SquadRollupAggregator().aggregate(
         [e for e in events if isinstance(e, DamageEvent)],
         [e for e in events if isinstance(e, HealingEvent)],
         [e for e in events if isinstance(e, BuffRemovalEvent)],
-        agent_id_to_subgroup,
+        agent_id_to_subgroup_map,
         duration_s,
     )
 
@@ -771,20 +701,13 @@ def get_fight_skills(
     # Build the skill_id -> skill_name map. An empty skill name
     # is a valid value (the parser surfaces it for unknown
     # skills); the aggregator renders it as ``skill_name=""``.
-    skill_id_to_name: dict[int, str] = {
-        s.skill_id: (s.name or "")
-        for s in db.execute(
-            select(OrmFightSkill).where(OrmFightSkill.fight_id == fight_id),
-        )
-        .scalars()
-        .all()
-    }
+    skill_id_to_name_map = skill_id_to_name(db, fight_id)
 
     skill_rows = SkillUsageAggregator().aggregate(
         [e for e in events if isinstance(e, DamageEvent)],
         [e for e in events if isinstance(e, HealingEvent)],
         [e for e in events if isinstance(e, BuffRemovalEvent)],
-        skill_id_to_name,
+        skill_id_to_name_map,
     )
 
     return FightSkillsOut(
