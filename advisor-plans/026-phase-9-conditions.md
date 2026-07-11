@@ -2,157 +2,233 @@
 
 > **Executor instructions**: Follow this plan step by step. Run every verification command and confirm the expected result before moving to the next step. If anything in the "STOP conditions" section occurs, stop and report — do not improvise. When done, update the status row for this plan in `plans/README.md`.
 
-> **Drift check (run first)**: `git diff --stat 5fefdae..HEAD -- libs/gw2_core libs/gw2_analytics libs/gw2_evtc_parser apps/api/src/gw2analytics_api/services/event_blob.py`
-> If any in-scope file changed since this plan was written, compare the "Current state" excerpts against the live code before proceeding.
+> **Drift check (run first)**: `git diff --stat HEAD~6..HEAD -- libs/gw2_core libs/gw2_analytics libs/gw2_evtc_parser apps/api/src/gw2analytics_api/services/event_blob.py`
+> If any in-scope file changed since this plan was last updated, compare the "Current state" excerpts against the live code before proceeding.
 
 ## Status
 
 - **Priority**: P2
-- **Effort**: M (Parts 1+3 shipped; Part 2 + buff_dispatch realignment deferred)
-- **Risk**: MEDIUM (Parts 2 + 4 deferred pending real arcdps dump calibration)
-- **Depends on**: plan 024 (combat-readout spike, DONE), plan 137 (buff_uptime Pydantic model, DONE), plan 026-step 1 (BoonApplyEvent kind discriminator, SHIPPED 5fefdae)
+- **Effort**: L (Parts 1+1.5+3 ship; Parts 2-EMIT + 4 + 5 BLOCKED behind new Part 1.5-SYNC)
+- **Risk**: HIGH (calibration round revealed parser struct misalignment)
+- **Depends on**: plan 024 (combat-readout spike, DONE), plan 137 (buff_uptime Pydantic model, DONE), plan 138 (revision-aware parser plugins, DEFERRED).
 - **Category**: analytics
 - **Planned at**: commit `3c524d9`, 2026-07-11
-- **Rewritten at**: 2026-07-11 (post-arcdps.h verification round)
+- **Rewritten at**: 2026-07-11 (post-arcdps.h verification round, commit `aff55ae`)
+- **Calibration-foundations rewrite at**: 2026-07-11 (after F1 empirical byte-distribution forensic on a real WvW dump surfaced Theory B -- the parser struct is NOT 1:1 aligned with arcdps.h)
 
 ## Why this matters
 
-The v0.10.6 cycle landed `buff_uptime.py` (per-buff historical tracking) + `buff_dispatch.py` (3-way apply/remove-single/remove-all decoder) in `libs/gw2_analytics`. Two gaps remain before the analyst surface is composable:
+The v0.10.6 cycle landed `buff_uptime.py` + `buff_dispatch.py` in `libs/gw2_analytics`. Three gaps remain before the analyst surface is composable. The most recent gap surfaced empirically:
 
-1. **The parser does not produce buff-apply events.** `parse_events` reads the 64-byte cbtevent records but does not surface the arcdps `is_buffremove` byte to the discriminated-union `Event` stream. The byte has been EXPOSED (Phase 9 step 2 partial — this rewrite documents that) but the EMIT branch that yields `BoonApplyEvent` records is deferred pending real arcdps dump calibration.
-2. **The `buff_dispatch.py` decoder's enum mappings have a known discrepancy with arcdps.h.** The arcdps.h `enum cbtbuffremove` is `CBTB_NONE=0, CBTB_ALL=1, CBTB_SINGLE=2, CBTB_MANUAL=3`. The project decoder (`decode_buff_change`) currently maps `0→APPLY, 1→REMOVE_SINGLE, 2→REMOVE_ALL`. The project's `1→REMOVE_SINGLE` and `2→REMOVE_ALL` lines are SWAPPED vs arcdps's `1→ALL` and `2→SINGLE`. This is a pre-existing defect from plan 137 (the original plan's framing was wrong; arcdps.h was not verified at plan-137 time). Realignment is deferred to step 4.
+1. **`buff_dispatch` enum mappings are SWAPPED vs arcdps.h.** Plan 137 (v0.10.5) shipped a 3-way decoder mapping `1→REMOVE_SINGLE, 2→REMOVE_ALL` but arcdps.h `cbtbuffremove` is `0=NONE, 1=ALL, 2=SINGLE, 3=MANUAL`. The project's mapping is the reverse for `1`/`2`. Realignment shipped via commit `529cb90` (Phase 9 step 4).
+2. **The parser does not produce buff-apply events.** `parse_events` reads the 64-byte cbtevent records but does not surface the arcdps `is_buffremove` byte to the discriminated-union `Event` stream. The byte has been EXPOSED (Phase 9 step 2-PARTIAL via commit `328833d`) but the EMIT branch that yields `BoonApplyEvent` records is deferred pending struct audit + real-arcdps-dump calibration.
+3. **The parser's `_EVENT_STRUCT` is NOT 1:1 aligned with arcdps.h.** Confirmed by the 2026-07-11 calibration round below. The struct has 3 uint16s where arcdps has 4 (missing `dst_master_instid`) + 8 single-byte slots where arcdps has 12 (covering only `iff, buff, result, is_activation, is_buffremove, is_ninety, is_fifty, is_moving`, dropping `is_statechange, is_flanking, is_shields, is_offcycle`!) + 2 uint32 slots where arcdps has 4 pad bytes. **This is the calibrate-or-correct blocker that gates Step 2-EMIT.**
 
-Phase 9 closes both gaps by:
-- ✅ Step 1 (SHIPPED `5fefdae`): Added `BoonApplyEvent` subclass to `gw2_core`'s discriminated union, with `kind: Literal["apply","remove_single","remove_all"]` discriminator + 13 round-trip tests.
-- ✅ Step 1.5 (SHIPPED `5fefdae` followup): Expanded `test_event_union.py` with the 5-member union round-trip + invalid-kind rejection + adapter-determinism coverage. All 13 tests pass; `mypy` 0 errors, `ruff` 0 errors.
-- ✅ Step 2-PARTIAL (SHIPPED this rewrite): Renamed the parser's struct slot 6 (`_pad61`) → `is_buffremove` + slot 7 (`_pad62`) → `is_ninety` to expose the arcdps.h byte. Added 5 hermetic struct-alignment tests (`test_parser_byte_alignment.py`) that lock the byte positions so a future struct tuple-reorder regression fires before it can corrupt downstream aggregation.
-- 🚧 Step 2-EMIT-BRANCH (DEFERRED): The emit branch that yields `BoonApplyEvent` records from non-statechange cbtevevent records carrying `is_buffremove != 0` is deferred pending real arcdps dump calibration. The exact predicate (which combination of `is_statechange` / `is_nondamage` / `value` / `buff_dmg` / `is_buffremove` triggers an apply/remove emit) is not documented in arcdps.h's `cbtstatechange` enum, so an empirical round with real arcdps dumps is required BEFORE shipping the predicate.
-- 🚧 Step 3-FULL (DEFERRED — calibrated-only path): The Phase 9 step 3 workstream in `libs/gw2_analytics.buff_uptime` (which would consume the `BoonApplyEvent` stream from the parser via `accumulate_buff_events`) is **NOT YET** implemented — the existing `accumulate_buff_events` aggregator operates on direct `BoonApplyEvent` records (built in step-1 round-trip tests) but is NOT yet wired to the parser's emit branch. The aggregator itself is correct and tested; the integration is the deferred scope.
-- 🚧 Step 4 (DEFERRED): Realign `decode_buff_change` enum mappings with arcdps.h. The blast radius of the change touches `BoonApplyEvent.kind` docstring + plan 137 + plan 138 (forwarding references) + 3 unit-test files. A real-arcdps-dump round should drive the realignment (without empirical data the realignment could swap in the wrong direction).
-- 🚧 Step 5 (DEFERRED): Per-buff-uptime schema + route. Step 5's scope remains the same as the pre-rewrite plan (Phase 9 prep explicit-outs: per buff uptime tables + the `GET /api/v1/fights/{id}/buff-uptime` route + the frontend card).
+This rewrite documents (a) the struct-math proof that misalignment exists, (b) the empirical byte-distribution evidence, (c) the new Step 1.5-SYNC prerequisite that must complete BEFORE Step 2-EMIT.
 
-## Current state
+## Calibration findings (2026-07-11 F1 round)
 
-### `libs/gw2_core/src/gw2_core/models.py` (Phase 9 step 1)
-- `BoonApplyEvent` Pydantic subclass with `event_type: Literal["boon_apply"]` + `skill_id` + `duration_ms` + `stacks` + `kind: Literal["apply","remove_single","remove_all"] = "apply"`
-- `Event` discriminated union extended to 5 members (Damage + Healing + BuffRemoval + BoonApply + ... [CC event TBD])
-- 13 round-trip tests in `libs/gw2_core/tests/test_event_union.py` cover the 5-member union, all `kind` literals, default `kind="apply"`, invalid `kind` rejection, adapter determinism
+The empirical byte-distribution forensic on the smallest real arcdps dump (`/home/roddy/WvW_Analytics/uploads/5b161ec03d544b0c96eeb6689590ece4.zevtc`, 75,091 bytes, 5,883 cbtevent records, build `'20250925'`) produced this distribution across the 8 single-byte slots in our parser's struct (offsets 46-53):
 
-### `libs/gw2_analytics/src/gw2_analytics/buff_uptime.py` (Phase 9 step 1.5)
-- `accumulate_buff_events(events, fight_end_ms, fight_start_ms=0) -> dict[int, BuffState]` shipped via commit `7cee0b7`
-- PEP 695 generic `_validate_subclass[T: Event](cls: type[T], event_json: str) -> T` test helper applied to the round-trip tests (closes the mypy `union-attr` warning class)
-- 8 unit tests in `libs/gw2_analytics/tests/test_buff_uptime.py` — single apply / apply-then-remove-single / apply-then-remove-all / multi-skill-id partitioning / remove-from-zero clamp / 3-way mixed sequence
+| Slot idx | Current label | Our byte | Zero % | One % | Other % | arcdps.h spec byte |
+|---:|---|---:|---:|---:|---:|---|
+| 10 | `_is_cleanup` | 46 | 42.90 % | 0.10 % | 57.00 % | n/a (would be `dst_master_instid` low byte in 4-H scheme) |
+| 11 | `is_nondamage` | 47 | 77.07 % | 0.32 % | 22.61 % | n/a (would be `dst_master_instid` high byte in 4-H scheme) |
+| 12 | `is_statechange` | 48 | 77.78 % | 0.07 % | 22.15 % | per spec: `iff` (Friend/Friendly flag) |
+| 13 | `_is_flanking` | 49 | 80.40 % | 0.14 % | 19.46 % | per spec: `buff` |
+| 14 | `_is_shields` | 50 | 81.88 % | 0.10 % | 18.02 % | per spec: `result` |
+| 15 | `_is_offcycle` | 51 | 92.13 % | 0.05 % | 7.82 % | per spec: `is_activation` |
+| 16 | `is_buffremove` | 52 | 96.28 % | 0.05 % | 3.67 % | **per spec: `is_buffremove` ✓ (matches!)** |
+| 17 | `is_ninety` | 53 | 97.20 % | 0.05 % | 2.75 % | per spec: `is_ninety` ✓ (matches!) |
 
-### `libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py` (Phase 9 step 2-PARTIAL)
-- `_EVENT_STRUCT` now exposes byte 52 as `is_buffremove` (was `_pad61`) + byte 53 as `is_ninety` (was `_pad62`)
-- 22-tuple unpack target list's slot 6 + slot 7 renamed to mirror arcdps.h field semantics
-- Layout comment in the struct definition now references arcdps.h (via `<GW2-ArcDPS-Mechanics-Log>/src/arcdps_datastructures.h` mirror) byte-by-byte
-- The damage / healing / buff-removal pipeline is UNCHANGED in semantics; the rename is a label-only edit (no byte reordering)
+The struct doc-comment claimed "the existing damage / heal / strip pipeline works empirically"; calibration shows this is true by ACCIDENT, not by design. The `if is_statechange != 0: continue` filter in `parse_events` (line ~341 of parser.py) is reading byte 48 of our struct -- which per the spec is arcdps's `iff` (Friend/Foe flag), NOT `is_statechange`. The filter correctly skips the wrong field (Friend records when it intends to skip statechange records) because in this WvW dump both populations happen to be ~22-23 % non-zero.
 
-### `libs/gw2_analytics/src/gw2_analytics/buff_dispatch.py` (Phase 9 step 4-DEFERRED)
-- `decode_buff_change(0) == BuffChangeKind.APPLY`
-- `decode_buff_change(1) == BuffChangeKind.REMOVE_SINGLE`
-- `decode_buff_change(2) == BuffChangeKind.REMOVE_ALL`
-- `decode_buff_change(3+) == BuffChangeKind.REMOVE_SINGLE` (unknown-byte fallback)
-- **Known discrepancy**: arcdps.h cbtbuffremove maps `1=ALL, 2=SINGLE, 3=MANUAL`. The project's `1=SINGLE, 2=ALL` lines are SWAPPED relative to arcdps.h. Realignment deferred to step 4 (pending real arcdps dump calibration).
+### Struct-math proof (independent of the empirical forensic)
 
-### API surface (today)
-- `GET /api/v1/fights/{id}/events` aggregates damage + healing + buff-removal per TARGET agent
-- `GET /api/v1/fights/{id}/squads` aggregates per SUBGROUP
-- `GET /api/v1/fights/{id}/skills` aggregates per SKILL
-- `GET /api/v1/fights/{id}/timeline` per-bucket damage + healing + buff-removal
-- `GET /api/v1/fights/{id}/timeline/players` per-player per-bucket
-- No buff-state endpoint exists (Phase 9 step 5 scope)
-
-### Schemas (today, modular split landed)
-- `apps/api/src/gw2analytics_api/schemas/fight.py`: `TargetBuffRemovalRowOut` (per-target strip roll-up), `BuffUptimeRowOut` (NOT YET — Phase 9 step 5 scope), `BoonStateOut` (NOT YET — Phase 9 step 5 scope)
-
-## Verified arcdps byte layout
-
-The byte positions exposed in the parser's struct are now clarified. Per `<GW2-ArcDPS-Mechanics-Log>/src/arcdps_datastructures.h` (a mirror of arcdps.h with forward-compatible naming):
+The arcdps `cbtevent` struct (per `<GW2-ArcDPS-Mechanics-Log>/src/arcdps_datastructures.h` -- the community-port mirror of `arcdps.h`, cross-checked against arcdps's own `evtc/README.txt` at `https://www.deltaconnected.com/arcdps/evtc/README.txt`):
 
 ```
-bytes  0-23:  3 × uint64  (time, src_agent, dst_agent)
-bytes 24-31:  2 × int32   (value, buff_dmg)
-bytes 32-39:  2 × uint32  (overstack_value, skillid)
-bytes 40-47:  4 × uint16  (src_instid, dst_instid, src_master_instid, dst_master_instid)
-bytes 48-59: 12 × uint8   (iff, buff, result, is_activation, is_buffremove,
-                            is_ninety, is_fifty, is_moving, is_statechange,
-                            is_flanking, is_shields, is_offcycle)
-bytes 60-63:  4 × pad bytes (pad61, pad62, pad63, pad64)
+bytes  0-23: 3 × uint64  (time, src_agent, dst_agent)
+bytes 24-31: 2 × int32   (value, buff_dmg)
+bytes 32-39: 2 × uint32  (overstack_value, skillid)
+bytes 40-47: 4 × uint16  (src_instid, dst_instid, src_master_instid, dst_master_instid)
+bytes 48-59: 12 × uint8  (iff, buff, result, is_activation, is_buffremove,
+                           is_ninety, is_fifty, is_moving, is_statechange,
+                           is_flanking, is_shields, is_offcycle)
+bytes 60-63: 4 × pad     (pad61, pad62, pad63, pad64)
 ```
 
-The parser's struct literal `"<QQQiiIIHHHbbbbbbbbIIbb"` does NOT match the arcdps.h layout 1:1 — the struct has 3 uint16s where arcdps has 4 (missing `dst_master_instid`), then reads 8 single-byte slots where arcdps has 12 (covering `iff`, `buff`, `result`, `is_activation`, `is_buffremove`, `is_ninety`, `is_fifty`, `is_moving`, `is_statechange`, `is_flanking`, `is_shields`, `is_offcycle`), then 2 uint32 slots where arcdps has 4 single-byte pads.
+Our parser's `_EVENT_STRUCT = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")` decodes as:
 
-The damage / heal / strip pipeline has been EMPIRICALLY CALIBRATED against real arcdps dumps with the existing (incorrect) struct, so the byte-level semantics work for the existing pipeline. The byte-position renames in step 2-PARTIAL (slot 6 → `is_buffremove`, slot 7 → `is_ninety`) reflect the assumption that the byte at slot 6 (offset 52 in the parser's struct reading) IS the arcdps.h byte 52 (`is_buffremove`). This was confirmed by the 5 hermetic struct-alignment tests in `test_parser_byte_alignment.py` (the test fixture packs a specific byte at slot 6 and the parser reads it back correctly).
+- 3 × uint64 (0-23) ✓
+- 2 × int32 (24-31) ✓
+- 2 × uint32 (32-39) ✓
+- 3 × uint16 (40-45) ← MISSING `dst_master_instid` (46-47 offset) -- arcdps has 4 H's, we have 3
+- 8 × uint8 (46-53) ← covers arcdps's `dst_master_instid` (low+high bytes) + `iff, buff, result, is_activation, is_buffremove, is_ninety` -- we DROP `is_fifty, is_moving, is_statechange, is_flanking, is_shields, is_offcycle` (6 fields)
+- 2 × uint32 (54-61) ← covers arcdps's `is_fifty + is_moving + is_statechange + is_flanking + is_shields + is_offcycle` (6 single-byte fields) AS ONE 8-byte word -- we read garbage as `_pad63, _pad64`
+- 2 × uint8 (62-63) ← covers arcdps's `pad63 + pad64` -- correct
 
-A FULL struct reordering (to align 1:1 with arcdps.h) is DEFERRED — it would shift the byte alignment of EVERY field past `src_instid` + `dst_instid` + the missing `src_master_instid`/`dst_master_instid`. The shift would invalidate past dump compatibility. Plan 138 already lays the groundwork for revision-aware parser plugins (the `cbtevent` layout can differ across arcdps versions).
+The net effect: 6 arcdps.h single-byte fields are swallowed into our 2 uint32 slot and never read. The `is_statechange` flag (which gates the damage / heal / strip / buff-emit branches) is at arcdps.h byte 56 -- in our shifted struct, this byte falls inside `_pad63` (upper half of the first uint32).
 
-## Scope (delta vs prior draft)
+### Concrete consequences for the existing pipeline
+
+The parser's `parse_events` loop reads:
+
+```python
+_is_cleanup,            # byte 46 (our label: dst_master_instid low per arcdps)
+is_nondamage,           # byte 47 (our label: dst_master_instid high per arcdps)
+is_statechange,         # byte 48 (our label: iff per arcdps)  ← WRONG FIELD
+_is_flanking,           # byte 49 (our label: buff per arcdps)
+_is_shields,            # byte 50 (our label: result per arcdps)
+_is_offcycle,           # byte 51 (our label: is_activation per arcdps)
+is_buffremove,          # byte 52 (our label: is_buffremove per arcdps) ✓
+is_ninety,              # byte 53 (our label: is_ninety per arcdps) ✓
+```
+
+The **filter** `if is_statechange != 0: continue` (line ~341) is actually filtering on arcdps's `iff` byte. In a WvW dump where most friend-vs-enemy damage flows forward (actors are friends, targets are enemies), the `iff=0` filter accidentally yields damage records for FRIEND targets and skips FRIEND records -- the OPPOSITE of what's recorded in arcdps binaries. The damage-rollup `target_dps` is therefore biased toward friend targets.
+
+The **damage vs heal branching** on `is_nondamage` (byte 47 = arcdps's `dst_master_instid` high byte) is reading essentially random data (instance IDs are large mixed-range numbers). The damage vs heal classification is LUCKY because for many records the dst_master_instid high byte happens to be 0 or non-0 in patterns that loosely correlate with `is_nondamage` semantics.
+
+The **`is_buffremove` byte** (slot 16, byte 52) IS correctly positioned by structural coincidence -- the missing `dst_master_instid` uint16 collapses the single-byte region start by 2, and the missing 4 uint8s at the tail collapse the end by 4, with net zero offset for byte 52 specifically. So the `buff_dispatch` decoder (Phase 9 step 4, commit `529cb90`) reads the right byte.
+
+## Real arcdps fixtures available (PRIOR calibration-blocker resolved)
+
+12 real `.zevtc` fixtures exist on this system, including WvW dumps from the in-product ingestion pipeline:
+
+- `/home/roddy/Downloads/20260604-230254.zevtc` (synthesized or downloaded)
+- `/home/roddy/WvW_Analytics/uploads/{5b6c..., 97bb..., c505..., 6021..., eeae..., 9240..., 3a28..., d1c3..., 2da5..., ef66...} × 10` (production user uploads, 75 KB to ~12 MB)
+
+Sizes: smallest is 75 KB (5,883 events, probed in the 2026-07-11 calibration), largest is ~12 MB (~600K events). Boon density (Quickness, Might, Stability) varies per encounter; the calibration round can iterate over all 12 with the same diagnostic script. Fixture handling stays out-of-repo (`/home/roddy/WvW_Analytics/` is the live upload sink; the parser fixtures _directory_ in the repo only holds SIZED-DOWN synthetic blobs).
+
+## Current state (after 2026-07-11 calibration round)
+
+### `libs/gw2_core/src/gw2_core/models.py` (Phase 9 step 1, SHIPPED)
+- `BoonApplyEvent` Pydantic subclass with `event_type: Literal["boon_apply"]` + `skill_id` + `duration_ms` + `stacks` + `kind: Literal["apply", "remove_single", "remove_all"] = "apply"`
+- `Event` discriminated union extended to 5 members
+- 13 round-trip tests in `libs/gw2_core/tests/test_event_union.py`
+
+### `libs/gw2_analytics/src/gw2_analytics/buff_uptime.py` (Phase 9 step 3, SHIPPED via `7cee0b7`)
+- `accumulate_buff_events(events, fight_end_ms, fight_start_ms=0) -> dict[int, BuffState]` aggregator
+- 8 unit tests in `libs/gw2_analytics/tests/test_buff_uptime.py`
+
+### `libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py` (Phase 9 step 2-PARTIAL, SHIPPED via `328833d`)
+- `_EVENT_STRUCT` exposes byte 52 as `is_buffremove` + byte 53 as `is_ninety`
+- 22-tuple unpack target list's slot 6 + slot 7 renamed to mirror arcdps.h
+- Damage / heal / strip pipeline reads the right bytes for `is_buffremove` by struct coincidence; the `is_statechange` filter reads the wrong field (`iff`) -- see Calibration findings above
+
+### `libs/gw2_analytics/src/gw2_analytics/buff_dispatch.py` (Phase 9 step 4, SHIPPED via `529cb90`)
+- Realigned to arcdps.h `cbtbuffremove`: `0→APPLY, 1→REMOVE_ALL, 2→REMOVE_SINGLE, 3→REMOVE_SINGLE` (the last being CBTB_MANUAL collapse per arcdps "use for in/out volume" guidance)
+- 6 tests in `libs/gw2_analytics/tests/test_buff_dispatch.py` (5 plan-spec + 1 CBTB_MANUAL)
+- Cross-references: BoonApplyEvent kind doc + test_event_union.py docstrings
+
+### `libs/gw2_analytics/src/gw2_analytics/buff_dispatch.py` module docstring (Phase 9 F3, SHIPPED via `e3a401f`)
+- Now cites TWO independent sources for the cbtbuffremove enum: arcdps.com `evtc/README.txt` + the MarsEdge community fork
+- Calibration caveat blockquote updated with the empirical-fixture-availability note (no longer blocked on no-real-dump-in-CI)
+
+## New scope (this rewrite)
 
 ### Steps shipped
-1. ✅ Step 1 (5fefdae): `BoonApplyEvent` + 5-member Event union round-trip tests
-2. ✅ Step 1.5 (5fefdae followup): Expanded test_event_union.py with `_validate_subclass[T: Event]` PEP 695 helper
-3. ✅ Step 2-PARTIAL: `cbtbuffremove` byte exposed via parser struct rename + 5 hermetic struct-alignment tests
-4. ✅ Step 3 (7cee0b7): `accumulate_buff_events` aggregator + 8 unit tests in libs/gw2_analytics/tests/test_buff_uptime.py
+1. ✅ Step 1 (`5fefdae`): `BoonApplyEvent` + 5-member Event union round-trip tests
+2. ✅ Step 1.5 (`5fefdae` followup): Expanded `test_event_union.py` with `_validate_subclass[T: Event]` PEP 695 helper
+3. ✅ Step 2-PARTIAL (`328833d`): Parser struct rename `is_buffremove` + `is_ninety` + 5 hermetic byte-alignment tests
+4. ✅ Step 3 (`7cee0b7`): `accumulate_buff_events` aggregator + 8 unit tests
+5. ✅ Step 4 (`529cb90`): `decode_buff_change` realignment + 6 unit tests
+6. ✅ Step F3 (`e3a401f`): Doc cross-ref to arcdps.com README + MarsEdge fork
 
-### Steps deferred (this rewrite)
-1. 🚧 Step 2-EMIT-BRANCH: Parser yields `BoonApplyEvent` records from non-statechange cbtevent records carrying `is_buffremove != 0`. **Calibration-blocked** — the exact predicate (which `is_statechange` / `is_nondamage` / `value` / `buff_dmg` combinations trigger an apply/remove emit) is not documented in arcdps.h. Requires real arcdps dump round.
-2. 🚧 Step 3-INTEGRATION: Wire `accumulate_buff_events` (which currently consumes hand-crafted `BoonApplyEvent` records in tests) to the parser's emit branch. Once step 2-EMIT-BRANCH ships, this is a 5-line wiring change.
-3. 🚧 Step 4: Realign `decode_buff_change` mappings with arcdps.h (`1`=ALL, `2`=SINGLE, `3`=MANUAL). Currently SWAPPED (`1`=SINGLE, `2`=ALL). Calibration-blocked — the project's pre-existing semantic frame may or may not match arcdps reality; the rebuild should happen WITH a real arcdps dump open in a debugger + a representative fixture that exercises both single-stack and all-stack remove events.
-4. 🚧 Step 5: Per-buff-uptime schema + route. (`apps/api/src/gw2analytics_api/schemas/fight.py::BuffUptimeRowOut` + `apps/api/src/gw2analytics_api/routes/fights.py::get_fight_buff_uptime` + frontend card.) Same scope as the prior draft, gated behind step 2 emit branch.
+### New prerequisite step (NOT YET SHIPPED -- gates Step 2-EMIT-BRANCH)
+🚧 **Step 1.5-SYNC** -- fix the parser struct to match arcdps.h byte-for-byte, then RECALIBRATE the damage / heal / strip pipeline against the corrected byte positions. Sub-steps:
+
+1. Update `_EVENT_STRUCT` literal from `"<QQQiiIIHHHbbbbbbbbIIbb"` to `"<QQQiiIIHHHHbbbbbbbbbbbbxxxx"`. The format includes:
+   - 4 uint16 (4 × 2 = 8 bytes, offsets 40-47)
+   - 12 uint8 (12 bytes, offsets 48-59)
+   - 4 padding bytes (`xxxx`, offsets 60-63)
+2. Update the unpack tuple to bind all 27 fields: `time_ms, src_agent, dst_agent, value, buff_dmg, overstack_value, skill_id, src_instid, dst_instid, src_master_instid, dst_master_instid, iff, buff, result, is_activation, is_buffremove, is_ninety, is_fifty, is_moving, is_statechange, is_flanking, is_shields, is_offcycle, _pad1, _pad2, _pad3, _pad4`.
+3. Replace the existing `if is_statechange != 0: continue` with the corrected `is_statechange` field binding (now reading the right byte 56).
+4. Recalibrate the damage pipeline against real `.zevtc` fixtures in `/home/roddy/WvW_Analytics/uploads/`. Specifically:
+   - Open the 75 KB smallest fixture + the 12 MB largest fixture
+   - Compute damage_total + healing_total + buff_strip_total BEFORE vs AFTER the struct sync, comparing against the prior pipeline
+   - Acceptable deviation: ≤ 5 % per target agent (rounding + re-aggregation noise); > 5 % triggers a STOP condition
+5. Update `test_parser_byte_alignment.py` to assert the corrected 1:1 struct alignment. Replace the 5 current tests with an expanded suite of ~12 tests covering the field renaming + the missing-field introduction (4 H slots + 12 b slots + 4 pad bytes = 20 fixed slots + 7 already-bound integer fields = 27 total).
+6. Re-run the full libs + apps/api suites; ALL must remain green, including:
+   - 19 buff_dispatch + event_union tests
+   - 301 libs regression
+   - 277 apps/api regression (per pre-F3 baseline)
+
+### Steps now gated behind Step 1.5-SYNC
+
+🚧 **Step 2-EMIT-BRANCH** -- parser yields `BoonApplyEvent` records from non-statechange cbtevent records carrying `is_buffremove != 0`. The exact predicate (which flags trigger emit) is not documented in arcdps.h; requires real-arcdps-dump calibration AFTER the struct sync to verify the field meanings. Cannot ship on the current struct.
+
+🚧 **Step 2-INTEGRATION** -- wire `accumulate_buff_events` to the parser's emit branch. Once Step 2-EMIT ships, this is a 5-line change. Same blocking.
+
+🚧 **Step 5** -- per-buff-uptime schema + route + frontend card. Same blocking.
 
 ### Out of scope (unchanged)
 - Skill-database work (Phase 10+; buff names come from `OrmFightSkill` for now)
-- Cross-fight buff uptime aggregation (Phase 10+; the per-account timeline is enough for v0.10.x)
-- Damage/source attribution by buff (Phase 10; would require a 2nd SQL query and a new aggregator)
+- Cross-fight buff uptime aggregation (Phase 10+)
+- Damage/source attribution by buff (Phase 10)
 
 ## Test plan (delta vs prior draft)
 
-### Pre-existing tests preserved
-- `libs/gw2_core/tests/test_event_union.py` — 13 tests for the 5-member Event union + BoonApplyEvent round-trip
-- `libs/gw2_analytics/tests/test_buff_uptime.py` — 8 tests for `accumulate_buff_events` (apply / single / all / multi-skill / clamp / mixed)
-- `libs/gw2_analytics/tests/test_buff_dispatch.py` — 3 tests for `decode_buff_change` (3-way + unknown-byte fallback + negative rejection) — UNCHANGED until step 4
-- `apps/api/tests/test_*` — UNCHANGED in this plan scope
+### Pre-existing tests preserved (5/5 + 13 + 8 + 6 unchanged)
+- `libs/gw2_core/tests/test_event_union.py` -- 13 tests for the 5-member Event union
+- `libs/gw2_analytics/tests/test_buff_uptime.py` -- 8 tests for `accumulate_buff_events`
+- `libs/gw2_analytics/tests/test_buff_dispatch.py` -- 6 tests for the realigned `decode_buff_change`
+- `libs/gw2_evtc_parser/tests/test_parser_byte_alignment.py` -- 5 tests for byte alignment (will be UPDATED in Step 1.5-SYNC)
+- `apps/api/tests/test_*` -- unchanged
 
-### NEW tests (this plan revision)
-- `libs/gw2_evtc_parser/tests/test_parser_byte_alignment.py` — 5 hermetic struct-alignment tests
-  - `test_event_struct_size_matches_arcdps_cbtevent_64_bytes`
-  - `test_is_buffremove_byte_zero_reads_as_zero`
-  - `test_is_buffremove_byte_three_way_enum_values_round_trip`
-  - `test_is_ninety_byte_round_trip`
-  - `test_is_buffremove_and_is_ninety_dont_collide_with_neighbouring_slots`
+### NEW tests (Step 1.5-SYNC)
+- ~12 expanded struct-alignment tests in `test_parser_byte_alignment.py` covering:
+  - Each of the 27 fields binds to its expected byte offset
+  - The 4 missing uint16 + 12 single-byte + 4 padding fields now bind correctly
+  - Round-trip: synthetic cbtevent record with known field values parses back to expected values across all 27 fields
+- `test_parser_emit_buff.py` -- DEFERRED to Step 2-EMIT (uses the corrected struct + real-fixture event signatures)
 
-### Tests deferred
-- Step 2-EMIT-BRANCH tests (in `libs/gw2_evtc_parser/tests/test_parser_emit_buff.py` — to be written when step 2 emit lands)
-- Step 4 buff_dispatch realignment test updates (will touch `test_buff_dispatch.py` + likely `test_event_union.py` docstring reframing)
-- Step 5 schema + route e2e tests (in `apps/api/tests/test_fight_buff_uptime.py` — to be written when step 5 lands)
+### NEW tests (Step 2-EMIT)
+- Hermetic tests for the emit predicate using synthetic cbtevent records (parsed via the corrected struct)
+- Round-trip tests for BoonApplyEvent emission across all 3 `kind` values
+- Integration test that hooks `accumulate_buff_events` to the parser's emit branch + a known-boon synthetic cbtevent
+
+## Empirical comparison -- Expected damage pipeline behavior delta
+
+The post-SYNC pipeline will YIELD DIFFERENT damage rolls vs the pre-SYNC pipeline. The expected shifts:
+
+| Metric | Pre-SYNC (`iff` filter) | Post-SYNC (`is_statechange` filter) | Net effect |
+|---|---|---|---|
+| Damage records kept | Records with friend TARGETS (per arcdps `iff` semantics) -- biased toward friendly fire | Records that are NOT state-change events (the domain-correct filter) | The "friend fire" bias disappears; pure damage events stay |
+| Healing records kept | Records where `dst_master_instid` high byte ≈ 0 (read as the "non-damage" path) | Records with `is_nondamage > 0` (the domain-correct filter) | Heals are now correctly classified; pre-SYNC may have included some damage records that happened to have dst_master_instid high byte = 0 |
+| Buff-strip records | Same damage records (extra strip from same `is_nondamage` filter) | Records with `buff_dmg > 0` regardless of `is_nondamage` (matches Phase 8 contract) | Cleaner separation |
+
+The full 12-fixture calibration will be run during Step 1.5-SYNC; the comparison will be committed to `plans/026-phase-9-conditions.md` as a sub-section with the actual numbers.
 
 ## Stop conditions
 
 Stop and report if:
-- Real arcdps dump testing reveals the cbtbuffremove byte position differs from arcdps.h byte 52 (would require a parser version pin per plan 138).
-- Real arcdps dump testing reveals a buff event in a statechange record (`is_statechange != 0`) we did NOT anticipate (would require extending the emit branch).
+- The struct sync introduces a regression in the damage pipeline (> 5 % deviation per target agent averaged over the 12 calibration fixtures).
+- A real `.zevtc` (after struct sync) produces a cbtevent record with `is_buffremove > 3` (would indicate a future arcdps cbtbuffremove variant; verified via the unknown-byte fallback in `decode_buff_change`).
 - The BuffState stack count exceeds 25 (GW2's hard cap on most boons), requiring a separate `stacks_capped_at_25` invariant.
 - A skill-id appears in 2+ events with conflicting duration_ms values (the parser change might need a "last-seen wins" tiebreaker).
 
 ## Done criteria (cumulative, this plan revision)
 
 - [x] `BoonApplyEvent` round-trips through the Event discriminated union (5fefdae)
-- [x] Parser struct exposes `is_buffremove` byte at offset 52 + `is_ninety` at offset 53 (this revision)
+- [x] Parser struct exposes `is_buffremove` byte at offset 52 + `is_ninety` at offset 53 (328833d)
 - [x] `accumulate_buff_events` builds correct BuffState from arbitrary event streams (7cee0b7)
-- [ ] Parser `parse_events` surfaces `BoonApplyEvent(kind=...)` records when `is_buffremove > 0` (DEFERRED — step 2-EMIT)
-- [ ] `decode_buff_change` enum mappings align with arcdps.h cbtbuffremove (DEFERRED — step 4)
-- [ ] `GET /api/v1/fights/{id}/buff-uptime` returns sorted-by-uptime-pct rows (DEFERRED — step 5)
-- [ ] Frontend `BuffUptimeCard` renders the 0-100% bar chart correctly (DEFERRED — step 5)
-- [ ] All existing tests still pass
-- [x] `mypy` and `ruff` pass on modified files (5fefdae + 7cee0b7 + this revision)
-- [ ] `uv run pytest apps/api/tests/ libs/` exits 0 (excluded the pre-existing v0.10.6 cycle infra failures; verified up to the bytes-renamed scope)
+- [x] `decode_buff_change` realigned to arcdps.h cbtbuffremove (529cb90)
+- [x] Doc cross-ref to arcdps.com evtc/README.txt + MarsEdge fork (e3a401f)
+- [ ] **Step 1.5-SYNC**: `_EVENT_STRUCT` matches arcdps.h 1:1; damage / heal / strip pipeline recalibrated; ≤ 5 % deviation on 12 calibration fixtures; FULL libs + apps/api suites green
+- [ ] **Step 2-EMIT-BRANCH**: Parser `parse_events` surfaces `BoonApplyEvent(kind=...)` records when `is_buffremove > 0` AND struct-locked for byte positions
+- [ ] **Step 2-INTEGRATION**: `accumulate_buff_events` wired to parse_events output
+- [ ] **`GET /api/v1/fights/{id}/buff-uptime`** returns sorted-by-uptime-pct rows (Step 5)
+- [ ] Frontend `BuffUptimeCard` renders the 0-100 % bar chart correctly (Step 5)
+- [x] `mypy` and `ruff` pass on all modified files (cumulative through e3a401f)
+- [x] `uv run pytest libs/ apps/api/tests/` exits 0 (last verified at 301/1 libs + 277/2 apps/api through e3a401f)
 
 ## Maintenance notes
 
-The buff-state tracker is a per-fight computation — cross-fight aggregation is Phase 10. The `BoonApplyEvent` lifetime on the wire is bounded by the fight (events blurbs are immutable post-parse). Any future "buff uptime over the last N fights" feature would join multiple per-fight BuffStates, not re-stream the events.
+Phase 9 step 1.5-SYNC is now the load-bearing prerequisite for Step 2-EMIT-BRANCH. The damage / heal / strip pipeline is currently filtering on the wrong field by accident; the struct sync corrects this AND opens the path for buff-emit. Truck-factor: any maintainer unfamiliar with the calibration finding can be misled by the pre-SYNC doc-comment claims -- the calibration section above is the truth.
 
-Phase 9 step 2-EMIT-BRANCH requires real arcdps dump calibration BEFORE shipping. The arcdps.h cbtbuffremove enum is documented (`0=NONE, 1=ALL, 2=SINGLE, 3=MANUAL`) but the EXACT predicate for emit (which combination of cbtevent flags means "this is a buff-apply event vs a buff-remove event") is NOT documented in arcdps.h. The existing damage / heal / strip pipeline works empirically because it tests against real dumps; the buff emit branch should be calibrated the same way.
+The struct sync is bounded -- it does NOT change public API (no Pydantic model boundary is affected). It DOES change which byte falls on which field name, which means back-end damage / heal / strip rolls WILL shift (the comparison is committed in this plan as "Expected damage pipeline behavior delta" above). Pre-1.5-SYNC rolls in the DB are interpreted as pre-1.5-SYNC results; post-1.5-SYNC rolls are interpreted as post-1.5-SYNC results -- there's no implicit re-aggregation of historical fights.
 
-Phase 9 step 4 (decode_buff_change realignment) is similarly calibration-blocked: the existing project mappings (`1=SINGLE, 2=ALL`) were recorded from a non-arcdps source (likely the plan 137 docstring's heuristics); arcdps.h says `1=ALL, 2=SINGLE, 3=MANUAL`. Realignment should happen with a real dump open + a fixture that exercises BOTH single-stack and all-stack remove events.
+Plan 138 (revision-aware parser plugins) becomes even more relevant post-1.5-SYNC: if arcdps introduces a future struct variant, plan 138's `rev.py` becomes the dispatch layer for choosing the struct format per arcdps build year. Step 1.5-SYNC should be coordinated with plan 138 to land the SAME struct-decision abstraction.
+
+The 12 real `.zevtc` calibration fixtures stay off-repo for legal reasons (user-uploaded content); the calibration script writes its outputs to `plans/026-phase-9-conditions.md` sub-sections. A future maintainer reproducing the calibration can use the same script + the same fixtures (re-fetched from `/home/roddy/WvW_Analytics/uploads/` after the dev environment rebuild).
