@@ -35,7 +35,7 @@ VALIDATION: ruff clean + mypy clean (5 sub-pack modules + conftest) + the 18 cac
 
 ### Note
 
-The `[Unreleased]` backlog still contains pre-existing entries for v0.9.0 / v0.10.0 / v0.10.1 / v0.10.3 / v0.10.9 / v0.10.11+ cycles (576 lines total on 2026-07-12) that have shipped but aren't yet migrated into dated release sections. Full bucketing is a follow-up cycle (TODO: re-classify each subsection into the appropriate dated `[0.10.0]` / `[0.10.1]` / `[0.10.3]` / `[0.10.10]` / `[0.10.11]` bucket based on the matching ``apps/api/alembic/versions/`` migration head timestamp + the matching git commit date). This entry closes only the A2 plan 021 work; the broader accumulated backlog remains in `[Unreleased]` until the bucketing follow-up.
+The `[Unreleased]` backlog still contains pre-existing entries for v0.9.0 / v0.10.0 / v0.10.1 / v0.10.3 / v0.10.9 / v0.10.11+ cycles (576 lines total on 2026-07-12) that have shipped but aren't yet migrated into dated release sections. Full bucketing is a follow-up cycle (TODO: re-classify each subsection into the appropriate dated `[0.10.0]` / `[0.10.1]` / `[0.10.3]` / `[0.10.10]` bucket based on the matching ``apps/api/alembic/versions/`` migration head timestamp + the matching git commit date). This entry closes only the A2 plan 021 work; the broader accumulated backlog remains in `[Unreleased]` until the bucketing follow-up.
 
 ## [Unreleased]
 
