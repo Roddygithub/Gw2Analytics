@@ -18,6 +18,8 @@
 
 ## Why this matters
 
+> **[PARTIAL SUPERSEDED 2026-07-11 by F1 calibration pilot]** — claim #3 below (the "parser-struct alignment is a calibrate-or-correct blocker that gates Step 2-EMIT") was theoretically correct under the post-SYNC struct hypothesis, but the 2026-07-11 F1 calibration pilot empirically confirmed the actual arcdps EVTC binary writer uses a different packing order than the community-port `arcdps_datastructures.h` suggests. The current struct IS empirically correct for rev=1 logs (verified on 12 real WvW fixtures). Step 2-EMIT is UNBLOCKED. Claims #1 + #2 (buff_dispatch enum realignment + parse_events buff-apply emit gap) remain accurate.
+
 The v0.10.6 cycle landed `buff_uptime.py` + `buff_dispatch.py` in `libs/gw2_analytics`. Three gaps remain before the analyst surface is composable. The most recent gap surfaced empirically:
 
 1. **`buff_dispatch` enum mappings are SWAPPED vs arcdps.h.** Plan 137 (v0.10.5) shipped a 3-way decoder mapping `1→REMOVE_SINGLE, 2→REMOVE_ALL` but arcdps.h `cbtbuffremove` is `0=NONE, 1=ALL, 2=SINGLE, 3=MANUAL`. The project's mapping is the reverse for `1`/`2`. Realignment shipped via commit `529cb90` (Phase 9 step 4).
@@ -26,7 +28,7 @@ The v0.10.6 cycle landed `buff_uptime.py` + `buff_dispatch.py` in `libs/gw2_anal
 
 This rewrite documents (a) the struct-math proof that misalignment exists, (b) the empirical byte-distribution evidence, (c) the new Step 1.5-SYNC prerequisite that must complete BEFORE Step 2-EMIT.
 
-## Calibration findings (2026-07-11 F1 round)
+## Calibration findings — pre-F1 theoretical analysis (mostly superseded by F1 empirical reversal below)
 
 The empirical byte-distribution forensic on the smallest real arcdps dump (`/home/roddy/WvW_Analytics/uploads/5b161ec03d544b0c96eeb6689590ece4.zevtc`, 75,091 bytes, 5,883 cbtevent records, build `'20250925'`) produced this distribution across the 8 single-byte slots in our parser's struct (offsets 46-53):
 
@@ -44,6 +46,8 @@ The empirical byte-distribution forensic on the smallest real arcdps dump (`/hom
 The struct doc-comment claimed "the existing damage / heal / strip pipeline works empirically"; calibration shows this is true by ACCIDENT, not by design. The `if is_statechange != 0: continue` filter in `parse_events` (line ~341 of parser.py) is reading byte 48 of our struct -- which per the spec is arcdps's `iff` (Friend/Foe flag), NOT `is_statechange`. The filter correctly skips the wrong field (Friend records when it intends to skip statechange records) because in this WvW dump both populations happen to be ~22-23 % non-zero.
 
 ### Struct-math proof (independent of the empirical forensic)
+
+> **[SUPERSEDED 2026-07-11 by F1 calibration pilot]** — the theoretical struct-misalignment arithmetic below (3 H + 8 b + 2 I vs arcdps's 4 H + 12 b + 4 pad) is now contradicted by F1 empirical data. The actual arcdps EVTC binary writer uses a different packing order than the community-port `arcdps_datastructures.h` C struct declaration suggests. Byte 48 in our struct IS empirically the correct filter position for rev=1 logs (verified on 12 real WvW fixtures — see the Empirical reversal section below). The struct-math reasoning below is HISTORICAL analysis of what we *thought* was wrong; it is NOT current truth. **Do not act on it without reading the F1 reversal first.**
 
 The arcdps `cbtevent` struct (per `<GW2-ArcDPS-Mechanics-Log>/src/arcdps_datastructures.h` -- the community-port mirror of `arcdps.h`, cross-checked against arcdps's own `evtc/README.txt` at `https://www.deltaconnected.com/arcdps/evtc/README.txt`):
 
@@ -269,9 +273,9 @@ The previous draft of this section compared "Pre-SYNC" vs "Post-SYNC" pipeline b
 | Fixture | rev | byte-48 zero% (current struct) | Empirical confidence | post-SYNC struct divergence |
 |---|---|---|---|---|
 | `20260604-230254` (large WvW) | 1 | ~99.8% | HIGH | Tie |
-| 6 mid-range fixtures | 1 | ~99.7% | HIGH | Tie |
+| 9 mid-range fixtures (97bb*, ef66*, c505*, 6021*, 9240*, 3a28*, d1c3*, 91dc*, ce4d* prefixes — all 9 in `/home/roddy/WvW_Analytics/uploads/`) | 1 | ~99.7% | HIGH | Tie |
 | `5b161ec0` (75 KB, smallest) | 1 | 77.78% | HIGH | Current significantly better (post: 48.66%) |
-| `eeae64d1` (~1 MB, the prior out-lier) | 1 | 6.91% | MODERATE (low zero% expected for heavy state-change fights) | Current significantly better (post: 0.69%) |
+| `eeae64d1` (~1 MB, the prior out-lier) | 1 | 6.91% | HIGH (heavy state-change fight; byte-48 still classifies correctly — current 6.91% vs post 0.69%, 10× better) | Current significantly better (post: 0.69%) |
 
 The current struct's byte-48 receiver IS the correct filter position for rev=1 logs across all 12 fixtures in the calibration corpus. Per-fixture divergence from the post-SYNC struct was in the WRONG direction (post-SYNC undercounted state-change filtering by 30–50 percentage points on the two outliers), so reverting to post-SYNC would REGRESS the existing damage pipeline's accuracy. Empirical confidence is HIGH given the corpus size and shape.
 
