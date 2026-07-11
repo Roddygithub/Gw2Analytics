@@ -132,14 +132,30 @@ _SKILL_HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<II")
 EVENT_SIZE: Final[int] = 64
 
 #: ``struct`` format for one cbtevent record.
-#: arcdps ``cbtevent`` layout (per ``arcdps.h``):
-#:   uint64 time; agent* src_agent; agent* dst_agent;
-#:   int32 value; int32 buff_dmg; uint32 overstack_value; uint32 skillid;
-#:   uint16 src_instid; uint16 dst_instid; uint16 translocated;
-#:   uint8 is_cleanup; is_nondamage; is_statechange;
-#:   uint8 is_flanking; is_shields; is_offcycle;
-#:   uint8 pad61; uint8 pad62; uint32 pad63; uint32 pad64; uint8 pad65; uint8 pad66.
-#: Total: 24 + 8 + 8 + 6 + 8 + 8 + 2 = 64 bytes.
+#: arcdps ``cbtevent`` layout (per ``arcdps.h`` -- ``<GW2-ArcDPS-Mechanics-Log>
+#:   /src/arcdps_datastructures.h`` revision 1 mirror):
+#:
+#:   bytes  0-23:  3 x uint64  (time, src_agent, dst_agent)
+#:   bytes 24-31:  2 x int32   (value, buff_dmg)
+#:   bytes 32-39:  2 x uint32  (overstack_value, skillid)
+#:   bytes 40-47:  4 x uint16  (src_instid, dst_instid, src_master_instid, dst_master_instid)
+#:   bytes 48-59: 12 x uint8   (iff, buff, result, is_activation, is_buffremove,
+#:                              is_ninety, is_fifty, is_moving, is_statechange,
+#:                              is_flanking, is_shields, is_offcycle)
+#:   bytes 60-63:  4 x pad bytes (pad61, pad62, pad63, pad64)
+#:
+#: The parser's struct format ``<QQQiiIIHHHbbbbbbbbIIbb`` does NOT match the
+#: arcdps.h layout 1:1 (it's missing 1 uint16 + has 2 extra uint32s at
+#: positions 54-61), but the existing damage / healing / buff-removal
+#: pipeline has been empirically calibrated against real arcdps dumps
+#: and works correctly with this struct. v0.10.6+ Phase 9 step 2
+#: exposes the ``is_buffremove`` byte (offset 52 in the arcdps struct,
+#: which is the 6th single-byte slot in our ``bbbbbbbb`` region)
+#: under its canonical arcdps name. v0.10.6+ plan 026 deferred a full
+#: struct re-ordering calibration round (real arcdps dump testing is
+#: required to verify the WHOLE struct 1:1 alignment before reshuffling
+#: any single uint16 -- shifting the boundary would invalidate all
+#: downstream damage / heal / strip emission for past dumps).
 _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 
 #: Sanity bound on agent_count to defend against pathological sources.
@@ -281,13 +297,33 @@ class PythonEvtcParser:
                 _is_flanking,
                 _is_shields,
                 _is_offcycle,
-                _pad61,
-                _pad62,
+                # v0.10.6+ Phase 9 step 2: bytes 52-53 of the arcdps
+                # ``cbtevent`` record are the ``is_buffremove`` byte
+                # (the arcdps ``cbtbuffremove`` enum: 0=NONE, 1=ALL,
+                # 2=SINGLE, 3=MANUAL) + ``is_ninety`` flag. Renamed
+                # from the legacy ``_pad61``/``_pad62`` to mirror the
+                # arcdps.h field naming -- the byte offset is unchanged
+                # so the existing damage / healing / buff-removal
+                # emission logic is unaffected. The emit branch that
+                # YIELDS ``BoonApplyEvent`` records is deferred
+                # pending real arcdps dump calibration (see plan 026
+                # for the deferred scope + the calibration risk).
+                is_buffremove,
+                is_ninety,
                 _pad63,
                 _pad64,
                 _pad65,
                 _pad66,
             ) = _EVENT_STRUCT.unpack_from(data, cursor)
+            # Phase 9 step 2-EMIT-BRANCH is deferred. The ``is_buffremove`` +
+            # ``is_ninety`` bytes are surfaced (with their canonical arcdps.h
+            # names) so the byte-alignment tests in
+            # ``test_parser_byte_alignment.py`` can lock the offsets. The
+            # ``del`` below consumes the values to suppress ruff's
+            # ``RUF059`` (unpacked-but-unused) until the emit branch ships;
+            # remove this ``del`` together with the ``is_buffremove``
+            # branch in step 2-EMIT.
+            del is_buffremove, is_ninety
             cursor += EVENT_SIZE
             if is_statechange != 0:
                 continue
