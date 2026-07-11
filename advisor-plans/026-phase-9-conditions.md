@@ -85,9 +85,9 @@ is_buffremove,          # byte 52 (our label: is_buffremove per arcdps) ✓
 is_ninety,              # byte 53 (our label: is_ninety per arcdps) ✓
 ```
 
-The **filter** `if is_statechange != 0: continue` (line ~341) is actually filtering on arcdps's `iff` byte. In a WvW dump where most friend-vs-enemy damage flows forward (actors are friends, targets are enemies), the `iff=0` filter accidentally yields damage records for FRIEND targets and skips FRIEND records -- the OPPOSITE of what's recorded in arcdps binaries. The damage-rollup `target_dps` is therefore biased toward friend targets.
+The **filter** `if is_statechange != 0: continue` (line ~341) is actually filtering on arcdps's `iff` byte (Friend/Foe flag; `iff=0` is friend, `iff=1` is enemy). The filter KEEPS records where `iff=0` (friend-target damage) and SKIPS records where `iff≠0` (enemy-target damage). **The damage-rollup `target_dps` is therefore biased toward FRIEND-target damage; enemy-target damage is dropped.** This is the OPPOSITE of what WvW semantics produce — most damage in a WvW raid is dealt TO enemies, so enemy-target damage is the bulk of the real signal. Pre-SYNC `target_dps` significantly undercounts for enemy agents. *(Corrected after 2026-07-11 reviewer feedback: the original draft stated "yields FRIEND AND skips FRIEND" which was self-contradictory.)*
 
-The **damage vs heal branching** on `is_nondamage` (byte 47 = arcdps's `dst_master_instid` high byte) is reading essentially random data (instance IDs are large mixed-range numbers). The damage vs heal classification is LUCKY because for many records the dst_master_instid high byte happens to be 0 or non-0 in patterns that loosely correlate with `is_nondamage` semantics.
+The **damage vs heal branching** on `is_nondamage` (byte 47 = arcdps's `dst_master_instid` high byte) reads the high byte of the target's instance ID. Instance IDs in arcdps are typically small integers (often < 256 for active agents, 0 for no-master) so the high byte is mostly 0 — which the parser interprets as `is_nondamage == 0` (i.e., the damage path). **This is WHY the damage-vs-heal split LUCKILY works**: small instance IDs → high byte is 0 → the bulk of records are classified as damage (~85 % of events in WvW fixtures are damage records per the post-SYNC run). The pipeline is correct BY COINCIDENCE on this filter — a future arcdps revision that uses large instance IDs would break the split. *(Corrected: the original draft hypothesised the high byte was random and would classify ~99 % as heals, which is empirically wrong since small instids keep the high byte at zero.)*
 
 The **`is_buffremove` byte** (slot 16, byte 52) IS correctly positioned by structural coincidence -- the missing `dst_master_instid` uint16 collapses the single-byte region start by 2, and the missing 4 uint8s at the tail collapse the end by 4, with net zero offset for byte 52 specifically. So the `buff_dispatch` decoder (Phase 9 step 4, commit `529cb90`) reads the right byte.
 
@@ -162,6 +162,40 @@ Sizes: smallest is 75 KB (5,883 events, probed in the 2026-07-11 calibration), l
 
 🚧 **Step 5** -- per-buff-uptime schema + route + frontend card. Same blocking.
 
+### Step 1.5-SYNC commit-organization (post-thinker-review clarification)
+
+The Step 1.5-SYNC sub-steps MUST ship as a SINGLE atomic commit, not as a series of incremental commits:
+
+1. Forward compatibility check: `git diff --stat` confirms zero in-flight structs that bind differently.
+2. Single atomic commit includes: (a) `_EVENT_STRUCT` literal rewrite to `"<QQQiiIIHHHHbbbbbbbbbbbbxxxx"`, (b) the 27-tuple unpack-target binding, (c) the `parse_events()` filter rewire to use the corrected `is_statechange` field, (d) the expanded `test_parser_byte_alignment.py` test suite (~12 tests covering all 27 fields).
+3. The empirical 12-fixture calibration (sub-step d above) runs on the SAME branch BEFORE the commit lands, so the commit message can quote the actual damage-pipeline reattribution numbers from the calibration.
+
+Splitting into "struct update" + "test update" + "pipeline rewire" as separate commits WILL break the build — the test suite's strict-arity destructuring will surface `struct.error` immediately on the struct update alone, and the `is_statechange` filter rewiring will surface `AttributeError` on the old tuple index.
+
+### Step 1.5-SYNC done-criteria (post-thinker-review correction)
+
+The original draft of this plan proposed "≤ 5 % deviation per target agent" as the calibration pass criterion. **This criterion is invalid.** The pre-SYNC damage pipeline is empirically biased toward friend targets (the iff bug), so the post-SYNC pipeline will reattribute a MASSIVE volume of damage records -- easily 50-80 % of per-target totals for any enemy-heavy fight. A "≤ 5 % deviation" check would FAIL even on a perfectly-corrected parser.
+
+**Corrected pass criterion** (one of the following, ordered by preference):
+
+1. **EliteInsights reference comparison**: Run the same 12 fixtures through EliteInsights (the canonical arcdps-data analytical tool) and compare against our post-SYNC output. Pass criterion: per-target agent deltas match EliteInsights within 5 %, AND per-bucket target_dps matches within 5 %. EliteInsights is the de facto reference for arcdps data attribution.
+2. **Direct arcdps source dump**: arcdps's own GUI logs the canonical damage / heal / strip numbers to a separate file during live play. Replay a known fight with the arcdps GUI active + our parser + compare totals. Pass criterion: per-agent totals match the arcdps GUI logs within 1 %.
+3. **Heroic consistency check**: Run the calibration on ALL 12 fixtures and confirm the post-SYNC pipeline produces CONSISTENT damage / heal / strip ratios across fixtures (low fixture-to-fixture variance). Pass criterion: per-fixture ratio (damage/heal, strip/heal) stays within a 10×-bounded band. Weaker than (1) or (2) but useful if neither is available.
+4. **Documentation-only fix**: If neither reference is available, ship Step 1.5-SYNC as a doc-only-tracked bugfix. Note the existing pre-SYNC target_dps values are biased, and that future analysis should re-run fights through the post-SYNC parser.
+
+**Realistic recommendation**: Combination of (3) for in-process calibration + (1) if the maintainer has access to EliteInsights binaries. (2) is impractical without a GW2 live-play environment.
+
+### Plan 138 sequencing decision (post-thinker-review clarification)
+
+The original draft deferred the plan 138 ordering question to "should coordinate with plan 138". The clarified decision criterion:
+
+- **If** arcdps has historically changed `sizeof` or byte-placement of the `cbtevent` fields across EVTC file revisions (different build years ship different struct shapes), **then** plan 138 must ship FIRST so the revision-aware dispatch layer can absorb the Step 1.5-SYNC byte alignment without breaking older logs.
+- **If** arcdps has kept `cbtevent` bytes 0-63 static for the entire `EVTC.2023+` era, **then** Step 1.5-SYNC can safely ship first; plan 138's plugin layer can land later without coupling risk.
+
+**Empirical check for this decision**: run the 12-fixture calibration across the FULL size range (75 KB to 12 MB). If ALL 12 fixtures parse cleanly under the post-SYNC struct AND produce consistent per-fixture damage/heal/strip ratios (≤ 10× variance), the "static struct" hypothesis holds and Step 1.5-SYNC can ship independently.
+
+If even one fixture fails to parse cleanly under post-SYNC (a `struct.error` or `ValueError` mid-stream), the "revision-aware" hypothesis holds and plan 138 lands FIRST.
+
 ### Out of scope (unchanged)
 - Skill-database work (Phase 10+; buff names come from `OrmFightSkill` for now)
 - Cross-fight buff uptime aggregation (Phase 10+)
@@ -215,7 +249,8 @@ Stop and report if:
 - [x] `accumulate_buff_events` builds correct BuffState from arbitrary event streams (7cee0b7)
 - [x] `decode_buff_change` realigned to arcdps.h cbtbuffremove (529cb90)
 - [x] Doc cross-ref to arcdps.com evtc/README.txt + MarsEdge fork (e3a401f)
-- [ ] **Step 1.5-SYNC**: `_EVENT_STRUCT` matches arcdps.h 1:1; damage / heal / strip pipeline recalibrated; ≤ 5 % deviation on 12 calibration fixtures; FULL libs + apps/api suites green
+- [x] Plan 026 calibration-foundations rewrite documents the struct misalignment + Step 1.5-SYNC prerequisite (404ee4e)
+- [ ] **Step 1.5-SYNC**: `_EVENT_STRUCT` matches arcdps.h 1:1; damage / heal / strip pipeline recalibrated; pass criterion = EliteInsights reference comparison (preferred) OR heroic-consistency on 12 fixtures; FULL libs + apps/api suites green
 - [ ] **Step 2-EMIT-BRANCH**: Parser `parse_events` surfaces `BoonApplyEvent(kind=...)` records when `is_buffremove > 0` AND struct-locked for byte positions
 - [ ] **Step 2-INTEGRATION**: `accumulate_buff_events` wired to parse_events output
 - [ ] **`GET /api/v1/fights/{id}/buff-uptime`** returns sorted-by-uptime-pct rows (Step 5)
