@@ -52,19 +52,16 @@ from sqlalchemy.orm import Session, selectinload
 from gw2_analytics.event_window import EventWindowAggregator
 from gw2_analytics.per_fight_timeline import PerFightTimelineAggregator
 from gw2_analytics.per_player_timeline import PerPlayerTimelineAggregator
-from gw2_analytics.skill_usage import SkillUsageAggregator
-from gw2_analytics.squad_rollup import SquadRollupAggregator
-from gw2_analytics.target_buff_removal import (
-    TargetBuffRemovalAggregator,
-    TargetBuffRemovalRow,
-)
-from gw2_analytics.target_dps import TargetDpsAggregator, TargetDpsRow
-from gw2_analytics.target_healing import TargetHealingAggregator, TargetHealingRow
 from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 from gw2analytics_api._event_dispatch import build_event_iterator
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightAgent
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession
+from gw2analytics_api.routes.fights.aggregators import (
+    _aggregate_per_target_rollup,
+    aggregate_skill_usage,
+    aggregate_squad_rollup,
+)
 from gw2analytics_api.routes.fights.blob_cache import _cached_get_events
 from gw2analytics_api.routes.fights.blob_loader import _load_fight_events
 from gw2analytics_api.routes.fights.mappers import (
@@ -94,8 +91,6 @@ from gw2analytics_api.schemas import (
 logger = logging.getLogger(__name__)
 
 
-
-
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
 
 
@@ -114,67 +109,6 @@ router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
 # only edits one site.
 _PER_FIGHT_DEFAULT_WINDOW_S: int = 5
 _PER_FIGHT_MAX_WINDOW_S: int = 600
-
-
-def _aggregate_per_target_rollup(
-    events: list[Event],
-    agent_id_to_name: dict[int, str | None],
-    duration_s: float,
-    event_cls: type[Event],
-) -> list[TargetDpsRow | TargetHealingRow | TargetBuffRemovalRow]:
-    """Compute one per-target roll-up branch (DPS / healing / buff-removal).
-
-    Centralises the 3 sibling roll-up branches in
-    :func:`get_fight_events` (the one structural change
-    introduced by Phase 8 v0.8.0 + v0.8.3 + v0.10.2 hotfix #12).
-    Each branch was 3 lines: an ``isinstance`` filter, an
-    aggregator call with ``(events, duration_s, name_map=...)``,
-    and a schema-validation list comprehension. The helper
-    picks the aggregator + output-row-type by ``event_cls`` so
-    the route layer wraps schema validation in a thin
-    comprehension with the right ``RowOut`` subclass.
-
-    Mapping
-    -------
-    ``DamageEvent`` -> :class:`TargetDpsAggregator`
-    ``HealingEvent`` -> :class:`TargetHealingAggregator`
-    ``BuffRemovalEvent`` -> :class:`TargetBuffRemovalAggregator`
-
-    Any other ``event_cls`` (e.g. a Phase 9
-    ``ConditionDamageEvent``) raises ``ValueError`` -- the
-    dispatch table is explicitly closed-form so a future
-    addition is a single-line edit here.
-
-    Performance
-    -----------
-    The ``isinstance`` filter is one pass over ``events``.
-    For a multi-million-event fight (rare but possible in
-    WvW) the filter is still O(N) -- the cost is amortised
-    across the 3 calls because the same event is filtered
-    3 times. The aggregated shape (a few hundred rows) is
-    small by comparison.
-    """
-    if event_cls is DamageEvent:
-        aggregator: TargetDpsAggregator | TargetHealingAggregator | TargetBuffRemovalAggregator = (
-            TargetDpsAggregator()
-        )
-    elif event_cls is HealingEvent:
-        aggregator = TargetHealingAggregator()
-    elif event_cls is BuffRemovalEvent:
-        aggregator = TargetBuffRemovalAggregator()
-    else:
-        raise ValueError(
-            f"_aggregate_per_target_rollup: unknown event_cls {event_cls!r}; "
-            f"expected DamageEvent | HealingEvent | BuffRemovalEvent"
-        )
-    return cast(
-        list[TargetDpsRow | TargetHealingRow | TargetBuffRemovalRow],
-        aggregator.aggregate(
-            [e for e in events if isinstance(e, event_cls)],  # type: ignore[misc]
-            duration_s,
-            name_map=agent_id_to_name,
-        ),
-    )
 
 
 @router.get("", response_model=list[FightOut])
@@ -644,13 +578,7 @@ def get_fight_squads(
     agent_id_to_subgroup_map = agent_id_to_subgroup(db, fight_id)
 
     duration_s = max(e.time_ms for e in events) / 1000.0
-    squad_rows = SquadRollupAggregator().aggregate(
-        [e for e in events if isinstance(e, DamageEvent)],
-        [e for e in events if isinstance(e, HealingEvent)],
-        [e for e in events if isinstance(e, BuffRemovalEvent)],
-        agent_id_to_subgroup_map,
-        duration_s,
-    )
+    squad_rows = aggregate_squad_rollup(events, agent_id_to_subgroup_map, duration_s)
 
     return FightSquadsOut(
         fight_id=fight_id,
@@ -703,12 +631,7 @@ def get_fight_skills(
     # skills); the aggregator renders it as ``skill_name=""``.
     skill_id_to_name_map = skill_id_to_name(db, fight_id)
 
-    skill_rows = SkillUsageAggregator().aggregate(
-        [e for e in events if isinstance(e, DamageEvent)],
-        [e for e in events if isinstance(e, HealingEvent)],
-        [e for e in events if isinstance(e, BuffRemovalEvent)],
-        skill_id_to_name_map,
-    )
+    skill_rows = aggregate_skill_usage(events, skill_id_to_name_map)
 
     return FightSkillsOut(
         fight_id=fight_id,

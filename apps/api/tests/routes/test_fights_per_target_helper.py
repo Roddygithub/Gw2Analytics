@@ -67,7 +67,7 @@ def test_per_target_helper_dispatches_damage_event_to_dps_aggregator() -> None:
 
     rows = _aggregate_per_target_rollup(
         events=[event],
-        agent_id_to_name=name_map,
+        agent_id_to_name_map=name_map,
         duration_s=12.5,
         event_cls=DamageEvent,
     )
@@ -102,7 +102,7 @@ def test_per_target_helper_dispatches_healing_event_to_healing_aggregator() -> N
 
     rows = _aggregate_per_target_rollup(
         events=[event],
-        agent_id_to_name=name_map,
+        agent_id_to_name_map=name_map,
         duration_s=12.5,
         event_cls=HealingEvent,
     )
@@ -133,7 +133,7 @@ def test_per_target_helper_dispatches_buff_removal_event_to_buff_removal_aggrega
 
     rows = _aggregate_per_target_rollup(
         events=[event],
-        agent_id_to_name=name_map,
+        agent_id_to_name_map=name_map,
         duration_s=12.5,
         event_cls=BuffRemovalEvent,
     )
@@ -172,7 +172,7 @@ def test_per_target_helper_raises_value_error_on_unknown_event_cls() -> None:
     with pytest.raises(ValueError, match="_aggregate_per_target_rollup"):
         _aggregate_per_target_rollup(
             events=[],
-            agent_id_to_name={},
+            agent_id_to_name_map={},
             duration_s=1.0,
             event_cls=_FakeConditionDamage,
         )
@@ -192,7 +192,7 @@ def test_per_target_helper_returns_empty_list_for_empty_iterator() -> None:
     """
     rows = _aggregate_per_target_rollup(
         events=[],
-        agent_id_to_name={},
+        agent_id_to_name_map={},
         duration_s=1.0,
         event_cls=DamageEvent,
     )
