@@ -552,8 +552,10 @@ def test_healthz_responds() -> None:
 def _post_minimal_fight(
     events: list[bytes] | None = None,
     suffix: str | None = None,
+    *,
+    agents: list[tuple[int, int, int, str, bool]] | None = None,
 ) -> str:
-    """POST a minimal 2-player fight with optional cbtevent records.
+    """POST a minimal 2-agent fight with optional cbtevent records.
 
     Returns the persisted ``fight_id``. The fixture mirrors the
     happy-path's 2-player layout (Warrior A + Guardian B, both
@@ -569,6 +571,18 @@ def _post_minimal_fight(
     parser-assigned agent_id differs from the cbtevent's
     source_agent_id) and the player is missing from the
     cross-fight roll-up.
+
+    ``agents`` (added in v0.10.3 plan 083 Feature 3A test refactor)
+    lets callers override the default 2-player layout with a
+    custom agent list -- the per-player timeline's 0-player
+    contract test posts an NPC-only fight (``is_player=False``
+    on both agents) so the source-side attribution filter
+    strips every event and the route returns 200 OK with
+    ``series: []`` (NOT 404). The kwarg is fully flexible --
+    any 2-tuple of ``(aid, prof, elite, name, is_player)``
+    tuples is accepted -- but the default (V07 Warrior +
+    V07 Guard) preserves backward compatibility with the 14
+    pre-existing callers.
     """
     suffix = suffix or _uuid.uuid4().hex[:8]
     build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
@@ -576,11 +590,13 @@ def _post_minimal_fight(
     base_id_b = base_id_a + 1
     base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_skill_b = base_skill_a + 1
-    blob = _make_minimal_zevtc(
-        [
+    if agents is None:
+        agents = [
             (base_id_a, 2, 18, f"V07 Warrior {suffix}", True),
             (base_id_b, 1, 27, f"V07 Guard {suffix}", True),
-        ],
+        ]
+    blob = _make_minimal_zevtc(
+        agents,
         build=build,
         skills=[
             (base_skill_a, f"Whirlwind {suffix}"),
@@ -2030,25 +2046,19 @@ def test_fight_player_timeline_200_with_empty_series_for_npc_only_fight() -> Non
             skill_id=base_skill_a,
         ),
     ]
-    blob = _make_minimal_zevtc(
-        # ``is_player=False`` on both agents: NPCs have no
-        # ``account_name`` registered in the arcdps account-name
-        # stream, so the aggregator drops them at the source-side
-        # attribution filter.
-        [
+    # ``is_player=False`` on both agents: NPCs have no
+    # ``account_name`` registered in the arcdps account-name
+    # stream, so the aggregator drops them at the source-side
+    # attribution filter. The ``agents=`` kwarg on the helper
+    # DRYs the otherwise-needed 14-line inline POST.
+    fight_id = _post_minimal_fight(
+        events,
+        suffix=suffix,
+        agents=[
             (base_id_a, 0, 0, f"NPC Alpha {suffix}", False),
             (base_id_b, 0, 0, f"NPC Beta {suffix}", False),
         ],
-        build=f"2025{suffix[:4]}",
-        skills=[(base_skill_a, f"NPC Strike {suffix}")],
-        events=events,
     )
-    resp = client.post(
-        "/api/v1/uploads",
-        files={"file": ("sample.zevtc", blob, "application/octet-stream")},
-    )
-    assert resp.status_code == 201, resp.text
-    fight_id = _wait_for_upload_completion(resp.json()["id"])
 
     # 200 OK with all events filtered out at the source-side step.
     # ``duration_s`` is non-zero (the 1 event at t=1.5s sets
@@ -2076,25 +2086,44 @@ def test_fight_player_timeline_404_when_unknown_fight() -> None:
     assert resp.status_code == 404
 
 
-def test_fight_player_timeline_422_when_window_s_out_of_range() -> None:
-    """Feature 3A: ``?window_s=0`` AND ``?window_s=601`` both return 422.
+def test_fight_player_timeline_422_when_window_s_too_small() -> None:
+    """Feature 3A: ``?window_s=0`` returns 422 (FastAPI
+    ``Query(ge=1)`` validator fires BEFORE the handler).
 
-    FastAPI's ``Query(ge=1, le=600)`` validator fires BEFORE the
-    handler, so neither value reaches the aggregator. Same bounds
-    contract as the per-fight timeline and the per-target roll-ups
-    (they share the same ``window_s`` semantic). One regression
-    test for both bounds keeps the suite compact.
+    Symmetric counterpart to :func:`test_fight_timeline_422_when_window_s_too_small`
+    -- the per-player timeline shares the same ``window_s``
+    lower bound (``1``) as the per-fight timeline, the per-target
+    roll-ups, and the event-window roll-up. One test per bound
+    mirrors the existing convention (per-fight timeline uses 2
+    separate tests) so a regression localises cleanly to the upper
+    or lower half of the validator.
     """
-    resp_lo = client.get(
+    resp = client.get(
         "/api/v1/fights/anything/timeline/players",
         params={"window_s": 0},
     )
-    assert resp_lo.status_code == 422
-    resp_hi = client.get(
+    assert resp.status_code == 422
+
+
+def test_fight_player_timeline_422_when_window_s_too_large() -> None:
+    """Feature 3A: ``?window_s=601`` returns 422 (FastAPI
+    ``Query(le=600)`` validator fires BEFORE the handler).
+
+    Symmetric counterpart to :func:`test_fight_timeline_422_when_window_s_too_large`
+    -- the per-player timeline shares the same ``window_s``
+    upper bound (``600`` = 10 minutes, the canonical ceiling
+    for per-fight bucket roll-ups) as the per-fight timeline,
+    the per-target roll-ups, and the event-window roll-up.
+    Splitting the upper + lower bound into 2 separate tests
+    mirrors the existing convention so a CI log
+    ``-k fight_player_timeline_422`` surfaces both failures
+    side-by-side.
+    """
+    resp = client.get(
         "/api/v1/fights/anything/timeline/players",
         params={"window_s": 601},
     )
-    assert resp_hi.status_code == 422
+    assert resp.status_code == 422
 
 
 def test_background_task_session_alive_at_invocation(
