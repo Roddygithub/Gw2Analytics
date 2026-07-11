@@ -44,14 +44,9 @@ def _persist_player_summaries(  # noqa: PLR0912
     #
     # The pre-seed is INTENTIONALLY conditional on empty events.
     # For non-empty events, the pre-fix per-event bucket semantics
-    # are preserved (1 bucket per UNIQUE account_name seen in the
-    # event stream). The test_persist_player_summaries.py unit suite
-    # asserts ``len(rows) == 1`` for a 1-event-from-2-agents fixture
-    # (only 1 of 2 agents is the event source); changing the
-    # non-empty path to pre-seed would REGRESS those tests against
-    # the v0.7.0 contract. The conditional pre-seed is therefore the
-    # narrowest fix that closes the empty-events regression while
-    # preserving the non-empty contract.
+    # are preserved (the test_persist_player_summaries.py unit suite
+    # asserts ``len(rows) == 1`` for a 1-event-from-2-agents fixture;
+    # this contract is preserved by NOT pre-seeding when events != []).
     if not events:
         for agent in source_map.values():
             account = agent.account_name
@@ -78,10 +73,6 @@ def _persist_player_summaries(  # noqa: PLR0912
             bucket: dict[str, int | str] = per_account[account]
             bucket["name"] = _sanitize_name(agent.name)
         else:
-            # Pre-fix behavior: bucket is created on the first event
-            # hit, NOT pre-seeded for non-empty events. Preserved so
-            # tests asserting ``len(rows) == 1`` for
-            # 1-event-from-2-agents fixtures stay green.
             bucket = {
                 "damage": 0,
                 "healing": 0,
