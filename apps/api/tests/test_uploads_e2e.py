@@ -1864,6 +1864,239 @@ def test_fight_timeline_422_when_window_s_too_large() -> None:
     assert resp.status_code == 422
 
 
+# ---------------------------------------------------------------------------
+# v0.10.3 plan 083 Feature 3A: per-player timeline
+# (``GET /api/v1/fights/{id}/timeline/players``).
+#
+# The per-player timeline is the SOURCE-SIDE counterpart of the
+# aggregated per-fight timeline: one series per player agent, each
+# series owns its own per-bucket (damage + healing + buff-removal)
+# points, all series share the SAME zero-filled bucket grid (the
+# visx multi-line chart's array-alignment contract -- see
+# :class:`PerPlayerTimelineAggregator`).
+#
+# The 4 tests below cover the 4 contract corners the
+# :func:`get_fight_player_timeline` route docstring pins:
+#   1. happy path with deterministic ordering + per-bucket
+#      per-player totals
+#   2. 0-player (NPC-only) fight -- 200 OK with ``series: []``
+#      (divergent from the /timeline endpoint's 404 contract)
+#   3. 404 on unknown fight id
+#   4. 422 on out-of-range ``window_s`` (both bounds)
+# ---------------------------------------------------------------------------
+
+
+def test_fight_player_timeline_returns_per_player_per_bucket_series() -> None:
+    """Feature 3A happy path: 2-player fight → 2 series sorted by
+    (-total_damage, account_name), each with the same zero-filled
+    bucket grid.
+
+    Seeds a 2-player fight with A→B damage at t=1.5s AND B→A heal
+    at t=2.5s (the B-direction heal uses ``is_nondamage=1`` so the
+    parser yields a :class:`HealingEvent`). With ``window_s=1``
+    the events land in 2 distinct buckets (1 and 2) with bucket 0
+    zero-filled. Source-side attribution:
+
+      * A's series: 1 damage point in bucket 1 (1_234), 0 in others.
+      * B's series: 1 heal point in bucket 2 (800), 0 in others.
+
+    Deterministic ordering: A first because ``(-1234, A) < (-0, B)``;
+    ties broken by ascending ``account_name`` (the natural lex order
+    on ``":synth.<id>"`` with ``base_id_b = base_id_a + 1``).
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_skill_b = base_skill_a + 1
+    events = [
+        # A (source) damages B (target) for 1_234 at t=1.5s.
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+        # B (source) heals A (target) for 800 at t=2.5s.
+        # ``is_nondamage=1`` makes the parser yield a HealingEvent.
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=800,
+            skill_id=base_skill_b,
+            is_nondamage=1,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+
+    resp = client.get(
+        f"/api/v1/fights/{fight_id}/timeline/players",
+        params={"window_s": 1},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    # Wire shape mirrors the per-fight timeline (``/timeline``) contract.
+    assert payload["fight_id"] == fight_id
+    assert payload["window_s"] == 1
+    assert payload["duration_s"] == pytest.approx(2.5)
+    # 2 player agents → exactly 2 series (sort order checked below).
+    assert len(payload["series"]) == 2
+
+    series_a = payload["series"][0]
+    series_b = payload["series"][1]
+    # Deterministic ordering: A first because total_damage(A)=1234
+    # > total_damage(B)=0; if A and B tied on damage, ascending
+    # ``account_name`` would break the tie. With the
+    # ``base_id_b = base_id_a + 1`` setup, lex order agrees.
+    assert series_a["account_name"] == f":synth.{base_id_a}"
+    assert series_b["account_name"] == f":synth.{base_id_b}"
+
+    # A is the SOURCE of the damage event only. Per-bucket
+    # placement: bucket 1 (t=1.5s).
+    assert len(series_a["points"]) == 3  # window_s=1, max bucket=2
+    assert series_a["points"][0]["window_start_ms"] == 0
+    assert series_a["points"][0]["window_end_ms"] == 1_000
+    assert series_a["points"][0]["total_damage"] == 0
+    assert series_a["points"][0]["total_healing"] == 0
+    assert series_a["points"][1]["window_start_ms"] == 1_000
+    assert series_a["points"][1]["window_end_ms"] == 2_000
+    assert series_a["points"][1]["total_damage"] == 1_234
+    assert series_a["points"][1]["total_healing"] == 0
+    assert series_a["points"][2]["window_start_ms"] == 2_000
+    assert series_a["points"][2]["window_end_ms"] == 3_000
+    assert series_a["points"][2]["total_damage"] == 0
+    assert series_a["points"][2]["total_healing"] == 0
+
+    # B is the SOURCE of the heal event only. Per-bucket
+    # placement: bucket 2 (t=2.5s).
+    assert len(series_b["points"]) == 3
+    assert series_b["points"][0]["total_damage"] == 0
+    assert series_b["points"][0]["total_healing"] == 0
+    assert series_b["points"][1]["total_damage"] == 0
+    assert series_b["points"][1]["total_healing"] == 0
+    assert series_b["points"][2]["total_damage"] == 0
+    assert series_b["points"][2]["total_healing"] == 800
+
+    # Cross-cut invariants.
+    # 1. A is the source of 1_234 damage; B's series is 0.
+    assert sum(p["total_damage"] for p in series_a["points"]) == 1_234
+    assert sum(p["total_damage"] for p in series_b["points"]) == 0
+    # 2. B is the source of 800 heal; A's series is 0 (source-side
+    #    inversion vs the per-target roll-up).
+    assert sum(p["total_healing"] for p in series_a["points"]) == 0
+    assert sum(p["total_healing"] for p in series_b["points"]) == 800
+
+
+def test_fight_player_timeline_200_with_empty_series_for_npc_only_fight() -> None:
+    """Feature 3A 0-player contract: a 2-NPC fight with events
+    returns ``200 OK`` with ``series: []`` -- NOT ``404``.
+
+    The route docstring pins the divergent-empty contract:
+
+      * ``/timeline`` (aggregated) returns 404 on a 0-event fight
+        (``events_blob_uri is None`` OR the events list is empty
+        after the JSONL split -- "parser ran, nothing happened"
+        vs "data unavailable").
+      * ``/timeline/players`` (per-player) returns 200 OK with
+        ``series: []`` on a fight whose events are all
+        NPC-sourced (the blob exists, the parser yielded events,
+        but the source-side attribution filter strips every
+        event). 0-player is a LEGITIMATE state, not "data
+        unavailable".
+
+    Seeds a 2-NPC fight with 1 damage event A→B. The events
+    blob is written; the ORM agent table has 0 rows with
+    ``is_player=True``. The aggregator's
+    ``source_map.get(e.source_agent_id)`` returns ``None`` for
+    every event (no player overlay), so ``per_account`` stays
+    empty and the route returns ``series: []``.
+
+    The fixture bypasses :func:`_post_minimal_fight` because that
+    helper sets ``is_player=True`` on both agents. We inline a
+    custom POST so both agents are NPCs.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+    ]
+    blob = _make_minimal_zevtc(
+        # ``is_player=False`` on both agents: NPCs have no
+        # ``account_name`` registered in the arcdps account-name
+        # stream, so the aggregator drops them at the source-side
+        # attribution filter.
+        [
+            (base_id_a, 0, 0, f"NPC Alpha {suffix}", False),
+            (base_id_b, 0, 0, f"NPC Beta {suffix}", False),
+        ],
+        build=f"2025{suffix[:4]}",
+        skills=[(base_skill_a, f"NPC Strike {suffix}")],
+        events=events,
+    )
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("sample.zevtc", blob, "application/octet-stream")},
+    )
+    assert resp.status_code == 201, resp.text
+    fight_id = _wait_for_upload_completion(resp.json()["id"])
+
+    # 200 OK with all events filtered out at the source-side step.
+    # ``duration_s`` is non-zero (the 1 event at t=1.5s sets
+    # ``max(event.time_ms) / 1000.0 = 1.5``) so the parser WROTE
+    # the events blob; the blob is present, but the per-player
+    # series is empty because the events' source_agent_ids all
+    # map to NPCs (no player overlay).
+    resp = client.get(f"/api/v1/fights/{fight_id}/timeline/players")
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["fight_id"] == fight_id
+    assert payload["duration_s"] == pytest.approx(1.5)
+    assert payload["series"] == []
+
+
+def test_fight_player_timeline_404_when_unknown_fight() -> None:
+    """Feature 3A: ``GET /fights/{unknown}/timeline/players`` returns 404.
+
+    Same 404 contract as the per-fight timeline and the per-target
+    roll-ups -- the shared :func:`_load_fight_events` helper raises
+    404 when the fight id is unknown. The route inherits the
+    contract for free via the helper.
+    """
+    resp = client.get("/api/v1/fights/does-not-exist-1234/timeline/players")
+    assert resp.status_code == 404
+
+
+def test_fight_player_timeline_422_when_window_s_out_of_range() -> None:
+    """Feature 3A: ``?window_s=0`` AND ``?window_s=601`` both return 422.
+
+    FastAPI's ``Query(ge=1, le=600)`` validator fires BEFORE the
+    handler, so neither value reaches the aggregator. Same bounds
+    contract as the per-fight timeline and the per-target roll-ups
+    (they share the same ``window_s`` semantic). One regression
+    test for both bounds keeps the suite compact.
+    """
+    resp_lo = client.get(
+        "/api/v1/fights/anything/timeline/players",
+        params={"window_s": 0},
+    )
+    assert resp_lo.status_code == 422
+    resp_hi = client.get(
+        "/api/v1/fights/anything/timeline/players",
+        params={"window_s": 601},
+    )
+    assert resp_hi.status_code == 422
+
+
 def test_background_task_session_alive_at_invocation(
     client: TestClient,
     get_sessionmaker: Any,
