@@ -37,6 +37,43 @@ class FightOut(BaseModel):
     skills: list[SkillOut] = []
 
 
+class FightsPageOut(BaseModel):
+    """Paginated response shape for ``GET /api/v1/fights``.
+
+    v0.10.12 PR 3.2 closes the thin-route per-handler
+    schema-typing gap identified by Phase C's architect verdict:
+    the pre-PR-3.2 handler returned a naked ``list[FightOut]``
+    which is technically valid for ``response_model=`` but
+    loses the pagination cursor (``limit``, ``offset``) on
+    the wire. A frontend operator page cannot render "Showing
+    50 of N fights" without either (A) a second round-trip
+    asking for the same set + a ``COUNT(*)`` query or (B)
+    reading the cursor back from the request that produced
+    the page. This wrapper carries both the trimmed page
+    (the ``fights`` list) AND the pagination cursor
+    (``limit``, ``offset``) so the next iteration of the
+    frontend pagination UX has the cursor metadata without
+    a second round-trip.
+
+    Field semantics mirror the handler's ``Query`` params
+    (``limit`` clamped to ``[1, 500]``; ``offset`` clamped
+    to ``[0, ∞)``). The defaults match the handler so a
+    frontend that consumes a hard-coded call site gets the
+    same out-of-the-box behaviour. ``total_count`` is
+    deliberately NOT in this wrapper: adding it would force
+    a separate ``SELECT count(*) FROM fights`` round-trip
+    per request and the architect verdict explicitly
+    scoped this PR to the schema-typing gap closure, not
+    the pagination-enhancement feature.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fights: list[FightOut] = []
+    limit: int = 50
+    offset: int = 0
+
+
 class EventBucketOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

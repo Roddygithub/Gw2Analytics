@@ -115,6 +115,7 @@ from gw2analytics_api.schemas import (
     FightEventsSummaryOut,
     FightOut,
     FightSkillsOut,
+    FightsPageOut,
     FightSquadsOut,
     PerFightTimelineOut,
     PerFightTimelinePointOut,
@@ -151,13 +152,24 @@ _PER_FIGHT_DEFAULT_WINDOW_S: int = 5
 _PER_FIGHT_MAX_WINDOW_S: int = 600
 
 
-@router.get("", response_model=list[FightOut])
+@router.get("", response_model=FightsPageOut)
 def list_fights(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_session),  # noqa: B008
-) -> list[FightOut]:
-    """Return up to ``limit`` fights (skipping the first ``offset``)."""
+) -> FightsPageOut:
+    """Return up to ``limit`` fights (skipping the first ``offset``).
+
+    v0.10.12 PR 3.2: the pre-PR-3.2 response shape was a naked
+    ``list[FightOut]`` which carried no pagination cursor on the
+    wire. The wrapper :class:`FightsPageOut` carries both the
+    trimmed page (the ``fights`` list) AND the cursor (``limit``
+    + ``offset``) so a future frontend pagination UX can render
+    "Showing X-Y of N" without a second round-trip. See the
+    schema docstring for the cursor-vs-total-count design
+    trade-off (we deliberately omit ``total_count`` to avoid
+    forcing a per-request ``COUNT(*)`` query).
+    """
     rows = (
         db.execute(
             select(OrmFight).order_by(OrmFight.started_at.desc()).limit(limit).offset(offset),
@@ -165,7 +177,17 @@ def list_fights(
         .scalars()
         .all()
     )
-    return [_to_fight_out(f) for f in rows]
+    # Build the trimmed page via the shared ``_to_fight_out``
+    # helper (the same one ``get_fight`` uses -- single source of
+    # truth for the FightOut construction including the agents +
+    # skills selectinload + the profession/elite spec wire-format
+    # labels). The cursor echoes the request params so the
+    # frontend can reconcile state when it paginates.
+    return FightsPageOut(
+        fights=[_to_fight_out(f) for f in rows],
+        limit=limit,
+        offset=offset,
+    )
 
 
 # ---------------------------------------------------------------------------
