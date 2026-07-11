@@ -23,7 +23,7 @@
 The v0.10.6 cycle landed `buff_uptime.py` + `buff_dispatch.py` in `libs/gw2_analytics`. Three gaps remain before the analyst surface is composable. The most recent gap surfaced empirically:
 
 1. **`buff_dispatch` enum mappings are SWAPPED vs arcdps.h.** Plan 137 (v0.10.5) shipped a 3-way decoder mapping `1→REMOVE_SINGLE, 2→REMOVE_ALL` but arcdps.h `cbtbuffremove` is `0=NONE, 1=ALL, 2=SINGLE, 3=MANUAL`. The project's mapping is the reverse for `1`/`2`. Realignment shipped via commit `529cb90` (Phase 9 step 4).
-2. **The parser does not produce buff-apply events.** `parse_events` reads the 64-byte cbtevent records but does not surface the arcdps `is_buffremove` byte to the discriminated-union `Event` stream. The byte has been EXPOSED (Phase 9 step 2-PARTIAL via commit `328833d`) but the EMIT branch that yields `BoonApplyEvent` records is deferred pending struct audit + real-arcdps-dump calibration.
+2. **Buff-apply events not yet yielded by the parser** (status as of 2026-07-11: predicate ready — Step 2-EMIT-BRANCH unblocked by F1 calibration pilot). `parse_events` reads the 64-byte cbtevent records but does NOT yet yield `BoonApplyEvent` records to the discriminated-union `Event` stream. The arcdps `is_buffremove` byte (byte 52 in our struct) has been EXPOSED (Phase 9 step 2-PARTIAL via commit `328833d`). Step 2-EMIT-BRANCH yields `BoonApplyEvent` records with predicate `is_buffremove ∈ [0..3]` and `kind` decoded via `gw2_analytics.buff_dispatch.decode_buff_change` (realigned in commit `529cb90` to arcdps.h's cbtbuffremove enum: 0=APPLY, 1=REMOVE_ALL, 2=REMOVE_SINGLE, 3=REMOVE_SINGLE-CBTB_MANUAL-collapsed).
 3. **The parser's `_EVENT_STRUCT` is NOT 1:1 aligned with arcdps.h.** Confirmed by the 2026-07-11 calibration round below. The struct has 3 uint16s where arcdps has 4 (missing `dst_master_instid`) + 8 single-byte slots where arcdps has 12 (covering only `iff, buff, result, is_activation, is_buffremove, is_ninety, is_fifty, is_moving`, dropping `is_statechange, is_flanking, is_shields, is_offcycle`!) + 2 uint32 slots where arcdps has 4 pad bytes. **This is the calibrate-or-correct blocker that gates Step 2-EMIT.**
 
 This rewrite documents (a) the struct-math proof that misalignment exists, (b) the empirical byte-distribution evidence, (c) the new Step 1.5-SYNC prerequisite that must complete BEFORE Step 2-EMIT.
@@ -273,7 +273,7 @@ The previous draft of this section compared "Pre-SYNC" vs "Post-SYNC" pipeline b
 | Fixture | rev | byte-48 zero% (current struct) | Empirical confidence | post-SYNC struct divergence |
 |---|---|---|---|---|
 | `20260604-230254` (large WvW) | 1 | ~99.8% | HIGH | Tie |
-| 9 mid-range fixtures (97bb*, ef66*, c505*, 6021*, 9240*, 3a28*, d1c3*, 91dc*, ce4d* prefixes — all 9 in `/home/roddy/WvW_Analytics/uploads/`) | 1 | ~99.7% | HIGH | Tie |
+| 9 mid-range fixtures — all 9 verified by F1 calibration (97bb2c4d, ef66dbd1, c5055dda, 6021ca5f, 92406ce9, 3a28ebd6, d1c3de29, 91dca5e8, ce4dfff2; byte-48 zero% consistent across the full set in `/home/roddy/WvW_Analytics/uploads/`) | 1 | ~99.7% | HIGH | Tie |
 | `5b161ec0` (75 KB, smallest) | 1 | 77.78% | HIGH | Current significantly better (post: 48.66%) |
 | `eeae64d1` (~1 MB, the prior out-lier) | 1 | 6.91% | HIGH (heavy state-change fight; byte-48 still classifies correctly — current 6.91% vs post 0.69%, 10× better) | Current significantly better (post: 0.69%) |
 
