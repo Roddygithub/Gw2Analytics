@@ -10,13 +10,13 @@ importers:
     dependencies:
       next:
         specifier: 16.2.10
-        version: 16.2.10(@playwright/test@1.61.1)(react-dom@19.2.4(react@19.2.7))(react@19.2.7)
+        version: 16.2.10(@playwright/test@1.61.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react:
         specifier: 19.2.7
         version: 19.2.7
       react-dom:
-        specifier: 19.2.4
-        version: 19.2.4(react@19.2.7)
+        specifier: 19.2.7
+        version: 19.2.7(react@19.2.7)
     devDependencies:
       '@playwright/test':
         specifier: ^1.61.1
@@ -26,7 +26,7 @@ importers:
         version: 6.9.1
       '@testing-library/react':
         specifier: ^16.3.2
-        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.7))(react@19.2.7)
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@types/node':
         specifier: ^20.19
         version: 20.19.43
@@ -44,10 +44,10 @@ importers:
         version: 34.3.1
       ag-grid-react:
         specifier: ^34
-        version: 34.3.1(react-dom@19.2.4(react@19.2.7))(react@19.2.7)
+        version: 34.3.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       jsdom:
         specifier: ^25
-        version: 25.0.1
+        version: 25.0.1(supports-color@10.2.2)
       openapi-typescript:
         specifier: ^7.13.0
         version: 7.13.0(typescript@5.9.3)
@@ -62,7 +62,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^2.1.9
-        version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1)(supports-color@10.2.2)
+        version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1(supports-color@10.2.2))(supports-color@10.2.2)
 
 packages:
 
@@ -1098,10 +1098,10 @@ packages:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
 
-  react-dom@19.2.4:
-    resolution: {integrity: sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ==}
+  react-dom@19.2.7:
+    resolution: {integrity: sha512-t0BRVXvbiE/o20Hfw669rLbMCDWtYZLvmJigy2f0MxsXF+71pxhR3xOkspmsO8h3ZlNzyibAmtCa3l4lYKk6gQ==}
     peerDependencies:
-      react: ^19.2.4
+      react: ^19.2.7
 
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
@@ -1719,12 +1719,12 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
 
-  '@testing-library/react@16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.7))(react@19.2.7)':
+  '@testing-library/react@16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@babel/runtime': 7.29.7
       '@testing-library/dom': 10.4.1
       react: 19.2.7
-      react-dom: 19.2.4(react@19.2.7)
+      react-dom: 19.2.7(react@19.2.7)
     optionalDependencies:
       '@types/react': 19.2.17
       '@types/react-dom': 19.2.3(@types/react@19.2.17)
@@ -1795,12 +1795,12 @@ snapshots:
     dependencies:
       ag-charts-types: 12.3.1
 
-  ag-grid-react@34.3.1(react-dom@19.2.4(react@19.2.7))(react@19.2.7):
+  ag-grid-react@34.3.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
       ag-grid-community: 34.3.1
       prop-types: 15.8.1
       react: 19.2.7
-      react-dom: 19.2.4(react@19.2.7)
+      react-dom: 19.2.7(react@19.2.7)
 
   agent-base@7.1.4: {}
 
@@ -2003,7 +2003,7 @@ snapshots:
     dependencies:
       whatwg-encoding: 3.1.1
 
-  http-proxy-agent@7.0.2:
+  http-proxy-agent@7.0.2(supports-color@10.2.2):
     dependencies:
       agent-base: 7.1.4
       debug: 4.4.3(supports-color@10.2.2)
@@ -2035,14 +2035,14 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
-  jsdom@25.0.1:
+  jsdom@25.0.1(supports-color@10.2.2):
     dependencies:
       cssstyle: 4.6.0
       data-urls: 5.0.0
       decimal.js: 10.6.0
       form-data: 4.0.6
       html-encoding-sniffer: 4.0.0
-      http-proxy-agent: 7.0.2
+      http-proxy-agent: 7.0.2(supports-color@10.2.2)
       https-proxy-agent: 7.0.6(supports-color@10.2.2)
       is-potential-custom-element-name: 1.0.1
       nwsapi: 2.2.24
@@ -2097,7 +2097,7 @@ snapshots:
 
   nanoid@3.3.15: {}
 
-  next@16.2.10(@playwright/test@1.61.1)(react-dom@19.2.4(react@19.2.7))(react@19.2.7):
+  next@16.2.10(@playwright/test@1.61.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
       '@next/env': 16.2.10
       '@swc/helpers': 0.5.15
@@ -2105,7 +2105,7 @@ snapshots:
       caniuse-lite: 1.0.30001800
       postcss: 8.4.31
       react: 19.2.7
-      react-dom: 19.2.4(react@19.2.7)
+      react-dom: 19.2.7(react@19.2.7)
       styled-jsx: 5.1.6(react@19.2.7)
     optionalDependencies:
       '@next/swc-darwin-arm64': 16.2.10
@@ -2194,7 +2194,7 @@ snapshots:
 
   punycode@2.3.1: {}
 
-  react-dom@19.2.4(react@19.2.7):
+  react-dom@19.2.7(react@19.2.7):
     dependencies:
       react: 19.2.7
       scheduler: 0.27.0
@@ -2372,7 +2372,7 @@ snapshots:
       '@types/node': 20.19.43
       fsevents: 2.3.3
 
-  vitest@2.1.9(@types/node@20.19.43)(jsdom@25.0.1)(supports-color@10.2.2):
+  vitest@2.1.9(@types/node@20.19.43)(jsdom@25.0.1(supports-color@10.2.2))(supports-color@10.2.2):
     dependencies:
       '@vitest/expect': 2.1.9
       '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@20.19.43))
@@ -2396,7 +2396,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 20.19.43
-      jsdom: 25.0.1
+      jsdom: 25.0.1(supports-color@10.2.2)
     transitivePeerDependencies:
       - less
       - lightningcss

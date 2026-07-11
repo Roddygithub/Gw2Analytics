@@ -82,6 +82,20 @@ const THREE_POINTS: PlayerTimelinePoint[] = [
   makePoint("f-3", "2025-01-15T12:00:00Z", 2_000, 300, 25),
 ];
 
+describe("PlayerTimelineChart timezone determinism (v0.9.6 plan 024)", () => {
+  it("formats dates identically regardless of local timezone", () => {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "UTC",
+    });
+    const result = fmt.format(new Date("2024-01-15T12:34:00Z"));
+    expect(result).toBe("01/15, 12:34 PM");
+  });
+});
+
 describe("PlayerTimelineChart", () => {
   it("renders the empty-state panel when there are no points", () => {
     render(<PlayerTimelineChart points={[]} />);

@@ -45,14 +45,14 @@ vi.mock("@/components/WindowSizeSelector", async (importOriginal) => {
   return actual;
 });
 
-// Mock the next/navigation hooks the selector depends on. The
-// selector only uses ``useRouter().push`` + ``usePathname()``; we
-// return deterministic stubs so each test can assert on the
-// emitted URL without booting the real Next.js router runtime.
+// Mock the next/navigation hooks the selector depends on.
 const pushMock = vi.fn();
+
+const searchParamsMock = vi.fn(() => new URLSearchParams());
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
   usePathname: () => "/fights/abc123def456",
+  useSearchParams: searchParamsMock,
 }));
 
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
@@ -90,5 +90,20 @@ describe("WindowSizeSelector", () => {
     fireEvent.change(select, { target: { value: "30" } });
     expect(pushMock).toHaveBeenCalledTimes(1);
     expect(pushMock).toHaveBeenCalledWith("/fights/abc123def456?window_s=30");
+  });
+
+  it("preserves other active query params when changing window_s", () => {
+    searchParamsMock.mockReturnValue(
+      new URLSearchParams("target=123&window_s=5"),
+    );
+    render(<WindowSizeSelector current={5} fightId={FIGHT_ID} />);
+    const select = screen.getByTestId("window-s-selector");
+    fireEvent.change(select, { target: { value: "30" } });
+    expect(pushMock).toHaveBeenCalledWith(
+      expect.stringContaining("target=123"),
+    );
+    expect(pushMock).toHaveBeenCalledWith(
+      expect.stringContaining("window_s=30"),
+    );
   });
 });

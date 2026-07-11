@@ -50,7 +50,7 @@
  * bloat is negligible.
  */
 
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 /**
  * The canonical preset list. Module-scope constant so the
@@ -69,6 +69,7 @@ export interface WindowSizeSelectorProps {
 export function WindowSizeSelector({ current, fightId }: WindowSizeSelectorProps) {
   const router = useRouter();
   const pathname = usePathname() ?? `/fights/${fightId}`;
+  const searchParams = useSearchParams();
 
   return (
     <label
@@ -87,20 +88,15 @@ export function WindowSizeSelector({ current, fightId }: WindowSizeSelectorProps
         value={current}
         onChange={(e) => {
           const value = e.target.value;
-          // The gateway's default is the second preset entry
-          // (``WINDOW_S_PRESETS[1]``); emit a bare URL (no query
-          // param) when the user picks the default so the URL
-          // stays canonical and the back-button doesn't accumulate
-          // ``?window_s=5`` entries. Indexing the constant (not
-          // hardcoding the value) keeps the onChange handler in
-          // lockstep with the preset list -- a future preset
-          // reorder only needs to change the constant, not two
-          // call sites.
-          const next =
-            value === String(WINDOW_S_PRESETS[1])
-              ? pathname
-              : `${pathname}?window_s=${value}`;
-          router.push(next);
+          const next = new URLSearchParams(searchParams.toString());
+          if (value === String(WINDOW_S_PRESETS[1])) {
+            next.delete("window_s");
+          } else {
+            next.set("window_s", value);
+          }
+          const queryString = next.toString();
+          const url = queryString ? `${pathname}?${queryString}` : pathname;
+          router.push(url);
         }}
         style={{
           padding: "4px 8px",

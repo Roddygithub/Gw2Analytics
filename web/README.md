@@ -23,11 +23,18 @@ and `/account`.
 
 ## Routes
 
-| Path        | Role                                                                       |
-|-------------|----------------------------------------------------------------------------|
-| `/`         | Landing + status badge + CTAs to `/fights` and `/account`.                 |
-| `/fights`   | Server Component: SSR-fetch `GET /api/v1/fights`, render AG&nbsp;Grid.     |
-| `/account`  | Client Component: form that resolves a `Bearer` key against `/api/v1/account`. |
+| Path | Description |
+|------|-------------|
+| `/` | Landing page with navigation cards |
+| `/account` | GW2 API key → world enrichment |
+| `/upload` | `.zevtc` combat log upload with 3-step wizard |
+| `/fights` | Paginated fight list grid |
+| `/fights/[id]` | Fight drilldown: events, timeline, squads, skills |
+| `/players` | Cross-fight player list with profession filter |
+| `/players/[account_name]` | Player profile with per-fight breakdown + timeline |
+| `/players/compare` | Cross-account timeline comparison (2-4 accounts) |
+
+Plus 3 error/loading boundaries (`error.tsx`, `not-found.tsx`, `loading.tsx`) and 7 Playwright screenshot fixtures tracked at `docs/screenshots/`.
 
 ## Scripts
 

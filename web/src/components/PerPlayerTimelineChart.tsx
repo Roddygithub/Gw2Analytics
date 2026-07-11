@@ -431,7 +431,7 @@ export function PerPlayerTimelineChart({
         width="100%"
         style={{ display: "block" }}
         role="img"
-        ariaLabel="Per-player timeline"
+        aria-label="Per-player timeline"
       >
         <g
           transform={`translate(${CHART_PADDING.left}, ${CHART_PADDING.top})`}

@@ -62,10 +62,12 @@ const X_AXIS_LABEL_FORMAT = new Intl.DateTimeFormat("en-US", {
   day: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
+  timeZone: "UTC",
 });
 const X_AXIS_DAY_LABEL_FORMAT = new Intl.DateTimeFormat("en-US", {
   month: "2-digit",
   day: "2-digit",
+  timeZone: "UTC",
 });
 
 export type TimelineScale = "linear" | "log";

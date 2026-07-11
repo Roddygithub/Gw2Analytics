@@ -4,6 +4,7 @@
   --accent: #d4a64a;
   --border: #1f2733;
   --surface: #161b22;
+  --error: #ff6e6e;
 }
 
 html {
@@ -51,5 +52,6 @@ a:hover {
     --accent: #8a6d2c;
     --border: #d0d7de;
     --surface: #ffffff;
+    --error: #ff6e6e;
   }
 }
