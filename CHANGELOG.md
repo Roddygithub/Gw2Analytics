@@ -603,7 +603,7 @@ The A2 god-module refactor (plan 021) decomposes the pre-A2 single `routes/fight
 - **Phase 1 polish (commit `ee92cee`)** -- the `routes/fights/__init__.py` module docstring gains a 4-bullet Submodules section (+ blob_cache + blob_loader + mappers + aggregators) that frames the package as the "thin package-level router that composes them". Closes the 2 reviewer-flagged doc drifts (endpoint count 4 -> 5 + map-shape split between the per-target `dict[int, str | None]` and the 2 str-maps).
 - **Phase 3 polish (commit `e62794a`)** -- the 2 cache test files drop their per-test `_clear_cache` autouse fixtures (a strict subset of the conftest autouse): `apps/api/tests/test_fights_blob_cache.py` + `apps/api/tests/test_fights_blob_cache_thundering_herd.py`. Net zero behavioral change (the conftest autouse runs before the test body just like the per-test fixture did pre-drop).
 
-VALIDATION: ruff clean + mypy clean (5 sub-pack modules + conftest) + the 18 cache + per-target tests pass + full apps/api regression rc=0 + git diff --check clean. 5 code-reviewer-minimax-m3 passes across the cycle approved. `routes/fights/__init__.py` shrank from 746 -> ~669 lines (the 4 extracted submodules total ~580 LoC across `blob_cache` + `blob_loader` + `mappers` + `aggregators`).
+VALIDATION: ruff clean + mypy clean (5 sub-pack modules + conftest) + the 18 cache + per-target tests pass + full apps/api regression rc=0 + git diff --check clean. 5 code-reviewer-minimax-m3 passes across the cycle approved. `routes/fights/__init__.py` shrank from 743 LoC (pre-PR 2.2) to 669 LoC (post-PR 2.2 hotfix); the 4 extracted submodules total ~713 LoC (`blob_cache.py` 282 + `blob_loader.py` 115 + `mappers.py` 126 + `aggregators.py` ~190 after hotfix).
 
 ### Note
 
