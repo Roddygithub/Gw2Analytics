@@ -67,24 +67,30 @@ def _build_event_record(
     is_offcycle: int = 0,
     buff_dmg: int = 0,
     is_buffremove: int = 0,
+    ev_buff: int = 0,
 ) -> bytes:
     """Build one 64-byte cbtevent record matching the arcdps ``cbtevent`` struct.
 
-    Extended from the test_parser.py version with an ``is_buffremove`` keyword
-    parameter so the Phase 9 emit tests can drive the predicate boundary
-    without hand-packing 64-byte fixtures.
+    Extended from the test_parser.py version with ``is_buffremove`` + ``ev_buff``
+    keyword parameters so the Phase 9 emit tests can drive both
+    REMOVE-class + APPLY-class predicate boundaries without hand-packing
+    64-byte fixtures.
 
     Pack order MUST mirror the parser's unpack order 1:1:
     :data:`_CBTEVENT_FMT` = ``<QQQiiIIHHHbbbbbbbbIIbb`` where the
     8 ``b`` slots (offsets 46-53) unpack as:
     is_cleanup(byte 46), is_nondamage(byte 47), is_statechange(byte 48),
-    is_flanking(byte 49), is_shields(byte 50), is_offcycle(byte 51),
-    is_buffremove(byte 52) -- the arcdps ``cbtbuffremove`` enum --
-    is_ninety(byte 53). The ``is_buffremove`` parameter is written
-    into byte 52 (struct member 16), NOT byte 53 -- getting these
-    swapped is an off-by-one silent regression (the test fixture
-    packs the byte correctly but the parser reads byte 52 in the
-    wrong slot, masking the bug).
+    ev.buff(byte 49 -- arcdps buff ID, F1-validated), result(byte 50),
+    is_activation(byte 51), is_buffremove(byte 52 -- arcdps
+    cbtbuffremove enum), is_ninety(byte 53).
+
+    The ``is_buffremove`` parameter is written into byte 52 (struct
+    member 16), NOT byte 53 -- getting these swapped is an off-by-one
+    silent regression. The ``ev_buff`` parameter is written into
+    byte 49 (struct member 13), NOT byte 50 -- same caveat. The
+    parser-side variable names are ``is_buffremove`` (the 0=NONE/
+    1=ALL/2=SINGLE/3=MANUAL enum discriminator) and ``_ev_buff``
+    (the buff ID for buff-interaction records).
     """
     return _CBTEVENT_FMT.pack(
         time_ms,
@@ -100,9 +106,9 @@ def _build_event_record(
         is_cleanup,        # byte 46 = is_cleanup
         is_nondamage,      # byte 47 = is_nondamage
         is_statechange,    # byte 48 = is_statechange
-        0,                 # byte 49 = is_flanking
-        0,                 # byte 50 = is_shields
-        is_offcycle,       # byte 51 = is_offcycle
+        ev_buff,           # byte 49 = ev.buff (arcdps buff ID)
+        0,                 # byte 50 = result (was is_shields)
+        is_offcycle,       # byte 51 = is_activation (was is_offcycle)
         is_buffremove,     # byte 52 = is_buffremove (arcdps cbtbuffremove)
         0,                 # byte 53 = is_ninety
         0,                 # pad63 (u32 slot 1, offsets 54-57)
@@ -428,7 +434,7 @@ def test_parse_events_emit_buff_apply_statechange_marker() -> None:
 
 
 def test_parse_events_emit_buff_remove_with_no_magnitude_still_emits_boon() -> None:
-    """REMOVE record with ``buff_dmg == 0`` and ``is_nondamage == 0`` yields BoonApply + Damage (no strip).
+    """REMOVE record (buff_dmg=0, is_nondamage=0) yields BoonApply + Damage (no strip).
 
     Edge case the plan calls out: REMOVE-class records that have a
     heal/strip of zero are still REMOVE markers from arcdps
@@ -462,3 +468,218 @@ def test_parse_events_emit_buff_remove_with_no_magnitude_still_emits_boon() -> N
     assert boon.kind == "remove_single"
     assert isinstance(damage, DamageEvent)
     assert damage.damage == 2_500
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 Step 3 APPLY-BRANCH tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_events_emit_apply_mid_combat_yields_boon_apply() -> None:
+    """Mid-combat APPLY record (ev_buff != 0, is_buffremove == 0) yields BoonApply(kind="apply").
+
+    Per F1 byte mapping + the buff_dispatch realignment (commit
+    ``529cb90``), arcdps encodes buff APPLY events as NON-statechange
+    records (``is_statechange == 0``) with a non-zero ``ev.buff``
+    byte (the buff ID for the applied buff). Phase 9 Step 3 wires
+    this channel into the parser's emit branch.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        skills=[(101, "Quickness")],
+        events=[
+            _build_event_record(
+                time_ms=10_000,
+                src_agent=1,
+                dst_agent=2,
+                value=0,           # APPLY has no damage magnitude
+                skill_id=101,      # the buff being applied
+                ev_buff=101,       # arcdps ev.buff = buff_id_being_applied
+                # is_buffremove==0 + is_statechange==0 (defaults) trigger the APPLY branch
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    # Predicate fires: BoonApplyEvent(kind="apply") yielded.
+    # No DamageEvent (value == 0). No BuffRemovalEvent (no buff_dmg).
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, BoonApplyEvent)
+    assert e.kind == "apply"
+    assert e.time_ms == 10_000
+    assert e.source_agent_id == 1
+    assert e.target_agent_id == 2
+    assert e.skill_id == 101
+    assert e.duration_ms == 0
+    assert e.stacks == 1
+
+
+def test_parse_events_emit_apply_with_damage_yields_dual_event() -> None:
+    """APPLY record with damage co-emits BoonApply(kind="apply") + DamageEvent.
+
+    A single arcdps cbtevent can carry BOTH a buff apply AND a
+    damage magnitude (the canonical case is a damage skill that
+    also applies a debuff via the same hit). The parser yields both
+    events: BoonApplyEvent(kind="apply") for the buff lifecycle
+    marker + DamageEvent for the magnitude.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        skills=[(42, "Torment")],
+        events=[
+            _build_event_record(
+                time_ms=15_000,
+                src_agent=1,
+                dst_agent=2,
+                value=850,         # damage magnitude
+                skill_id=42,       # the buff being applied (Torment)
+                ev_buff=42,        # arcdps ev.buff = Torment's buff_id
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    # Dual emission: BoonApply(apply) + DamageEvent.
+    assert len(events) == 2
+    boon, damage = events
+    assert isinstance(boon, BoonApplyEvent)
+    assert boon.kind == "apply"
+    assert boon.skill_id == 42
+    assert isinstance(damage, DamageEvent)
+    assert damage.damage == 850
+    assert damage.skill_id == 42
+
+
+def test_parse_events_emit_apply_excludes_remove_class() -> None:
+    """REMOVE-class record (``is_buffremove in (1..3)``) does NOT trigger the APPLY branch.
+
+    Mutual exclusivity: the REMOVE branch (``is_buffremove in (1..3)``)
+    handles REMOVE records; the APPLY branch (``elif _ev_buff != 0``)
+    handles the rest. A record with ``is_buffremove=2`` AND
+    ``ev_buff=42`` (a REMOVE_SINGLE event for buff 42) fires ONLY
+    the REMOVE branch, NOT the APPLY branch. The ``elif`` makes the
+    branches exclusive.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        skills=[(42, "Strip")],
+        events=[
+            _build_event_record(
+                time_ms=20_000,
+                src_agent=1,
+                dst_agent=2,
+                value=100,
+                skill_id=42,
+                buff_dmg=50,
+                ev_buff=42,         # a REMOVE record's ev.buff is the stripped buff ID
+                is_buffremove=2,    # REMOVE_SINGLE
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    # Expected: the REMOVE branch fires (BoonApply kind="remove_single")
+    # and the Damage path fires (DamageEvent because value>0 and
+    # is_nondamage defaults to 0). The APPLY branch is silent because
+    # `is_buffremove == 2` makes the Step 3 `elif _ev_buff != 0`
+    # predicate unreachable via short-circuit.
+    assert len(events) == 2
+    boon = events[0]
+    damage = events[1]
+    assert isinstance(boon, BoonApplyEvent)
+    assert boon.kind == "remove_single"
+    assert boon.kind != "apply"  # mutual exclusivity check
+    assert isinstance(damage, DamageEvent)
+
+
+def test_parse_events_emit_apply_zero_ev_buff_does_not_emit() -> None:
+    """Default-fixture cbtevent (ev_buff == 0) does NOT yield BoonApply(kind="apply").
+
+    Mirror of ``test_parse_events_emit_buff_skipped_for_is_buffremove_zero``
+    but for the APPLY branch. The default ``_build_event_record``
+    helper packs ``ev_buff = 0`` (the helper's keyword default).
+    Records with both ``ev_buff == 0`` AND ``is_buffremove == 0``
+    are pure damage / pure heal records (no buff-interaction
+    context) -- no BoonApply event fires.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        skills=[(42, "Whirlwind")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=100,
+                # ev_buff defaults to 0; no buff interaction.
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    # Only DamageEvent fires (the existing Phase 7 v2 emission).
+    assert len(events) == 1
+    assert all(not isinstance(e, BoonApplyEvent) for e in events)
+    assert isinstance(events[0], DamageEvent)
+
+
+def test_parse_events_emit_apply_statechange_filtered_upstream() -> None:
+    """APPLY records deliberately do NOT go through the statechange path.
+
+    The upstream ``if is_statechange != 0: continue`` filter (already
+    in place since Phase 7 v2) does NOT yield APPLY events from
+    statechange records. Per the F1 byte mapping + buff_dispatch
+    realignment, APPLY events are encoded as non-statechange cbtevent
+    records with ``ev_buff != 0``. CBTS_BUFFAPPLY (statechange
+    flavor) is a separate arcdps signal used for INITIAL buff state
+    snapshots at fight start, NOT for mid-combat APPLYs.
+
+    This test locks the statechange-filter boundary so a future
+    refactor that mistakenly engages statechange as the APPLY
+    signal (per the incorrect pre-F1 plan framing) fires at the
+    test boundary.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        skills=[(42, "Skill")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=0,
+                is_statechange=1,  # CBTS_BUFFAPPLY-style marker (NOT mid-combat APPLY)
+                ev_buff=42,         # would-be APPLY buff ID
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    # Statechange record is filtered upstream -- no events.
+    # APPLY predicate is unreachable for statechange records.
+    assert events == []
+
+
+# ---------------------------------------------------------------------------
+# F1 Byte-mapping lock: byte 49 IS arcdps's ev.buff field
+# ---------------------------------------------------------------------------
+
+
+def test_parse_events_offset_49_is_ev_buff_empirical_lock_F1() -> None:
+    """Byte 49 of the cbtevent record reads as ``_ev_buff`` (struct slot 13) -- the arcdps buff ID.
+
+    The 2026-07-11 F1 calibration confirmed byte-49 byte-position
+    alignment with arcdps's ``ev.buff`` field (per the F1 calibration
+    table: byte 49 zero-percentage ~80% on typical rev=1 fights,
+    matches arcdps's `buff` byte semantics). Phase 9 Step 3
+    consumes this byte as the APPLY-predicate discriminator.
+    Renamed from the legacy ``_is_flanking`` to ``_ev_buff`` to
+    reflect the F1 byte mapping (the byte position is unchanged;
+    the rename has zero byte-level impact).
+    """
+    from gw2_evtc_parser.parser import _EVENT_STRUCT
+
+    record = bytearray(64)
+    record[49] = 99  # ev_buff = 99 (non-zero == buff interaction)
+    unpacked = _EVENT_STRUCT.unpack_from(bytes(record), 0)
+    assert unpacked[13] == 99, (
+        f"_ev_buff byte should be at offset 49 (struct slot 13). "
+        f"Read {unpacked[13]} from slot 13 of the unpack tuple. "
+        f"F1 calibration pinned this byte to arcdps's ev.buff field."
+    )

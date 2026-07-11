@@ -160,6 +160,14 @@ EVENT_SIZE: Final[int] = 64
 #:       beat the post-SYNC struct on the empirical outliers:
 #:       5b161ec0 -- current 77.78% vs post 48.66%; eeaE64d1 -- current
 #:       6.91% vs post 0.69% (10x better).
+#:     * Byte 49 (unpack tuple slot 13) = arcdps's ``ev.buff`` field
+#:       (the buff ID for buff-interaction records; the arcdps.h
+#:       label is `buff` but the binding here is renamed from the
+#:       legacy `is_flanking` to reflect the F1 byte mapping).
+#:       Per-fixture zero-percentage is ~80% on typical rev=1 fights.
+#:       Phase 9 step 3 (commit following ``e13ab3b``) reads this
+#:       byte as ``_ev_buff`` and uses it as the APPLY predicate
+#:       (``ev.buff != 0 AND is_buffremove == 0`` -> mid-combat APPLY).
 #:     * Byte 52 (unpack tuple slot 16) = arcdps's ``cbtbuffremove``
 #:       enum: 0=APPLY, 1=REMOVE_ALL, 2=REMOVE_SINGLE,
 #:       3=REMOVE_SINGLE-CBTB_MANUAL-collapsed. Realigned in
@@ -382,7 +390,14 @@ class PythonEvtcParser:
                 _is_cleanup,
                 is_nondamage,
                 is_statechange,
-                _is_flanking,
+                # byte 49 = arcdps ``ev.buff`` field -- the buff ID for
+                # mid-combat APPLY records per F1 byte mapping (struct
+                # slot 13). The legacy name was ``_is_flanking``; v0.10.11+
+                # renames the local binding to ``_ev_buff`` to reflect
+                # the arcdps field semantics. The byte position is
+                # unchanged so the existing damage / heal / strip
+                # / REMOVE-emit logic is unaffected.
+                _ev_buff,
                 _is_shields,
                 _is_offcycle,
                 # v0.10.6+ Phase 9 step 2: bytes 52-53 of the arcdps
@@ -393,13 +408,20 @@ class PythonEvtcParser:
                 # ``_pad61``/``_pad62`` to mirror the arcdps.h field
                 # naming -- the byte offset is unchanged so the
                 # existing damage / healing / buff-removal emission
-                # logic is unaffected. Phase 9 step 2-EMIT-BRANCH
-                # (SHIPPED 2026-07-11) consumes ``is_buffremove`` to
-                # yield ``BoonApplyEvent`` records from REMOVE-class
-                # cbtevent records; ``is_ninety`` is unpacked but not
-                # yet surfaced to the Event stream (a future Phase 9
-                # step may use it for 90%-threshold markers on
-                # Removals -- see plan 026 for the deferred scope).
+                # logic is unaffected.
+                #
+                # v0.10.11+ Phase 9 step 3 also consumes byte 49
+                # (struct slot 13) as ``ev.buff`` -- the arcdps buff
+                # ID for mid-combat APPLY records (per F1 byte mapping:
+                # the parser's 8-byte region reads bytes 46-53 = arcdps
+                # bytes 46 (dst_master_instid low) + 47 (high) + 48
+                # (iff/is_statechange) + 49 (buff) + ... + 52
+                # (cbtbuffremove) + 53 (is_ninety). The legacy binding
+                # named this slot ``_is_flanking``; v0.10.11+ renames
+                # the binding to ``_ev_buff`` to reflect the F1 byte
+                # mapping. The rename has zero byte-level impact (the
+                # byte position is unchanged) but aligns the variable
+                # name with the arcdps.h field semantics.
                 is_buffremove,
                 is_ninety,
                 _pad63,
@@ -408,14 +430,56 @@ class PythonEvtcParser:
                 _pad66,
             ) = _EVENT_STRUCT.unpack_from(data, cursor)
             # NOTE: ``is_buffremove`` is consumed below by
-            # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``);
-            # ``is_ninety`` is unpacked but not yet surfaced to the
-            # Event stream (future Phase 9 steps may use it for
-            # 90%-threshold markers on Removals).
+            # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``) AND
+            # by Step 3 APPLY-BRANCH (predicate ``_ev_buff != 0 AND
+            # is_buffremove == 0``). ``is_ninety`` is unpacked but not
+            # yet surfaced to the Event stream (a future Phase 9 step
+            # may use it for 90%-threshold markers on Removals).
             cursor += EVENT_SIZE
             if is_statechange != 0:
                 continue
-            # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11).
+            # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11, commit
+            # ``e13ab3b``). Predicate: ``is_buffremove`` byte in the
+            # arcdps REMOVE range {1, 2, 3} -- i.e. CBTB_ALL /
+            # CBTB_SINGLE / CBTB_MANUAL (CBTB_MANUAL collapses to
+            # ``remove_single`` per arcdps's "use for in/out volume"
+            # guidance; see
+            # :func:`gw2_analytics.buff_dispatch.decode_buff_change`).
+            #
+            # Phase 9 step 3 APPLY-BRANCH (SHIPPED 2026-07-11 as the
+            # follow-up commit to ``e13ab3b``): predicate
+            # ``_ev_buff != 0 AND is_buffremove == 0`` yields a
+            # ``BoonApplyEvent(kind="apply")`` record from MID-COMBAT
+            # APPLY records. Per F1 byte mapping (see ``_EVENT_STRUCT``
+            # doc-comment) byte 49 IS arcdps's ``ev.buff`` field -- the
+            # buff ID for buff-interaction records. The
+            # ``is_buffremove == 0`` arm ensures the APPLY predicate
+            # excludes the REMOVE-class records (which carry
+            # ``ev.buff`` set to the stripped buff AND
+            # ``is_buffremove`` in [1..3]); the REMOVE branch above
+            # already handles those, so the APPLY branch sees only
+            # pure-apply records (no ``is_buffremove`` signal = no
+            # removal code = either apply OR pure damage).
+            #
+            # Why NOT statechange-driven APPLY: per the F1 calibration
+            # + the buff_dispatch realignment (commit ``529cb90``),
+            # arcdps encodes buff APPLY events as NON-statechange
+            # records (``is_statechange == 0``) with ``ev.buff != 0``,
+            # NOT as statechange records. The CBTS_BUFFAPPLY statechange
+            # is a separate arcdps signal used for the initial buff
+            # stack snapshot at fight start, NOT for mid-combat
+            # applies. The upstream ``if is_statechange != 0: continue``
+            # filter (already in place since Phase 7 v2) correctly
+            # skips the statechange drives AND keeps the APPLY
+            # predicate reachable.
+            #
+            # Layer-separation rationale: the parser does NOT import
+            # from ``gw2_analytics`` (a foundational-vs-analytics
+            # hierarchy -- parsing is a primitive, not on top of
+            # analytics). The APPLY branch here statically yields
+            # ``kind="apply"`` without touching
+            # ``buff_dispatch.decode_buff_change`` (consistent with
+            # the Step 2-REMOVE branch's inline tuple indexing).
             # Predicate: ``is_buffremove`` byte in the arcdps REMOVE
             # range {1, 2, 3} -- i.e. CBTB_ALL / CBTB_SINGLE /
             # CBTB_MANUAL (CBTB_MANUAL collapses to ``remove_single``
@@ -505,6 +569,42 @@ class PythonEvtcParser:
                     # the REMOVE byte range [1, 2, 3] (byte 0 is the
                     # CBTB_NONE sentinel excluded by the predicate).
                     kind=_CBTBUFREMOVE_KINDS[is_buffremove - 1],
+                )
+            elif _ev_buff != 0:
+                # Phase 9 Step 3 APPLY-BRANCH (SHIPPED 2026-07-11).
+                # Predicate: ``_ev_buff != 0 AND is_buffremove == 0 AND
+                # is_statechange == 0`` -- the arcdps mid-combat APPLY
+                # channel per F1 byte mapping + buff_dispatch realignment
+                # (commit ``529cb90``). The upstream
+                # ``if is_statechange != 0: continue`` filter (already
+                # in place) ensures ``is_statechange == 0``; the REMOVE
+                # branch above ensures ``is_buffremove == 0`` for this
+                # branch (since ``is_buffremove in (1, 2, 3)`` is the
+                # REMOVE predicate and ``elif`` makes them mutually
+                # exclusive); so the only remaining predicate is
+                # ``_ev_buff != 0`` -- a non-zero arcdps ``ev.buff``
+                # byte signals a buff-interaction record (a buff ID
+                # was written), which is exactly an APPLY for that
+                # ``skill_id`` buff.
+                #
+                # Conservative default ``duration_ms=0``: cbtevent does
+                # not carry a duration field; the buff duration lives
+                # in the project skills DB (loaded in Phase 10 by the
+                # upstream buff_uptime.accumulate_buff_events aggregator).
+                # Conservative default ``stacks=1``: cbtevent does not
+                # carry a stacks field; mid-combat apply events in
+                # arcdps represent a single stack magnitude delta (a
+                # future arcdps revision could emit multi-stack applies
+                # -- locked in Phase 10 once the aggregator surfaces
+                # the stack-count delta).
+                yield BoonApplyEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent,
+                    target_agent_id=dst_agent,
+                    skill_id=skill_id,
+                    duration_ms=0,
+                    stacks=1,
+                    kind="apply",
                 )
             # Suppress ruff RUF059 (unused-variable on the is_ninety
             # unpack above); re-emit once the 90%-threshold marker
