@@ -9,13 +9,6 @@ import pytest
 from gw2analytics_api.routes.fights.blob_cache import _cached_get_events
 
 
-@pytest.fixture(autouse=True)
-def _clear_cache() -> None:
-    _cached_get_events.cache_clear()
-    yield
-    _cached_get_events.cache_clear()
-
-
 def test_cache_dedupes_minio_get_per_blob_uri(monkeypatch: pytest.MonkeyPatch) -> None:
     """Two calls on the same URI invoke the underlying get_events once."""
     call_count = {"n": 0}

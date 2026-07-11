@@ -77,15 +77,6 @@ class _FakeS3Error(S3Error):
         Exception.__init__(self)
 
 
-@pytest.fixture(autouse=True)
-def _clear_cache() -> None:
-    _cached_get_events.cache_clear()
-    _BLOB_URI_LOCKS.clear()
-    yield
-    _cached_get_events.cache_clear()
-    _BLOB_URI_LOCKS.clear()
-
-
 def test_get_blob_uri_lock_is_atomic_under_concurrent_first_access() -> None:
     """Double-checked locking closes the ``defaultdict`` race on first access.
 
