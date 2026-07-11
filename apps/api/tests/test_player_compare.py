@@ -144,7 +144,11 @@ def test_compare_day_bucket_collapses_per_day() -> None:
     assert len(series) == 2
     for s in series:
         assert len(s["points"]) == 1
-        assert s["points"][0]["started_at"].endswith("T00:00:00")
+        # The day-bucketed point's ``started_at`` is the day-midnight
+        # in the requested TZ, serialised as UTC (the ``Z`` suffix
+        # on the wire -- see ``_combine_day_midnight`` in
+        # ``routes/players.py`` for the conversion details).
+        assert s["points"][0]["started_at"].endswith("T00:00:00Z")
 
 
 def test_compare_unknown_tz_returns_422() -> None:

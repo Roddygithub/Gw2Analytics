@@ -30,29 +30,29 @@ the downstream aggregator + day-bucketing logic stays unchanged.
 
 from __future__ import annotations
 
-import gzip
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error
-from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from gw2_analytics.condi_power_split import KNOWN_CONDI_NAMES
 from gw2_analytics.player_profile import (
     FightContribution,
-    PlayerProfileAggregator,
+    PlayerProfile,
 )
 from gw2_analytics.role_detection import detect_role_lite
-from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, Event, HealingEvent, Profession
+from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, HealingEvent, Profession
+from gw2analytics_api._event_dispatch import build_event_iterator
 from gw2analytics_api.database import get_session
-from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary
+from gw2analytics_api.models import OrmFight
+from gw2analytics_api.route_helpers import format_elite_spec, format_profession
 from gw2analytics_api.schemas import (
     PerFightBreakdownRowOut,
     PlayerListRowOut,
@@ -60,14 +60,14 @@ from gw2analytics_api.schemas import (
     PlayerTimelineOut,
     PlayerTimelinePointOut,
 )
+from gw2analytics_api.services.player_profiles import (
+    aggregate_player_profiles_from_sql,
+    find_account_fights_without_summary,
+    get_account_contributions_from_sql,
+)
 from gw2analytics_api.storage import get_events
 
 logger = logging.getLogger(__name__)
-
-# Module-level adapter: same pattern as
-# :mod:`gw2analytics_api.routes.fights` -- a single ``TypeAdapter``
-# instance for the heterogeneous JSONL line dispatch.
-_EVENT_TYPE_ADAPTER: TypeAdapter[Event] = TypeAdapter(Event)
 
 router = APIRouter(prefix="/api/v1/players", tags=["players"])
 
@@ -77,120 +77,63 @@ router = APIRouter(prefix="/api/v1/players", tags=["players"])
 # ---------------------------------------------------------------------------
 
 
-def _compute_contributions(
+def _load_slow_path_contributions(
     db: Session,
-    fights: Sequence[OrmFight],
-) -> list[FightContribution]:
-    """Emit one :class:`FightContribution` per ``(account_name, fight_id)`` pair.
+    *,
+    account_name: str,
+) -> tuple[list[FightContribution], dict[str, datetime]]:
+    """Load pre-v0.8.4 contributions for ``account_name`` (slow-path fallback).
 
-    v0.8.4: this is now a **hybrid** fast-path / slow-path helper.
-    Fast-path (the new default for fights uploaded after the
-    v0.8.4 migration): read the pre-materialised
-    :class:`OrmFightPlayerSummary` rows directly. Slow-path (the
-    fallback for fights without a summary row -- pre-migration
-    fights, or fights whose re-parse has not yet landed): walk
-    the gzipped events blob, build the per-(fight, account)
-    accumulator, and emit the same :class:`FightContribution`
-    list. Both paths converge on the same output shape so the
-    downstream aggregator + day-bucketing logic stays unchanged.
+    Returns ``(contributions, started_at_map)``:
 
-    Performance: the fast-path is O(rows) per fight (one indexed
-    PK lookup per fight_id), the slow-path is O(events) per
-    fight. For users with 100+ fights, the fast-path drops the
-    5-30s latency to a few milliseconds.
+    - ``contributions``: one :class:`FightContribution` per
+      ``(account_name, fight_id)`` pair, filtered to the
+      requested account (the blob-walk emits one per account
+      that attended the fight, so the filter is required).
+    - ``started_at_map``: ``fight_id -> started_at`` so the
+      caller can sort the merged (SQL + slow-path) set by
+      recency-first.
 
-    Re-parse safety: a re-upload of the same SHA replaces the
-    fight's events blob AND replaces the per-fight summary rows
-    (the services.py helper does a DELETE+INSERT). The
-    fast-path therefore sees the new totals on the next request.
+    At 100% materialised-view coverage (post-v0.8.4 deployments),
+    both return values are empty and the helper is a single
+    ``NOT EXISTS`` query (O(account_fights) on the
+    ``(account_name)`` index of ``fight_agents``) + an empty
+    result short-circuit. The blob-walk is dormant.
+
+    When fights ARE missing, the dispatch is one
+    ``selectinload(OrmFight.agents + skills)`` round-trip (all
+    missing fights in a single query) + one blob-walk per
+    missing fight. ``selectinload`` avoids N+1 queries during
+    the blob-walk's per-fight agent/skill access.
+
+    Extracted from :func:`get_player_timeline` + :func:`get_player`
+    in plan 028 round 2 to remove the ~12 LoC of duplicated
+    dispatch code that was identical between the 2 endpoints.
     """
-    if not fights:
-        return []
-
-    fight_ids = [f.id for f in fights]
-    fast_path_ids = _fast_path_fight_ids(db, fight_ids)
+    missing_fight_ids = find_account_fights_without_summary(db, account_name=account_name)
+    if not missing_fight_ids:
+        return [], {}
+    slow_fights: Sequence[OrmFight] = (
+        db.execute(
+            select(OrmFight)
+            .where(OrmFight.id.in_(missing_fight_ids))
+            .options(
+                selectinload(OrmFight.agents),
+                selectinload(OrmFight.skills),
+            ),
+        )
+        .scalars()
+        .all()
+    )
     contributions: list[FightContribution] = []
-    for fight in fights:
-        if fight.id in fast_path_ids:
-            contributions.extend(_contributions_from_summary(db, fight.id))
-        else:
-            contributions.extend(_contributions_from_blob_walk(fight))
-    return contributions
-
-
-def _fast_path_fight_ids(db: Session, fight_ids: list[str]) -> set[str]:
-    """Return the subset of ``fight_ids`` that have at least one
-    :class:`OrmFightPlayerSummary` row.
-
-    One ``EXISTS`` query: ``SELECT DISTINCT fight_id FROM
-    fight_player_summaries WHERE fight_id IN (...)``. The query
-    is O(N log N) on the PK index, returning at most
-    ``len(fight_ids)`` rows. The result set is the fast-path
-    input. ``DISTINCT`` is the canonical SQL for a unique set
-    over a single PK column (``GROUP BY`` on a PK produces the
-    same plan but is non-idiomatic and confuses readers
-    expecting aggregate semantics).
-    """
-    if not fight_ids:
-        return set()
-    rows = (
-        db.execute(
-            select(OrmFightPlayerSummary.fight_id)
-            .where(OrmFightPlayerSummary.fight_id.in_(fight_ids))
-            .distinct(),
-        )
-        .scalars()
-        .all()
-    )
-    return set(rows)
-
-
-def _contributions_from_summary(
-    db: Session,
-    fight_id: str,
-) -> list[FightContribution]:
-    """Read the pre-materialised :class:`OrmFightPlayerSummary` rows
-    for one fight and emit one :class:`FightContribution` per row.
-
-    The summary table denormalises the identity columns (name /
-    profession / elite_spec) so the route does NOT need to JOIN
-    ``OrmFightAgent`` here -- the same query that reads the
-    magnitudes returns the identity. Strict parallel of
-    :func:`_contributions_from_blob_walk` so both paths
-    produce byte-identical output for the same input.
-    """
-    rows = (
-        db.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id),
-        )
-        .scalars()
-        .all()
-    )
-    return [
-        FightContribution(
-            fight_id=fight_id,
-            account_name=row.account_name,
-            name=row.name,
-            profession=Profession(row.profession),
-            elite=EliteSpec(row.elite_spec),
-            total_damage=row.total_damage,
-            total_healing=row.total_healing,
-            total_buff_removal=row.total_buff_removal,
-            # v0.10.3 plan 083: project the per-fight role detection
-            # from the materialised ``OrmFightPlayerSummary`` row.
-            # Pre-v0.10.3 rows land with ``NULL`` (the migration is
-            # ``nullable=True`` + no backfill); the route's
-            # ``PerFightBreakdownRowOut`` surface treats ``NULL`` as
-            # "unknown" (the pre-migration semantic).
-            detected_role=row.detected_role,
-            detected_tags=row.detected_tags,
-            # v0.10.5 plan 135: project the condi/power split from the
-            # materialised summary row.
-            power_damage=row.power_damage,
-            condi_damage=row.condi_damage,
-        )
-        for row in rows
-    ]
+    started_at_map: dict[str, datetime] = {}
+    for slow_fight in slow_fights:
+        for c in _contributions_from_blob_walk(slow_fight):
+            if c.account_name != account_name:
+                continue
+            contributions.append(c)
+            started_at_map[c.fight_id] = slow_fight.started_at
+    return contributions, started_at_map
 
 
 def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intentionally branchy (S3 + gzip + per-event dispatch) and the ``fight`` arg is the only state it needs (the pre-loaded agents live on the relationship)
@@ -285,8 +228,8 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
         )
         return []
     try:
-        jsonl = gzip.decompress(gz_bytes)
-    except OSError:
+        events = list(build_event_iterator(gz_bytes=gz_bytes))
+    except (OSError, EOFError):
         logger.exception(
             "events blob %s not gzip-decodable for fight %s; skipping",
             blob_uri,
@@ -296,10 +239,7 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
 
     # Per-account accumulator: ``account_name -> {damage, healing, strip, name, prof, elite}``.
     per_account: dict[str, dict[str, int | str]] = {}
-    for line in jsonl.splitlines():
-        if not line:
-            continue
-        event = _EVENT_TYPE_ADAPTER.validate_json(line)
+    for event in events:
         identity = agent_map.get(event.source_agent_id)
         if identity is None:
             continue
@@ -438,33 +378,24 @@ def list_players(
     :func:`_parse_profession_filter` helper.
     """
     parsed_profession = _parse_profession_filter(profession)
-    fights = (
-        db.execute(
-            select(OrmFight)
-            .order_by(OrmFight.started_at.desc())
-            .options(
-                selectinload(OrmFight.agents),
-                # v0.10.5 plan 135: pre-load skills so the slow-path
-                # _contributions_from_blob_walk can build per-fight
-                # skill_name_for_event dict without 2nd round-trip.
-                selectinload(OrmFight.skills),
-            ),
-        )
-        .scalars()
-        .all()
+    # v0.10.10 plan 028: SQL-only cross-fight roll-up. Replaces
+    # the legacy ``select(OrmFight).all() + _compute_contributions
+    # + PlayerProfileAggregator.aggregate()`` path that loaded the
+    # entire ``OrmFight`` table + 2 selectinloads per request.
+    # At 10k WvW fights with ~50 agents each, the legacy path
+    # loaded ~500k ORM objects per request; the SQL path stays
+    # bounded by the response size (LIMIT/OFFSET) and the PK
+    # index. The post-filter on modal profession is client-side
+    # (O(results)) to keep the SQL simple; the filter is on the
+    # MODAL profession (per-account aggregate), not on the
+    # per-fight profession.
+    profiles = aggregate_player_profiles_from_sql(
+        db,
+        limit=limit,
+        offset=offset,
+        profession_filter=parsed_profession,
     )
-    contributions = _compute_contributions(db, fights)
-    profiles = PlayerProfileAggregator().aggregate(contributions)
-    if parsed_profession is not None:
-        # Post-aggregation filter on the modal profession (the
-        # aggregator's contract: the modal profession is the most
-        # common profession across the player's attended fights).
-        # The filter preserves the deterministic-ordering
-        # contract (the aggregator's output is already sorted by
-        # total_damage DESC, so the filtered list is also
-        # sorted by total_damage DESC).
-        profiles = [p for p in profiles if p.profession == parsed_profession]
-    page = profiles[offset : offset + limit]
+    page = profiles
     return [
         PlayerListRowOut(
             account_name=p.account_name,
@@ -545,20 +476,49 @@ def get_player_timeline(
     fights transparently. Per-request latency drops from 5-30s
     to a few milliseconds for users with 100+ fights.
     """
-    fights = (
-        db.execute(
-            select(OrmFight)
-            .order_by(OrmFight.started_at.desc())
-            .options(
-                selectinload(OrmFight.agents),
-                selectinload(OrmFight.skills),
-            ),
-        )
-        .scalars()
-        .all()
+    # v0.10.10 plan 028: hybrid SQL + slow-path view via
+    # ``get_account_contributions_from_sql`` (post-v0.8.4
+    # fights) + ``find_account_fights_without_summary`` +
+    # ``_contributions_from_blob_walk`` (pre-v0.8.4 fights).
+    # The two paths converge on the same ``(FightContribution,
+    # started_at)`` tuple shape; the merge step sorts the
+    # combined result by ``(started_at DESC, fight_id ASC)`` to
+    # match the route's recency-first contract. At 100%
+    # materialised-view coverage (post-v0.8.4 deployments), the
+    # slow-path is dormant and the SQL path is the full
+    # contribution set.
+    pairs = get_account_contributions_from_sql(
+        db,
+        account_name=account_name,
+        limit=10**6,  # unbounded; bounded by account's fight count
+        offset=0,
     )
-    contributions = _compute_contributions(db, fights)
-    own_contributions = [c for c in contributions if c.account_name == account_name]
+    own_contributions: list[FightContribution] = [c for c, _ in pairs]
+    # ``fight_id_to_started`` is built once from the SQL result
+    # and extended below with the slow-path fights (whose
+    # ``started_at`` comes from the loaded ``OrmFight`` rows).
+    fight_id_to_started: dict[str, Any] = {c.fight_id: started_at for c, started_at in pairs}
+
+    # Slow-path dispatch: pre-v0.8.4 fights where this account
+    # had an agent but no ``OrmFightPlayerSummary`` row. The
+    # helper is dormant in steady-state (post-v0.8.4) -- both
+    # return values are empty and no merge is needed. See
+    # :func:`_load_slow_path_contributions` for the dispatch
+    # contract.
+    slow_contributions, slow_started_at = _load_slow_path_contributions(
+        db, account_name=account_name
+    )
+    own_contributions.extend(slow_contributions)
+    fight_id_to_started.update(slow_started_at)
+    # Re-sort the combined (SQL + slow-path) contributions
+    # recency-first. The SQL path was already sorted; the
+    # merge step appends slow-path rows out of order.
+    if slow_contributions:
+        own_contributions.sort(
+            key=lambda c: (fight_id_to_started[c.fight_id], c.fight_id),
+            reverse=True,
+        )
+
     if not own_contributions:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "player not found")
     # v0.8.9: parse the ``?tz=`` string into a :class:`ZoneInfo`
@@ -577,24 +537,12 @@ def get_player_timeline(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"unknown IANA timezone: {tz!r}",
         ) from exc
-    fight_id_to_started: dict[str, Any] = {f.id: f.started_at for f in fights}
-    # Recency-first: started_at DESC (datetime direct compare
-    # preserves microsecond precision; ``.timestamp()`` would
-    # coerce to float), with ``fight_id ASC`` as the canonical
-    # deterministic-ordering tiebreaker for fights that share
-    # a started_at. The ``.get(fight_id, fight_id)`` fallback
-    # is a defensive guard: ``own_contributions`` is computed
-    # from the same fights list, so the lookup SHOULD always
-    # hit, but the fallback mirrors the detail route's style
-    # and prevents a KeyError on any future schema drift.
-    sorted_contributions = sorted(
-        own_contributions,
-        key=lambda c: (
-            fight_id_to_started.get(c.fight_id, c.fight_id),
-            c.fight_id,
-        ),
-        reverse=True,
-    )
+    # Recency-first: the SQL path is sorted by
+    # ``(started_at DESC, fight_id ASC)``; the slow-path merge
+    # step above re-sorts the combined set on the same key. The
+    # ``fight_id_to_started`` dict is built once + reused for
+    # the day-bucketing + breakdown views below.
+    sorted_contributions = own_contributions
 
     # v0.8.1 of the API: ``?bucket=day`` collapses all fights
     # sharing a calendar day into one point whose totals are
@@ -729,39 +677,63 @@ def get_player(
     :class:`PerFightBreakdownRowOut` per attended fight, sorted
     by ``started_at`` DESC.
     """
-    fights = (
-        db.execute(
-            select(OrmFight)
-            .order_by(OrmFight.started_at.desc())
-            .options(
-                selectinload(OrmFight.agents),
-                selectinload(OrmFight.skills),
-            ),
-        )
-        .scalars()
-        .all()
+    # v0.10.10 plan 028: hybrid SQL + slow-path per-account
+    # per-fight contributions. The SQL path returns
+    # post-v0.8.4 fights; the slow-path (one ``NOT EXISTS``
+    # query + a selectinload of the missing ``OrmFight`` rows
+    # + ``_contributions_from_blob_walk`` per fight) covers
+    # pre-v0.8.4 fights. Both paths converge on the same
+    # ``(FightContribution, started_at)`` tuple shape; the
+    # merge step builds the ``fight_id_to_started`` dict from
+    # both sources.
+    pairs = get_account_contributions_from_sql(
+        db,
+        account_name=account_name,
+        limit=10**6,  # unbounded; bounded by account's fight count
+        offset=0,
     )
-    contributions = _compute_contributions(db, fights)
-    # Filter to the requested account BEFORE feeding to the
-    # aggregator so the per-fight breakdown is scoped to the
-    # single account.
-    own_contributions = [c for c in contributions if c.account_name == account_name]
+    own_contributions = [c for c, _ in pairs]
+    fight_id_to_started: dict[str, Any] = {c.fight_id: started_at for c, started_at in pairs}
+
+    # Slow-path dispatch: pre-v0.8.4 fights. Same helper as
+    # ``get_player_timeline``; the merge is identical (extend
+    # contributions, update started_at map).
+    slow_contributions, slow_started_at = _load_slow_path_contributions(
+        db, account_name=account_name
+    )
+    own_contributions.extend(slow_contributions)
+    fight_id_to_started.update(slow_started_at)
+
     if not own_contributions:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "player not found")
-    profiles = PlayerProfileAggregator().aggregate(own_contributions)
-    profile = profiles[0]
-
-    # Build the per-fight breakdown: one row per attended fight,
-    # ordered by started_at DESC. The route does its own ordering
-    # because the aggregator emits ``attended_fight_ids`` sorted
-    # ascending by fight_id (the deterministic-ordering contract),
-    # but the API surface prefers recency-first (analyst UX).
-    fight_id_to_started: dict[str, Any] = {f.id: f.started_at for f in fights}
-    breakdown = sorted(
-        own_contributions,
-        key=lambda c: fight_id_to_started.get(c.fight_id, c.fight_id),
+    # The cross-fight profile: first contribution's identity
+    # (the SQL sort order ensures the first SQL row is the most
+    # recent; the slow-path merge may have re-ordered the
+    # combined list, so we re-sort by recency-first to find the
+    # most-recent contribution's identity). The magnitudes +
+    # fights_attended are summed from ALL contributions to match
+    # the ``PlayerProfileAggregator`` contract.
+    own_contributions.sort(
+        key=lambda c: (fight_id_to_started[c.fight_id], c.fight_id),
         reverse=True,
     )
+    first = own_contributions[0]
+    profile = PlayerProfile(
+        account_name=account_name,
+        name=first.name,
+        profession=first.profession,
+        elite=first.elite,
+        fights_attended=len(own_contributions),
+        total_damage=sum(c.total_damage for c in own_contributions),
+        total_healing=sum(c.total_healing for c in own_contributions),
+        total_buff_removal=sum(c.total_buff_removal for c in own_contributions),
+        attended_fight_ids=sorted(c.fight_id for c in own_contributions),
+    )
+
+    # Per-fight breakdown: recency-first. The
+    # ``own_contributions`` list is already sorted by the merge
+    # step above; pass it through unchanged.
+    breakdown = own_contributions
     return PlayerProfileOut(
         account_name=profile.account_name,
         name=profile.name,
@@ -856,22 +828,10 @@ def _parse_profession_filter(value: str) -> Profession | None:
 
 
 def _profession_label(profession: Profession) -> str:
-    """Map the :class:`Profession` enum to its wire-format string label.
-
-    Mirrors the :func:`gw2analytics_api.routes.fights._to_fight_out`
-    contract exactly: ``UNKNOWN`` for the sentinel zero value,
-    ``PROF(<id>)`` for everything else. The ``profession.value``
-    access is the canonical IntEnum -> int round-trip.
-    """
-    v = profession.value if isinstance(profession, Profession) else int(profession)
-    return "UNKNOWN" if v == 0 else f"PROF({v})"
+    """Wire-format label. Delegates to :func:`format_profession`."""
+    return format_profession(profession)
 
 
 def _elite_label(elite: EliteSpec) -> str:
-    """Map the :class:`EliteSpec` enum to its wire-format string label.
-
-    Mirrors :func:`_profession_label`: ``BASE`` for the sentinel
-    zero value, ``ELITE(<id>)`` for everything else.
-    """
-    v = elite.value if isinstance(elite, EliteSpec) else int(elite)
-    return "BASE" if v == 0 else f"ELITE({v})"
+    """Wire-format label. Delegates to :func:`format_elite_spec`."""
+    return format_elite_spec(elite)

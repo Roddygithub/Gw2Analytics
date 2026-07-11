@@ -35,13 +35,15 @@ detail route before this route ever fires.
 Per-account semantics preserved
 -------------------------------
 
-The route reuses ``apps.api.routes.players._compute_contributions``
-(the same helper the list + detail + per-account timeline routes
-use) so the compute path converges on the same output shape. The
-``?bucket=`` and ``?tz=`` params match the per-account timeline
-exactly (an analyst reading this route after the per-account
-timeline sees the same wire surface -- only the response shape
-changes).
+The route reuses the v0.10.10 plan 028 SQL helpers
+(:func:`services.player_profiles.get_account_contributions_from_sql`
++ :func:`routes.players._load_slow_path_contributions`) per
+requested account so the compute path converges on the same
+``(FightContribution, started_at)`` shape as the per-account
+timeline + detail routes. The ``?bucket=`` and ``?tz=`` params
+match the per-account timeline exactly (an analyst reading this
+route after the per-account timeline sees the same wire surface
+-- only the response shape changes).
 
 404 vs empty
 ------------
@@ -59,13 +61,12 @@ empty data" is more useful for the analyst UX than a 404).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from gw2_analytics.cross_account_timeline import (
     CrossAccountTimelineAggregator,
@@ -73,34 +74,10 @@ from gw2_analytics.cross_account_timeline import (
 )
 from gw2_analytics.player_profile import FightContribution
 from gw2analytics_api.database import get_session
-from gw2analytics_api.models import OrmFight
-from gw2analytics_api.routes.players import _compute_contributions
+from gw2analytics_api.routes.players import _load_slow_path_contributions
+from gw2analytics_api.services.player_profiles import get_account_contributions_from_sql
 
 router = APIRouter(prefix="/api/v1/players", tags=["players"])
-
-
-def _group_contributions_by_account(
-    contributions: Iterable[FightContribution],
-    requested_accounts: Iterable[str],
-) -> dict[str, list[FightContribution]]:
-    """Group contributions by account, pre-seeded with the requested accounts.
-
-    The dict is seeded with one empty list per requested account so
-    :class:`CrossAccountTimelineAggregator` (which emits one series per
-    dict KEY) yields exactly one series per requested account -- an
-    account with no contributions still gets a series with empty
-    ``points``. Contributions whose ``account_name`` was not requested
-    are dropped. Pre-seeding also makes the append safe: a plain
-    ``dict[...] = {}`` with an unconditional ``d[k].append`` raises
-    ``KeyError`` on the first contribution (the v0.10.0 plan 032 defect
-    this helper replaces).
-    """
-    grouped: dict[str, list[FightContribution]] = {account: [] for account in requested_accounts}
-    for c in contributions:
-        bucket = grouped.get(c.account_name)
-        if bucket is not None:
-            bucket.append(c)
-    return grouped
 
 
 # Maximum accounts per compare request. The chart's readability
@@ -147,13 +124,17 @@ def get_compare_timeline(
 ) -> list[CrossAccountTimelineSeries]:
     """Return one per-account series per requested account.
 
-    Iterates :func:`apps.api.routes.players._compute_contributions`
-    once per request (the helper does ONE cross-fight roll-up
-    over ALL fights, then filters per-account in-memory). The
-    cross-account response shape is a list of series; each
-    series carries the same ``points`` shape as the per-account
-    timeline (so a future v0.11.0 client could reuse the chart
-    component without forking the per-account canvas).
+    Iterates the v0.10.10 plan 028 SQL helpers once per
+    requested account (one ``get_account_contributions_from_sql``
+    + one ``_load_slow_path_contributions`` per account, 2-4
+    accounts per request). Replaces the v0.10.0 plan 032
+    ``select(OrmFight).all() + _compute_contributions(db, fights)``
+    pattern that loaded the entire ``OrmFight`` table per
+    request (the O(N) full-table scan that plan 028 was designed
+    to eliminate). The cross-account response shape is a list of
+    series; each series carries the same ``points`` shape as the
+    per-account timeline (so a future v0.11.0 client could reuse
+    the chart component without forking the per-account canvas).
     """
     # Deduplicate the input ``accounts`` list so a request with
     # ``?accounts=A&accounts=A&accounts=B`` emits ONE series for
@@ -189,25 +170,54 @@ def get_compare_timeline(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"unknown IANA timezone: {tz!r}",
         ) from exc
-    fights = (
-        db.execute(
-            select(OrmFight)
-            .order_by(OrmFight.started_at.desc())
-            .options(selectinload(OrmFight.agents)),
+    # v0.10.10 plan 028 (round 2): per-account pattern, matching
+    # the per-account timeline + detail routes. For each
+    # requested (deduped) account, the SQL path covers
+    # post-v0.8.4 fights and the slow-path helper covers
+    # pre-v0.8.4 fights. The merge step builds the
+    # per-account contributions + the ``fight_id -> started_at``
+    # map for the aggregator. At 100% materialised-view
+    # coverage (post-v0.8.4), the slow-path is dormant for
+    # all requested accounts and only the SQL path is
+    # exercised. Replaces the legacy v0.10.0 plan 032
+    # ``select(OrmFight).all() + _compute_contributions(db, fights)``
+    # pattern that loaded the entire ``OrmFight`` table per
+    # request (the O(N) full-table scan that plan 028 was
+    # designed to eliminate).
+    pairs_by_account: dict[str, list[tuple[FightContribution, datetime]]] = {}
+    fight_id_to_started: dict[str, datetime] = {}
+    for account in deduped_accounts:
+        pairs = get_account_contributions_from_sql(
+            db,
+            account_name=account,
+            limit=10**6,  # unbounded; bounded by account's fight count
+            offset=0,
         )
-        .scalars()
-        .all()
-    )
-    contributions = _compute_contributions(db, fights)
-    # Bucket per-account contributions, pre-seeded with the requested
-    # (deduped) accounts so every requested account gets a series and
-    # an account with NO contributions still gets an empty-``points``
-    # series (the "all requested accounts -> all series" contract).
-    per_account_contributions = _group_contributions_by_account(contributions, deduped_accounts)
-    # ``fight_id_to_started`` mirrors the per-account timeline
-    # route's lookup table. The ``.get(fight_id, fight_id)``
-    # fallback is the same defensive guard.
-    fight_id_to_started = {f.id: f.started_at for f in fights}
+        slow_contributions, slow_started_at = _load_slow_path_contributions(
+            db, account_name=account
+        )
+        for c in slow_contributions:
+            pairs.append((c, slow_started_at[c.fight_id]))
+        # Re-sort the combined (SQL + slow-path) pairs recency-first
+        # after the merge (mirrors the per-account timeline route's
+        # post-merge re-sort). Without this, the day-bucketing's
+        # ``setdefault(day_first_fight, c.fight_id)`` in
+        # ``CrossAccountTimelineAggregator`` may pick a non-most-recent
+        # ``day_first_fight`` because the slow-path rows are appended
+        # in their natural order, not in recency-first order.
+        if slow_contributions:
+            pairs.sort(key=lambda p: (p[1], p[0].fight_id), reverse=True)
+        pairs_by_account[account] = pairs
+        for c, started_at in pairs:
+            fight_id_to_started[c.fight_id] = started_at
+    # The pre-seeded-by-deduped-accounts dict guarantees one
+    # series per requested account (an account with no
+    # contributions still gets an empty-``points`` series --
+    # the "all requested accounts -> all series" contract).
+    per_account_contributions = {
+        account: [c for c, _ in pairs]
+        for account, pairs in pairs_by_account.items()
+    }
     return CrossAccountTimelineAggregator().aggregate(
         per_account_contributions=per_account_contributions,
         fight_id_to_started=fight_id_to_started,
