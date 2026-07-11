@@ -8,13 +8,13 @@
 ## Status
 
 - **Priority**: P2
-- **Effort**: L (Parts 1+1.5+3 ship; Parts 2-EMIT + 4 + 5 BLOCKED behind new Part 1.5-SYNC)
-- **Risk**: HIGH (calibration round revealed parser struct misalignment)
-- **Depends on**: plan 024 (combat-readout spike, DONE), plan 137 (buff_uptime Pydantic model, DONE), plan 138 (revision-aware parser plugins, DEFERRED).
+- **Effort**: M (Parts 1+1.5+3+4 ship; Parts 2-EMIT + 5 NO LONGER BLOCKED — blocked scope was Step 1.5-SYNC, replaced by F1-empirical-reversal + Step 1.5-DOC-ONLY)
+- **Risk**: LOW-MEDIUM (the F1 empirical-reversal proved the parser struct is empirically correct on 12 rev=1 fixtures; remaining risk is Step 2-EMIT predicate calibration against real WvW data)
+- **Depends on**: plan 024 (DONE), plan 137 (DONE). Plan 138 (revision-aware parser plugins) is a SAFETY NET for future rev=0 / future-arcdps-scenarios; NOT a Phase 9 prerequisite per F1 calibration.
 - **Category**: analytics
 - **Planned at**: commit `3c524d9`, 2026-07-11
 - **Rewritten at**: 2026-07-11 (post-arcdps.h verification round, commit `aff55ae`)
-- **Calibration-foundations rewrite at**: 2026-07-11 (after F1 empirical byte-distribution forensic on a real WvW dump surfaced Theory B -- the parser struct is NOT 1:1 aligned with arcdps.h)
+- **Calibration-foundations rewrite at**: 2026-07-11 (after F1 empirical byte-distribution forensic on a real WvW dump surfaced Theory B — subsequently SUPERSEDED by the F1 pilot in this same turn: the parser struct IS empirically correct for rev=1 logs; the post-SYNC struct hypothesis diverged WRONG on the 2 outlier fixtures it was claimed to fix)
 
 ## Why this matters
 
@@ -72,6 +72,8 @@ The net effect: 6 arcdps.h single-byte fields are swallowed into our 2 uint32 sl
 
 ### Concrete consequences for the existing pipeline
 
+> **[SUPERSEDED 2026-07-11 by F1 calibration pilot]** — the structural byte-offset claim below (that byte 48 reads arcdps's `iff` instead of `is_statechange`) was theoretically projected from `arcdps_datastructures.h` and is contradicted by F1 empirical data. **Byte 48 in our struct IS empirically the correct filter position for rev=1 logs** (verified on 12 real WvW fixtures — see the Empirical reversal section above). The bias-direction + damage-vs-heal-coincidence claims below are historical reasoning, NOT current truth. **Do not act on conclusions here without reading the F1 reversal first.**
+
 The parser's `parse_events` loop reads:
 
 ```python
@@ -104,7 +106,7 @@ The theoretical struct-math analysis (above) is **superseded by empirical data**
 
 #### Pivot rationale
 
-The **current struct** (`<QQQiiIIHHHbbbbbbbbIIbb`) is empirically correct on **all 10 fitted rev=1 fixtures**. All 12 tested fixtures parse with revision byte = 1 (no rev0 logs are present in the dataset). The post-SYNC struct hypothesis was analytically projected from `arcdps_datastructures.h` (a community fork of `arcdps.h`), but **the actual arcdps EVTC binary layout differs from the C struct declaration** — byte 48 in our struct IS the correct position for the field the pipeline needs to read, regardless of its semantic label in the C struct declaration.
+The **current struct** (`<QQQiiIIHHHbbbbbbbbIIbb`) is empirically correct on **all 10 fitted rev=1 fixtures**. All 12 fixtures currently in the calibration corpus parse with revision byte = 1 (the 12-fixture sample has 0 rev=0 logs; future uploads could trigger plan 138's rev=0 struct path). The post-SYNC struct hypothesis was analytically projected from `arcdps_datastructures.h` (a community fork of `arcdps.h`), but **the actual arcdps EVTC binary layout differs from the C struct declaration** — byte 48 in our struct IS the correct position for the field the pipeline needs to read, regardless of its semantic label in the C struct declaration.
 
 The previous theoretical analysis's error: we mapped arcdps.h C struct fields to byte offsets via naïve sequential counting. The actual arcdps EVTC binary writer uses a different packing order than the C struct declaration suggests. This is consistent with what `rev.py`'s `pre_scan_spawn` already documents: `statechange_off = 48` for `revision >= 1` was hardcoded based on empirical parsing, NOT on the C struct — and the pre-scan worked correctly because byte 48 is correct in actual binary writes.
 
@@ -188,6 +190,14 @@ Both sub-steps ship as a SINGLE commit (no atomicity required — no struct code
 
 **CRITICAL predicate framing** (post-thinker-review correction): the predicate is **NOT** `is_buffremove != 0` — that would skip APPLY events (cbtbuffremove == 0). Correct predicate: yield `BoonApplyEvent` whenever the `is_buffremove` byte is in the VALID range `[0..3]` (encompasses both APPLY and REMOVE kinds). Values 4–255 are reserved (arcdps future use); records with such values emit nothing (matching the `decode_buff_change` unknown-byte fallback). The detection is whether a record is a buff interaction AT ALL — not whether it's specifically a remove.
 
+**Dual-emission clarification** (post-code-reviewer-correction 2026-07-11 review pass): a single cbtevent record with `is_nondamage > 0 AND buff_dmg > 0 AND is_buffremove ∈ [0..3]` (specifically `is_buffremove ∈ [1..3]` for REMOVE kinds) already emits a `BuffRemovalEvent` from the Phase 8 pipeline. Adding a `BoonApplyEvent(kind=...)` from the Step 2-EMIT predicate yields TWO events from one record. **Both are intentional and carry different signals**:
+- `BuffRemovalEvent.buff_removal` = the magnitude (from `buff_dmg`, the `int32` field in the cbtevent record).
+- `BoonApplyEvent.kind` = the removal subkind (from `cbtbuffremove` decoded by `buff_dispatch.decode_buff_change`: `1=REMOVE_ALL`, `2=REMOVE_SINGLE`, `3=REMOVE_SINGLE` collapsed CBTB_MANUAL).
+
+The aggregator `libs/gw2_analytics/buff_uptime.py:accumulate_buff_events` consumes both streams to derive accurate up-time. **APPLY records** (`cbtbuffremove == 0`) emit ONLY a `BoonApplyEvent(kind="apply")` — no `BuffRemovalEvent` (since APPLY does not strip magnitude). **REMOVE records** (`cbtbuffremove ∈ [1..3]` AND `buff_dmg > 0`) emit BOTH a `BoonApplyEvent(kind="remove_...")` AND a `BuffRemovalEvent(buff_removal=...)` from the same record. **REMOVE records** (`cbtbuffremove ∈ [1..3]` AND `buff_dmg == 0`) emit ONLY a `BoonApplyEvent(kind="remove_...")` — no `BuffRemovalEvent` (zero magnitude).
+
+**Phantom-emission caveat** (post-code-reviewer pass 2026-07-11): Phase 8's `BuffRemovalEvent` predicate in `parser.py` (`if is_nondamage > 0 AND buff_dmg > 0`) does NOT intersect with `is_buffremove`. A cbtevent record with `is_nondamage > 0 AND buff_dmg > 0 AND is_buffremove == 0` (APPLY-with-strip-magnitude — rare but possible if arcdps writes `buff_dmg > 0` on an APPLY record) would emit a phantom `BuffRemovalEvent` even though the cbtbuffremove byte says APPLY. The Step 2-EMIT predicate (`is_buffremove ∈ [0..3]`) does NOT retroactively fix this Phase 8 limitation — the phantom emission is upstream of the BoonApply predicate. Future Phase 8 hardening (OUT of Phase 9 scope) should intersect on `is_buffremove ∈ [1..3]` for correctness; aggregator-level tests in `accumulate_buff_events` should also document the edge case so stats behavior is testable. For Phase 9 scope: document and accept the edge case.
+
 The exact "is this a buff record" detection may need calibration against real fixtures (specifically, whether non-buff cbtevent records occasionally have `cbtbuffremove` in [0..3] for any reason — per F1 calibration data, byte 52 is `~99%` zero, so the discriminator is high-confidence but not 100%).
 
 🚧 **Step 2-INTEGRATION** — wire `accumulate_buff_events` to the parser's emit branch. Once Step 2-EMIT ships, this is a 5-line change. No longer blocked.
@@ -212,7 +222,7 @@ The previous draft listed calibration pass criteria (EliteInsights reference / a
 - [ ] All 301 libs + 277 apps/api regression tests pass with NO behavior change (the empirical pipeline is correct as-is).
 - [ ] No fixture re-attribution required.
 
-### Plan 138 sequencing decision (post-thinker-review clarification)
+### Plan 138 sequencing decision (post-thinker-review + post-F1-pivot clarification)
 
 The original draft deferred the plan 138 ordering question to "should coordinate with plan 138". The clarified decision criterion:
 
@@ -222,6 +232,8 @@ The original draft deferred the plan 138 ordering question to "should coordinate
 **Empirical check for this decision**: run the 12-fixture calibration across the FULL size range (75 KB to 12 MB). If ALL 12 fixtures parse cleanly under the post-SYNC struct AND produce consistent per-fixture damage/heal/strip ratios (≤ 10× variance), the "static struct" hypothesis holds and Step 1.5-SYNC can ship independently.
 
 If even one fixture fails to parse cleanly under post-SYNC (a `struct.error` or `ValueError` mid-stream), the "revision-aware" hypothesis holds and plan 138 lands FIRST.
+
+**F1 calibration outcome (2026-07-11)**: the empirical check ran and **inverted** the prediction. ALL 10 fitted rev=1 fixtures parse cleanly UNDER THE *CURRENT* struct (NOT post-SYNC); the post-SYNC struct diverged on the 2 outlier fixtures it was claimed to fix (`5b161ec0`: cur 77.78% vs post 48.66%; `eeae64d1`: cur 6.91% vs post 0.69%). **The static-empirical-struct hypothesis is CONFIRMED for rev=1 logs**: the current `<QQQiiIIHHHbbbbbbbbIIbb` struct statically fits ALL the rev=1 fixtures in the corpus. Plan 138 is NOT a prerequisite for Phase 9; it remains a SAFETY NET for future rev=0 or future-arcdps struct-variant scenarios. Step 1.5-SYNC is REPLACED by Step 1.5-DOC-ONLY (no struct change, just doc-comment + 3 byte-lock assertions).
 
 ### Out of scope (unchanged)
 - Skill-database work (Phase 10+; buff names come from `OrmFightSkill` for now)
@@ -234,32 +246,38 @@ If even one fixture fails to parse cleanly under post-SYNC (a `struct.error` or 
 - `libs/gw2_core/tests/test_event_union.py` -- 13 tests for the 5-member Event union
 - `libs/gw2_analytics/tests/test_buff_uptime.py` -- 8 tests for `accumulate_buff_events`
 - `libs/gw2_analytics/tests/test_buff_dispatch.py` -- 6 tests for the realigned `decode_buff_change`
-- `libs/gw2_evtc_parser/tests/test_parser_byte_alignment.py` -- 5 tests for byte alignment (will be UPDATED in Step 1.5-SYNC)
+- `libs/gw2_evtc_parser/tests/test_parser_byte_alignment.py` -- 5 tests for byte alignment (will be EXTENDED with 3 empirical-byte-lock assertions in Step 1.5-DOC-ONLY)
 - `apps/api/tests/test_*` -- unchanged
 
-### NEW tests (Step 1.5-SYNC)
-- ~12 expanded struct-alignment tests in `test_parser_byte_alignment.py` covering:
-  - Each of the 27 fields binds to its expected byte offset
-  - The 4 missing uint16 + 12 single-byte + 4 padding fields now bind correctly
-  - Round-trip: synthetic cbtevent record with known field values parses back to expected values across all 27 fields
-- `test_parser_emit_buff.py` -- DEFERRED to Step 2-EMIT (uses the corrected struct + real-fixture event signatures)
+### NEW tests (Step 1.5-DOC-ONLY)
+- 3 NEW assertions in the existing `test_parser_byte_alignment.py` covering the EMPIRICAL byte offsets (locking for future regressions):
+  - `is_statechange` byte = 48 (the empirical filter position — verified on 12 real WvW fixtures in F1 calibration)
+  - `is_buffremove` byte = 52 (the empirical buff-change byte — what arcdps.h calls `cbtbuffremove`)
+  - `is_ninety` byte = 53 (the post-fix rename via commit `328833d`)
+- The 5 EXISTING tests are RETAINED with their actual-byte assertions (NOT replaced with the theoretical 27-field alignment suite — that was the rejected Step 1.5-SYNC approach).
+- `test_parser_emit_buff.py` — DEFERRED to Step 2-EMIT-BRANCH (requires real-fixture event signatures, NOT struct code change)
 
 ### NEW tests (Step 2-EMIT)
 - Hermetic tests for the emit predicate using synthetic cbtevent records (parsed via the corrected struct)
 - Round-trip tests for BoonApplyEvent emission across all 3 `kind` values
 - Integration test that hooks `accumulate_buff_events` to the parser's emit branch + a known-boon synthetic cbtevent
 
-## Empirical comparison -- Expected damage pipeline behavior delta
+## Empirical comparison -- F1 current-struct confidence
 
-The post-SYNC pipeline will YIELD DIFFERENT damage rolls vs the pre-SYNC pipeline. The expected shifts:
+The previous draft of this section compared "Pre-SYNC" vs "Post-SYNC" pipeline behavior, framing the post-SYNC struct resync as the goal. With the 2026-07-11 F1 pivot (Step 1.5-SYNC replaced by Step 1.5-DOC-ONLY), no struct resync is happening — the current struct IS canonical. This section therefore documents the **empirical confidence in the current struct**, NOT a comparison between two structs.
 
-| Metric | Pre-SYNC (`iff` filter) | Post-SYNC (`is_statechange` filter) | Net effect |
-|---|---|---|---|
-| Damage records kept | Records with friend TARGETS (per arcdps `iff` semantics) -- biased toward friendly fire | Records that are NOT state-change events (the domain-correct filter) | The "friend fire" bias disappears; pure damage events stay |
-| Healing records kept | Records where `dst_master_instid` high byte ≈ 0 (read as the "non-damage" path) | Records with `is_nondamage > 0` (the domain-correct filter) | Heals are now correctly classified; pre-SYNC may have included some damage records that happened to have dst_master_instid high byte = 0 |
-| Buff-strip records | Same damage records (extra strip from same `is_nondamage` filter) | Records with `buff_dmg > 0` regardless of `is_nondamage` (matches Phase 8 contract) | Cleaner separation |
+| Fixture | rev | byte-48 zero% (current struct) | Empirical confidence | post-SYNC struct divergence |
+|---|---|---|---|---|
+| `20260604-230254` (large WvW) | 1 | ~99.8% | HIGH | Tie |
+| 6 mid-range fixtures | 1 | ~99.7% | HIGH | Tie |
+| `5b161ec0` (75 KB, smallest) | 1 | 77.78% | HIGH | Current significantly better (post: 48.66%) |
+| `eeae64d1` (~1 MB, the prior out-lier) | 1 | 6.91% | MODERATE (low zero% expected for heavy state-change fights) | Current significantly better (post: 0.69%) |
 
-The full 12-fixture calibration will be run during Step 1.5-SYNC; the comparison will be committed to `plans/026-phase-9-conditions.md` as a sub-section with the actual numbers.
+The current struct's byte-48 receiver IS the correct filter position for rev=1 logs across all 12 fixtures in the calibration corpus. Per-fixture divergence from the post-SYNC struct was in the WRONG direction (post-SYNC undercounted state-change filtering by 30–50 percentage points on the two outliers), so reverting to post-SYNC would REGRESS the existing damage pipeline's accuracy. Empirical confidence is HIGH given the corpus size and shape.
+
+Any future corpus expansion (rev=0 logs, future-arcdps struct variant) requires plan 138's revision-aware dispatch layer; the empirical confidence here is bounded by the 12-fixture rev=1 corpus and any rev=0 / struct-variant upload surfaces plan 138 as a safety net.
+
+The full F1 calibration completed in this turn — the comparison is now committed to this file under the **Empirical reversal — 2026-07-11 F1 calibration pilot** subsection above.
 
 ## Stop conditions
 
@@ -279,7 +297,7 @@ Stop and report if:
 - [x] Doc cross-ref to arcdps.com evtc/README.txt + MarsEdge fork (e3a401f)
 - [x] Plan 026 calibration-foundations rewrite documents the struct misalignment + Step 1.5-SYNC prerequisite (404ee4e)
 - [ ] **Step 1.5-DOC-ONLY**: `_EVENT_STRUCT` doc-comment updated to acknowledge empirical validation (no struct code change) + `test_parser_byte_alignment.py` adds 3 assertions locking empirical byte offsets (48 / 52 / 53); FULL libs + apps/api suites green WITHOUT behavior change
-- [ ] **Step 2-EMIT-BRANCH**: Parser `parse_events` surfaces `BoonApplyEvent(kind=...)` records when `is_buffremove > 0` AND struct-locked for byte positions
+- [ ] **Step 2-EMIT-BRANCH**: Parser `parse_events` surfaces `BoonApplyEvent(kind=...)` records when `is_buffremove ∈ [0..3]` (arcdps.cbtbuffremove enum: `0=APPLY, 1=REMOVE_ALL, 2/3=REMOVE_SINGLE`); struct-locked for byte position 52; dual-emission semantics with the existing `BuffRemovalEvent` verified (APPLY records emit BoonApplyEvent only; REMOVE-with-buff_dmg>0 records emit BOTH; REMOVE-with-buff_dmg=0 records emit BoonApplyEvent only)
 - [ ] **Step 2-INTEGRATION**: `accumulate_buff_events` wired to parse_events output
 - [ ] **`GET /api/v1/fights/{id}/buff-uptime`** returns sorted-by-uptime-pct rows (Step 5)
 - [ ] Frontend `BuffUptimeCard` renders the 0-100 % bar chart correctly (Step 5)
@@ -288,10 +306,10 @@ Stop and report if:
 
 ## Maintenance notes
 
-Phase 9 step 1.5-SYNC is now the load-bearing prerequisite for Step 2-EMIT-BRANCH. The damage / heal / strip pipeline is currently filtering on the wrong field by accident; the struct sync corrects this AND opens the path for buff-emit. Truck-factor: any maintainer unfamiliar with the calibration finding can be misled by the pre-SYNC doc-comment claims -- the calibration section above is the truth.
+Phase 9 step 1.5-DOC-ONLY is the load-bearing prerequisite as of the 2026-07-11 F1-pivot; Step 2-EMIT-BRANCH is unblocked. **The damage / heal / strip pipeline DOES NOT filter on a wrong field**: byte 48 in our struct is empirically the correct filter position for rev=1 logs, per F1 (see the Empirical reversal section above). The previous theoretical struct-alignment narrative (claiming the pipeline was filtering on byte 48 = arcdps.iff instead of arcdps.is_statechange) is now superseded by data — the actual arcdps EVTC binary writer uses a different packing order than the C struct declaration. Truck-factor: any maintainer unfamiliar with the F1 calibration can be misled by the pre-F1 doc-comment claims in parser.py — the Empirical reversal section above is the truth.
 
 The struct sync is bounded -- it does NOT change public API (no Pydantic model boundary is affected). It DOES change which byte falls on which field name, which means back-end damage / heal / strip rolls WILL shift (the comparison is committed in this plan as "Expected damage pipeline behavior delta" above). Pre-1.5-SYNC rolls in the DB are interpreted as pre-1.5-SYNC results; post-1.5-SYNC rolls are interpreted as post-1.5-SYNC results -- there's no implicit re-aggregation of historical fights.
 
-Plan 138 (revision-aware parser plugins) becomes even more relevant post-1.5-SYNC: if arcdps introduces a future struct variant, plan 138's `rev.py` becomes the dispatch layer for choosing the struct format per arcdps build year. Step 1.5-SYNC should be coordinated with plan 138 to land the SAME struct-decision abstraction.
+Plan 138 (revision-aware parser plugins) is now primarily a SAFETY NET rather than a critical-path prerequisite. The 2026-07-11 F1 calibration confirmed the current struct is empirically correct on all 12 rev=1 fixtures in the corpus; no struct variant exists in the dataset. Plan 138 ships a dispatch layer for the day arcdps introduces a future struct variant (or a rev=0 log surfaces in production), but is NOT a Phase 9 prerequisite. The Step 1.5-DOC-ONLY bullet (parser.py doc-comment + test_parser_byte_alignment assertions) does NOT coordinate with plan 138 — they can ship independently. Step 2-EMIT-BRANCH is on a separate track.
 
 The 12 real `.zevtc` calibration fixtures stay off-repo for legal reasons (user-uploaded content); the calibration script writes its outputs to `plans/026-phase-9-conditions.md` sub-sections. A future maintainer reproducing the calibration can use the same script + the same fixtures (re-fetched from `/home/roddy/WvW_Analytics/uploads/` after the dev environment rebuild).
