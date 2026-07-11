@@ -3,7 +3,19 @@
 arcdps 2025+ encodes buff apply / remove ALL / remove SINGLE / remove MANUAL
 via the ``is_statechange == 0`` + ``ev.buff != 0`` channel, distinguished by
 the ``is_buffremove`` byte. The mapping is the arcdps.h ``cbtbuffremove``
-enum (verified via `<GW2-ArcDPS-Mechanics-Log>/src/arcdps_datastructures.h`):
+enum, verified against TWO independent sources for auditability:
+
+1. **arcdps's own ``evtc/README.txt``** --
+   `https://www.deltaconnected.com/arcdps/evtc/README.txt`
+   (the canonical upstream spec maintained by the arcdps developer).
+2. **The community-port ``arcdps_datastructures.h``** at
+   `<GW2-ArcDPS-Mechanics-Log>/src/arcdps_datastructures.h`
+   (a community mirror of the C struct definitions used for
+   the parser test fixtures; cross-checked against the
+   arcdps.com README to confirm the four ``cbtbuffremove``
+   enum values agree).
+
+Reported values from both sources:
 
 - ``0`` = CBTB_NONE (NOT a removal event — in the buff-emit predicate
   context, this is the "buff applied" sentinel)
