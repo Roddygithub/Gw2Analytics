@@ -44,6 +44,7 @@ import pytest
 
 from gw2_core import BoonApplyEvent, BuffRemovalEvent, DamageEvent, HealingEvent
 from gw2_evtc_parser import PythonEvtcParser
+from gw2_evtc_parser.parser import _EVENT_STRUCT
 
 # ---------------------------------------------------------------------------
 # Local copies of build-event fixtures (extended with ``is_buffremove``)
@@ -316,7 +317,7 @@ def test_parse_events_emit_buff_remove_manual_collapses_to_remove_single() -> No
     )
     events = list(PythonEvtcParser().parse_events(evtc))
     assert len(events) == 2  # BoonApplyEvent + DamageEvent
-    boon, damage = events
+    boon, _damage = events  # _damage intentionally unused
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_single"  # CBTB_MANUAL collapses to SINGLE
 
@@ -661,7 +662,7 @@ def test_parse_events_emit_apply_statechange_filtered_upstream() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_events_offset_49_is_ev_buff_empirical_lock_F1() -> None:
+def test_parse_events_offset_49_is_ev_buff_empirical_lock_F1() -> None:  # noqa: N802 -- F1 calibration suffix
     """Byte 49 of the cbtevent record reads as ``_ev_buff`` (struct slot 13) -- the arcdps buff ID.
 
     The 2026-07-11 F1 calibration confirmed byte-49 byte-position
@@ -673,8 +674,6 @@ def test_parse_events_offset_49_is_ev_buff_empirical_lock_F1() -> None:
     reflect the F1 byte mapping (the byte position is unchanged;
     the rename has zero byte-level impact).
     """
-    from gw2_evtc_parser.parser import _EVENT_STRUCT
-
     record = bytearray(64)
     record[49] = 99  # ev_buff = 99 (non-zero == buff interaction)
     unpacked = _EVENT_STRUCT.unpack_from(bytes(record), 0)

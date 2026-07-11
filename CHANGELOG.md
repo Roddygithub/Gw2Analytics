@@ -20,6 +20,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (apps/api - v0.10.11+ plan 144 LRU singleflight: collapse N concurrent cold-cache misses to 1 fetch)
+
+The pre-existing per-URI ``threading.Lock`` on ``_cached_get_events`` (apps/api/src/gw2analytics_api/routes/fights.py = plan 029) was AUGMENTED with a true singleflight on the cold-cache miss path. N parallel ``Promise.allSettled`` calls on a cold ``blob_uri`` now produce 1 MinIO GET + N-1 ``future.result()`` waits (vs the pre-singleflight 4 sequentialised MinIO GETs in the latch design). The per-URI latch stays as defence-in-depth: it bridges the nanosecond race-window between the in-flight Future pop in the ``finally`` block and the lru_cache decorator's atomic cache-write at function-return (a 5th concurrent caller could otherwise open a redundant Future in that brief window), AND it bounds the ``_IN_FLIGHT_FUTURES`` peak to ``maxsize=8`` (the same bound the lru_cache uses).
+
+- New module-level ``_IN_FLIGHT_FUTURES: dict[str, Future]`` + ``_IN_FLIGHT_FUTURES_META_LOCK: threading.Lock`` (commit ``dd5ee2f``).
+- New helper ``_get_or_create_inflight_future(uri) -> (Future, is_fetcher)`` mirrors ``_get_blob_uri_lock``'s double-checked-locking pattern -- fast path is a lock-free dict lookup, slow path re-checks under the meta-lock before insert.
+- ``_cached_get_events`` rewritten:
+  * ``future, is_fetcher = _get_or_create_inflight_future(blob_uri)``
+  * if ``not is_fetcher``: ``return future.result()`` (concurrent waiter)
+  * if ``is_fetcher``: fetch + ``future.set_result(result)`` -> ``return result``
+  * on Exception: ``future.set_exception(exc); raise`` (broadcasts to N waiters)
+  * on finally: pop the Future from the dict so a retry post-exception starts a fresh singleflight fetch.
+- Exception type narrowed from ``BaseException`` to ``Exception``: shutdown signals (KeyboardInterrupt / SystemExit) propagate without enabling the exception broadcast.
+- 2 NEW singleflight contract tests (``test_singleflight_collapses_to_single_fetcher`` + ``test_singleflight_exception_propagates_to_all_waiters``) alongside the existing 8 latch tests. Full 12-test suite passes (10 isolated runs of the 3 concurrency tests, zero flake).
+
+### Fixed (apps/api - v0.10.10 cold-phase flake on thundering-herd test, pre-existing on main)
+
+The pre-existing ``test_fights_blob_cache_thundering_herd.py::test_concurrent_calls_to_same_uri_are_serialised`` was failing ~1/3 of CI runs (a deterministic test bug masked by ``gzip``-timestamp coincidence: 4 concurrent ``gzip.compress(b"event")`` calls produce different bytes unless they happen within the same wallclock second). The fix is in the test (the production code's latch contract was always correct):
+
+- Replaced the broken assertion ``assert all(r == results[0] for r in results)`` with ``assert all(gzip.decompress(r) == b"event" for r in results)`` -- the precise-but-stable contract: every caller received gzip bytes that DECOMPRESS to the same payload, regardless of gzip-header timestamp drift.
+- Verified: 10/10 isolated test runs PASS post-fix; full apps/api test_fights_blob_cache_thundering_herd.py suite (8 tests) PASS; no flake.
+
+### Changed (dev/styling - sweep of 8 inherited non-E501 ruff violations)
+
+Sweeps up the pre-existing inherited style violations in ``libs/gw2_evtc_parser/tests/`` that were NOT introduced by the Phase 9 + singleflight work:
+
+- 3 ``N802``: 3 functions named with the ``F1`` calibration suffix (``test_is_buffremove_offset_52_empirical_lock_F1`` + ``test_is_ninety_offset_53_empirical_lock_F1`` + ``test_parse_events_offset_49_is_ev_buff_empirical_lock_F1``) get explicit ``# noqa: N802 -- F1 calibration suffix`` annotations (the suffix references the 2026-07-11 empirical calibration pilot; renaming to lowercase would lose the calibration-context grep hint).
+- 2 ``PLC0415``: 2 local imports inside test functions (``_CBTBUFREMOVE_KINDS`` inside ``test_cbtbuffremove_kinds_tuple_shape_locked`` in ``test_parser_byte_alignment.py`` + ``_EVENT_STRUCT`` inside ``test_parse_events_offset_49_is_ev_buff_empirical_lock_F1`` in ``test_parser_emit_buff.py``) hoisted to file-top imports.
+- 1 ``SIM300``: yoda condition in ``test_cbtbuffremove_kinds_tuple_shape_locked`` swapped to variable-first (auto-fixed by ruff).
+- 1 ``RUF059``: unused ``damage`` unpack in ``test_parse_events_emit_buff_remove_manual_collapses_to_remove_single`` renamed to ``_damage`` + explicit comment.
+
+### Added (libs/gw2_evtc_parser - v0.10.11+ Phase 9 step 2-EMIT-BRANCH + step 3 APPLY-BRANCH: dual-channel buff-lifecycle emit surface)
+
+The parser's :meth:`PythonEvtcParser.parse_events` now yields :class:`~gw2_core.BoonApplyEvent` records from BOTH ends of the arcdps buff-lifecycle spectrum via the dual-channel emit surface:
+
+- **Step 2 REMOVE channel** (commit ``e13ab3b``): the ``is_buffremove`` byte (arcdps ``cbtbuffremove`` enum, struct slot 6 = byte 52) drives the REMOVE branch. The predicate ``is_buffremove in (1, 2, 3)`` excludes the ``CBTB_NONE`` sentinel (0) so pure-damage / pure-heal records (which carry ``is_buffremove == 0`` as a default) do not pollute the BoonApplyEvent stream with phantom zero-duration applies. The per-yield defensive ``assert 0 <= is_buffremove - 1 < len(_CBTBUFREMOVE_KINDS)`` + the module-load ``_CBTBUFREMOVE_KINDS`` literal-content pin (``test_cbtbuffremove_kinds_tuple_shape_locked``) form a 2-layer defence against predicate/indexing drift.
+
+- **Step 3 APPLY channel** (commit ``a1bd696``): the ``_ev_buff`` byte (struct slot 13 = byte 49, renamed from the legacy ``_is_flanking``) drives the APPLY branch. Per the F1 calibration (2026-07-11 pilot on 12 real WvW fixtures), arcdps encodes mid-combat APPLY as a NON-statechange record with a non-zero ``ev.buff`` byte (the buff ID for the applied buff) -- NOT as a statechange record. The ``elif _ev_buff != 0 AND is_buffremove == 0`` predicate is mutually exclusive with the REMOVE branch via short-circuit.
+
+- **Step 3.5 real-fixture anchor** (commit ``0129331``): ``test_parser_applive_realfixture.py`` pins the dual-channel emit contract against the F1-pilot ``5b161ec0*.zevtc`` fixture (75 KB / 1,702 events, ratios: damage 1,567, heals 25, strips 77, BoonApply(apply) 32, BoonApply(remove) 1). The soft-bound ratio guard ``apply_count <= damage_count // 3`` (the measured ratio is 2.0%) is the phantom-leak signature: catches any future predicate widening to ``[0..3]`` (would push the ratio near 1.0 once every damage record leaks). Off-repo fixture policy: ``$WVW_ANALYTICS_DIR/uploads/5b161ec0*.zevtc`` (default ``/home/roddy/WvW_Analytics``) -- pytest.skipif makes the test cleanly skip when the sink is unavailable (offline CI stays green).
+
+- 8 hermetic predicate-boundary tests in ``test_parser_emit_buff.py`` (Step 2) cover the FULL arcdps REMOVE byte range {1, 2, 3} + the sentinel {0} + the out-of-range bytes {4, 5, 127, -128} + statechange-driven records + the canonical CBTS_BUFFAPPLY flavor + the no-magnitude REMOVE edge case. 5 NEW tests for Step 3 cover mid-combat APPLY + co-emit-with-damage + mutual exclusion with REMOVE + zero-ev_buff regression + statechange-filter lock.
+
 ### Fixed (apps/api - v0.10.9 plan 144: player-compare KeyError crash)
 
 - **apps/api v0.10.9 plan 144**: `GET /api/v1/players/compare/timeline`

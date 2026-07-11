@@ -36,7 +36,11 @@ from __future__ import annotations
 
 import struct
 
-from gw2_evtc_parser.parser import _EVENT_STRUCT, EVENT_SIZE
+from gw2_evtc_parser.parser import (
+    _CBTBUFREMOVE_KINDS,  # pinned by test_cbtbuffremove_kinds_tuple_shape_locked
+    _EVENT_STRUCT,
+    EVENT_SIZE,
+)
 
 
 def _pack_cbtevent_byte_at_offset(
@@ -284,7 +288,7 @@ def test_is_statechange_offset_48_empirical_lock() -> None:
     )
 
 
-def test_is_buffremove_offset_52_empirical_lock_F1() -> None:
+def test_is_buffremove_offset_52_empirical_lock_F1() -> None:  # noqa: N802 -- F1 calibration suffix
     """Byte 52 of the cbtevent record reads as ``is_buffremove`` (struct slot 16).
 
     The 2026-07-11 F1 calibration pilot confirmed this byte position
@@ -303,7 +307,7 @@ def test_is_buffremove_offset_52_empirical_lock_F1() -> None:
     )
 
 
-def test_is_ninety_offset_53_empirical_lock_F1() -> None:
+def test_is_ninety_offset_53_empirical_lock_F1() -> None:  # noqa: N802 -- F1 calibration suffix
     """Byte 53 of the cbtevent record reads as ``is_ninety`` (struct slot 17).
 
     The 2026-07-11 F1 calibration pilot confirmed this byte position
@@ -351,14 +355,12 @@ def test_cbtbuffremove_kinds_tuple_shape_locked() -> None:
     :meth:`PythonEvtcParser.parse_events`. Keep this test in
     sync with the constant's docstring.
     """
-    from gw2_evtc_parser.parser import _CBTBUFREMOVE_KINDS
-
     # Tuple-equality owns both axes (literal content AND length);
     # a separate ``len()`` assert would be redundant -- Python
     # ``==`` on tuples compares both arity AND element-wise
     # contents, so a single assert covers both drift modes.
     expected = ("remove_all", "remove_single", "remove_single")
-    assert _CBTBUFREMOVE_KINDS == expected, (
+    assert expected == _CBTBUFREMOVE_KINDS, (
         f"_CBTBUFREMOVE_KINDS shape drifted: expected {expected!r} "
         f"(3 entries indexed by [byte-1] for the arcdps REMOVE "
         f"range {1, 2, 3}), got {_CBTBUFREMOVE_KINDS!r}. If you "
