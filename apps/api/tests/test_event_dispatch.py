@@ -1,211 +1,99 @@
-"""Contract tests for :func:`gw2analytics_api._event_dispatch.iter_events_from_blob`.
+"""Tests for :mod:`gw2analytics_api._event_dispatch`.
 
-The 3 pinned cases below cover the on-hot-path behaviour of the
-canonical gzip + ``TypeAdapter`` dispatch:
-
-1. Single ``DamageEvent`` round-trips through gzip + discriminator
-   dispatch.
-2. Trailing whitespace lines are dropped (parser emits blank
-   separators between events).
-3. Mixed-type dispatch (``DamageEvent`` + ``HealingEvent``) returns
-   events in source order with the matching subclasses.
-
-Field-shape sanity (locked against ``libs/gw2_core/src/gw2_core/models.py``):
-  * EventType discriminator values are UPPERCASE: ``"DAMAGE"`` /
-    ``"HEALING"`` / ``"BUFF_REMOVAL"`` (StrEnum members).
-  * ``BaseEvent`` carries: ``time_ms`` + ``source_agent_id`` +
-    ``target_agent_id`` + ``skill_id`` -- NOT ``src`` / ``dst``.
-  * Per-subclass payload fields: ``damage`` / ``healing`` /
-    ``buff_removal`` -- NOT a generic ``value``.
-
-Future regressions that break empty-line handling, the discriminator
-lookup, OR event ordering will be caught by these tests.
-
-MODULE-PURE-UNIT HYGIENE WARNING
-=================================
-
-ALL 3 tests in this module are intentionally pure-unit (NO DB, NO
-network, NO filesystem). The module-local ``_isolate_test_state``
-autouse fixture is a NO-OP shadow of the conftest's DB-cleanup
-autouse (``apps/api/tests/conftest.py``).
-
-If a FUTURE test added to this module DOES need Postgres, you MUST
-either REMOVE THIS SHADOW entirely (to let the conftest's autouse
-run again) OR scope the shadow to the specific pure-unit tests via
-a marker + ``pytest_collection_modifyitems``. Leaving a DB-touching
-test running under the no-op shadow produces silent cross-test
-contamination (no per-test cleanup).
+Plan 116 consolidates the triplicate ``TypeAdapter(Event)``
+instances + the gzipped-JSONL round-trip across
+``backfill.py``, ``routes/fights.py``, and ``routes/players.py``
+into a single canonical hub. These tests pin the
+single-source-of-truth invariant.
 """
 
 from __future__ import annotations
 
 import gzip
-import json
+import inspect
 
-import pytest
-
-from gw2_core import DamageEvent, HealingEvent
-from gw2analytics_api._event_dispatch import iter_events_from_blob
-
-
-def _gz_jsonl(lines: list[dict[str, object]]) -> bytes:
-    """Build a JSONL byte stream + gzip-compress it.
-
-    The ``separators=(",", ":")`` argument matches the parser's compact
-    form (``model_dump_json`` default). Whitespace at line boundaries
-    is intentionally absent so the round-trip assertion is about the
-    canonical write-side form.
-    """
-    blob = "\n".join(json.dumps(line, separators=(",", ":")) for line in lines).encode("utf-8")
-    return gzip.compress(blob)
+from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
+from gw2analytics_api import backfill
+from gw2analytics_api._event_dispatch import (
+    EVENT_TYPE_ADAPTER,
+    build_event_iterator,
+)
+from gw2analytics_api.routes import fights as fights_module
+from gw2analytics_api.routes import players as players_module
 
 
-# ---------------------------------------------------------------------------
-# v0.10.5 polish: skip the conftest's DB-cleanup autouse for the 3 tests
-# below. These tests only exercise gzip + parse logic; no Postgres
-# session is needed. The shadow-overrides pattern is the pytest idiom:
-# a module-scoped fixture with the SAME name as the conftest's
-# autouse takes precedence over the conftest fixture for tests in
-# this module only.
-# ---------------------------------------------------------------------------
-@pytest.fixture(autouse=True)
-def _isolate_test_state() -> None:
-    """No-op shadow of the conftest's DB-cleanup autouse (``apps/api/tests/conftest.py``).
-
-    The conftest's autouse runs ``db.execute(delete(...))`` + commit
-    against the test Postgres; these unit tests don't need DB. The
-    shadow is module-scoped, so conftest-level tests elsewhere still
-    get the real cleanup.
-
-    v0.10.5 audit followup: ALL 3 tests in this module are pure-unit
-    (NO DB). If a future test added here DOES need Postgres, REMOVE
-    THIS SHADOW or scope it to the specific pure-unit tests.
-
-    Scope note: this shadow disables ONLY the conftest's
-    ``_isolate_test_state`` DB-cleanup autouse. The conftest's
-    other autouse ``_disable_arq_for_tests`` still runs (and
-    monkeypatches ``arq.create_pool`` + sets
-    ``ALLOW_INREQUEST_PARSE_FALLBACK=1``); those don't touch DB so
-    they're irrelevant for these pure-gzip tests.
-    """
+def _event_line(event: Event) -> bytes:
+    return EVENT_TYPE_ADAPTER.dump_json(event).replace(b"\n", b"") + b"\n"
 
 
-def test_iter_events_from_blob_round_trips_single_damage_event() -> None:
-    """A single ``DamageEvent`` line survives gzip + discriminator dispatch."""
-    gz = _gz_jsonl(
+def test_canonical_adapter_is_single_instance_apps_api_wide() -> None:
+    """The hub's adapter is the same object used by the helper."""
+    assert "EVENT_TYPE_ADAPTER" in build_event_iterator.__globals__
+    assert build_event_iterator.__globals__["EVENT_TYPE_ADAPTER"] is EVENT_TYPE_ADAPTER
+
+
+def test_build_event_iterator_yields_three_subtypes_in_discriminator_order() -> None:
+    """A gzipped JSONL with one damage + one healing + one strip event
+    yields the matching concrete subclasses in source order."""
+    lines = b"".join(
         [
-            {
-                "event_type": "DAMAGE",
-                "time_ms": 1_000,
-                "source_agent_id": 42,
-                "target_agent_id": 99,
-                "skill_id": 7,
-                "damage": 500,
-            },
+            _event_line(
+                DamageEvent(
+                    event_type="DAMAGE",
+                    time_ms=1,
+                    source_agent_id=1,
+                    target_agent_id=2,
+                    skill_id=3,
+                    damage=100,
+                ),
+            ),
+            _event_line(
+                HealingEvent(
+                    event_type="HEALING",
+                    time_ms=2,
+                    source_agent_id=1,
+                    target_agent_id=2,
+                    skill_id=3,
+                    healing=50,
+                ),
+            ),
+            _event_line(
+                BuffRemovalEvent(
+                    event_type="BUFF_REMOVAL",
+                    time_ms=3,
+                    source_agent_id=1,
+                    target_agent_id=2,
+                    skill_id=3,
+                    buff_removal=25,
+                ),
+            ),
         ],
     )
+    gz_bytes = gzip.compress(lines)
+    events = list(build_event_iterator(gz_bytes=gz_bytes))
 
-    events = iter_events_from_blob(gz)
-
-    assert len(events) == 1
-    assert isinstance(events[0], DamageEvent)
-    assert events[0].event_type == "DAMAGE"
-    assert events[0].time_ms == 1_000
-    assert events[0].source_agent_id == 42
-    assert events[0].target_agent_id == 99
-    assert events[0].skill_id == 7
-    assert events[0].damage == 500
-
-
-def test_iter_events_from_blob_drops_whitespace_only_lines() -> None:
-    """Trailing empty + whitespace-only lines are dropped, not parsed.
-
-    The parser can emit trailing blank separators between events; the
-    helper must NOT raise ``ValidationError`` on an empty line AND
-    MUST NOT surface empty-string events. Pins ``if line.strip()``
-    semantics in :func:`iter_events_from_blob`'s splitlines
-    comprehension.
-
-    All seven whitespace classes the parser may encounter are pinned:
-
-    * ``b""`` -- fully empty line (was caught by the prior ``if line``
-      filter; the round-2 ``if line.strip()`` keeps the behaviour).
-    * ``b"   "`` -- ASCII space-only (the original surfaced bug).
-    * ``b"\t"`` -- tab-only (the original surfaced bug).
-    * ``b"\r\n"`` -- Windows line ending split by ``splitlines()``
-      produces a ``b"\r"`` line that ``.strip()`` truncates to ``b""``.
-    * ``b"\r"`` -- legacy Mac carriage-return alone.
-    * ``b"\f"`` -- form feed (rare but valid JSON separator).
-    * ``b"\v"`` -- vertical tab.
-
-    Python's ``bytes.strip()`` covers all of them per the stdlib docs;
-    this test pins the cross-platform correctness so a future
-    "optimization" to a non-stripping filter regresses loudly.
-    """
-    valid = (
-        b'{"event_type":"DAMAGE","time_ms":1000,'
-        b'"source_agent_id":42,"target_agent_id":99,"skill_id":7,"damage":500}'
-    )
-    # Every whitespace class Python's ``.strip()`` strips: space, tab,
-    # newline, carriage return, form feed, vertical tab. Each is padded
-    # around the valid JSON to assert the dispatch still surfaces the
-    # single valid event.
-    blob = (
-        valid
-        + b"\n"  # plain newline
-        + b"\r"  # carriage return alone (legacy Mac)
-        + b"\r\n"  # Windows line ending
-        + b"\n\n"  # two consecutive newlines
-        + b"   \n"  # ASCII space separator
-        + b"\t\n"  # tab separator
-        + b"\f\n"  # form feed separator
-        + b"\v\n"  # vertical tab separator
-        + b"   \r\n"  # mixed whitespace + Windows line ending
-    )
-    gz = gzip.compress(blob)
-
-    events = iter_events_from_blob(gz)
-
-    assert len(events) == 1
-    assert isinstance(events[0], DamageEvent)
-    assert events[0].damage == 500
-
-
-def test_iter_events_from_blob_returns_mixed_damage_healing_in_order() -> None:
-    """DamageEvent + HealingEvent dispatch returns in source order.
-
-    Pins two contracts:
-
-    * ``TypeAdapter.validate_json(line)`` surfaces the matching
-      subclass (not just the base ``Event``) via the ``event_type``
-      discriminator.
-    * The splitter preserves source order -- a future ``set``-based
-      dedup would break this test.
-    """
-    gz = _gz_jsonl(
-        [
-            {
-                "event_type": "DAMAGE",
-                "time_ms": 1_000,
-                "source_agent_id": 42,
-                "target_agent_id": 99,
-                "skill_id": 7,
-                "damage": 500,
-            },
-            {
-                "event_type": "HEALING",
-                "time_ms": 1_500,
-                "source_agent_id": 42,
-                "target_agent_id": 99,
-                "skill_id": 7,
-                "healing": 300,
-            },
-        ],
-    )
-
-    events = iter_events_from_blob(gz)
-
-    assert len(events) == 2
+    assert len(events) == 3
     assert isinstance(events[0], DamageEvent)
     assert isinstance(events[1], HealingEvent)
-    assert [e.event_type for e in events] == ["DAMAGE", "HEALING"]
+    assert isinstance(events[2], BuffRemovalEvent)
+
+
+def test_routes_fights_drops_local_event_type_adapter() -> None:
+    """``routes/fights.py`` no longer instantiates its own adapter."""
+    source = inspect.getsource(fights_module)
+    assert "TypeAdapter(Event)" not in source
+    assert "build_event_iterator" in source
+
+
+def test_routes_players_drops_local_event_type_adapter() -> None:
+    """``routes/players.py`` no longer instantiates its own adapter."""
+    source = inspect.getsource(players_module)
+    assert "TypeAdapter(Event)" not in source
+    assert "build_event_iterator" in source
+
+
+def test_backfill_drops_local_event_type_adapter() -> None:
+    """``backfill.py`` no longer instantiates its own adapter."""
+    source = inspect.getsource(backfill)
+    assert "TypeAdapter(Event)" not in source
+    assert "build_event_iterator" in source

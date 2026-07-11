@@ -75,7 +75,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session as _sa  # noqa: N813
 
 from gw2analytics_api import schemas
-from gw2analytics_api.config import Settings
+from gw2analytics_api.config import Settings, get_settings
 from gw2analytics_api.crypto import decrypt_webhook_secret, encrypt_webhook_secret
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app
@@ -528,6 +528,9 @@ def test_post_webhook_accepts_https_private_ip_with_env_optin(
     operator escape hatch documented in ``apps/api/.env.example``.
     """
     monkeypatch.setenv("GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS", "1")
+    # The route reads ``get_settings()`` once via lru_cache; clear it
+    # so the monkeypatched env is observed by this test.
+    get_settings.cache_clear()
     resp = _post_sub("https://10.0.0.2/")  # unique IP per re-run scope
     assert resp.status_code == 201, resp.text
     body = resp.json()
@@ -1146,6 +1149,123 @@ def test_dispatch_skips_corrupted_ciphertext_but_continues_others(
         "the FernetInvalidToken catch; the 'decrypt-then-sign' "
         f"ordering invariant is violated. Calls: {corrupt_path_calls!r}"
     )
+
+
+def test_list_webhook_dlq_returns_dlq_rows(
+    session_factory: Any,
+) -> None:
+    """GET /api/v1/webhooks/dlq returns all DLQ rows ordered by
+    ``moved_to_dlq_at`` descending.
+    """
+    sub_id, upload_id_str, _fight_id = _bootstrap_webhook_environment(
+        session_factory,
+    )
+    payload = {
+        "kind": "upload_completed",
+        "upload_id": upload_id_str,
+        "fight_id": "fixture-fight",
+        "sha256": "a" * 64,
+        "started_at": _BASE_TIME.isoformat(),
+    }
+    payload_bytes = _json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    delivery_id = f"dly_{_uuid.uuid4()}"
+    with session_factory() as seed_db:
+        seed_db.add(
+            OrmWebhookDlq(
+                id=delivery_id,
+                subscription_id=sub_id,
+                upload_id=upload_id_str,
+                payload=payload_bytes,
+                last_error="non-2xx response: 500",
+                moved_to_dlq_at=_BASE_TIME,
+            )
+        )
+        seed_db.commit()
+
+    resp = client.get("/api/v1/webhooks/dlq")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert isinstance(body, list)
+    assert len(body) >= 1
+    assert body[0]["id"] == delivery_id
+    assert body[0]["subscription_id"] == sub_id
+    assert body[0]["upload_id"] == upload_id_str
+    assert body[0]["last_error"] == "non-2xx response: 500"
+    assert "moved_to_dlq_at" in body[0]
+
+
+def test_list_webhook_dlq_filters_by_subscription_id(
+    session_factory: Any,
+) -> None:
+    """GET /api/v1/webhooks/dlq?subscription_id=... returns only rows
+    for that subscription.
+    """
+    sub_a, upload_a, _ = _bootstrap_webhook_environment(session_factory)
+    sub_b, upload_b, _ = _bootstrap_webhook_environment(session_factory)
+
+    with session_factory() as seed_db:
+        seed_db.add(
+            OrmWebhookDlq(
+                id=f"dly_{_uuid.uuid4()}",
+                subscription_id=sub_a,
+                upload_id=upload_a,
+                payload=b"{}",
+                last_error="err a",
+                moved_to_dlq_at=_BASE_TIME,
+            )
+        )
+        seed_db.add(
+            OrmWebhookDlq(
+                id=f"dly_{_uuid.uuid4()}",
+                subscription_id=sub_b,
+                upload_id=upload_b,
+                payload=b"{}",
+                last_error="err b",
+                moved_to_dlq_at=_BASE_TIME,
+            )
+        )
+        seed_db.commit()
+
+    resp = client.get(f"/api/v1/webhooks/dlq?subscription_id={sub_a}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["subscription_id"] == sub_a
+    assert body[0]["last_error"] == "err a"
+
+
+def test_list_webhook_dlq_pagination(
+    session_factory: Any,
+) -> None:
+    """GET /api/v1/webhooks/dlq respects limit and offset query params."""
+    sub_id, upload_id_str, _ = _bootstrap_webhook_environment(session_factory)
+    with session_factory() as seed_db:
+        for i in range(3):
+            seed_db.add(
+                OrmWebhookDlq(
+                    id=f"dly_{i:03d}{_uuid.uuid4().hex[:8]}",
+                    subscription_id=sub_id,
+                    upload_id=upload_id_str,
+                    payload=b"{}",
+                    last_error=f"err {i}",
+                    moved_to_dlq_at=_BASE_TIME.replace(second=i),
+                )
+            )
+        seed_db.commit()
+
+    resp = client.get("/api/v1/webhooks/dlq?limit=2&offset=1")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body) == 2
+    assert body[0]["last_error"] == "err 1"
+    assert body[1]["last_error"] == "err 0"
+
+
+def test_list_webhook_dlq_rejects_out_of_range_pagination() -> None:
+    """GET /api/v1/webhooks/dlq returns 422 for invalid limit/offset."""
+    assert client.get("/api/v1/webhooks/dlq?limit=0").status_code == 422
+    assert client.get("/api/v1/webhooks/dlq?limit=1001").status_code == 422
+    assert client.get("/api/v1/webhooks/dlq?offset=-1").status_code == 422
 
 
 def test_settings_secrets_kek_reads_from_env_alias(

@@ -215,8 +215,7 @@ def get_compare_timeline(
     # contributions still gets an empty-``points`` series --
     # the "all requested accounts -> all series" contract).
     per_account_contributions = {
-        account: [c for c, _ in pairs]
-        for account, pairs in pairs_by_account.items()
+        account: [c for c, _ in pairs] for account, pairs in pairs_by_account.items()
     }
     return CrossAccountTimelineAggregator().aggregate(
         per_account_contributions=per_account_contributions,

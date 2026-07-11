@@ -125,6 +125,7 @@ from minio.error import S3Error
 from sqlalchemy import delete
 from sqlalchemy.orm import Session, sessionmaker
 
+from gw2analytics_api.config import get_settings
 from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory
 from gw2analytics_api.main import app
 from gw2analytics_api.models import (
@@ -135,6 +136,43 @@ from gw2analytics_api.models import (
     OrmWebhookSubscription,
     Upload,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear the cached Settings object before each test and on env changes.
+
+    :func:`gw2analytics_api.config.get_settings` is decorated with
+    ``@lru_cache`` for runtime performance, but that means env-var
+    changes made via ``monkeypatch.setenv`` / ``delenv`` are ignored
+    unless the cache is cleared. This autouse fixture runs before
+    every test so the first call to ``get_settings()`` inside the
+    test sees the env vars as the test (or conftest) set them.
+
+    It also wraps ``monkeypatch.setenv`` / ``delenv`` so that any
+    env-var mutation performed inside a test (or by a fixture after
+    the autouse setup) immediately invalidates the settings cache.
+    This is required because fixtures such as ``client`` run the
+    FastAPI lifespan, which calls ``get_settings()`` and fills the
+    cache *before* the test body has a chance to adjust env vars.
+    """
+    get_settings.cache_clear()
+
+    orig_setenv = monkeypatch.setenv
+    orig_delenv = monkeypatch.delenv
+
+    # Forward every pytest argument so the wrapper remains compatible
+    # with future pytest keyword additions (e.g. internal ``skip_refine``).
+    def _setenv_and_clear(*args: object, **kwargs: object) -> None:
+        orig_setenv(*args, **kwargs)  # type: ignore[arg-type]
+        get_settings.cache_clear()
+
+    def _delenv_and_clear(*args: object, **kwargs: object) -> None:
+        orig_delenv(*args, **kwargs)  # type: ignore[arg-type]
+        get_settings.cache_clear()
+
+    monkeypatch.setattr(monkeypatch, "setenv", _setenv_and_clear)
+    monkeypatch.setattr(monkeypatch, "delenv", _delenv_and_clear)
 
 
 @pytest.fixture(autouse=True)

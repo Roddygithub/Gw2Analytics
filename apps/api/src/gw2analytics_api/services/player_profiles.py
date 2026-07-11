@@ -193,9 +193,9 @@ def aggregate_player_profiles_from_sql(
             func.count(OrmFightPlayerSummary.fight_id).label("fights_attended"),
             func.coalesce(func.sum(OrmFightPlayerSummary.total_damage), 0).label("total_damage"),
             func.coalesce(func.sum(OrmFightPlayerSummary.total_healing), 0).label("total_healing"),
-            func.coalesce(
-                func.sum(OrmFightPlayerSummary.total_buff_removal), 0
-            ).label("total_buff_removal"),
+            func.coalesce(func.sum(OrmFightPlayerSummary.total_buff_removal), 0).label(
+                "total_buff_removal"
+            ),
         )
         .join(
             per_account_profession,
@@ -311,9 +311,7 @@ def get_account_contributions_from_sql(
     return results
 
 
-def find_fights_without_summary(
-    db: Session, fight_ids: list[str] | None = None
-) -> set[str]:
+def find_fights_without_summary(db: Session, fight_ids: list[str] | None = None) -> set[str]:
     """Return the subset of fight ids that have NO ``OrmFightPlayerSummary`` rows.
 
     Used by the route to dispatch the legacy blob-walk fallback
@@ -347,9 +345,7 @@ def find_fights_without_summary(
     if fight_ids is not None:
         base = base.where(OrmFight.id.in_(fight_ids))
     stmt = base.where(
-        ~select(literal_column("1"))
-        .where(OrmFightPlayerSummary.fight_id == OrmFight.id)
-        .exists()
+        ~select(literal_column("1")).where(OrmFightPlayerSummary.fight_id == OrmFight.id).exists()
     )
     return {row[0] for row in db.execute(stmt).all()}
 

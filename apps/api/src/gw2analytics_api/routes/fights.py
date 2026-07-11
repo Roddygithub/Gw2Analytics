@@ -7,13 +7,13 @@ GET events: aggregated damage + time-bucketed roll-ups for one fight.
 
 from __future__ import annotations
 
-import gzip
+import functools
 import logging
+import threading
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error
-from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -29,8 +29,10 @@ from gw2_analytics.target_buff_removal import (
 from gw2_analytics.target_dps import TargetDpsAggregator, TargetDpsRow
 from gw2_analytics.target_healing import TargetHealingAggregator, TargetHealingRow
 from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
+from gw2analytics_api._event_dispatch import build_event_iterator
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightSkill
+from gw2analytics_api.route_helpers import format_elite_spec, format_profession
 from gw2analytics_api.schemas import (
     AgentOut,
     EventBucketOut,
@@ -53,12 +55,74 @@ from gw2analytics_api.storage import get_events
 
 logger = logging.getLogger(__name__)
 
-# Module-level adapter: ``Event`` is a Pydantic discriminated union
-# over ``DamageEvent`` + ``HealingEvent`` (see gw2_core.models). The
-# TypeAdapter instance is the canonical entry-point for round-tripping
-# a heterogeneous JSONL line; instantiating it at module-load time
-# (rather than per-request) is the recommended Pydantic v2 pattern.
-_EVENT_TYPE_ADAPTER: TypeAdapter[Event] = TypeAdapter(Event)
+# v0.9.4 plan 014: cache the gzipped events blob bytes across
+# requests. The 4 endpoints on ``/fights/{id}`` (events, squads,
+# skills, timeline) are fetched in parallel by the frontend and all
+# read the same blob. Caching the gzipped bytes (not the parsed
+# events) keeps memory bounded while avoiding 4x MinIO GETs.
+# maxsize=8 caps the cache at ~8x typical blob size.
+#
+# v0.10.10 plan 029: per-URI ``threading.Lock`` prevents the
+# thundering-herd stampede when the frontend's ``Promise.allSettled``
+# fires N parallel ``/fights/{id}/*`` requests against the same
+# ``blob_uri`` on a cold cache. ``functools.lru_cache`` has NO
+# internal lock shared with the wrapped function body; concurrent
+# callers on a cold cache would all execute the wrapped function
+# (N MinIO GETs in parallel, defeating the cache). A per-URI lock
+# serialises the wrapped function calls, capping memory peak at
+# one decompressed blob in flight at a time.
+#
+# Why a regular dict + meta-lock instead of ``defaultdict``:
+# ``collections.defaultdict.__missing__`` is NOT thread-safe --
+# 4 threads can each see a missing key, each invoke the factory,
+# and each get a DIFFERENT ``Lock`` object, defeating the latch.
+# Double-checked locking with a process-wide
+# ``_BLOB_URI_LOCKS_META_LOCK`` closes the race by serialising
+# the dict-mutation step. The fast path (lock already in dict)
+# is uncontended; the slow path (lock creation) is held under
+# the meta-lock exactly once per URI for the process lifetime.
+#
+# Note: the cache is keyed by ``blob_uri`` and never invalidated.
+# A fight's events blob is immutable after parsing, so this is
+# safe in practice; if a blob were ever overwritten in-place under
+# the same URI, the cache would serve stale bytes until the worker
+# restarts or the LRU entry is evicted.
+_BLOB_URI_LOCKS: dict[str, threading.Lock] = {}
+_BLOB_URI_LOCKS_META_LOCK = threading.Lock()
+
+
+def _get_blob_uri_lock(blob_uri: str) -> threading.Lock:
+    """Atomically fetch (or create) the per-URI latch.
+
+    See the ``_BLOB_URI_LOCKS`` block comment for the ``defaultdict``
+    race rationale. The fast path is a single dict lookup; the slow
+    path (first caller for a new URI) holds the meta-lock long
+    enough to create + insert a single ``Lock`` instance.
+    """
+    lock = _BLOB_URI_LOCKS.get(blob_uri)
+    if lock is not None:
+        return lock
+    with _BLOB_URI_LOCKS_META_LOCK:
+        lock = _BLOB_URI_LOCKS.get(blob_uri)
+        if lock is None:
+            lock = threading.Lock()
+            _BLOB_URI_LOCKS[blob_uri] = lock
+    return lock
+
+
+@functools.lru_cache(maxsize=8)
+def _cached_get_events(blob_uri: str) -> bytes:
+    """LRU-cached MinIO GET for the gzipped events blob.
+
+    Sequential calls (the v0.9.4 plan 014 contract): cache hit
+    short-circuits. Concurrent calls (this plan's contract): the
+    per-URI lock ensures exactly ONE MinIO GET per (blob_uri,
+    cold-cache) event; the other N-1 callers block on the lock and
+    pick up the populated cache value when the lock releases.
+    """
+    with _get_blob_uri_lock(blob_uri):
+        return get_events(blob_uri)
+
 
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
 
@@ -122,7 +186,7 @@ def _load_fight_events(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
 
     try:
-        gz_bytes = get_events(fight.events_blob_uri)
+        gz_bytes = _cached_get_events(fight.events_blob_uri)
     except S3Error:
         logger.warning(
             "events blob %s missing in MinIO for fight %s",
@@ -132,20 +196,11 @@ def _load_fight_events(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable") from None
 
     try:
-        jsonl = gzip.decompress(gz_bytes)
-    except OSError as exc:
+        events = list(build_event_iterator(gz_bytes=gz_bytes))
+    except (OSError, EOFError) as exc:
         logger.exception("events blob %s not gzip-decodable", fight.events_blob_uri)
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "events blob corrupt") from exc
 
-    # ``TypeAdapter(Event).validate_json(line)`` is the canonical
-    # Pydantic v2 entry point for discriminated-union round-trip;
-    # it materialises the matching subclass via the ``event_type``
-    # literal carried on every line. The adapter instance is
-    # module-level so the discriminator validation table is built
-    # once at import time.
-    events: list[Event] = [
-        _EVENT_TYPE_ADAPTER.validate_json(line) for line in jsonl.splitlines() if line
-    ]
     if not events:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "events unavailable")
     return events
@@ -790,8 +845,8 @@ def _to_fight_out(fight: OrmFight) -> FightOut:
             AgentOut(
                 agent_id=a.agent_id,
                 name=a.name,
-                profession=("UNKNOWN" if a.profession == 0 else f"PROF({a.profession})"),
-                elite_spec=("BASE" if a.elite_spec == 0 else f"ELITE({a.elite_spec})"),
+                profession=format_profession(a.profession),
+                elite_spec=format_elite_spec(a.elite_spec),
                 is_player=a.is_player,
                 account_name=a.account_name,
                 subgroup=a.subgroup,

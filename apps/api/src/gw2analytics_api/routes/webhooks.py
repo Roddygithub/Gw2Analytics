@@ -19,7 +19,9 @@ idempotently (204) on DELETE.
 
 from __future__ import annotations
 
+import atexit
 import base64
+import concurrent.futures
 import ipaddress
 import logging
 import secrets
@@ -28,7 +30,7 @@ import uuid
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -43,12 +45,33 @@ from gw2analytics_api.models import (
 )
 from gw2analytics_api.schemas import (
     WebhookDeliveryReplayOut,
+    WebhookDlqOut,
     WebhookSubscriptionCreate,
     WebhookSubscriptionCreatedOut,
     WebhookSubscriptionOut,
 )
 
 logger = logging.getLogger(__name__)
+
+# v0.9.4 plan 013: bound the ``socket.getaddrinfo`` call used to
+# validate webhook URLs. The default ``getaddrinfo`` has no timeout,
+# so a slow/unresponsive DNS resolver can stall the route thread
+# indefinitely. We run it in a thread pool and wait at most 2.0 s.
+# v0.10.10 plan 026: bump ``max_workers`` from 1 to ``DNS_POOL_MAX_WORKERS``
+# (a module-level constant -- tests pin against the constant, NOT
+# against ``ThreadPoolExecutor._max_workers`` whose leading-underscore
+# attribute is a CPython internal detail that may shift across Python
+# versions, especially 3.13's free-threaded build). A single-thread
+# executor serialises ALL concurrent DNS lookups process-wide; a
+# slow tarpit DNS resolver causes every subsequent request to fail
+# closed via the 2.0s ``future.result(timeout)`` fence.
+_DNS_RESOLVE_TIMEOUT_S = 2.0
+DNS_POOL_MAX_WORKERS: int = 32
+_DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=DNS_POOL_MAX_WORKERS,
+    thread_name_prefix="dns_resolve",
+)
+atexit.register(_DNS_EXECUTOR.shutdown)
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 
@@ -170,14 +193,21 @@ def _resolved_address_is_blocked(hostname: str) -> bool:
     if addr is not None:
         return _ip_is_blocked(addr)
     # Hostname: resolve via getaddrinfo (handles IPv4 + IPv6).
+    # v0.9.4 plan 013: run the lookup in a thread pool with a
+    # bounded timeout so a slow DNS resolver cannot stall the route
+    # thread indefinitely. ``socket.getaddrinfo`` is not interruptible
+    # from Python, so the executor lets us abandon the call after
+    # ``_DNS_RESOLVE_TIMEOUT_S`` seconds.
     try:
-        infos = socket.getaddrinfo(
+        future = _DNS_EXECUTOR.submit(
+            socket.getaddrinfo,
             hostname,
             None,
             type=socket.SOCK_STREAM,
         )
-    except (socket.gaierror, TimeoutError):
-        return True  # fail-closed on DNS failure
+        infos = future.result(timeout=_DNS_RESOLVE_TIMEOUT_S)
+    except (socket.gaierror, TimeoutError, concurrent.futures.TimeoutError):
+        return True  # fail-closed on DNS failure or timeout
     for info in infos:
         sockaddr = info[4]
         if not sockaddr:
@@ -269,6 +299,40 @@ def list_webhooks(
             filter=r.filter_payload,
             description=r.description,
             created_at=r.created_at,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/dlq", response_model=list[WebhookDlqOut])
+def list_webhook_dlq(
+    subscription_id: str | None = None,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_session),  # noqa: B008
+) -> list[WebhookDlqOut]:
+    """List dead-letter webhook deliveries.
+
+    Returns DLQ rows ordered by ``moved_to_dlq_at`` descending
+    (most recent first). Pass ``subscription_id`` to restrict the
+    result to one subscription. ``limit``/``offset`` provide
+    pagination for operational UIs.
+    """
+    stmt = select(OrmWebhookDlq).order_by(OrmWebhookDlq.moved_to_dlq_at.desc())
+    if subscription_id:
+        stmt = stmt.where(OrmWebhookDlq.subscription_id == subscription_id)
+    # ``subscription_id`` is typed ``str | None``; an empty query
+    # string (``?subscription_id=``) arrives as "" and should be
+    # treated the same as "no filter".
+
+    rows = db.execute(stmt.limit(limit).offset(offset)).scalars().all()
+    return [
+        WebhookDlqOut(
+            id=r.id,
+            subscription_id=r.subscription_id,
+            upload_id=r.upload_id,
+            last_error=r.last_error,
+            moved_to_dlq_at=r.moved_to_dlq_at,
         )
         for r in rows
     ]

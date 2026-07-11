@@ -63,7 +63,7 @@ from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 
 from gw2analytics_api.main import app
-from gw2analytics_api.services import logger as services_logger
+from gw2analytics_api.services.fight_persistence import logger as services_logger
 
 client: TestClient = TestClient(app)
 

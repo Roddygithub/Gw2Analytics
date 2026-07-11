@@ -85,7 +85,7 @@ from gw2_analytics.role_detection import detect_role_lite
 # module's local binding. Live attribute lookup via ``storage.get_events``
 # resolves the monkeypatch path mismatch (test_backfill_eoferror.py:1).
 from gw2analytics_api import storage
-from gw2analytics_api._event_dispatch import iter_events_from_blob
+from gw2analytics_api._event_dispatch import build_event_iterator
 from gw2analytics_api.models import (
     OrmFight,
     OrmFightAgent,
@@ -330,7 +330,7 @@ def _backfill_one_fight(
         return
 
     gz_bytes = storage.get_events(fight.events_blob_uri)
-    events = iter_events_from_blob(gz_bytes)
+    events = list(build_event_iterator(gz_bytes=gz_bytes))
     _persist_player_summaries(db, fight, events)
     if dry_run:
         db.rollback()  # undo the DELETE+INSERT in dry-run mode
@@ -366,17 +366,12 @@ def _backfill_pre_phase7(
         # caller), so the cast to ``str`` is safe. The
         # ``agent.name or ""`` fallback matches the write
         # path's contract (the parser may surface an empty
-        # char-name for synthetic agents).
-        # ``agent.account_name`` is truthy (filtered by the
-        # caller), so the cast to ``str`` is safe. The
-        # ``agent.name or ""`` fallback matches the write
-        # path's contract (the parser may surface an empty
         # char-name for synthetic agents). The ``assert`` is
         # type-narrowing only; ``# noqa: S101`` silences the
         # assert-detection lint (the codebase doesn't run
         # with ``python -O`` so the assert cannot be
         # optimised away in production).
-        assert agent.account_name is not None  # noqa: S101  # narrowed by the caller's filter
+        assert agent.account_name is not None  # noqa: S101
         db.add(
             OrmFightPlayerSummary(
                 fight_id=fight.id,
