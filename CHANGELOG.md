@@ -5,19 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.10.3] - 2026-07-10
-
-### Added
-
-- v0.10.3 plan 083 Feature 1: heuristic role detection (`libs/gw2_analytics/role_detection.py`; 12 NEW tests in `tests/test_role_detection.py`)
-- v0.10.3 plan 083 Feature 3A: per-player timeline overlay (`per_player_timeline.py` aggregator + `GET /api/v1/fights/{id}/timeline/players` + `PerPlayerTimelineOut` schema)
-- v0.10.3 plan 123: Janthir Wilds elite specs (`LUMINARY`/`PARAGON`/`TROUBADOUR`/...)
-- v0.10.3 plan 119: role-detection backfill (`backfill_role_detection` + `--roles-only` CLI flag)
-
-### Migration
-
-- v0.10.3 migration `0011_player_role_detection` adds `detected_role` + `detected_tags` columns to `fight_player_summaries`
-
 ## [0.10.11] - 2026-07-12: apps/api singleflight + A2 god-module refactor (plan 021)
 
 ### Added (apps/api - v0.10.11+ plan 021 A2 god-module refactor: 4-submodule decomposition of `routes/fights`)
@@ -53,13 +40,6 @@ The pre-existing per-URI ``threading.Lock`` on ``_cached_get_events`` (apps/api/
   * on finally: pop the Future from the dict so a retry post-exception starts a fresh singleflight fetch.
 - Exception type narrowed from ``BaseException`` to ``Exception``: shutdown signals (KeyboardInterrupt / SystemExit) propagate without enabling the exception broadcast.
 - 2 NEW singleflight contract tests (``test_singleflight_collapses_to_single_fetcher`` + ``test_singleflight_exception_propagates_to_all_waiters``) alongside the existing 8 latch tests. Full 12-test suite passes (10 isolated runs of the 3 concurrency tests, zero flake).
-
-### Fixed (apps/api - v0.10.10 cold-phase flake on thundering-herd test, pre-existing on main)
-
-The pre-existing ``test_fights_blob_cache_thundering_herd.py::test_concurrent_calls_to_same_uri_are_serialised`` was failing ~1/3 of CI runs (a deterministic test bug masked by ``gzip``-timestamp coincidence: 4 concurrent ``gzip.compress(b"event")`` calls produce different bytes unless they happen within the same wallclock second). The fix is in the test (the production code's latch contract was always correct):
-
-- Replaced the broken assertion ``assert all(r == results[0] for r in results)`` with ``assert all(gzip.decompress(r) == b"event" for r in results)`` -- the precise-but-stable contract: every caller received gzip bytes that DECOMPRESS to the same payload, regardless of gzip-header timestamp drift.
-- Verified: 10/10 isolated test runs PASS post-fix; full apps/api test_fights_blob_cache_thundering_herd.py suite (8 tests) PASS; no flake.
 
 ### Changed (dev/styling - sweep of 8 inherited non-E501 ruff violations)
 
@@ -4190,6 +4170,29 @@ route already handles the union via
 - Library surface is intentionally minimal so future
   ``MultiFightAggregator`` / ``SingleEventAggregator`` siblings
   can be added without breaking this contract.
+
+## [0.10.10] - 2026-07-11: apps/api cold-phase flake fix on thundering-herd test
+
+### Fixed (apps/api - v0.10.10 cold-phase flake on thundering-herd test, pre-existing on main)
+
+The pre-existing ``test_fights_blob_cache_thundering_herd.py::test_concurrent_calls_to_same_uri_are_serialised`` was failing ~1/3 of CI runs (a deterministic test bug masked by ``gzip``-timestamp coincidence: 4 concurrent ``gzip.compress(b"event")`` calls produce different bytes unless they happen within the same wallclock second). The fix is in the test (the production code's latch contract was always correct):
+
+- Replaced the broken assertion ``assert all(r == results[0] for r in results)`` with ``assert all(gzip.decompress(r) == b"event" for r in results)`` -- the precise-but-stable contract: every caller received gzip bytes that DECOMPRESS to the same payload, regardless of gzip-header timestamp drift.
+- Verified: 10/10 isolated test runs PASS post-fix; full apps/api test_fights_blob_cache_thundering_herd.py suite (8 tests) PASS; no flake.
+
+## [0.10.3] - 2026-07-10
+
+### Added
+
+- v0.10.3 plan 083 Feature 1: heuristic role detection (`libs/gw2_analytics/role_detection.py`; 12 NEW tests in `tests/test_role_detection.py`)
+- v0.10.3 plan 083 Feature 3A: per-player timeline overlay (`per_player_timeline.py` aggregator + `GET /api/v1/fights/{id}/timeline/players` + `PerPlayerTimelineOut` schema)
+- v0.10.3 plan 123: Janthir Wilds elite specs (`LUMINARY`/`PARAGON`/`TROUBADOUR`/...)
+- v0.10.3 plan 119: role-detection backfill (`backfill_role_detection` + `--roles-only` CLI flag)
+
+### Migration
+
+- v0.10.3 migration `0011_player_role_detection` adds `detected_role` + `detected_tags` columns to `fight_player_summaries`
+
 
 ## [0.2.0] - Phase 3 depth: multi-fight rollup
 
