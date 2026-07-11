@@ -318,15 +318,28 @@ class BuffRemovalEvent(BaseEvent):
 
 
 class BoonApplyEvent(BaseEvent):
-    """One outgoing boon-apply event.
+    """One outgoing boon-state-change event (Phase 9 / advisor-plan 026).
 
-    Spike (Plan 024) prototype for the v0.9.0 combat-readout Boons
-    table. ``duration_ms`` is the total duration of the applied boon
-    stack; ``stacks`` is the number of stacks (relevant for stacking
-    boons such as might). Emitted from arcdps ``BuffApply``
-    statechange records (``is_statechange == 69``) once the parser is
-    extended; until then this model exists only for API/aggregator
-    design.
+    Forward-compatible union of ALL 3 arcdps ``is_buffremove`` byte
+    values (``0`` = apply, ``1`` = single-stack remove, ``2`` =
+    all-stack remove) gated on the ``kind`` discriminator literal.
+    Pre-Phase-9 spike (Plan 024) called this class a "boon-apply"
+    event; Phase 9 collapses the apply + 2-remove variants into one
+    class because the wire shape (time_ms + source/target agent id +
+    skill id + stacks + duration) is identical across the three, and
+    the discriminator literal lets downstream aggregators
+    (``buff_uptime``, ``BuffState``) compute stack deltas in a single
+    pass.
+
+    ``duration_ms`` is the total duration of the applied/removed
+    boon stack in milliseconds. ``stacks`` is the magnitude of the
+    change (apply: stacks applied; remove_single: 1; remove_all:
+    full-stack count to drop). ``kind`` defaults to ``"apply"`` so
+    pre-Phase-9 round-trip payloads (those without an explicit
+    ``kind`` key) parse cleanly into the apply subset -- the
+    backward-compat default materialises the pre-Phase-9
+    "outgoing boon apply" semantics into the new class without a
+    data migration.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -335,7 +348,16 @@ class BoonApplyEvent(BaseEvent):
     duration_ms: int = Field(
         ..., ge=0, description="Total duration of the applied boon stack in milliseconds."
     )
-    stacks: int = Field(..., ge=0, description="Number of boon stacks applied.")
+    stacks: int = Field(..., ge=0, description="Magnitude of the state change.")
+    kind: Literal["apply", "remove_single", "remove_all"] = Field(
+        default="apply",
+        description=(
+            "arcdps 2023+ ``is_buffremove`` byte decoded: ``0`` = apply, "
+            "``1`` = single-stack remove, ``2`` = all-stack remove. "
+            "Defaults to ``'apply'`` for forward-compat with pre-Phase-9 "
+            "wire payloads that omit the field."
+        ),
+    )
 
 
 class CCEvent(BaseEvent):
