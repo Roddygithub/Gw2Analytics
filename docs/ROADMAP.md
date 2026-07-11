@@ -1,7 +1,7 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed during the v0.9.0
-close-out (post v0.8.9 ship).
+**Status:** Living document. Last refreshed during the v0.10.9+
+audit cycle (2026-07-11).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -11,37 +11,15 @@ off.
 
 ---
 
-## Current state (post v0.8.9 / v0.9.0 close-out)
+## Current state (post v0.10.9+ audit cycle)
 
-- **Latest shipped tag:** `v0.8.9`
+- **Latest shipped tag:** (v0.10.x — the CHANGELOG is the canonical ledger)
   (Phase 9 of web: per-account timeline `?tz=Continent/City`
   + per-fight timeline section on `/fights/[id]`).
-- **Test count:** 303 active tests at the start of the v0.9.0
-  close-out (210 pytest across `libs/gw2_*` + `apps/api`, 82 vitest
-  across `web/`, 16 Playwright e2e), plus 1 conditionally skipped
-  real-fixture integration test in
-  `libs/gw2_evtc_parser/tests/test_parser.py`. v0.9.0 plan/001–003
-  adds +7 pytest / +3 vitest / +2 e2e (the CHANGELOG `[Unreleased]`
-  "Test totals" line is the canonical ledger).
-- **Phase status (per README):** Phase 0 through Phase 9 of web all
-  marked ✅.
 - **Architecture:** `gw2_evtc_parser` → `gw2_core` → `gw2_analytics` →
   `apps/api` (FastAPI) + `gw2_api_client` (outbound) → `web` (Next.js
   16). Pure-Python parser, gated behind an `EvtcParser` Protocol so a
   Rust + PyO3 binding is a drop-in replacement (no churn elsewhere).
-- **v0.9.0 close-out (✅ shipped):** three advisor plans executed —
-  `plans/001-v090-shared-timeline-chart.md` (shared
-  `<TimelineChart>` base, ~250 → ~130 lines per wrapper),
-  `plans/002-v090-filter-by-profession.md` (filter by profession
-  enum/int on `GET /api/v1/players` + `<ProfessionFilter>` UI), and
-  `plans/003-v090-vr-suite-expansion.md` (visual-regression
-  threshold alignment + hydration guard + spec/data-driven loop).
-  All three plans shipped. The hydration guard has been restored to
-  `web/scripts/screenshots.mjs`; the host-only
-  `pnpm screenshots --persist` re-run that materialises the
-  corrected 5 dynamic-page baselines at 1440×3196 (post-hydration)
-  is a separate work item that lands when the v0.9.0 close-out
-  batch is committed + the dev + mock-server are reachable.
 
 ---
 
@@ -49,12 +27,11 @@ off.
 
 | Item | Source | Effort | Why now |
 |---|---|---|---|
-| **Cross-account comparison** — overlay 2-4 accounts' timelines on the same chart | `docs/v0.8.0-web-design.md` §6 | **M** | Reuses `PlayerTimelineChart` from v0.8.0; the multi-series overlay is the main extension. |
 | **Skill build analyser** — parse the loadout from the EVTC header, show per-skill DPS contribution | `docs/v0.8.0-web-design.md` §6 | **M** | Builds on `SkillUsageTable` from v0.7.1. |
 | **Real-time DPS meter** — WebSocket-based live DPS display during a parse in progress | `docs/v0.8.0-web-design.md` §6 | **XL** | Auth + reconnect + partial-parse handling. Own dedicated cycle. |
 | **Combat readout (4 tables: Damage / Heal / Boons / Defense)** | `docs/v0.9.0-combat-readout-design.md` | **XL+** | The user spec from the brainstorming sessions. Blocked on the statechange parser + the skills DB. **Longest cycle, highest analyst value.** |
 
-### 1.1 Items removed since v0.8.0 / v0.8.9 release cycle (for archival)
+### 1.1 Items removed since v0.8.0 / v0.9.0 release cycle (for archival)
 
 The following items previously listed in §1 have shipped and are now
 documented in their respective CHANGELOG entries. Listed here once
@@ -62,6 +39,9 @@ so a future audit can confirm what was cleaned up; do not re-add.
 
 - **Backend "webhooks" (foundational + API + single-attempt worker)** — shipped v0.9.0 close-out. 8 files: alembic migration `0006` (3 tables: `webhook_subscriptions` / `webhook_deliveries` / `webhook_dlq` per design doc §4) + 3 ORM classes (`OrmWebhookSubscription` with `filter_payload` Python attr shadowing the SQL `filter` column, `OrmWebhookDelivery` with NO ondelete cascade, `OrmWebhookDlq` with NO FK subscription_id for forensics) + 3 Pydantic schemas (`WebhookSubscriptionCreate` / `WebhookSubscriptionCreatedOut` with one-time secret / `WebhookSubscriptionOut` after the dead-`revoked_at`-field post-reviewer drop) + 4 endpoints under `/api/v1/webhooks` (POST → 201 / GET-list / GET-by-id / DELETE → 204 idempotent soft-delete) + workers module (`apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`) with single-attempt HMAC-SHA256-signed dispatch + 11 e2e tests (`apps/api/tests/test_webhooks_e2e.py`, all ruff+mypy clean). The retry+DLQ+replay layer was deliberately deferred to v0.9.1 -- the v0.9.0 close-out ships enough for integrators to build against the API; the retry/DLQ replay-ui loop is the natural hardening slice.
   Original source: `docs/v0.8.0-backend-design.md` (full design doc shippable as-is). Effort estimate matched reality: M-effort vs the original L estimate (the v0.9.0 scope intentionally excluded the 3-attempt retry schedule + the DLQ replay endpoint to land the foundational layer in one cycle).
+- **Cross-account comparison** — shipped v0.10.0
+  (new route at `/players/compare` + `?accounts=` multi-select on the
+  timeline endpoint). The effort matched the M estimate.
 - **Per-day bucketing on the timeline** — shipped v0.8.1
   (`?bucket=day` on `GET /api/v1/players/{account_name:path}/timeline` +
   "Per fight" / "Per day" toggle on `PlayerTimelineSection`).
@@ -70,11 +50,10 @@ so a future audit can confirm what was cleaned up; do not re-add.
 
 ### 1.2 "Ready to implement" shortlist (post v0.8.9 / v0.9.0 close-out)
 
-The 3 items above with a complete design doc. Any of these can be
+The 2 items above with a complete design doc. Any of these can be
 started as soon as the maintainer gives the green light:
 
-1. **Cross-account comparison** — reuses v0.8.0 chart.
-2. **Combat readout** — `docs/v0.9.0-combat-readout-design.md`.
+1. **Combat readout** — `docs/v0.9.0-combat-readout-design.md`.
    Note: blocked on statechange parser + skills DB; the §1 table
    marks this XL+ with the block reason explicit.
 3. **Skill build analyser** — design doc on §6 of
@@ -181,8 +160,11 @@ notes).
   (single-tenant is the current assumption).
 - **Mobile-first redesign** of `/fights/[id]` (desktop is the
   canonical analyst surface today).
-- **GraphQL subscription channel** (alternative to webhooks for
-  live dashboards).
+- ~~**GraphQL subscription channel** (alternative to webhooks for
+  live dashboards).~~ **DECIDED: not planned.** The webhook system
+  (v0.9.1) covers push notifications via HMAC-signed HTTP callbacks.
+  Any future GraphQL proposal must demonstrate a concrete user
+  requirement that webhooks cannot satisfy. See `docs/adr/001-graphql-subscription-channel.md`.
 - **PNG / SVG export of the timeline** (CSV is already covered
   by `CsvDownloadButton`).
 

@@ -2,7 +2,7 @@
 
 **Source:** `https://raw.githubusercontent.com/baaron4/GW2-Elite-Insights-Parser/master/GW2EIEvtcParser/ParserHelpers/ArcDPSEnums.cs`
 **Refreshed:** 2026-07-07
-**Total entries:** $(grep -cE '^\s+[A-Z][a-zA-Z0-9_]+\s*=\s*[0-9]+' /tmp/StateChange.cs.clean) + 1 (Unknown)
+**Total entries:** 86 (0-85, per the table below)
 
 This is the canonical mapping of the \`is_statechange\` field in the GW2 EVTC
 binary to a human-readable effect name. The v0.9.0 combat-readout feature
