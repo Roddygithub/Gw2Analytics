@@ -34,7 +34,8 @@ def test_canonical_adapter_is_single_instance_apps_api_wide() -> None:
 
 def test_build_event_iterator_yields_three_subtypes_in_discriminator_order() -> None:
     """A gzipped JSONL with one damage + one healing + one strip event
-    yields the matching concrete subclasses in source order."""
+    yields the matching concrete subclasses in source order.
+    """
     lines = b"".join(
         [
             _event_line(
@@ -97,3 +98,35 @@ def test_backfill_drops_local_event_type_adapter() -> None:
     source = inspect.getsource(backfill)
     assert "TypeAdapter(Event)" not in source
     assert "build_event_iterator" in source
+
+
+def test_build_event_iterator_does_not_use_gzip_decompress() -> None:
+    """v0.10.13 plan 027 regression: the streaming impl MUST NOT contain gzip.decompress.
+
+    inspect.getsource reads the function body as text. The streaming
+    implementation uses ``gzip.GzipFile(fileobj=io.BytesIO(...))``
+    (line-by-line decompression) and NEVER ``gzip.decompress`` (which
+    would materialise the entire decompressed bytes + a ``splitlines()``
+    list, defeating the streaming intent).
+
+    A future revert to ``gzip.decompress + splitlines`` (e.g. an
+    accidental "minimal import" rewrite that thinks the streaming
+    pattern is over-engineered) MUST fail this test. The substring
+    check is intentional: pin the absence, not the presence of a
+    specific call site -- a future refactor that uses
+    ``gzip.decompress`` again for ANY purpose in this helper fails.
+    """
+    source = inspect.getsource(build_event_iterator)
+    assert "gzip.decompress(" not in source, (
+        "build_event_iterator contains gzip.decompress( -- the streaming "
+        "implementation has been reverted to the legacy materialising "
+        "path (gzip.decompress + splitlines). The 200 MB peak RAM on "
+        "30 MB gzipped WvW logs is BACK."
+    )
+    # Cross-check: the streaming implementation MUST use GzipFile.
+    assert "gzip.GzipFile" in source, (
+        "build_event_iterator does not contain gzip.GzipFile -- the "
+        "streaming implementation is missing. The helper either fell "
+        "back to gzip.decompress OR was rewritten with a non-gzip "
+        "decompressor entirely."
+    )

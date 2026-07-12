@@ -1,0 +1,6 @@
+.next
+node_modules
+playwright-report
+test-results
+.visual-regression-output
+tests/e2e/.visual-regression-output

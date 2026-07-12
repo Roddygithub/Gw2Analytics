@@ -116,15 +116,12 @@ const server = createServer(async (req, res) => {
   const path = url.pathname;
   const method = req.method ?? "GET";
 
-  // POST /api/v1/account (v0.2.0-api) -- Bearer-protected world
-  // enrichment. Stub shape mirrors the ``AccountEnrichedOut``
-  // schema in apps/api/src/gw2analytics_api/schemas.py. We
-  // intentionally do NOT validate the Bearer token here -- the
-  // /account page's E2E only exercises the SSR + form-rendering
-  // contract, not the POST flow (a real key would 401 against
-  // the gateway's auth chain). Status 200 because the real
-  // route returns 200 on a valid key.
-  if (method === "POST" && path === "/api/v1/account") {
+  // GET or POST /api/v1/account (v0.2.0-api + v0.10.13 BFF) --
+  // Bearer-protected world enrichment. Stub shape mirrors the
+  // ``AccountEnrichedOut`` schema. The BFF proxy (plan 013) calls
+  // GET; the original client-side page called POST. Both return
+  // the same stub.
+  if ((method === "GET" || method === "POST") && path === "/api/v1/account") {
     return jsonResponse(
       res,
       200,

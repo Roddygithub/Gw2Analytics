@@ -1,22 +1,21 @@
 /**
  * Client Component that collects a GW2 API key and posts it to the
+ * BFF proxy at ``/api/account/resolve`` which forwards to the
  * gateway's ``/api/v1/account`` Bearer-protected endpoint to resolve
  * the user's current world triple.
  *
  * Why form is client-side
  * =======================
- * The key is held in React state, sent over HTTPS to the gateway,
- * and never persisted in localStorage / cookies by this component
- * (Next.js developer should add a server-side proxy if production
- * wants to bypass browser exposure entirely -- the gateway is the
- * source of truth either way).
+ * The key is held in React state, sent over HTTPS to the Next.js
+ * server-side proxy (which hides the gateway URL from the browser),
+ * and never persisted in localStorage / cookies by this component.
  */
 
 "use client";
 
 import { useState } from "react";
 
-import { formatApiError, resolveAccount, type AccountEnrichedRow } from "@/lib/api";
+import { formatApiError, type AccountEnrichedRow } from "@/lib/api";
 
 export default function AccountPage() {
   const [apiKey, setApiKey] = useState("");
@@ -33,14 +32,19 @@ export default function AccountPage() {
     setError(null);
     setResult(null);
     try {
-      const resolved = await resolveAccount(apiKey);
+      const resp = await fetch("/api/account/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey }),
+      });
+      if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+      const resolved = (await resp.json()) as AccountEnrichedRow;
       setResult(resolved);
       // Clear the key from component state once consumed: keeps the
       // browser DevTools surface small if the tab is left open and
       // signals to the user that the form is "spent".
       setApiKey("");
     } catch (err) {
-      // Same canonical formatter as /upload -- see formatApiError.
       setError(formatApiError(err));
     } finally {
       setSubmitting(false);
@@ -55,8 +59,9 @@ export default function AccountPage() {
         Resolve GW2 API key
       </h1>
       <p style={{ opacity: 0.7, marginBottom: 24 }}>
-        Posts your key as <code>Bearer</code> to{" "}
-        <code>/api/v1/account</code>. The key is not stored.
+        Posts your key to the server-side proxy at{" "}
+        <code>/api/account/resolve</code> which forwards to the gateway.
+        The key is not stored.
       </p>
 
       <form

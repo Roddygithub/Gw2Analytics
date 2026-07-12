@@ -22,6 +22,7 @@ build/
 # Environment (never commit secrets)
 .env
 .env.local
+.env.prod
 .env.*.local
 
 # IDE / editor
