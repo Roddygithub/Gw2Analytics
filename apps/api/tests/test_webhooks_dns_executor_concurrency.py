@@ -98,8 +98,7 @@ def test_concurrent_calls_to_same_uri_invoked_in_single_pool() -> None:
 
     start = time.monotonic()
     futures = [
-        webhooks._DNS_EXECUTOR.submit(slow_getaddrinfo, "example.com", None)
-        for _ in range(4)
+        webhooks._DNS_EXECUTOR.submit(slow_getaddrinfo, "example.com", None) for _ in range(4)
     ]
     for f in futures:
         f.result(timeout=5.0)

@@ -128,7 +128,7 @@ async def parse_job(
         )
         raise
     try:
-        await asyncio.to_thread(dispatch_for_upload, sf, parsed_upload_id)
+        await dispatch_for_upload(sf, parsed_upload_id)
     except Exception:
         # The parse already committed; a missed webhook is an
         # operational concern (manual re-dispatch) and is NOT

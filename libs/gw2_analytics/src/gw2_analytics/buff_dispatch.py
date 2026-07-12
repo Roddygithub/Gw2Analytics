@@ -115,9 +115,7 @@ def decode_buff_change(is_buffremove_byte: int) -> BuffChangeKind:
     would still produce a sensible default rather than crash).
     """
     if is_buffremove_byte < 0:
-        raise ValueError(
-            f"is_buffremove byte must be non-negative: {is_buffremove_byte}"
-        )
+        raise ValueError(f"is_buffremove byte must be non-negative: {is_buffremove_byte}")
     if is_buffremove_byte == 0:
         return BuffChangeKind.APPLY
     if is_buffremove_byte == 1:

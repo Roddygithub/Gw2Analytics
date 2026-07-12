@@ -55,6 +55,7 @@ dependency locally + in CI.
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import hashlib
 import hmac
@@ -1108,7 +1109,7 @@ def test_dispatch_skips_corrupted_ciphertext_but_continues_others(
         # our 2 own subs' assertions).
         mock.post("/webhook").respond(200, json={"ok": True})
         # MUST NOT raise even though one sub has corrupt ciphertext.
-        dispatch_for_upload(session_factory, upload_uuid)
+        asyncio.run(dispatch_for_upload(session_factory, upload_uuid))
 
     with session_factory() as verify_db:
         valid_row = verify_db.get(OrmWebhookSubscription, sub_id_valid)

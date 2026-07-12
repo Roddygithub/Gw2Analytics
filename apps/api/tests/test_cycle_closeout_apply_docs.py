@@ -19,6 +19,9 @@ to a per-test template dir so the script doesn't pollute /tmp.
 
 from __future__ import annotations
 
+import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +51,7 @@ SEED_ROADMAP = (
     "- **Latest shipped tag:** v0.10.17 (F18 Replay UI main scope + "
     "C1 partial-pre-existing-test-fix-up + D4 fetchCached LRU isolation "
     "pin + D5 cross-component substrate pin per the v0.10.16 deferral "
-    "brief's \"Recommended v0.10.17 scope\" section; 5 cycle deliverables "
+    'brief\'s "Recommended v0.10.17 scope" section; 5 cycle deliverables '
     "D1-D5 + 2 close-out docs commits per the v0.10.17 cycle-end audit "
     "at `plans/AUDIT-2026-07-13-3b2e71f.md`. Plan 036 (pre-existing pytest "
     "+ vitest fix-up) is **PARTIALLY closed**: 1 of 7 vitest failures "
@@ -59,7 +62,8 @@ SEED_ROADMAP = (
     "## 1. v1.0 candidates (designed, not yet implemented)\n\n"
     "| Item | Source | Effort | Why now |\n"
     "|---|---|---|---|\n"
-    "| **M8 (Test-Substrate Mismatch fix-up)** | this audit + RELEASE-v0.10.19.md | **M** | v0.10.19 mimo-half target |\n"
+    "| **M8 (Test-Substrate Mismatch fix-up)** | this audit + "
+    "RELEASE-v0.10.19.md | **M** | v0.10.19 mimo-half target |\n"
     "\n"
     "### 1.1 Items removed since v0.8.0 / v0.9.0 release cycle (for archival)\n\n"
     "Archival placeholder section.\n"
@@ -71,8 +75,7 @@ SEED_DOC_BODY_CHANGELOG = (
 )
 
 SEED_DOC_BODY_AUDIT = (
-    "# Audit 2026-07-12 -- cycle-end audit body\n\n"
-    "Audit content with MARKER placeholder.\n"
+    "# Audit 2026-07-12 -- cycle-end audit body\n\nAudit content with MARKER placeholder.\n"
 )
 
 
@@ -114,11 +117,7 @@ def _import_apply_docs() -> Any:
     Tests the in-process contract (NOT subprocess). This validates
     the script's main contract directly without subprocess overhead.
     """
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(
-        "_cycle_closeout_apply_docs_test", SCRIPT_PATH
-    )
+    spec = importlib.util.spec_from_file_location("_cycle_closeout_apply_docs_test", SCRIPT_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not load spec for {SCRIPT_PATH}")
     module = importlib.util.module_from_spec(spec)
@@ -213,10 +212,7 @@ def test_missing_roadmap_section_one_one_raises_systemexit(
 
 def test_cli_help_not_required_to_be_verbose() -> None:
     """CLI --help exits with code 0 and prints description. Sanity check."""
-    import subprocess
-    import sys
-
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         [sys.executable, str(SCRIPT_PATH), "--help"],
         capture_output=True,
         text=True,
@@ -229,10 +225,7 @@ def test_cli_help_not_required_to_be_verbose() -> None:
 
 def test_cli_missing_marker_arg_exits_nonzero() -> None:
     """CLI invocation without --marker exits with non-zero code (argparse-required)."""
-    import subprocess
-    import sys
-
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         [sys.executable, str(SCRIPT_PATH)],
         capture_output=True,
         text=True,
@@ -245,8 +238,9 @@ def test_cli_missing_marker_arg_exits_nonzero() -> None:
 
 
 def test_marker_substituted_in_all_three_docs(scratch_repo: dict[str, Any]) -> None:
-    """The 9th smoke test: verify the literal `MARKER` placeholder is substituted
-    in ALL THREE close-out docs (CHANGELOG, ROADMAP, AUDIT) on a single apply call.
+    """The 9th smoke test: verify the literal `MARKER` placeholder is
+    substituted in ALL THREE close-out docs (CHANGELOG, ROADMAP, AUDIT)
+    on a single apply call.
 
     Closes a coverage gap: prior tests verified each doc was mutated, but the
     substitution consistency across docs was implicit. This test EXPLICITLY
@@ -267,9 +261,7 @@ def test_marker_substituted_in_all_three_docs(scratch_repo: dict[str, Any]) -> N
 
     # Glob-based AUDIT read-back: forward-compat with any `--audit-date` value.
     audit_files = sorted(
-        (scratch_repo["repo_root"] / "plans").glob(
-            f"AUDIT-*-{scratch_repo['marker']}.md"
-        )
+        (scratch_repo["repo_root"] / "plans").glob(f"AUDIT-*-{scratch_repo['marker']}.md")
     )
     assert len(audit_files) == 1, (
         f"Expected exactly 1 AUDIT file matching AUDIT-*-{scratch_repo['marker']}.md, "

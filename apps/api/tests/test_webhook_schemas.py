@@ -34,5 +34,5 @@ def test_webhook_delivery_out_payload_is_bytes_optional() -> None:
             subscription_id="whsub_xyz",
             upload_id="up-789",
             attempt=1,
-            payload={"kind": "upload_completed"},  # type: ignore[arg-type]
+            payload={"kind": "upload_completed"},
         )

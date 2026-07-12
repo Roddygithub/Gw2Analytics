@@ -40,6 +40,7 @@ ROADMAP.md is mutated in place via 4 surgical edits (no /tmp file):
 3. "Latest shipped tag" line rewrite to the new cycle.
 4. §1.2 v1.0 candidates table clarification comment append.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -68,7 +69,7 @@ def _abort(msg: str) -> _CyleCloseOutError:
     return _CyleCloseOutError(msg)
 
 
-def apply_docs(marker: str, root: Path, audit_date: str = "2026-07-12") -> None:
+def apply_docs(marker: str, root: Path, audit_date: str = "2026-07-12") -> None:  # noqa: PLR0915
     """Apply the 3 close-out docs to the working tree.
 
     Parameters
@@ -91,7 +92,7 @@ def apply_docs(marker: str, root: Path, audit_date: str = "2026-07-12") -> None:
     # where the cycle close-out workflow stages pre-authored bodies
     # before invoking the script.
     template_root = Path(
-        os.environ.get("GW2ANALYTICS_TEMPLATE_DIR", "/tmp"),
+        os.environ.get("GW2ANALYTICS_TEMPLATE_DIR", "/tmp"),  # noqa: S108
     )
 
     # ---- 1. CHANGELOG [0.10.<n+1>] entry splice ----
@@ -142,12 +143,13 @@ def apply_docs(marker: str, root: Path, audit_date: str = "2026-07-12") -> None:
         f"3 close-out docs at marker=`{marker}` per "
         f"plans/AUDIT-2026-07-12-`{marker}`.md). The **v0.10.19 "
         f"mimo-half** cycle attempted M8 (per "
-        f"`plans/RELEASE-v0.10.19.md`) but DEFERRED to v0.10.20 after "
-        f"6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` "
-        f"autouse fixture exhausted the signature-shape budget against "
-        f"pydantic-settings' actual call style. 3 residual failures "
-        f"persisted out of the 11 M8 K-cluster failures per this "
-        f"cycle's CHANGELOG `[0.10.19]` entry; v0.10.18.1 "
+        f"`plans/RELEASE-v0.10.19.md`) but DEFERRED to v0.10.20 "
+        f"after 6 iterations on `conftest.py`'s "
+        f"`_disable_dotenv_for_tests` autouse fixture exhausted "
+        f"the signature-shape budget against pydantic-settings' "
+        f"actual call style. 3 residual failures persisted out of "
+        f"the 11 M8 K-cluster failures per this cycle's CHANGELOG "
+        f"`[0.10.19]` entry; v0.10.18.1 "
         f"(`plans/AUDIT-2026-07-13-2ffafc75.md`) is the canonical "
         f"K1+K2+K3 discoverer. Cycle close-out close-out cycle "
         f"stamps: `## [0.10.19]` CHANGELOG entry spliced + "
@@ -164,7 +166,9 @@ def apply_docs(marker: str, root: Path, audit_date: str = "2026-07-12") -> None:
         re.DOTALL,
     )
     if pattern_latest_tag.search(rd) is None:
-        raise _abort("ROADMAP Latest-shipped-tag regex did not match (architecture anchor missing?)")
+        raise _abort(
+            "ROADMAP Latest-shipped-tag regex did not match (architecture anchor missing?)"
+        )
     rd = pattern_latest_tag.sub(lambda _m: new_latest_tag, rd, count=1)
 
     # Production-safety guard 4: make silent regex misses loud.
@@ -176,18 +180,22 @@ def apply_docs(marker: str, root: Path, audit_date: str = "2026-07-12") -> None:
     # (2d) §1.2 M8 clarification blockquote.
     m8_clarification = (
         "\n> **v0.10.19 mimo-half cycle attempt**: 6 iterations on "
-        f"`conftest.py`'s `_disable_dotenv_for_tests` autouse fixture "
-        f"exhausted the signature-budget against pydantic-settings "
-        f"actual call style; 3 residual failures persisted out of the "
-        f"11 K-cluster per `CHANGELOG [0.10.19]`. Forward-defer to "
-        f"v0.10.20 per `plans/AUDIT-2026-07-12-{marker}.md` §2. NO "
+        f"`conftest.py`'s `_disable_dotenv_for_tests` autouse "
+        f"fixture exhausted the signature-budget against "
+        f"pydantic-settings actual call style; 3 residual failures "
+        f"persisted out of the 11 K-cluster per "
+        f"`CHANGELOG [0.10.19]`. Forward-defer to v0.10.20 per "
+        f"`plans/AUDIT-2026-07-12-{marker}.md` §2. NO "
         f"production-code regression; bucket K = Test-Substrate "
         f"Mismatch.\n"
     )
     anchor_post_section = "### 1.1 Items removed since v0.8.0"
     # Production-safety guard 2: no silent fallback for missing §1.1 anchor.
     if anchor_post_section not in rd:
-        raise _abort("ROADMAP §1.1 anchor missing; cannot append M8 clarification (hard-fail per production-safety contract)")
+        raise _abort(
+            "ROADMAP §1.1 anchor missing; cannot append M8 clarification "
+            "(hard-fail per production-safety contract)"
+        )
     rd = rd.replace(anchor_post_section, m8_clarification + anchor_post_section, 1)
 
     roadmap_path.write_text(rd)
@@ -209,25 +217,33 @@ def apply_docs(marker: str, root: Path, audit_date: str = "2026-07-12") -> None:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Parses args + dispatches to ``apply_docs``."""
     parser = argparse.ArgumentParser(
-        description="Cycle close-out doc-applier. Applies the 3 close-out docs to the git working tree.",
+        description=(
+            "Cycle close-out doc-applier. Applies the 3 close-out docs to the git working tree."
+        ),
     )
     parser.add_argument(
         "--marker",
         type=str,
         required=True,
-        help="Short SHA of the cycle-window marker commit (required; no default for production-safety).",
+        help=(
+            "Short SHA of the cycle-window marker commit "
+            "(required; no default for production-safety)."
+        ),
     )
     parser.add_argument(
         "--root",
         type=Path,
         default=DEFAULT_ROOT,
-        help=f"Repository root path (default: {DEFAULT_ROOT}; override with GW2ANALYTICS_ROOT env var).",
+        help=(
+            f"Repository root path (default: {DEFAULT_ROOT}; "
+            f"override with GW2ANALYTICS_ROOT env var)."
+        ),
     )
     parser.add_argument(
         "--audit-date",
         type=str,
         default="2026-07-12",
-        help="Cycle-end date for the AUDIT filename (YYYY-MM-DD). Default: 2026-07-12.",
+        help=("Cycle-end date for the AUDIT filename (YYYY-MM-DD). Default: 2026-07-12."),
     )
     args = parser.parse_args(argv)
 

@@ -249,9 +249,9 @@ _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 #: arcdps's documented "use for in/out volume" guidance (also
 #: reflected in :func:`gw2_analytics.buff_dispatch.decode_buff_change`).
 _CBTBUFREMOVE_KINDS: Final[tuple[str, str, str]] = (
-    "remove_all",      # byte 1: CBTB_ALL -> remove_all
-    "remove_single",   # byte 2: CBTB_SINGLE -> remove_single
-    "remove_single",   # byte 3: CBTB_MANUAL collapsed to remove_single per arcdps
+    "remove_all",  # byte 1: CBTB_ALL -> remove_all
+    "remove_single",  # byte 2: CBTB_SINGLE -> remove_single
+    "remove_single",  # byte 3: CBTB_MANUAL collapsed to remove_single per arcdps
 )
 
 #: Sanity bound on agent_count to defend against pathological sources.

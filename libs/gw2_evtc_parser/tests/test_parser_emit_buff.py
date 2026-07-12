@@ -104,18 +104,18 @@ def _build_event_record(
         0,  # src_instid
         0,  # dst_instid
         0,  # translocated
-        is_cleanup,        # byte 46 = is_cleanup
-        is_nondamage,      # byte 47 = is_nondamage
-        is_statechange,    # byte 48 = is_statechange
-        ev_buff,           # byte 49 = ev.buff (arcdps buff ID)
-        0,                 # byte 50 = result (was is_shields)
-        is_offcycle,       # byte 51 = is_activation (was is_offcycle)
-        is_buffremove,     # byte 52 = is_buffremove (arcdps cbtbuffremove)
-        0,                 # byte 53 = is_ninety
-        0,                 # pad63 (u32 slot 1, offsets 54-57)
-        0,                 # pad64 (u32 slot 2, offsets 58-61)
-        0,                 # pad65 (byte 62)
-        0,                 # pad66 (byte 63)
+        is_cleanup,  # byte 46 = is_cleanup
+        is_nondamage,  # byte 47 = is_nondamage
+        is_statechange,  # byte 48 = is_statechange
+        ev_buff,  # byte 49 = ev.buff (arcdps buff ID)
+        0,  # byte 50 = result (was is_shields)
+        is_offcycle,  # byte 51 = is_activation (was is_offcycle)
+        is_buffremove,  # byte 52 = is_buffremove (arcdps cbtbuffremove)
+        0,  # byte 53 = is_ninety
+        0,  # pad63 (u32 slot 1, offsets 54-57)
+        0,  # pad64 (u32 slot 2, offsets 58-61)
+        0,  # pad65 (byte 62)
+        0,  # pad66 (byte 63)
     )
 
 
@@ -270,11 +270,11 @@ def test_parse_events_emit_buff_remove_single_yields_three_events() -> None:
                 time_ms=42_500,
                 src_agent=1,
                 dst_agent=2,
-                value=8_500,        # heal magnitude
-                skill_id=101,       # FK to skills table = "Mimic"
-                buff_dmg=2_250,     # strip magnitude
-                is_nondamage=1,     # heal-class signal
-                is_buffremove=2,    # CBTB_SINGLE
+                value=8_500,  # heal magnitude
+                skill_id=101,  # FK to skills table = "Mimic"
+                buff_dmg=2_250,  # strip magnitude
+                is_nondamage=1,  # heal-class signal
+                is_buffremove=2,  # CBTB_SINGLE
             ),
         ],
     )
@@ -385,7 +385,7 @@ def test_parse_events_emit_buff_statechange_record_filters_upstream() -> None:
                 dst_agent=2,
                 value=100,
                 is_statechange=1,  # filtered upstream
-                is_buffremove=2,    # REMOVE_SINGLE
+                is_buffremove=2,  # REMOVE_SINGLE
             ),
         ],
     )
@@ -424,7 +424,7 @@ def test_parse_events_emit_buff_apply_statechange_marker() -> None:
                 dst_agent=2,
                 value=100,
                 is_statechange=1,  # CBTS_BUFFAPPLY marker
-                is_buffremove=0,    # arcdps cbtbuffremove = NONE for APPLY statechange
+                is_buffremove=0,  # arcdps cbtbuffremove = NONE for APPLY statechange
             ),
         ],
     )
@@ -453,10 +453,10 @@ def test_parse_events_emit_buff_remove_with_no_magnitude_still_emits_boon() -> N
                 time_ms=1_000,
                 src_agent=1,
                 dst_agent=2,
-                value=2_500,    # direct damage
-                buff_dmg=0,     # no strip
+                value=2_500,  # direct damage
+                buff_dmg=0,  # no strip
                 is_nondamage=0,  # damage-class
-                is_buffremove=2, # but REMOVE_SINGLE marker
+                is_buffremove=2,  # but REMOVE_SINGLE marker
             ),
         ],
     )
@@ -493,9 +493,9 @@ def test_parse_events_emit_apply_mid_combat_yields_boon_apply() -> None:
                 time_ms=10_000,
                 src_agent=1,
                 dst_agent=2,
-                value=0,           # APPLY has no damage magnitude
-                skill_id=101,      # the buff being applied
-                ev_buff=101,       # arcdps ev.buff = buff_id_being_applied
+                value=0,  # APPLY has no damage magnitude
+                skill_id=101,  # the buff being applied
+                ev_buff=101,  # arcdps ev.buff = buff_id_being_applied
                 # is_buffremove==0 + is_statechange==0 (defaults) trigger the APPLY branch
             ),
         ],
@@ -532,9 +532,9 @@ def test_parse_events_emit_apply_with_damage_yields_dual_event() -> None:
                 time_ms=15_000,
                 src_agent=1,
                 dst_agent=2,
-                value=850,         # damage magnitude
-                skill_id=42,       # the buff being applied (Torment)
-                ev_buff=42,        # arcdps ev.buff = Torment's buff_id
+                value=850,  # damage magnitude
+                skill_id=42,  # the buff being applied (Torment)
+                ev_buff=42,  # arcdps ev.buff = Torment's buff_id
             ),
         ],
     )
@@ -571,8 +571,8 @@ def test_parse_events_emit_apply_excludes_remove_class() -> None:
                 value=100,
                 skill_id=42,
                 buff_dmg=50,
-                ev_buff=42,         # a REMOVE record's ev.buff is the stripped buff ID
-                is_buffremove=2,    # REMOVE_SINGLE
+                ev_buff=42,  # a REMOVE record's ev.buff is the stripped buff ID
+                is_buffremove=2,  # REMOVE_SINGLE
             ),
         ],
     )
@@ -587,7 +587,6 @@ def test_parse_events_emit_apply_excludes_remove_class() -> None:
     damage = events[1]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_single"
-    assert boon.kind != "apply"  # mutual exclusivity check
     assert isinstance(damage, DamageEvent)
 
 
@@ -647,7 +646,7 @@ def test_parse_events_emit_apply_statechange_filtered_upstream() -> None:
                 dst_agent=2,
                 value=0,
                 is_statechange=1,  # CBTS_BUFFAPPLY-style marker (NOT mid-combat APPLY)
-                ev_buff=42,         # would-be APPLY buff ID
+                ev_buff=42,  # would-be APPLY buff ID
             ),
         ],
     )

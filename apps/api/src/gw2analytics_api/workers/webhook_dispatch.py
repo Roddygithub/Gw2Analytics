@@ -26,6 +26,7 @@ reuse -- see the trade-off note in ``services.process_parse``.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -67,7 +68,7 @@ def _generate_delivery_id() -> str:
     return f"dly_{uuid_lib.uuid4()}"
 
 
-def dispatch_for_upload(
+async def dispatch_for_upload(
     session_factory: Callable[[], Session],
     upload_id: uuid_lib.UUID,
 ) -> None:
@@ -77,6 +78,10 @@ def dispatch_for_upload(
     (with ``delivered_at``) or the failure (non-2xx status OR
     network error). The 3-attempt retry schedule + DLQ promotion
     is a v0.9.1 followup (see CHANGELOG ``### Known followup``).
+
+    Outbound POSTs are issued concurrently via ``httpx.AsyncClient``
+    so a slow subscriber cannot serially block deliveries to the
+    remaining subscribers.
 
     Edge cases handled (in order, skip-with-log for each):
 
@@ -153,16 +158,28 @@ def dispatch_for_upload(
 
             upload_id_str = str(upload.id)
             delivered_count = 0
-            with httpx.Client(timeout=_REQUEST_TIMEOUT_S) as client:
-                for sub in active_subs:
-                    if _dispatch_single(
-                        db,
-                        client,
-                        sub,
-                        body_bytes,
-                        upload_id_str,
-                    ):
-                        delivered_count += 1
+            async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S) as client:
+                results = await asyncio.gather(
+                    *(
+                        _dispatch_single_async(db, client, sub, body_bytes, upload_id_str)
+                        for sub in active_subs
+                    ),
+                    return_exceptions=True,
+                )
+
+            for result in results:
+                if result is True:
+                    delivered_count += 1
+                elif isinstance(result, Exception):
+                    # _dispatch_single_async should never raise; it
+                    # catches all expected errors per-sub. If an
+                    # unexpected exception leaks, log it but do not
+                    # crash the dispatch loop.
+                    logger.exception(
+                        "unexpected error during webhook dispatch for upload %s: %s",
+                        upload_id,
+                        result,
+                    )
 
             db.commit()
             logger.info(
@@ -180,17 +197,17 @@ def dispatch_for_upload(
             raise  # let FastAPI BG-task machinery log + record
 
 
-def _dispatch_single(
+async def _dispatch_single_async(
     db: Session,
-    client: httpx.Client,
+    client: httpx.AsyncClient,
     sub: OrmWebhookSubscription,
     body_bytes: bytes,
     upload_id_str: str,
 ) -> bool:
-    """Create one delivery row, fire POST, record outcome. NO commit.
+    """Create one delivery row, fire POST asynchronously, record outcome. NO commit.
 
     Returns True if delivered (2xx), False otherwise. The caller
-    commits atomically after the loop so all deliveries for a
+    commits atomically after the gather so all deliveries for a
     given upload commit together (or all roll back together if the
     loop crashes).
     """
@@ -274,7 +291,7 @@ def _dispatch_single(
     db.add(delivery)
 
     try:
-        resp = client.post(sub.url, content=body_bytes, headers=headers)
+        resp = await client.post(sub.url, content=body_bytes, headers=headers)
     except httpx.HTTPError as exc:
         # Covers ConnectError, ReadTimeout, RemoteProtocolError,
         # etc. -- the entire httpx transport layer. The delivery

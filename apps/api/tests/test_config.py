@@ -21,7 +21,7 @@ from gw2analytics_api.config import Settings
 def test_cors_default_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
     s = Settings(_env_file=None)
-    assert s.cors_allowed_origins == ["*"]
+    assert s.cors_allowed_origins == ["http://localhost:3000"]
 
 
 def test_cors_wildcard_string_preserves_glob(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -30,7 +30,7 @@ def test_cors_wildcard_string_preserves_glob(monkeypatch: pytest.MonkeyPatch) ->
     assert s.cors_allowed_origins == ["*"]
 
 
-def test_cors_empty_string_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cors_empty_string_allows_all_origins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "")
     s = Settings(_env_file=None)
     assert s.cors_allowed_origins == ["*"]

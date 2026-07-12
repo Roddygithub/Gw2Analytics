@@ -6,6 +6,7 @@ import concurrent.futures
 import socket
 
 import pytest
+from fastapi import HTTPException
 
 from gw2analytics_api.routes import webhooks
 
@@ -19,7 +20,7 @@ def test_getaddrinfo_timeout_returns_422(monkeypatch: pytest.MonkeyPatch) -> Non
         return future
 
     monkeypatch.setattr(webhooks._DNS_EXECUTOR, "submit", fake_submit)
-    with pytest.raises(webhooks.HTTPException) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         webhooks._validate_webhook_url("https://slow.example.com/webhook")
     assert exc_info.value.status_code == 422
 

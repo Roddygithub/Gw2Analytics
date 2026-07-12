@@ -91,6 +91,8 @@ from __future__ import annotations
 # robust than N per-line marks (a stray new import won't silently
 # regress E402) AND more grep-discoverable for test-infra audits.
 import base64
+import concurrent.futures
+import functools
 import io
 import os
 import secrets
@@ -136,6 +138,7 @@ from gw2analytics_api.models import (
     OrmWebhookSubscription,
     Upload,
 )
+from gw2analytics_api.routes import webhooks
 from gw2analytics_api.routes.fights.blob_cache import clear_blob_caches
 
 
@@ -272,17 +275,17 @@ def _disable_arq_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("arq.create_pool", _fake_create_pool)
 
 
-
 # -----------------------------------------------------------------------
 # v0.10.20 plan M8 PR-3 simplified (K-2 .env hermeticity)
 # -----------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def _get_settings_no_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     os.environ.pop("GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS", None)
-    import functools
+
     @functools.cache
     def _no_dotenv_get_settings() -> Settings:
         return Settings(_env_file=None)
+
     monkeypatch.setattr(
         "gw2analytics_api.config.get_settings",
         _no_dotenv_get_settings,
@@ -296,8 +299,6 @@ def _get_settings_no_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
 def _isolate_dns_executor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[None, None, None]:
-    from gw2analytics_api.routes import webhooks
-    import concurrent.futures
     executor = concurrent.futures.ThreadPoolExecutor(
         max_workers=webhooks.DNS_POOL_MAX_WORKERS,
         thread_name_prefix="dns_test_iso",
@@ -307,6 +308,7 @@ def _isolate_dns_executor(
         yield
     finally:
         executor.shutdown(wait=False)
+
 
 # ---------------------------------------------------------------------------
 # v0.10.8 plan 140 Fix-B: in-memory FakeMinio for the S3 read-path mocks
@@ -390,9 +392,7 @@ class FakeMinio:
         # with tests that pass length=0.
         self._buckets.add(bucket)  # implicit create on first write
         self._storage.setdefault(bucket, {})
-        self._storage[bucket][key] = (
-            data.read(length) if length > 0 else data.read()
-        )
+        self._storage[bucket][key] = data.read(length) if length > 0 else data.read()
 
     def get_object(self, bucket: str, key: str) -> _FakeHttpResponse:
         if bucket not in self._storage or key not in self._storage[bucket]:

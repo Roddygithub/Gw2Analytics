@@ -51,7 +51,7 @@ def test_build_event_iterator_constructs_gzipfile_with_bytesio() -> None:
 
     def fake_gzipfile(*args: object, **kwargs: object) -> gzip.GzipFile:
         called_kwargs.append(kwargs)
-        return real_gzipfile(*args, **kwargs)
+        return real_gzipfile(*args, **kwargs)  # type: ignore[call-overload, no-any-return]
 
     with patch("gw2analytics_api._event_dispatch.gzip.GzipFile", side_effect=fake_gzipfile):
         gz = _build_gz_blob(3)

@@ -7,6 +7,8 @@ import time
 import zipfile
 from io import BytesIO
 
+from fastapi.testclient import TestClient
+
 _HEADER_FMT = "<4s8sBHBI IB"
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)
 _AGENT_RECORD_FMT = "<QIIhhhhhh"
@@ -19,17 +21,46 @@ _EVENT_SIZE = struct.calcsize(_EVENT_FMT)
 
 
 def make_cbtevent(
-    time_ms: int, src: int, dst: int, value: int, skill_id: int,
-    *, is_statechange: int = 0, is_nondamage: int = 0, buff_dmg: int = 0,
+    time_ms: int,
+    src: int,
+    dst: int,
+    value: int,
+    skill_id: int,
+    *,
+    is_statechange: int = 0,
+    is_nondamage: int = 0,
+    buff_dmg: int = 0,
 ) -> bytes:
     return struct.pack(
-        _EVENT_FMT, time_ms, src, dst, value, buff_dmg, 0, skill_id, 0, 0, 0, 0,
-        is_nondamage, is_statechange, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        _EVENT_FMT,
+        time_ms,
+        src,
+        dst,
+        value,
+        buff_dmg,
+        0,
+        skill_id,
+        0,
+        0,
+        0,
+        0,
+        is_nondamage,
+        is_statechange,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
     )[:_EVENT_SIZE]
 
 
 def make_minimal_zevtc(
-    agents: list[tuple[int, int, int, str, bool]], build: str,
+    agents: list[tuple[int, int, int, str, bool]],
+    build: str,
     skills: list[tuple[int, str]] | None = None,
     events: list[bytes] | None = None,
 ) -> bytes:
@@ -40,7 +71,15 @@ def make_minimal_zevtc(
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
         header = struct.pack(
-            _HEADER_FMT, b"EVTC", build.encode("ascii"), 0, 0, 0, len(agents), len(skills), 0,
+            _HEADER_FMT,
+            b"EVTC",
+            build.encode("ascii"),
+            0,
+            0,
+            0,
+            len(agents),
+            len(skills),
+            0,
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()
@@ -59,7 +98,7 @@ def make_minimal_zevtc(
     return buf.getvalue()
 
 
-def post_upload(client, blob: bytes) -> str:
+def post_upload(client: TestClient, blob: bytes) -> str:
     """POST a .zevtc blob, assert 201, wait for completion, return fight_id."""
     resp = client.post(
         "/api/v1/uploads",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from unittest.mock import patch
 
 from sqlalchemy import select
@@ -22,7 +23,7 @@ _D = 100_000  # base source agent id
 
 
 def _seed_and_call(
-    events: list,
+    events: Sequence[DamageEvent | HealingEvent | BuffRemovalEvent],
     *,
     account_name_a: str = ":synth.100",
     account_name_b: str | None = ":synth.101",
@@ -36,33 +37,57 @@ def _seed_and_call(
         session.add(
             Upload(
                 id=upload_uuid,
-                status="completed", parser_version="0",
-                sha256="a" * 64, original_filename="t.zevtc", size_bytes=0,
+                status="completed",
+                parser_version="0",
+                sha256="a" * 64,
+                original_filename="t.zevtc",
+                size_bytes=0,
             )
         )
         session.flush()
         session.add(
             OrmFight(
-                id=fight_id, upload_id=upload_uuid,
-                agent_count=2, build_version="20250711",
-                encounter_id=0, game_type=1,
+                id=fight_id,
+                upload_id=upload_uuid,
+                agent_count=2,
+                build_version="20250711",
+                encounter_id=0,
+                game_type=1,
                 started_at="2026-07-11T12:00:00+00:00",
             )
         )
-        session.add(OrmFightAgent(
-            fight_id=fight_id, agent_id=_D, name=name_a,
-            account_name=account_name_a, profession=2, elite_spec=18,
-            is_player=True, subgroup="",
-        ))
+        session.add(
+            OrmFightAgent(
+                fight_id=fight_id,
+                agent_id=_D,
+                name=name_a,
+                account_name=account_name_a,
+                profession=2,
+                elite_spec=18,
+                is_player=True,
+                subgroup="",
+            )
+        )
         if account_name_b:
-            session.add(OrmFightAgent(
-                fight_id=fight_id, agent_id=101, name="PlayerB",
-                account_name=account_name_b, profession=1, elite_spec=27,
-                is_player=True, subgroup="",
-            ))
-        session.add(OrmFightSkill(
-            fight_id=fight_id, skill_id=200, name="TestSkill",
-        ))
+            session.add(
+                OrmFightAgent(
+                    fight_id=fight_id,
+                    agent_id=101,
+                    name="PlayerB",
+                    account_name=account_name_b,
+                    profession=1,
+                    elite_spec=27,
+                    is_player=True,
+                    subgroup="",
+                )
+            )
+        session.add(
+            OrmFightSkill(
+                fight_id=fight_id,
+                skill_id=200,
+                name="TestSkill",
+            )
+        )
         session.flush()
         fight = session.get(OrmFight, fight_id)
         assert fight is not None
@@ -75,19 +100,31 @@ def _seed_and_call(
 
 def _de(src: int = _D, dst: int = 101, skill: int = 200, dmg: int = 0) -> DamageEvent:
     return DamageEvent(
-        time_ms=1_000, source_agent_id=src, target_agent_id=dst, skill_id=skill, damage=dmg,
+        time_ms=1_000,
+        source_agent_id=src,
+        target_agent_id=dst,
+        skill_id=skill,
+        damage=dmg,
     )
 
 
 def _he(src: int = _D, dst: int = 101, skill: int = 200, heal: int = 0) -> HealingEvent:
     return HealingEvent(
-        time_ms=1_000, source_agent_id=src, target_agent_id=dst, skill_id=skill, healing=heal,
+        time_ms=1_000,
+        source_agent_id=src,
+        target_agent_id=dst,
+        skill_id=skill,
+        healing=heal,
     )
 
 
 def _bf(src: int = _D, dst: int = 101, skill: int = 200, bf: int = 0) -> BuffRemovalEvent:
     return BuffRemovalEvent(
-        time_ms=1_000, source_agent_id=src, target_agent_id=dst, skill_id=skill, buff_removal=bf,
+        time_ms=1_000,
+        source_agent_id=src,
+        target_agent_id=dst,
+        skill_id=skill,
+        buff_removal=bf,
     )
 
 
@@ -96,9 +133,13 @@ def test_single_player_single_damage() -> None:
     fight_id = _seed_and_call([_de(dmg=42)])
     session = get_sessionmaker()()
     try:
-        rows = session.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert rows[0].total_damage == 42
         assert rows[0].total_healing == 0
@@ -109,15 +150,27 @@ def test_single_player_single_damage() -> None:
 
 def test_multiple_players() -> None:
     """2 agents with events → 2 summary rows."""
-    fight_id = _seed_and_call([
-        _de(dmg=10),
-        HealingEvent(time_ms=1_000, source_agent_id=101, target_agent_id=_D, skill_id=200, healing=20),  # noqa: E501
-    ])
+    fight_id = _seed_and_call(
+        [
+            _de(dmg=10),
+            HealingEvent(
+                time_ms=1_000,
+                source_agent_id=101,
+                target_agent_id=_D,
+                skill_id=200,
+                healing=20,
+            ),
+        ]
+    )
     session = get_sessionmaker()()
     try:
-        rows = session.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 2
     finally:
         session.close()
@@ -128,9 +181,13 @@ def test_npc_only_fight() -> None:
     fight_id = _seed_and_call([_de(dmg=10)], account_name_a="", account_name_b=None)
     session = get_sessionmaker()()
     try:
-        rows = session.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 0
     finally:
         session.close()
@@ -146,9 +203,13 @@ def test_reparse_delete_insert() -> None:
         assert fight is not None
         _persist_player_summaries(session, fight, list(events))
         session.commit()
-        rows = session.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert rows[0].total_damage == 10
     finally:
@@ -160,9 +221,13 @@ def test_condi_power_split() -> None:
     fight_id = _seed_and_call([_de(dmg=50)])
     session = get_sessionmaker()()
     try:
-        rows = session.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert rows[0].power_damage == 50
         assert rows[0].condi_damage == 0
@@ -175,9 +240,13 @@ def test_nul_sanitization() -> None:
     fight_id = _seed_and_call([_de(dmg=10)])
     session = get_sessionmaker()()
     try:
-        rows = session.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert "\x00" not in rows[0].name
     finally:
@@ -189,9 +258,13 @@ def test_empty_account_name_guard() -> None:
     fight_id = _seed_and_call([_de(dmg=10)], account_name_a="")
     session = get_sessionmaker()()
     try:
-        rows = session.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 0
     finally:
         session.close()
@@ -199,16 +272,22 @@ def test_empty_account_name_guard() -> None:
 
 def test_mixed_event_types() -> None:
     """Damage + Healing + BuffRemoval → all 3 magnitudes correct."""
-    fight_id = _seed_and_call([
-        _de(dmg=30),
-        _he(heal=20),
-        _bf(bf=10),
-    ])
+    fight_id = _seed_and_call(
+        [
+            _de(dmg=30),
+            _he(heal=20),
+            _bf(bf=10),
+        ]
+    )
     session = get_sessionmaker()()
     try:
-        rows = session.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert rows[0].total_damage == 30
         assert rows[0].total_healing == 20
@@ -227,9 +306,13 @@ def test_role_detection_invoked() -> None:
     assert kwargs["total_damage"] == 42
     session = get_sessionmaker()()
     try:
-        rows = session.execute(
-            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert rows[0].detected_role == "DPS"
     finally:

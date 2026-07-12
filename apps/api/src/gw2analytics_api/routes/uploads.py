@@ -112,7 +112,7 @@ async def _enqueue_parse(
     )
     sf = get_sessionmaker()
     await asyncio.to_thread(process_parse, sf, upload_id, raw)
-    await asyncio.to_thread(dispatch_for_upload, sf, upload_id)
+    await dispatch_for_upload(sf, upload_id)
 
 
 @router.post(
@@ -178,7 +178,7 @@ async def create_upload(
     )
     db.add(upload)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         # Race lost — re-fetch and return existing.
         db.rollback()
@@ -191,14 +191,24 @@ async def create_upload(
             status=existing.status,
         )
 
-    # Best-effort MinIO dump — narrow exception scope so unexpected
-    # bugs in storage.py don't get swallowed silently. ``S3Error`` is
-    # what the minio library raises; real bugs (e.g. TypeErrors) propagate up.
+    # Persist the raw .zevtc blob BEFORE accepting the upload. A
+    # missing blob makes re-parsing / replay impossible and creates
+    # an orphaned DB record, so storage failures are treated as
+    # hard errors (503) rather than best-effort warnings.
     try:
         put_zevtc(sha, raw)
-    except (S3Error, OSError):
-        logger.exception("MinIO put_zevtc failed; upload remains usable without blob")
+    except (S3Error, OSError) as exc:
+        logger.exception("MinIO put_zevtc failed; upload %s rejected", upload.id)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Object storage unavailable; the upload could not be "
+                "persisted. Retry once storage is healthy."
+            ),
+        ) from exc
 
+    db.commit()
     await _enqueue_parse(request, upload.id, raw)
     return UploadCreatedResponse(
         id=upload.id,

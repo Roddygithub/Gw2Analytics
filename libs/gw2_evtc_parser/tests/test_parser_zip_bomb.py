@@ -1,4 +1,5 @@
 """v0.9.6 plan 020: zip-bomb protection in parser._first_entry."""
+
 from __future__ import annotations
 
 import io

@@ -139,8 +139,7 @@ def total_uptime_ms(state: BuffState, fight_end_ms: int) -> int:
         return 0
     if fight_end_ms < history[-1][0]:
         raise ValueError(
-            f"fight_end_ms ({fight_end_ms}) must be >= last history time "
-            f"({history[-1][0]})"
+            f"fight_end_ms ({fight_end_ms}) must be >= last history time ({history[-1][0]})"
         )
 
     total = 0

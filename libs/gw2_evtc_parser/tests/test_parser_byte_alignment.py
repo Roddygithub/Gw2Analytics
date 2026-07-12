@@ -235,8 +235,7 @@ def test_is_ninety_byte_round_trip() -> None:
         blob = _pack_cbtevent_byte_at_offset(byte_53=byte_value)
         _, is_ninety = _unpack_cbtevent(blob)
         assert is_ninety == byte_value, (
-            f"is_ninety byte mismatch: "
-            f"wrote {byte_value} at offset 53, read {is_ninety}"
+            f"is_ninety byte mismatch: wrote {byte_value} at offset 53, read {is_ninety}"
         )
 
 

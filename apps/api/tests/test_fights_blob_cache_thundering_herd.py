@@ -72,7 +72,7 @@ class _FakeS3Error(S3Error):
     both rely on it) without the I/O plumbing.
     """
 
-    def __init__(self) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self) -> None:
         # Skip S3Error.__init__ (requires BaseHTTPResponse).
         Exception.__init__(self)
 
@@ -147,9 +147,7 @@ def test_concurrent_calls_to_same_uri_are_serialised(
             in_flight -= 1
         return gzip.compress(b"event")
 
-    monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events
-    )
+    monkeypatch.setattr("gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events)
 
     # 4 concurrent calls on the same URI. Barrier releases them simultaneously.
     barrier = threading.Barrier(4)
@@ -336,9 +334,7 @@ def test_singleflight_collapses_to_single_fetcher(
         time.sleep(0.05)
         return gzip.compress(b"event")
 
-    monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events
-    )
+    monkeypatch.setattr("gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events)
 
     barrier = threading.Barrier(4)
 
@@ -389,14 +385,10 @@ def test_singleflight_exception_propagates_to_all_waiters(
             raise _FakeS3Error()
         return gzip.compress(b"event")
 
-    monkeypatch.setattr(
-        "gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events
-    )
+    monkeypatch.setattr("gw2analytics_api.routes.fights.blob_cache.get_events", fake_get_events)
 
     barrier = threading.Barrier(4)
-    capture: list[tuple[bytes | None, BaseException | None]] = [  # type: ignore[misc]
-        (None, None)
-    ] * 4
+    capture: list[tuple[bytes | None, BaseException | None]] = [(None, None)] * 4
 
     def call(idx: int) -> None:
         barrier.wait(timeout=2.0)
@@ -418,9 +410,7 @@ def test_singleflight_exception_propagates_to_all_waiters(
         f"{len(successes)} caller(s) got stale data."
     )
     for exc in exceptions:
-        assert isinstance(exc, S3Error), (
-            f"Singleflight surfaced a non-S3Error exception: {exc!r}"
-        )
+        assert isinstance(exc, S3Error), f"Singleflight surfaced a non-S3Error exception: {exc!r}"
 
     # Retry post-exception must succeed (the dict entry was cleared in
     # the fetcher's ``finally`` block, so the retry hits the function

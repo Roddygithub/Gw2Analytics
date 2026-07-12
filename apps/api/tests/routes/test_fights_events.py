@@ -23,10 +23,16 @@ def _post_fight_and_events(
         base_id_a = 100_000 + int(suffix[:4], 16)
     base_id_b = base_id_a + 1
     base_skill = 1_000_000 + int(suffix[:4], 16)
+
     def _ev(i: int) -> bytes:
         return make_cbtevent(
-            1_000 + i * 2_000, src=base_id_a, dst=base_id_b, value=1000, skill_id=base_skill + i,
+            1_000 + i * 2_000,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1000,
+            skill_id=base_skill + i,
         )
+
     cbtevents = [_ev(i) for i in range(n_events)]
     agents = [
         (base_id_a, 2, 18, f"Warrior {suffix}", True),

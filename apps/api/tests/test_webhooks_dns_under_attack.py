@@ -89,9 +89,7 @@ def test_legitimate_user_not_blocked_by_attacker_slow_dns(
         # eventually returns ``True`` (the tarpit returns empty list -> fail-closed),
         # then the 422 fires.
         with suppress(HTTPException):
-            webhooks._validate_webhook_url(
-                "https://tarpit.attacker.example/webhook"
-            )
+            webhooks._validate_webhook_url("https://tarpit.attacker.example/webhook")
         slow_done.set()
 
     def fast_thread() -> None:
@@ -133,9 +131,8 @@ def test_concurrent_burst_does_not_starve_legitimate(
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
     futures = [
         pool.submit(validate, url)
-        for url in [
-            f"https://tarpit-{i}.attacker.example/webhook" for i in range(5)
-        ] + ["https://fast-allowed.example/webhook"] * 5
+        for url in [f"https://tarpit-{i}.attacker.example/webhook" for i in range(5)]
+        + ["https://fast-allowed.example/webhook"] * 5
     ]
     concurrent.futures.wait(futures, timeout=_DNS_RESOLVE_TIMEOUT_S * 2.0)
     pool.shutdown(wait=False)
@@ -144,8 +141,7 @@ def test_concurrent_burst_does_not_starve_legitimate(
     # With 32 workers + 5 slow @ 3.0s + 5 fast @ 5ms: total wallclock ~3.0s
     # (slows run in parallel + fasts run in parallel); the 4.0s timeout is safe.
     assert all(f.done() for f in futures), (
-        "Executor is serialising concurrent submissions: "
-        "10 URLs did not complete within 4.0s"
+        "Executor is serialising concurrent submissions: 10 URLs did not complete within 4.0s"
     )
 
 
@@ -207,9 +203,7 @@ def test_pool_saturation_gracefully_returns_422(monkeypatch: pytest.MonkeyPatch)
         )
         results = {f.result() for f in futures}
         # Each URL must have produced a 422 (fail-closed); no 200 leaks through.
-        assert results == {422}, (
-            "unexpected status codes: " + repr(results)
-        )
+        assert results == {422}, "unexpected status codes: " + repr(results)
     finally:
         pool.shutdown(wait=False)
         # Drain the isolated pool to avoid leaking threads after the

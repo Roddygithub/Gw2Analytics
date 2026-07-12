@@ -84,9 +84,7 @@ from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 #: for testing against a different corpus on a different host. The test
 #: cleanly ``pytest.skip``s when the file is missing -- offline CI without
 #: the WvW sink still green.
-_FIXTURE_DIR = Path(
-    os.environ.get("WVW_ANALYTICS_DIR", "/home/roddy/WvW_Analytics")
-)
+_FIXTURE_DIR = Path(os.environ.get("WVW_ANALYTICS_DIR", "/home/roddy/WvW_Analytics"))
 _FIXTURE_PATH = _FIXTURE_DIR / "uploads" / "5b161ec03d544b0c96eeb6689590ece4.zevtc"
 
 
@@ -131,16 +129,8 @@ def test_real_fixture_dual_channel_emit_contract() -> None:
     damage_count = sum(1 for e in events if isinstance(e, DamageEvent))
     heal_count = sum(1 for e in events if isinstance(e, HealingEvent))
     strip_count = sum(1 for e in events if isinstance(e, BuffRemovalEvent))
-    apply_count = sum(
-        1
-        for e in events
-        if isinstance(e, BoonApplyEvent) and e.kind == "apply"
-    )
-    remove_count = sum(
-        1
-        for e in events
-        if isinstance(e, BoonApplyEvent) and e.kind != "apply"
-    )
+    apply_count = sum(1 for e in events if isinstance(e, BoonApplyEvent) and e.kind == "apply")
+    remove_count = sum(1 for e in events if isinstance(e, BoonApplyEvent) and e.kind != "apply")
 
     # ------- Sanity: event counts are >= minimum spec-stable thresholds. -------
 
@@ -219,9 +209,7 @@ def test_real_fixture_dual_channel_emit_contract() -> None:
     # The closed-form set is `{remove_all, remove_single}` (CBTB_MANUAL
     # collapses onto remove_single per the arcdps documented "use for
     # in/out volume" guidance).
-    remove_kinds = {
-        e.kind for e in events if isinstance(e, BoonApplyEvent) and e.kind != "apply"
-    }
+    remove_kinds = {e.kind for e in events if isinstance(e, BoonApplyEvent) and e.kind != "apply"}
     assert remove_kinds <= valid_kinds, (
         f"F1 fixture: REMOVE records emit unexpected kinds: "
         f"{remove_kinds - valid_kinds}; valid kinds are {sorted(valid_kinds)}."
@@ -238,9 +226,7 @@ def test_real_fixture_dual_channel_emit_contract() -> None:
 
 @pytest.mark.skipif(
     not _FIXTURE_PATH.exists(),
-    reason=(
-        f"F1-pilot fixture not found at {_FIXTURE_PATH}. Set WVW_ANALYTICS_DIR."
-    ),
+    reason=(f"F1-pilot fixture not found at {_FIXTURE_PATH}. Set WVW_ANALYTICS_DIR."),
 )
 def test_real_fixture_emit_preserves_record_order() -> None:
     """The parser preserves the cbtevent record order on the emit side.

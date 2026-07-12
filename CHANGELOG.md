@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Bump vitest ≥ 3.2.6 and vite ≥ 6.4.3** (`web/package.json`): closes critical/high Node.js dependency vulnerabilities in the frontend build/test toolchain. `vitest` bumped to `^3.2.6`, `vite` to `^6.4.3`.
+- **Harden default CORS allow-list** (`apps/api/src/gw2analytics_api/config.py`): default `allow_origins` changed from `["*"]` (allow-all) to `["http://localhost:3000"]` so a fresh deployment no longer exposes the API to arbitrary origins. Operators can still override via the `CORS_ALLOW_ORIGINS` env var.
+
+### Changed
+
+- **Parallelize webhook dispatch** (`apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`): `dispatch_for_upload` is now `async` and fires outgoing webhook POSTs concurrently via `httpx.AsyncClient` + `asyncio.gather(return_exceptions=True)`, replacing the previous sequential loop. Callers updated to `await` the coroutine (`parser_worker.py`, `routes/uploads.py`, `tests/test_webhooks_e2e.py`).
+
+### Fixed
+
+- **MinIO blob storage failure handling** (`apps/api/src/gw2analytics_api/routes/uploads.py`): if `put_zevtc` raises, the upload endpoint now returns `HTTP 503 Service Unavailable` instead of silently accepting an un-stored blob. Transaction flow fixed to use `db.flush()` before the blob write and `db.commit()` only after success, with `db.rollback()` on failure, preventing orphaned `Upload` rows.
+- **Lint/type errors in tests and scripts** (`apps/api/tests/`, `apps/api/scripts/`): resolved Ruff and Mypy violations across test helpers and the cycle-closeout doc-applier script so the CI lint/type gates stay green.
+
 ## [0.10.11] - 2026-07-12: apps/api singleflight + A2 god-module refactor (plan 021)
 
 ### Added (apps/api - v0.10.11+ plan 021 A2 god-module refactor: 4-submodule decomposition of `routes/fights`)

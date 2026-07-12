@@ -60,8 +60,12 @@ class Settings(BaseSettings):
     # overrides in the current scope.
     minio_secure: bool = False
     parser_version: str = "0.5.0"
-    # ``cors_allowed_origins`` defaults to wide-open (``["*"]``) for
-    # local dev (the Next.js frontend at :3000 + curl from any origin).
+    # ``cors_allowed_origins`` defaults to the local Next.js frontend
+    # (``http://localhost:3000``) so a production deployment that
+    # forgets to set ``CORS_ALLOWED_ORIGINS`` does not silently
+    # wide-open the API to every origin. Operators can still set
+    # ``CORS_ALLOWED_ORIGINS=*`` for unrestricted local curl/dev, or
+    # a comma-separated list for multiple origins.
     # ``NoDecode`` short-circuits pydantic-settings' default JSON
     # parsing of list-valued env vars (a bare ``*`` is not valid JSON
     # and would otherwise raise ``SettingsError`` on startup); the
@@ -69,7 +73,7 @@ class Settings(BaseSettings):
     # on commas (``CORS_ALLOWED_ORIGINS=https://a,https://b`` -> 2
     # entries) and recognises ``*`` as the wide-open shortcut.
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
-        default=["*"],
+        default=["http://localhost:3000"],
         validation_alias="CORS_ALLOWED_ORIGINS",
     )
     # v0.10.0 plan 031: webhook secret at rest envelope encryption.

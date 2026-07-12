@@ -74,7 +74,7 @@ def mock_arq_pool(client: TestClient) -> Generator[_MockArqPool, None, None]:
     so pytest resolves the TestClient fixture FIRST (which fires the
     FastAPI lifespan via ``with TestClient(app) as c: yield c``),
     THEN installs our mock pool on top.
-    
+    """
     pool = _MockArqPool()
     previous = getattr(app.state, "arq_pool", None)
     app.state.arq_pool = pool
