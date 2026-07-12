@@ -88,6 +88,7 @@ The web's 7 routes captured via `pnpm screenshots` + [Playwright](https://playwr
 | `/fights` | ![Fights grid](docs/screenshots/04-fights.png) |
 | `/players` | ![Players grid](docs/screenshots/05-players.png) |
 | `/players/[account_name]` | ![Player profile with timeline](docs/screenshots/06-player-profile-with-timeline.png) |
+| `/fights/[id]?tab=replay` | ![Replay drilldown](docs/screenshots/08-fight-drilldown.png) (v0.10.17 Replay UI: seekable playback of the per-fight `/api/v1/fights/{id}/timeline?window_s=N` rollup with scrubber + play/pause/reset + 1x/2x/4x/8x speed toggle + per-bucket damage/healing/strip bar chart + current-bucket snapshot panel) |
 
 The script also captures 2 fixture/edge-state PNGs (committed but not displayed): `07-player-empty-timeline.png` + `08-fight-drilldown.png` — reserved for visual regression baselines.
 
