@@ -1,7 +1,7 @@
 export { ApiError, formatApiError } from "./errors";
 
 export type { AccountEnrichedRow } from "./account";
-export { resolveAccount } from "./account";
+export { resolveAccount, resolveAccountViaProxy } from "./account";
 
 export type {
   UploadCreatedRow,
