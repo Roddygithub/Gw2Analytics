@@ -64,14 +64,14 @@ def _persist_player_summaries(  # noqa: PLR0912
                 }
 
     for event in events:
-        agent = source_map.get(event.source_agent_id)
-        if agent is None:
+        evt_agent = source_map.get(event.source_agent_id)
+        if evt_agent is None:
             continue
-        account = agent.account_name
+        account = evt_agent.account_name
         assert account is not None  # noqa: S101
         if account in per_account:
             bucket: dict[str, int | str] = per_account[account]
-            bucket["name"] = _sanitize_name(agent.name)
+            bucket["name"] = _sanitize_name(evt_agent.name)
         else:
             bucket = {
                 "damage": 0,
@@ -79,9 +79,9 @@ def _persist_player_summaries(  # noqa: PLR0912
                 "strip": 0,
                 "power": 0,
                 "condi": 0,
-                "name": _sanitize_name(agent.name),
-                "prof": int(agent.profession),
-                "elite": int(agent.elite_spec),
+                "name": _sanitize_name(evt_agent.name),
+                "prof": int(evt_agent.profession),
+                "elite": int(evt_agent.elite_spec),
             }
             per_account[account] = bucket
         if isinstance(event, DamageEvent):

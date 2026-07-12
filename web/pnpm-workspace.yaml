@@ -1,2 +1,3 @@
+packages: []
 # Build-script allowlist moved to .npmrc.
 verify-deps-before-run: true
