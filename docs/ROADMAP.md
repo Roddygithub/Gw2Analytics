@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed AT v0.10.17 cycle
+**Status:** Living document. Last refreshed AT v0.10.18 cycle
 close-out (2026-07-13).
 
 This file is the **single source of truth** for "what's left to do" on
@@ -209,7 +209,48 @@ so a future audit can confirm what was cleaned up; do not re-add.
   break this contract; D5 is the single test that catches
   regressions on EITHER side.
 
-### 1.2 "Ready to implement" shortlist (post v0.10.17 close-out)
+**v0.10.18 cycle shipts** (release commit — see `plans/RELEASE-v0.10.18.md`
++ cycle-end audit `plans/AUDIT-2026-07-20-1405720.md`).
+
+- **D1 marker — D1 pre-closed by v0.10.17 D3** — shipped v0.10.18
+  (commit `4610a10`). The v0.10.17 D3 mock-layer-swap commit
+  `52fd60f` closed ALL 7 pre-existing vitest failures atomically
+  (they shared ONE root cause: mocking the wrong module). The
+  v0.10.18 cycle's diagnostic-first phase reconciles the audit's
+  stale "1 of 7 closed" count into the true outcome (7 of 7
+  closed). Zero-line `git commit --allow-empty` preserves the
+  cycle's strict 4-commit topology.
+- **D3 — Replay UI Playwright e2e spec (deferred from v0.10.17
+  D2)** — shipped v0.10.18 (commit `53e1796`). NEW
+  `web/tests/e2e/replay-ui.spec.ts` (~167 LoC, 4 cases: page tab
+  strip renders + scrubber keyboard accessibility with `aria-valuenow`
+  + B3 badge highlight + play/pause `aria-pressed` conservation
+  without console errors + 1x/2x/4x/8x speed toggle). Exercises
+  the existing `mock-server.mjs` inline `/timeline` stub (3 buckets
+  of 5s window). Pre-Phase-8a defensive grep verified
+  `web/src/app/fights/[id]/page.tsx:404` routes `?tab=replay` to
+  the ReplayPlayer Client Component.
+- **D4 — F16 README parity sync (audit M4 polish observation)** —
+  shipped v0.10.18 (commit `1405720`). 1 row appended to the
+  README's `## Screenshots` table referencing the v0.10.17 F18
+  Replay UI tab path (`/fights/[id]?tab=replay`) + the reserved
+  `docs/screenshots/08-fight-drilldown.png`. Targets the actual
+  documentation gap (the UI tab path, NOT a phantom 9th HTTP route;
+  the `## API surface` table already lists 15 entries including
+  the underlying `/api/v1/fights/{id}/timeline?window_s=N`).
+  Closes the M4 polish finding from the v0.10.17 cycle-end audit.
+
+**O7 carry-forward to v0.10.18.1 cycle** — the 2 pre-existing pytest
+failures in `apps/api/tests/test_uploads_e2e.py` (per the v0.10.14
+release notes; stable through v0.10.15 + v0.10.16-deferred + v0.10.17
++ v0.10.18 partial-cycle). The 2 failures are PostgreSQL-fixture-gated
+and require `docker compose up -d` to surface; v0.10.18 cycle is
+`web/`-only by design, so the back-end-touching D2 ships as the
+v0.10.18.1 followup cycle (the v0.10.18.1 brief will be authored
+post-v0.10.18 close-out per the v0.10.17 / v0.10.18
+anti-premature-cycle-rule).
+
+### 1.2 "Ready to implement" shortlist (post v0.10.18 close-out)
 
 The items below have a complete plan spec in `advisor-plans/` and
 can ship any time the maintainer gives the green light:
