@@ -1,7 +1,7 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed AT v0.10.19 cycle
-close-out (2026-07-12).
+**Status:** Living document. Last refreshed AT v0.10.20 cycle
+close-out (2026-07-13).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -11,7 +11,7 @@ off.
 
 ---
 
-## Current state (post v0.10.19 cycle)
+## Current state (post v0.10.20 cycle)
 
 - **Latest shipped tag:** v0.10.19 (DEFER docs-only cycle: 3 close-out docs at marker=`cd6e9ad` per plans/AUDIT-2026-07-12-`cd6e9ad`.md). The **v0.10.19 mimo-half** cycle attempted M8 (per `plans/RELEASE-v0.10.19.md`) but DEFERRED to v0.10.20 after 6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` autouse fixture exhausted the signature-shape budget against pydantic-settings' actual call style. 3 residual failures persisted out of the 11 M8 K-cluster failures per this cycle's CHANGELOG `[0.10.19]` entry; v0.10.18.1 (`plans/AUDIT-2026-07-13-2ffafc75.md`) is the canonical K1+K2+K3 discoverer. Cycle close-out close-out cycle stamps: `## [0.10.19]` CHANGELOG entry spliced + `plans/RELEASE-v0.10.19.md` (M8 fix-up PRIMARY plan) + `docs/v0.10.19-combat-readout-spike.md` (F17 sizing) + `plans/AUDIT-2026-07-13-RETROSPECTIVE-V01017-V010181.md` (closure thread retrospective) + `plans/AUDIT-2026-07-12-cd6e9ad.md` (this cycle's close-out audit).
 
