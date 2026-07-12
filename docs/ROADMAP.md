@@ -1,7 +1,7 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed AT v0.10.18.1 cycle
-close-out (2026-07-13).
+**Status:** Living document. Last refreshed AT v0.10.19 cycle
+close-out (2026-07-12).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -11,18 +11,10 @@ off.
 
 ---
 
-## Current state (post v0.10.18.1 cycle)
+## Current state (post v0.10.19 cycle)
 
-- **Latest shipped tag:** v0.10.17 (F18 Replay UI main scope + C1
-  partial-pre-existing-test-fix-up + D4 fetchCached LRU isolation
-  pin + D5 cross-component substrate pin per the v0.10.16 deferral
-  brief's "Recommended v0.10.17 scope" section; 5 cycle deliverables
-  D1-D5 + 2 close-out docs commits per the
-  v0.10.17 cycle-end audit at
-  `plans/AUDIT-2026-07-13-3b2e71f.md`. Plan 036 (pre-existing pytest
-  + vitest fix-up) is **PARTIALLY closed**: 1 of 7 vitest failures
-  closed via D3 (`window-size-selector.test.tsx` TDZ fix); 6 vitest
-  + 2 pytest remain as O6 carry-forward to v0.10.18).
+- **Latest shipped tag:** v0.10.19 (DEFER docs-only cycle: 3 close-out docs at marker=`cd6e9ad` per plans/AUDIT-2026-07-12-`cd6e9ad`.md). The **v0.10.19 mimo-half** cycle attempted M8 (per `plans/RELEASE-v0.10.19.md`) but DEFERRED to v0.10.20 after 6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` autouse fixture exhausted the signature-shape budget against pydantic-settings' actual call style. 3 residual failures persisted out of the 11 M8 K-cluster failures per this cycle's CHANGELOG `[0.10.19]` entry; v0.10.18.1 (`plans/AUDIT-2026-07-13-2ffafc75.md`) is the canonical K1+K2+K3 discoverer. Cycle close-out close-out cycle stamps: `## [0.10.19]` CHANGELOG entry spliced + `plans/RELEASE-v0.10.19.md` (M8 fix-up PRIMARY plan) + `docs/v0.10.19-combat-readout-spike.md` (F17 sizing) + `plans/AUDIT-2026-07-13-RETROSPECTIVE-V01017-V010181.md` (closure thread retrospective) + `plans/AUDIT-2026-07-12-cd6e9ad.md` (this cycle's close-out audit).
+
 - **Architecture:** unchanged from v0.10.9+:
   `gw2_evtc_parser` → `gw2_core` → `gw2_analytics` →
   `apps/api` (FastAPI) + `gw2_api_client` (outbound) → `web`
@@ -40,6 +32,8 @@ off.
 | **Real-time DPS meter** — WebSocket-based live DPS display during a parse in progress | `docs/v0.8.0-web-design.md` §6 | **XL** | Auth + reconnect + partial-parse handling. Own dedicated cycle. |
 | **Combat readout (4 tables: Damage / Heal / Boons / Defense)** | `docs/v0.9.0-combat-readout-design.md` | **XL+** | The user spec from the brainstorming sessions. Blocked on the statechange parser + the skills DB. **Longest cycle, highest analyst value.** |
 
+
+> **v0.10.19 mimo-half cycle attempt**: 6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` autouse fixture exhausted the signature-budget against pydantic-settings actual call style; 3 residual failures persisted out of the 11 K-cluster per `CHANGELOG [0.10.19]`. Forward-defer to v0.10.20 per `plans/AUDIT-2026-07-12-cd6e9ad.md` §2. NO production-code regression; bucket K = Test-Substrate Mismatch.
 ### 1.1 Items removed since v0.8.0 / v0.9.0 release cycle (for archival)
 
 The following items previously listed in §1 have shipped and are now
