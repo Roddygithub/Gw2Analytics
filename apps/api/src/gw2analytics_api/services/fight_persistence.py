@@ -29,6 +29,24 @@ def _elite_id(e: EliteSpec) -> int:
 
 
 def _sanitize_name(name: str | None, max_length: int = MAX_NAME_LEN) -> str:
+    """Normalise a free-text name from the EVTC parser to a safe ORM string.
+
+    The contract is intentionally non-obvious from the body alone:
+
+    - Input contract: ``name`` may be ``None`` or empty; both produce
+      ``""`` (NOT ``None``). The return type is ``str`` (never
+      ``Optional[str]``) so callers can pass the result directly to a
+      non-nullable SQLAlchemy ``String`` column without a defensive
+      ``or ""`` wrap.
+    - ``"\\x00"`` is stripped BEFORE truncation so a NUL at position
+      ``max_length - 1`` cannot push a partial byte past the limit
+      (the parser may surface NULs in synthetic agent names).
+    - The function is a 1-line wrapper around the static helper, but
+      callers MUST NOT re-wrap with ``or ""`` or re-strip ``\\x00`` --
+      both are already handled here. The pre-plan-028 callers were
+      already in the right shape; this docstring is preventive against
+      future drift.
+    """
     if not name:
         return ""
     return name.replace("\x00", "")[:max_length]
