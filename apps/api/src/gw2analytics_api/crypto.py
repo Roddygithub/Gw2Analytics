@@ -114,8 +114,26 @@ def decrypt_webhook_secret(ciphertext: bytes, *, kek: str | None = None) -> str:
     row does NOT crash the entire dispatch loop (one
     subscriber's misconfiguration must not freeze every other
     webhook).
+
+    v0.10.12 plan 015: fallback KEK list. If the primary KEK
+    fails to decrypt, try each KEK in ``SECRETS_KEK_FALLBACK``
+    (comma-separated list in env). This enables zero-downtime
+    KEK rotation: set the old KEK as fallback, rotate to a new
+    primary, run the migration script, then remove the fallback.
     """
-    return _get_fernet(_resolve_kek(kek)).decrypt(ciphertext).decode("utf-8")
+    primary = _resolve_kek(kek)
+    try:
+        return _get_fernet(primary).decrypt(ciphertext).decode("utf-8")
+    except FernetInvalidToken:
+        # Try fallback KEKs (plan 015: KEK rotation support)
+        fallbacks = get_settings().secrets_kek_fallback
+        for fallback_kek in fallbacks:
+            try:
+                return _get_fernet(fallback_kek).decrypt(ciphertext).decode("utf-8")
+            except FernetInvalidToken:
+                continue
+        # All attempts failed
+        raise
 
 
 __all__ = [
