@@ -256,22 +256,6 @@ can ship any time the maintainer gives the green light:
    marks this XL+ with the block reason explicit.
 2. **Skill build analyser** — design doc on §6 of
    `docs/v0.8.0-web-design.md` (~M effort).
-3. **M8 (bucket K = Test-Substrate Mismatch) — 11 pytest
-   failures in webhook/Arq/DNS tests** — NEW finding from the
-   v0.10.18.1 diagnostic-first phase (the full-surface pytest
-   run `uv run pytest apps/api/tests -rfE --tb=no --no-header -q`
-   reported `11 failed, 286 passed, 2 skipped`). All 11 cluster
-   on test-to-substrate mismatches (conftest isolation leaks +
-   DNS `socket.getaddrinfo` monkeypatch breakage + Arq mock-pool
-   parity) running on the live docker-compose stack. NOT
-   production code regressions. Sub-categorised: K1 (Arq-
-   Worker connectivity, 5) + K2 (IP-routing/SSRF gate semantics,
-   4) + K3 (DNS-resolver-pool latency budget, 2). Forward-
-   deferred to **v0.10.19 mimo-half PRIMARY scope**. The fix-up
-   lands test-substrate corrections only (conftest isolation +
-   DNS monkeypatch restoration + Arq mock-pool parity); NO
-   production logic changes. Effort: M-L.
-
 
 The previous v0.8.0 list's third + fourth + fifth items (per-day
 bucketing + fight_player_summaries materialisation + webhooks
@@ -279,6 +263,15 @@ backend) shipped in v0.8.1, v0.8.4, v0.9.0 respectively and are
 no longer in the shortlist. **F18 Replay UI is no longer listed in
 §1 v1.0 candidates** — it shipped in v0.10.17 (D1 + D2 + D5) and
 is now in §1.1 cycle shipts (see "v0.10.17 cycle shipts" above).
+
+**M8 PR status (v0.10.20 cycle PARTIAL-FIX):** see
+`plans/AUDIT-2026-07-13-v0.10.20.md` §4 for the 12 v0.10.21 M-8-bis sub-tasks.
+M8 shipped as PARTIAL-FIX in the v0.10.20 mimo-half cycle (closes 5 of 11
+lifecycle-race subtype failures via PR-1 K-1 + closes 2 of 2 saturation
+subtypes via PR-2 K-3 per-test executor; 4 SSRF-gate residuals + 6 NEW
+dispatch-FK subtype failures + substrate-pollution remain forward-blocked).
+M8 not eligible for "completed" relabeling until v0.10.21 closes §4's
+12 TASK-Y items.
 
 ---
 
