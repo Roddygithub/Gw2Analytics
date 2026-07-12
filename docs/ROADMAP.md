@@ -1,7 +1,7 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed AT v0.10.15 cycle
-close-out (2026-07-12).
+**Status:** Living document. Last refreshed AT v0.10.17 cycle
+close-out (2026-07-13).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -11,13 +11,18 @@ off.
 
 ---
 
-## Current state (post v0.10.15 cycle)
+## Current state (post v0.10.17 cycle)
 
-- **Latest shipped tag:** v0.10.15 (the audit pass + 4 S+M-effort
-  hygiene tightening per the v0.10.14 cycle-end audit at
-  `plans/AUDIT-2026-07-12-5d0d4d4.md`. Plans 032-035 in
-  `advisor-plans/` document the cycle's per-plan details; plan 036
-  is deferred to v0.10.16+).
+- **Latest shipped tag:** v0.10.17 (F18 Replay UI main scope + C1
+  partial-pre-existing-test-fix-up + D4 fetchCached LRU isolation
+  pin + D5 cross-component substrate pin per the v0.10.16 deferral
+  brief's "Recommended v0.10.17 scope" section; 5 cycle deliverables
+  D1-D5 + 2 close-out docs commits per the
+  v0.10.17 cycle-end audit at
+  `plans/AUDIT-2026-07-13-3b2e71f.md`. Plan 036 (pre-existing pytest
+  + vitest fix-up) is **PARTIALLY closed**: 1 of 7 vitest failures
+  closed via D3 (`window-size-selector.test.tsx` TDZ fix); 6 vitest
+  + 2 pytest remain as O6 carry-forward to v0.10.18).
 - **Architecture:** unchanged from v0.10.9+:
   `gw2_evtc_parser` → `gw2_core` → `gw2_analytics` →
   `apps/api` (FastAPI) + `gw2_api_client` (outbound) → `web`
@@ -140,7 +145,71 @@ so a future audit can confirm what was cleaned up; do not re-add.
   / timeline / playerTimeline grids. Events endpoint failure
   retains the page-level blocking-error banner.
 
-### 1.2 "Ready to implement" shortlist (post v0.10.15 close-out)
+**v0.10.17 cycle shipts** (release commit — see `plans/RELEASE-v0.10.17.md`).
+
+- **D1 — Replay UI for `/fights/[id]` (F18 main scope)** — shipped
+  v0.10.17. NEW `web/src/components/ReplayPlayer.tsx` (~600 LoC) is
+  a Client Component with playback engine (play/pause + 1x/2x/4x/8x
+  speed toggle + scrubber drag + auto-pause at last bucket) +
+  per-bucket visualisation (3 horizontal sub-bars per bucket:
+  damage / healing / strip) + locale-formatted totals + the
+  speed-chip cluster with `aria-pressed` + current-bucket badge
+  `B{i+1}` + empty-state messaging. NEW `web/src/lib/replayFetcher.ts`
+  (~90 LoC) wraps `fetchCached` to fetch the per-fight timeline
+  rollup at the page's resolved `window_s` (URL omits `?window_s=`
+  when windowS=5; includes `?window_s=N` otherwise).
+  `web/src/app/fights/[id]/page.tsx` MODIFIED to add the Replay tab
+  to the tab strip; case-insensitive tab matching + wiring
+  `fetchReplayTimeline` into the `Promise.allSettled` (6th parallel
+  fetch). `web/src/components/PerFightTimelineChart.tsx` MODIFIED (1
+  line) — `export` added to `formatSecondsLabel` so ReplayPlayer.tsx
+  can reuse it.
+
+- **D2 — `replay-player.test.tsx` vitest specs (13 cases)** — shipped
+  v0.10.17. NEW `web/tests/components/replay-player.test.tsx` covers
+  3 render chrome (scrubber `aria-valuemin`/`aria-valuemax`/
+  `aria-valuenow` + speed chips `aria-pressed` + locale-formatted
+  totals), 5 playback engine (Play click → setInterval fakes + speed
+  toggle changes interval + Pause stops advancement + Reset pauses +
+  auto-pause at last bucket), 2 scrubber + current bucket (drag
+  updates currentIndex + badge `B{i+1}` highlights), 2 empty states
+  (no timeline / no buckets), 1 initial state (Bucket 1 of N
+  visible at mount). All `vi.advanceTimersByTime(N)` wrapped in
+  `act(() => ...)` to neutralise React 18+ auto-batching flakiness.
+
+- **D3 — `window-size-selector.test.tsx` vi.mock TDZ fix (pre-existing
+  vitest failure closure)** — shipped v0.10.17. Closes 1 of the 7
+  pre-existing vitest failures from the v0.10.14 release notes:
+  `window-size-selector.test.tsx` had a TDZ error on the
+  top-of-file `pushMock` + `searchParamsMock` constants when
+  vitest hoists `vi.mock(...)` above them. Wraps both mocks in
+  `vi.hoisted(() => ({ ... }))` so they initialise BEFORE the
+  `vi.mock` calls run.
+
+- **D4 — `fetchCached` LRU isolation test (deferred v0.10.16 D4
+  hygiene pin)** — shipped v0.10.17. NEW `web/tests/lib/
+  fetchCached-isolation.test.ts` pins all 5 promised-behaviors + 1
+  concurrency case (TTL hit / TTL expiry / dedup / no-cache-on-error
+  / LRU cap eviction at maxsize=8 / concurrent `Promise.all`).
+  Without this test, a future `fetchCached` refactor could silently
+  break the LRU bound + the TTL contract + the dedup contract
+  without test detection. Anti-regression substrate for the v0.10.14
+  D2 `fetchCached` helper.
+
+- **D5 — `replay-substrate-integration.test.ts` cross-component
+  substrate pin (v0.10.17 D5)** — shipped v0.10.17. NEW file pins
+  the contract between `ReplayPlayer.tsx` (consumer) and
+  `fetchCached.ts` (infrastructure) at the `fetchReplayTimeline`
+  wrapper boundary. 6 sub-cases: URL omits `?window_s=` when
+  windowS=5 / URL includes `?window_s=N` when windowS!==5 /
+  `encodeURIComponent` defensiveness on fightId / invalid windowS
+  rejection (0/-1/NaN) BEFORE the gateway call / `fetchCached` error
+  propagation unmodified / LRU cache hit within 60s TTL. A future
+  regression in EITHER ReplayPlayer.tsx OR fetchCached.ts would
+  break this contract; D5 is the single test that catches
+  regressions on EITHER side.
+
+### 1.2 "Ready to implement" shortlist (post v0.10.17 close-out)
 
 The items below have a complete plan spec in `advisor-plans/` and
 can ship any time the maintainer gives the green light:
@@ -149,21 +218,29 @@ can ship any time the maintainer gives the green light:
    Note: blocked on statechange parser + skills DB; the §1 table
    marks this XL+ with the block reason explicit.
 2. **Skill build analyser** — design doc on §6 of
-   `docs/v0.8.0-web-design.md` (extracted from the §1 priorities
-   table row, retained as the most-leverage M-effort web item).
-3. **Pre-existing pytest + vitest fix-up** — plan 036 (deferred
-   from v0.10.15). 7 vitest + 2 pytest failures documented in
-   `plans/RELEASE-v0.10.14.md`'s gate contract. The vitest failures'
-   FetchCached LRU interaction is a v0.10.14-cycle hypothesis;
-   diagnostic at v0.10.16 cycle. M-L effort. Originally M, but
-   with the v0.10.14 + v0.10.15 lessons learned (multiple-section
-   Promise.allSettled + LRU isolation), the actual fix-up may be
-   cleaner than the L-effort baseline estimate.
+   `docs/v0.8.0-web-design.md` (~M effort).
+3. **Residual pre-existing tests fix-up + D2 Playwright e2e (plan
+   036 partial-closure followup)** — NEW plan for v0.10.18.
+   v0.10.17 PLAN-036 PARTIALLY closed: D3 fixed 1 of 7 pre-existing
+   vitest failures (`window-size-selector.test.tsx`); 6 vitest in
+   `web/tests/components/fight-events-page*` + 2 pytest in
+   `apps/api/tests/test_uploads_e2e.py` remain. The 6 vitest are
+   hypothesised to share a `fetchCached`/`window.fetch` interaction
+   root cause that requires a diagnostic cycle. PLUS the v0.10.17
+   D2 Playwright e2e spec (`web/tests/e2e/replay-ui.spec.ts`) was
+   deferred from this cycle; v0.10.18 picks it up to round out the
+   Replay UI testing surface. M-L effort.
+4. **README 9th-route sync (F16 followup)** — the v0.10.14 README
+   `## API surface` table has 8 routes; the v0.10.17 Replay UI adds
+   a 9th (the `/fights/[id]/replay` tab path + `fetchReplayTimeline`
+   wrapper-derived read). S-effort; v0.10.18 followup.
 
 The previous v0.8.0 list's third + fourth + fifth items (per-day
 bucketing + fight_player_summaries materialisation + webhooks
 backend) shipped in v0.8.1, v0.8.4, v0.9.0 respectively and are
-no longer in the shortlist.
+no longer in the shortlist. **F18 Replay UI is no longer listed in
+§1 v1.0 candidates** — it shipped in v0.10.17 (D1 + D2 + D5) and
+is now in §1.1 cycle shipts (see "v0.10.17 cycle shipts" above).
 
 ---
 
