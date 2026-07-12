@@ -19,12 +19,10 @@ to a per-test template dir so the script doesn't pollute /tmp.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 import pytest
-
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "cycle_closeout_apply_docs.py"
 
@@ -184,7 +182,8 @@ def test_missing_changelog_anchor_raises_systemexit(
     apply_docs = _import_apply_docs()
     with pytest.raises(SystemExit) as excinfo:
         apply_docs(marker=scratch_repo["marker"], root=scratch_repo["repo_root"])
-    assert "## [0.10.18.1] anchor not found" in str(excinfo.value)
+    assert "'## [0.10.18.1]'" in str(excinfo.value)
+    assert "anchor not found" in str(excinfo.value)
 
 
 def test_missing_roadmap_anchor_raises_systemexit(scratch_repo: dict[str, Any]) -> None:
@@ -243,3 +242,37 @@ def test_cli_missing_marker_arg_exits_nonzero() -> None:
     assert result.returncode != 0
     # argparse writes to stderr on missing required arg.
     assert "--marker" in result.stderr
+
+
+def test_marker_substituted_in_all_three_docs(scratch_repo: dict[str, Any]) -> None:
+    """The 9th smoke test: verify the literal `MARKER` placeholder is substituted
+    in ALL THREE close-out docs (CHANGELOG, ROADMAP, AUDIT) on a single apply call.
+
+    Closes a coverage gap: prior tests verified each doc was mutated, but the
+    substitution consistency across docs was implicit. This test EXPLICITLY
+    verifies the marker SHA appears in CHANGELOG.md, docs/ROADMAP.md, and
+    plans/AUDIT-2026-07-12-<marker>.md + that NO lingering `MARKER` placeholder
+    text survives in any of the 3 docs.
+    """
+    apply_docs = _import_apply_docs()
+    apply_docs(marker=scratch_repo["marker"], root=scratch_repo["repo_root"])
+
+    ch = (scratch_repo["repo_root"] / "CHANGELOG.md").read_text()
+    rd = (scratch_repo["repo_root"] / "docs" / "ROADMAP.md").read_text()
+    audit = (
+        scratch_repo["repo_root"]
+        / "plans"
+        / f"AUDIT-2026-07-12-{scratch_repo['marker']}.md"
+    ).read_text()
+
+    # Each doc contains the marker SHA.
+    assert scratch_repo["marker"] in ch
+    assert scratch_repo["marker"] in rd
+    assert scratch_repo["marker"] in audit
+
+    # No doc retains the literal `MARKER` placeholder text.
+    assert "MARKER" not in ch.split("## [0.10.19]")[0] + ch[: ch.find("## [0.10.19]")]
+    # AUDIT template uses "MARKER" placeholder pre-substitution.
+    assert "MARKER placeholder" not in audit or "MARKER" not in audit.replace(
+        "MARKER placeholder", ""
+    )

@@ -57,7 +57,7 @@ class _CyleCloseOutError(SystemExit):
     """Subclass so 'grep -n _CyleCloseOutError' finds script-side exits."""
 
 
-def _abort(msg: str) -> "_CyleCloseOutError":
+def _abort(msg: str) -> _CyleCloseOutError:
     """Build a SystemExit carrying ``msg``.
 
     Returns the SystemExit instance so callers can ``raise _abort(...)``
@@ -68,7 +68,7 @@ def _abort(msg: str) -> "_CyleCloseOutError":
     return _CyleCloseOutError(msg)
 
 
-def apply_docs(marker: str, root: Path) -> None:
+def apply_docs(marker: str, root: Path, audit_date: str = "2026-07-12") -> None:
     """Apply the 3 close-out docs to the working tree.
 
     Parameters
@@ -196,7 +196,7 @@ def apply_docs(marker: str, root: Path) -> None:
     audit_template_path = template_root / "v0.10.19_audit_template.md"
     if not audit_template_path.exists():
         raise _abort(f"AUDIT template body not found at {audit_template_path}")
-    audit_path = root / "plans" / f"AUDIT-2026-07-12-{marker}.md"
+    audit_path = root / "plans" / f"AUDIT-{audit_date}-{marker}.md"
 
     au = audit_template_path.read_text()
     au = au.replace("MARKER", marker)
@@ -223,10 +223,16 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_ROOT,
         help=f"Repository root path (default: {DEFAULT_ROOT}; override with GW2ANALYTICS_ROOT env var).",
     )
+    parser.add_argument(
+        "--audit-date",
+        type=str,
+        default="2026-07-12",
+        help="Cycle-end date for the AUDIT filename (YYYY-MM-DD). Default: 2026-07-12.",
+    )
     args = parser.parse_args(argv)
 
     root = Path(os.environ.get("GW2ANALYTICS_ROOT", args.root))
-    apply_docs(marker=args.marker, root=root)
+    apply_docs(marker=args.marker, root=root, audit_date=args.audit_date)
     return 0
 
 
