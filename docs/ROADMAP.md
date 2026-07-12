@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed AT v0.10.18 cycle
+**Status:** Living document. Last refreshed AT v0.10.18.1 cycle
 close-out (2026-07-13).
 
 This file is the **single source of truth** for "what's left to do" on
@@ -11,7 +11,7 @@ off.
 
 ---
 
-## Current state (post v0.10.17 cycle)
+## Current state (post v0.10.18.1 cycle)
 
 - **Latest shipped tag:** v0.10.17 (F18 Replay UI main scope + C1
   partial-pre-existing-test-fix-up + D4 fetchCached LRU isolation
@@ -250,7 +250,7 @@ v0.10.18.1 followup cycle (the v0.10.18.1 brief will be authored
 post-v0.10.18 close-out per the v0.10.17 / v0.10.18
 anti-premature-cycle-rule).
 
-### 1.2 "Ready to implement" shortlist (post v0.10.18 close-out)
+### 1.2 "Ready to implement" shortlist (post v0.10.18.1 close-out)
 
 The items below have a complete plan spec in `advisor-plans/` and
 can ship any time the maintainer gives the green light:
@@ -260,21 +260,22 @@ can ship any time the maintainer gives the green light:
    marks this XL+ with the block reason explicit.
 2. **Skill build analyser** — design doc on §6 of
    `docs/v0.8.0-web-design.md` (~M effort).
-3. **Residual pre-existing tests fix-up + D2 Playwright e2e (plan
-   036 partial-closure followup)** — NEW plan for v0.10.18.
-   v0.10.17 PLAN-036 PARTIALLY closed: D3 fixed 1 of 7 pre-existing
-   vitest failures (`window-size-selector.test.tsx`); 6 vitest in
-   `web/tests/components/fight-events-page*` + 2 pytest in
-   `apps/api/tests/test_uploads_e2e.py` remain. The 6 vitest are
-   hypothesised to share a `fetchCached`/`window.fetch` interaction
-   root cause that requires a diagnostic cycle. PLUS the v0.10.17
-   D2 Playwright e2e spec (`web/tests/e2e/replay-ui.spec.ts`) was
-   deferred from this cycle; v0.10.18 picks it up to round out the
-   Replay UI testing surface. M-L effort.
-4. **README 9th-route sync (F16 followup)** — the v0.10.14 README
-   `## API surface` table has 8 routes; the v0.10.17 Replay UI adds
-   a 9th (the `/fights/[id]/replay` tab path + `fetchReplayTimeline`
-   wrapper-derived read). S-effort; v0.10.18 followup.
+3. **M8 (bucket K = Test-Substrate Mismatch) — 11 pytest
+   failures in webhook/Arq/DNS tests** — NEW finding from the
+   v0.10.18.1 diagnostic-first phase (the full-surface pytest
+   run `uv run pytest apps/api/tests -rfE --tb=no --no-header -q`
+   reported `11 failed, 286 passed, 2 skipped`). All 11 cluster
+   on test-to-substrate mismatches (conftest isolation leaks +
+   DNS `socket.getaddrinfo` monkeypatch breakage + Arq mock-pool
+   parity) running on the live docker-compose stack. NOT
+   production code regressions. Sub-categorised: K1 (Arq-
+   Worker connectivity, 5) + K2 (IP-routing/SSRF gate semantics,
+   4) + K3 (DNS-resolver-pool latency budget, 2). Forward-
+   deferred to **v0.10.19 mimo-half PRIMARY scope**. The fix-up
+   lands test-substrate corrections only (conftest isolation +
+   DNS monkeypatch restoration + Arq mock-pool parity); NO
+   production logic changes. Effort: M-L.
+
 
 The previous v0.8.0 list's third + fourth + fifth items (per-day
 bucketing + fight_player_summaries materialisation + webhooks

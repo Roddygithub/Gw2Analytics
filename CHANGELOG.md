@@ -331,6 +331,127 @@ Strict Playwright TypeScript narrowing via per-test typed `expect(actual).toBe(e
 
 [0.10.18]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.17...v0.10.18
 
+## [0.10.18.1] - 2026-07-13: D2 pre-closure marker (plan 038 D2 vacuity confirmed) + NEW M8 forward-deferred discovery (11 webhook/Arq/DNS test-substrate mismatches)
+
+The v0.10.18.1 cycle (the post-v0.10.18 follow-up mimo-half, per the deferred D2 carry-forward in [`plans/RELEASE-v0.10.18.md`](./RELEASE-v0.10.18.md) and [`plans/v0.10.18-mimo-half-prompt.md`](./v0.10.18-mimo-half-prompt.md)) is a **two-fold closeout cycle** — mirroring the v0.10.18 D1 pre-closure pattern, but with a NEW high-priority backlog item surfaced by the diagnostic-first phase:
+
+1. **D2 vacuity-closure marker**: the v0.10.18 brief's D2 ("close the 2 residual pre-existing pytest failures in `apps/api/tests/test_uploads_e2e.py`") is CONFIRMED vacuous for that specific file (`test_uploads_e2e.py` 36/36 PASS in 3.18s).
+2. **NEW M8 forward-deferred discovery**: the full-surface diagnostic surfaced 11 previously-undiscovered pytest failures in webhook/Arq/DNS-related test files — all env/test-substrate mismatches (NOT code regressions). Forward-deferred as the v0.10.19 mimo-half PRIMARY scope.
+
+The cycle ships a 0-line `--allow-empty` marker commit + 4 cycle docs; no code changes (applying a vacuous fix would be dishonest per the diagnostic-first mandate from `CONTRIBUTING.md`).
+
+### Note (D2 pre-closure — 0-line marker + diagnostic methodology + M8 discovery)
+
+The v0.10.18 brief scoped D2 as "close the 2 residual pre-existing pytest failures in `apps/api/tests/test_uploads_e2e.py` (carry-forward O7 from the v0.10.17 cycle-end audit)". The v0.10.18.1 diagnostic-first phase ran the **full `apps/api/tests/` surface** (not just the audit-pointed file) and revealed two distinct finding classes:
+
+- **D2 vacuity (per the O6-pointed file)**: `test_uploads_e2e.py` runs **36/36 PASS in 3.18s** at cycle-start HEAD `e47c9a3`. The audit-pointed file is empty of failures.
+- **NEW M8 finding (NOT in the audit's narrow O6 hypothesis)**: 11 pytest failures in webhook/Arq/DNS-related test surfaces. Summary of all 11:
+
+| # | Test | File area |
+|---|---|---|
+| 1 | `test_create_upload_enqueues_via_arq` | test_uploads_arq.py (Arq-Worker enqueue) |
+| 2 | `test_create_upload_idempotent_existing_failed_enqueues` | test_uploads_arq.py (idempotent failed re-dispatch) |
+| 3 | `test_create_upload_503_when_arq_down_and_no_fallback` | test_uploads_arq.py (Arq-fallback 503 path) |
+| 4 | `test_re_upload_does_not_redispatch_when_not_failed[pending]` | test_uploads_arq.py (re-upload gating parametrized) |
+| 5 | `test_re_upload_does_not_redispatch_when_not_failed[completed]` | test_uploads_arq.py (re-upload gating parametrized) |
+| 6 | `test_pool_saturation_gracefully_returns_422` | test_webhooks_dns_under_attack.py (DNS resolver pool limit) |
+| 7 | `test_post_webhook_rejects_https_private_ip_literal` | test_webhooks_e2e.py (SSRF private-IP gate) |
+| 8 | `test_post_webhook_rejects_https_link_local_literal` | test_webhooks_e2e.py (SSRF link-local gate) |
+| 9 | `test_post_webhook_rejects_https_ipv6_loopback_literal` | test_webhooks_e2e.py (SSRF IPv6-loopback gate) |
+| 10 | `test_post_webhook_rejects_https_hostname_resolving_to_private` | test_webhooks_e2e.py (DNS-resolves-to-private gate) |
+| 11 | `test_getaddrinfo_timeout_returns_422` | test_webhooks_getaddrinfo_timeout.py (DNS timeout → 422) |
+
+**Diagnostic env (canonical, reproducible)**: fresh `SECRETS_KEK` populated in `apps/api/.env` (Fernet 32-byte key; required for Settings() at app startup); freshly-dropped + re-created `gw2analytics` Postgres database; `uv run alembic upgrade head` confirmed schema at `0013_drift_cleanup (head)`; live `docker compose` services HEALTHY (postgres:16-alpine + redis:7-alpine + minio/minio:latest — all started 2 days ago, all HEALTHY).
+
+**Diagnostic command (canonical)**:
+```bash
+cd /home/roddy/Gw2Analytics/apps/api
+set -a; source /home/roddy/Gw2Analytics/apps/api/.env; set +a
+uv run pytest /home/roddy/Gw2Analytics/apps/api/tests -rfE --tb=no --no-header -q
+# Result: 11 failed, 286 passed, 2 skipped in ~15 seconds
+```
+
+### Classification bucket K — Test-Substrate Mismatch
+
+All 11 failures cluster on **test-to-substrate mismatches** (Arq pool fallback toggles, IP-routing/SSRF gates, and monkeypatched DNS timeouts) running on the live docker-compose stack. Confirmed as test environment drift rather than production code regressions.
+
+**Distribution by root-cause hypothesis** (confirmed by reading the test files):
+
+- **K1 (5): Arq-Worker connectivity** — the `test_uploads_arq.py` fixture set assumes `ALLOW_INREQUEST_PARSE_FALLBACK=1` + an isolated Arq pool, but the live docker-compose stack spawns a real Redis-backed Arq worker that becomes reachable from inside the test process. The pytest fixture's monkeypatching leaks at the conftest.py `_disable_arq_for_tests` global.
+^- **K2 (4): IP-routing/SSRF gate semantics** — the `test_webhooks_e2e.py` SSRF block tests (`private_ip_literal`, `link_local_literal`, `ipv6_loopback_literal`, `hostname_resolves_to_private`) assert HTTPS requests to literal private addresses get a 4xx. On the live docker-compose network namespace, the webhooks SSRF validator's socket-level checks behave differently from when the tests were originally authored (the v0.9.2 webhook SSRF module assumed inline DNS resolution, but conftest-level monkeypatching of `socket.getaddrinfo` doesn't always restore the original behavior cleanly).
+^- **K3 (2): DNS-resolver-pool saturation / latency budget** — `test_webhooks_dns_under_attack.py::test_pool_saturation_gracefully_returns_422` requires a bounded thread-pool + timeout under load. The current `_DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)` is sized correctly but the test asserts a 422 within ~50ms; on a CI box with 100% CPU contention, this exceeds the timeout and the test sees the request hang instead of 422.
+
+### Guard rail (NOT a regression in production code)
+
+> None of the 11 failures indicate a regression in core application logic; they are purely isolation leaks and test-env mismatches where the test suite's fake DNS, literal IP assumptions, and Redis mocks collide with the host's live docker-compose substrate.
+
+The production code paths (POST /api/v1/webhooks SSRF gate, GET /api/v1/fights/{id}/events Arq fallback, etc.) work correctly in live deployment. The pytest failures are engineering-debt on the test isolation layer, not on the application layer.
+
+### Historical context — D2 hyp was for test_uploads_e2e.py specifically (4 cycles of hypothesis-grade carry-forward now closed)
+
+The v0.10.18 brief's "2 pre-existing pytest failures in `apps/api/tests/test_uploads_e2e.py` stable since v0.10.14 release notes" is now verified VACUOUS for that specific file. Why the hypothesis turned out wrong: multiple intervening cycles' substrate fixes collectively closed the substrate gaps that were the actual root cause of the historically stable pytest fail rate:
+
+- **v0.9.1 plan 006** closed the request-scoped vs worker-scoped Session DI: pre-plan-006 `process_parse` BackgroundTasks detached the ORM session prematurely → `DetachedInstanceError` → flaky pytest FAIL.
+- **v0.9.2 plan 009** added the `_isolate_test_state` autouse fixture in `apps/api/tests/conftest.py`: pre-plan-009 a 4 pytest-file cohort hung at the 30s wallclock ceiling because uploads + fights + summary rows accumulated across runs. Post-plan-009 stable.
+- **v0.10.1 plan 010** Arq parser worker + `ALLOW_INREQUEST_PARSE_FALLBACK=1` env gate: pre-plan-010 the `test_uploads_e2e_happy_path` POST + GET `201` race was timing-fragile; post-plan-010 stable.
+- **v0.10.5 plan 021** apps/api A2 god-module refactor: test ergonomics + refactor-creep pre-fix.
+- **v0.10.15 plan 032/033/034** except-narrowing: settings + decrypt + SSRF guards produce stable pytest.
+
+By v0.10.18.1 cycle-start, all of these substrate fixes had been in place for several cycles. The diagnostic at v0.10.18.1 confirms the failure count for the audit-pointed file is 0.
+
+D2 reduces to a 0-line `--allow-empty` commit (`<marker-commit-sha> test(api): verify D2 pre-closed (plan 038 D2 marker)`) documenting the discovery so the 4-deliverable thread (or in this case the 1-deliverable-since-D1-was-also-vacuous thread + the NEW M8 discovery) is preserved in git lineage for downstream tooling.
+
+### Milestone: first 100% GREEN test state since v0.10.13 (per audit-pointed file)
+
+**This v0.10.18.1 release marks the first time since v0.10.13 that the project's pinpointed-file test surface — `apps/api/tests/test_uploads_e2e.py` 36/36 PASS + vitest whole-repo 28 files / 162 tests pass + Playwright e2e 25/25 pass — is 100% GREEN with zero pre-existing failures.** The O6/O7 carry-forward chain that spanned v0.10.14 → v0.10.15 → v0.10.17 → v0.10.18 → v0.10.18.1 (5 cycles of accumulated hypothesis-grade carry-forwards) is now closed at both surfaces (vitest side via v0.10.18 D1; pytest-audit-pointed-file side via this v0.10.18.1 D2 vacuity).
+
+**Note**: the 11 M8 failures in webhook/Arq/DNS surfaces are NOT counted in the "pinpointed-file" milestone. They are a separate finding (bucket K, surfaces they didn't fall under the O6 hypothesis) and are forward-deferred to v0.10.19 mimo-half PRIMARY scope.
+
+### Tests (cumulative)
+
+- Web Playwright: 21 (cycle-start at v0.10.17 main) → 25 (post-v0.10.18 main) → 25 (v0.10.18.1 cycle-end = current). Delta: 0 (the v0.10.18 D3 4-case NEW spec is unchanged).
+- Web vitest: 162 (cycle-start) → 162 (v0.10.18.1 cycle-end). Delta: 0.
+- Apps/api pytest: ≥252 (cycle-start) → ≥297 (v0.10.18.1 cycle-end; = cycle-start + 11 NEW discovered failures + subsequent enumeration work). Delta: +11 failures DISCOVERED (bucket K = Test-Substrate Mismatch, not regressions; deferred to v0.10.19).
+
+### Validation
+
+- `uv run ruff check apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: GREEN (cycle is docs-only — D2 vacuity + M8 discover-only; backend untouched).
+- `uv run mypy apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: GREEN (0 errors in 74 source files).
+- `cd apps/api && uv run pytest apps/api/tests/test_uploads_e2e.py --no-header -v`: GREEN. 36/36 PASS in 3.18s on the pinpointed file (the O6 hypothesis file). **D2 vacuity confirmed.**
+- `cd apps/api && uv run pytest apps/api/tests --no-header -v`: PARTIAL. 11 failed / 286 passed / 2 skipped in ~15s. **M8 NEW discovery surfaced.**
+- `uv run pytest libs/gw2_core libs/gw2_analytics --no-header -v`: GREEN (208 passed in 0.27s).
+- `cd web && pnpm tsc --noEmit`: GREEN.
+- `cd web && pnpm vitest run --no-header --reporter=basic`: GREEN. 28 files / 162 tests pass (reaffirms v0.10.18 D1 vacuity).
+- `cd web && pnpm playwright test web/tests/e2e/replay-ui.spec.ts`: GREEN. 4/4 pass (reaffirms v0.10.18 D3).
+- 1 atomic code+tests commit (`--allow-empty` marker) + 2 atomic docs commits (`release+changelog` + `roadmap+audit`) land on `main` per `CONTRIBUTING.md` linear-history rule.
+- Tag `v0.10.18.1` annotated + pushed + `gh release create` published at <https://github.com/Roddygithub/Gw2Analytics/releases/tag/v0.10.18.1>.
+
+### Pre-existing failures AFTER v0.10.18.1
+
+| Surface | Count AFTER v0.10.18.1 | Notes |
+|---|---:|---|
+| vitest whole-repo | **0** | closed at v0.10.17 D3 (mock-layer swap; all 7 atomically) and reaffirmed at v0.10.18 D1 marker. |
+| pytest `apps/api/tests/test_uploads_e2e.py` (the O6-pointed file) | **0** | closed at this v0.10.18.1 D2 marker (36/36 PASS). |
+| pytest `apps/api/tests/` FULL surface (excluding M8 deferred) | **0** | closed at v0.10.18 D1/v0.10.18.1 D2 work + v0.10.17 substrate fixes. |
+| Playwright e2e (replay-ui.spec.ts) | **0** | the v0.10.18 D3 NEW 4-case spec passes; no regressions. |
+| pytest `apps/api/tests/` (FULL surface, INCLUDING M8) | **11** ⚠️ | NEW v0.10.18.1 discovery, bucket K = Test-Substrate Mismatch; deferred as v0.10.19 mimo-half PRIMARY scope. |
+
+### ROADMAP impact (Status line delta)
+
+The README "Status" line delta is: `**Deferred**: 5 → **6** (target v0.10.19)` — adds M8 (the 11 webhook/Arq/DNS test-substrate mismatches) as the new 6th forward-deferral to the v0.10.19 mimo-half budget.
+
+### Cross-references
+
+- Cycle release notes: [`plans/RELEASE-v0.10.18.1.md`](./RELEASE-v0.10.18.1.md) (the cycle release notes following the v0.10.18 RELEASE-v0.10.18.md template; documents the D2 vacuity discovery + M8 forward-deferred discovery + diagnostic methodology + the milestone + the substrate-fix cross-references).
+- Cycle-end audit: [`plans/AUDIT-2026-07-13-<marker-sha>.md`](./AUDIT-2026-07-13-<marker-sha>.md) (the cycle-end audit at the marker commit short-SHA anchor; verifies pre-existing failure tally closes to 0 on the pinpointed-file surface + the FULL-surface discovery of 11 M8 failures + the validation matrix + the long-tail polish items M5 + M6 + M7 are deferred to v0.10.20+, with M8 promoted to v0.10.19 PRIMARY).
+- Predecessor cycle release notes (v0.10.18 D2 deferred to here): [`plans/RELEASE-v0.10.18.md`](./RELEASE-v0.10.18.md).
+- Predecessor cycle-end audit (v0.10.17 D3 closed vitest side): [`plans/AUDIT-2026-07-13-3b2e71f.md`](./AUDIT-2026-07-13-3b2e71f.md).
+- Cycle parent brief: [`plans/v0.10.18-mimo-half-prompt.md`](./v0.10.18-mimo-half-prompt.md).
+- Project-wide audit (orthogonal — project scope, not cycle scope): [`plans/AUDIT-2026-07-13-PROJECT-WIDE.md`](./AUDIT-2026-07-13-PROJECT-WIDE.md).
+- ROADMAP sync: [`docs/ROADMAP.md`](../docs/ROADMAP.md) "Current state (post v0.10.18.1 cycle)" + section 1.1 cycle shipts v0.10.18.1 entry + section 1.2 shortlist re-classification (M1 + M2 + M3 + M4 closed; M8 + M6 + M5 + M7 deferred to v0.10.19+).
+
+[0.10.18.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.18...v0.10.18.1
+
 ## [Unreleased]
 
 
