@@ -270,8 +270,11 @@ M8 shipped as PARTIAL-FIX in the v0.10.20 mimo-half cycle (closes 5 of 11
 lifecycle-race subtype failures via PR-1 K-1 + closes 2 of 2 saturation
 subtypes via PR-2 K-3 per-test executor; 4 SSRF-gate residuals + 6 NEW
 dispatch-FK subtype failures + substrate-pollution remain forward-blocked).
-M8 not eligible for "completed" relabeling until v0.10.21 closes §4's
-12 TASK-Y items.
+
+> **AUDIT §A invariant (verbatim paste from `plans/AUDIT-2026-07-13-v0.10.20.md`):**
+> "Cycle may NOT be relabeled as 'completed' until the 12 v0.10.21 cycle-scope items close (4 true test residuals + 8 substrate-improvement / cycle-authoring / cross-validation items). The maintainer invariant stated above is the contract."
+>
+> See `plans/RELEASE-v0.10.21.md` for the v0.10.21 cycle plan-landing (M-8-bis 4 true residuals + F17 sub-cycle + 8 substrate/cycle-authoring items).
 
 ---
 
