@@ -1,7 +1,7 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed during the v0.10.9+
-audit cycle (2026-07-11).
+**Status:** Living document. Last refreshed AT v0.10.15 cycle
+close-out (2026-07-12).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -11,15 +11,19 @@ off.
 
 ---
 
-## Current state (post v0.10.9+ audit cycle)
+## Current state (post v0.10.15 cycle)
 
-- **Latest shipped tag:** (v0.10.x — the CHANGELOG is the canonical ledger)
-  (Phase 9 of web: per-account timeline `?tz=Continent/City`
-  + per-fight timeline section on `/fights/[id]`).
-- **Architecture:** `gw2_evtc_parser` → `gw2_core` → `gw2_analytics` →
-  `apps/api` (FastAPI) + `gw2_api_client` (outbound) → `web` (Next.js
-  16). Pure-Python parser, gated behind an `EvtcParser` Protocol so a
-  Rust + PyO3 binding is a drop-in replacement (no churn elsewhere).
+- **Latest shipped tag:** v0.10.15 (the audit pass + 4 S+M-effort
+  hygiene tightening per the v0.10.14 cycle-end audit at
+  `plans/AUDIT-2026-07-12-5d0d4d4.md`. Plans 032-035 in
+  `advisor-plans/` document the cycle's per-plan details; plan 036
+  is deferred to v0.10.16+).
+- **Architecture:** unchanged from v0.10.9+:
+  `gw2_evtc_parser` → `gw2_core` → `gw2_analytics` →
+  `apps/api` (FastAPI) + `gw2_api_client` (outbound) → `web`
+  (Next.js 16). Pure-Python parser, gated behind an `EvtcParser`
+  Protocol so a Rust + PyO3 binding is a drop-in replacement (no
+  churn elsewhere).
 
 ---
 
@@ -48,23 +52,118 @@ so a future audit can confirm what was cleaned up; do not re-add.
   Original source: `docs/v0.8.0-web-design.md` §7. Effort estimate
   matched reality: S-effort as predicted.
 
-### 1.2 "Ready to implement" shortlist (post v0.8.9 / v0.9.0 close-out)
+**v0.10.13 cycle shipts** (release commit `fa67b15`).
 
-The 2 items above with a complete design doc. Any of these can be
-started as soon as the maintainer gives the green light:
+- **Plan 027 — Event dispatch streaming `gzip.GzipFile`** — shipped
+  v0.10.13. Replaces `gzip.decompress + splitlines` (which
+  materialised the full 30 MB JSONL into memory) with a streaming
+  `gzip.GzipFile(fileobj=io.BytesIO(gz_bytes))` wrapper. Bounded
+  memory peak to the zlib-chunk buffer (~64 KB) regardless of blob
+  size. Closes the pre-v0.10.13 OOM path on large WvW raid dumps.
+
+- **Plan 028 — Event dispatch hub consolidation** — shipped v0.10.13.
+  Single `EVENT_TYPE_ADAPTER: TypeAdapter[Event]` instance in
+  `apps/api/src/gw2analytics_api/_event_dispatch.py` shared across
+  `backfill.py` + `routes/fights.py` + `routes/players.py` (3
+  previous duplicates). Closes the "3 adapters go stale" future risk.
+
+- **Plan 029 — Per-fight blob `lru_cache(maxsize=8)`** — shipped
+  v0.10.13 on `get_events(blob_uri)` in `routes/fights.py`. Closes
+  the 4× MinIO GET waterfall on the `Promise.allSettled` drilldown
+  page (was a prior-audit F2 finding).
+
+- **Plan 012 — Webhook DLQ GET + replay route** — shipped v0.10.13.
+  New `GET /api/v1/webhooks/dlq` (returns DLQ rows with
+  `subscription_id` filter) + new `POST
+  /api/v1/webhooks/dlq/{delivery_id}/replay` (creates fresh
+  delivery + atomically deletes the DLQ row, with SELECT FOR UPDATE
+  row-locking for concurrent-replay idempotency). UI in
+  `web/src/components/WebhookDlqGrid.tsx`.
+
+- **Plan 013 — Webhook DNS executor + 2.0 s timeout fence** —
+  shipped v0.10.13. `_DNS_EXECUTOR` thread pool + 2.0 s
+  `future.result(timeout)` fence closes the slow-DNS-resolver DoS
+  hot path. v0.10.10 followup bumped `max_workers` from 1 to 32
+  via `DNS_POOL_MAX_WORKERS`.
+
+**v0.10.14 cycle shipts** (release commit `5d0d4d4`).
+
+- **D1 — BFF Playwright e2e to CI green** — shipped v0.10.14.
+  Rewrite `web/tests/e2e/account-bff.spec.ts` to use Playwright's
+  `page.route` stubbing for the negative-path coverage. 5 cases
+  exercise the BFF proxy + the validation envelope directly.
+
+- **D2 — `fetchCached` helper for the per-fight drilldown page** —
+  shipped v0.10.14. New `web/src/lib/fetchCached.ts` wraps the 5
+  gateway calls in LRU (8 entries) + TTL (60 s) with in-flight
+  dedup. Page uses Promise.allSettled to fire all 5 in parallel.
+  Test suite in `web/tests/lib/fetchCached.test.ts` (6 cases).
+
+- **D3 — Visual regression baseline refresh (threshold 1→1.5%)** —
+  shipped v0.10.14. Refreshed 9 baseline PNGs at `docs/screenshots/`;
+  `DIFF_THRESHOLD` raised from `0.01` to `0.015` to absorb the
+ 8-fixture font-rendering drift between the v0.10.9 baseline host
+  and the v0.10.14 CI host.
+
+- **D4 — ARQ-integration CI gate + port-1 defensive env** — shipped
+  v0.10.14. New `arq-integration` job in `.github/workflows/ci.yml`
+  brings up the arq worker against `docker compose up -d redis`, runs
+  the `apps/api/tests/test_parser_worker.py` +
+  `apps/api/tests/test_uploads_arq.py` suites. Port-1 defensive
+  guard in `parser_settings.py` so a missing `REDIS_PORT` env
+  surfaces a clear RuntimeError at startup, not a silent port 1
+  bind.
+
+**v0.10.15 cycle shipts** (release commit — see `plans/RELEASE-v0.10.15.md`).
+
+- **Plan 032 — `except Exception` narrow in `main.py:113`** — shipped
+  v0.10.15. Caught exception class narrowed from bare `Exception` to
+  `(ConnectionError, OSError, TimeoutError)`. Other exception types
+  (e.g. `AttributeError` from a typo'd `redis_settings`) now
+  propagate, surfacing the real misconfiguration instead of masking
+  it with a misleading "arq pool init failed" warning.
+
+- **Plan 033 — `except Exception` narrow in `rotate_kek.py:104`** —
+  shipped v0.10.15. Per-row catch narrowed to `(InvalidToken,
+  UnicodeDecodeError, SQLAlchemyError)`. Closes the dev DX landmine
+  of catching unrelated exception types.
+
+- **Plan 034 — `?subscription_id=` collapse in `webhooks.py:294`** —
+  shipped v0.10.15. Normalize empty query string to `None` so the
+  typed contract `str | None` holds + tests can assert
+  `subscription_id is None` on `?subscription_id=`.
+
+- **Plan 035 — Per-section error chips in
+  `web/src/app/fights/[id]/page.tsx`** — shipped v0.10.15. The
+  `Promise.allSettled` pattern's silent partial-failure UX is
+  replaced with per-section diagnostic chips on the squads / skills
+  / timeline / playerTimeline grids. Events endpoint failure
+  retains the page-level blocking-error banner.
+
+### 1.2 "Ready to implement" shortlist (post v0.10.15 close-out)
+
+The items below have a complete plan spec in `advisor-plans/` and
+can ship any time the maintainer gives the green light:
 
 1. **Combat readout** — `docs/v0.9.0-combat-readout-design.md`.
    Note: blocked on statechange parser + skills DB; the §1 table
    marks this XL+ with the block reason explicit.
-3. **Skill build analyser** — design doc on §6 of
+2. **Skill build analyser** — design doc on §6 of
    `docs/v0.8.0-web-design.md` (extracted from the §1 priorities
    table row, retained as the most-leverage M-effort web item).
+3. **Pre-existing pytest + vitest fix-up** — plan 036 (deferred
+   from v0.10.15). 7 vitest + 2 pytest failures documented in
+   `plans/RELEASE-v0.10.14.md`'s gate contract. The vitest failures'
+   FetchCached LRU interaction is a v0.10.14-cycle hypothesis;
+   diagnostic at v0.10.16 cycle. M-L effort. Originally M, but
+   with the v0.10.14 + v0.10.15 lessons learned (multiple-section
+   Promise.allSettled + LRU isolation), the actual fix-up may be
+   cleaner than the L-effort baseline estimate.
 
 The previous v0.8.0 list's third + fourth + fifth items (per-day
 bucketing + fight_player_summaries materialisation + webhooks
 backend) shipped in v0.8.1, v0.8.4, v0.9.0 respectively and are
-no longer in the shortlist. The webhooks row's new "v0.9.1 retry +
-DLQ + replay" scope is captured in the §1 table above.
+no longer in the shortlist.
 
 ---
 
