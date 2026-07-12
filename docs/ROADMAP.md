@@ -13,7 +13,9 @@ off.
 
 ## Current state (post v0.10.20 cycle)
 
-- **Latest shipped tag:** v0.10.19 (DEFER docs-only cycle: 3 close-out docs at marker=`cd6e9ad` per plans/AUDIT-2026-07-12-`cd6e9ad`.md). The **v0.10.19 mimo-half** cycle attempted M8 (per `plans/RELEASE-v0.10.19.md`) but DEFERRED to v0.10.20 after 6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` autouse fixture exhausted the signature-shape budget against pydantic-settings' actual call style. 3 residual failures persisted out of the 11 M8 K-cluster failures per this cycle's CHANGELOG `[0.10.19]` entry; v0.10.18.1 (`plans/AUDIT-2026-07-13-2ffafc75.md`) is the canonical K1+K2+K3 discoverer. Cycle close-out close-out cycle stamps: `## [0.10.19]` CHANGELOG entry spliced + `plans/RELEASE-v0.10.19.md` (M8 fix-up PRIMARY plan) + `docs/v0.10.19-combat-readout-spike.md` (F17 sizing) + `plans/AUDIT-2026-07-13-RETROSPECTIVE-V01017-V010181.md` (closure thread retrospective) + `plans/AUDIT-2026-07-12-cd6e9ad.md` (this cycle's close-out audit).
+- **Latest shipped tag:** v0.10.20 (M8 PARTIAL-FIX mimo-half cycle). The **v0.10.20 mimo-half** cycle landed 5 atomic commits + this audit close-out (6th commit). 12 v0.10.21 cycle-scope items forward-deferred per `plans/AUDIT-2026-07-13-v0.10.20.md` §4 (4 true test residuals: K-1 dispatch-FK ×2 + K-2 SSRF-gate ×2; 8 substrate-improvement + cycle-authoring + cross-validation + future-cycle items). Close-out docs shipped: `## [0.10.20]` CHANGELOG entry spliced (`5c8864e`) + `docs/ROADMAP.md` refresh (`c7b3bfa`) + `plans/AUDIT-2026-07-13-v0.10.20.md` (this commit file, 6th commit).
+
+- **Prior cycle audit chain (for archival):** v0.10.19 mimo-half DEFER cycle shipped at marker `cd6e9ad`. The v0.10.19 cycle attempted M8 (per `plans/RELEASE-v0.10.19.md`) but DEFERRED to v0.10.20 after 6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` autouse fixture exhausted the signature-shape budget. v0.10.18.1 (`plans/AUDIT-2026-07-13-2ffafc75.md`) is the canonical K1+K2+K3 discoverer. v0.10.19 close-out audit: `plans/AUDIT-2026-07-12-cd6e9ad.md`.
 
 - **Architecture:** unchanged from v0.10.9+:
   `gw2_evtc_parser` → `gw2_core` → `gw2_analytics` →
