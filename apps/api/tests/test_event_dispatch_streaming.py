@@ -124,7 +124,15 @@ def test_build_event_iterator_memory_peak_bounded() -> None:
 
 
 def test_build_event_iterator_skips_empty_and_whitespace_only_lines() -> None:
-    """Empty + whitespace-only + trailing-newline lines are dropped."""
+    """Empty + whitespace-only + trailing-newline lines are dropped.
+
+    The fixture only emits ``DamageEvent`` records; the isinstance
+    filter narrows the iterator element type to ``DamageEvent`` so
+    ``mypy strict`` does not flag ``.damage`` access via the 5-member
+    ``Event`` union (BoonApplyEvent / CCEvent / HealingEvent /
+    BuffRemovalEvent all lack ``.damage``). The fixture deliberately
+    covers only DamageEvent so the post-filter count remains stable.
+    """
     # Manually construct a gzipped blob with mixed empty/whitespace/json lines.
     jsonl = (
         b'{"event_type":"DAMAGE","time_ms":1,"source_agent_id":1,'
@@ -136,7 +144,13 @@ def test_build_event_iterator_skips_empty_and_whitespace_only_lines() -> None:
     )
     gz = gzip.compress(jsonl)
 
-    events = list(build_event_iterator(gz_bytes=gz))
+    # Narrow to ``list[DamageEvent]`` via the isinstance filter so the
+    # downstream ``.damage`` accesses type-check on the union. The
+    # fixture produces only DamageEvent so the filter is a no-op at
+    # runtime; it exists purely to give mypy strict the type info.
+    events: list[DamageEvent] = [
+        e for e in build_event_iterator(gz_bytes=gz) if isinstance(e, DamageEvent)
+    ]
 
     # 2 valid events + 3 dropped (empty + whitespace + valid-with-trailing).
     # The valid-with-trailing is still parsed (strip() on bytes only strips
