@@ -121,8 +121,8 @@ if (realAccountName === null || realFightId === null) {
   );
 }
 
-// Resolve all 8 URLs up-front so the PAGES array below stays a clean
-// tabular literal (the script's contract is "8 routes, 8 PNGs").
+// Resolve all 9 URLs up-front so the PAGES array below stays a clean
+// tabular literal (the script's contract is "9 routes, 9 PNGs").
 const PLAYER_PROFILE_ROUTE = `/players/${encodeURIComponent(realAccountName ?? "unknown")}`;
 const FIGHT_DRILLDOWN_ROUTE = `/fights/${encodeURIComponent(realFightId ?? "unknown")}`;
 
@@ -135,6 +135,7 @@ const PAGES = [
   ["06-player-profile-with-timeline", PLAYER_PROFILE_ROUTE,                       "stable-scroll",  0],
   ["07-player-empty-timeline",         "/players/empty-history.5678",              "stable-scroll",  0],
   ["08-fight-drilldown",               FIGHT_DRILLDOWN_ROUTE,                      "stable-scroll",  0],
+  ["09-players-compare",              "/players/compare",                         "stable-scroll",  0],
 ];
 
 await mkdir(OUT_DIR, { recursive: true });

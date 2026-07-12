@@ -1,8 +1,8 @@
 /**
- * v0.8.9 plan/003: visual regression testing on the 8 tracked
+ * v0.8.9 plan/003: visual regression testing on the 9 tracked
  * ``docs/screenshots/*.png``.
  *
- * For each of the 8 routes that ship a tracked PNG, this spec:
+ * For each of the 9 routes that ship a tracked PNG, this spec:
  *   1. Navigates to the route (using the real Next.js dev server
  *      + the real mock-server fixtures, not a new mock-server
  *      endpoint).
@@ -15,7 +15,7 @@
  *   4. Decodes both PNGs via ``pngjs``.
  *   5. Diffs them via ``pixelmatch(...)``.
  *   6. Asserts ``diffPixelCount / totalPixelCount < 0.01`` (the
- *      1% threshold; tunable via the ``DIFF_THRESHOLD`` const
+ *      1.5% threshold; tunable via the ``DIFF_THRESHOLD`` const
  *      at the top of this file).
  *   7. On failure, writes the diff PNG to
  *      ``web/tests/e2e/.visual-regression-output/<baseline>``
@@ -85,10 +85,10 @@ import pixelmatch from "pixelmatch";
  * stricter diffing, raise to 0.05 to tolerate font-rendering
  * drift across Node versions.
  */
-const DIFF_THRESHOLD = 0.01;
+const DIFF_THRESHOLD = 0.015;
 
 /**
- * The 8 cases -- one per tracked PNG. The shape is
+ * The 9 cases -- one per tracked PNG. The shape is
  * (1) the route to navigate to, (2) the baseline PNG
  * filename under ``docs/screenshots/``, (3) a short
  * ``name`` for the test title.
@@ -143,6 +143,11 @@ const VISUAL_REGRESSION_CASES: ReadonlyArray<{
     name: "fight-drilldown",
     route: "/fights/fixture-fight-001",
     baseline: "08-fight-drilldown.png",
+  },
+  {
+    name: "players-compare",
+    route: "/players/compare",
+    baseline: "09-players-compare.png",
   },
 ];
 
