@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Parallelize webhook dispatch** (`apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`): `dispatch_for_upload` is now `async` and fires outgoing webhook POSTs concurrently via `httpx.AsyncClient` + `asyncio.gather(return_exceptions=True)`, replacing the previous sequential loop. Callers updated to `await` the coroutine (`parser_worker.py`, `routes/uploads.py`, `tests/test_webhooks_e2e.py`).
+- **Isolate synchronous SQLAlchemy work from the event loop** (`apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`): the dispatch loop is now split into three phases -- (1) `_prepare_deliveries` runs in `asyncio.to_thread` to create delivery rows, (2) pure async HTTP requests fire concurrently, (3) `_finalize_deliveries` runs in `asyncio.to_thread` to persist outcomes. This removes the remaining event-loop blocking caused by synchronous `Session` operations inside `asyncio.gather`.
 
 ### Fixed
 
