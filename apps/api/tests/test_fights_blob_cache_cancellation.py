@@ -24,6 +24,7 @@ import concurrent.futures
 import gzip
 import threading
 import time
+from collections.abc import Iterator
 
 import pytest
 
@@ -35,16 +36,18 @@ from gw2analytics_api.routes.fights.blob_cache import (
 
 
 @pytest.fixture(autouse=True)
-def _clear_caches():
+def _clear_caches() -> Iterator[None]:
     """Ensure a clean singleflight state for every test (no leaked Futures).
 
     The ``apps/api/tests/conftest.py`` autouse chain should already
     call :func:`clear_blob_caches` between tests; the local mirror
     here is defensive (independent of conftest wiring).
 
-    No return annotation: this is a generator fixture (uses ``yield``)
-    and mypy requires ``Generator[...]`` to annotate it. Leaving the
-    return type implicit is the simplest expression of the contract.
+    ``Iterator[None]`` is the canonical annotation for a pytest
+    fixture that ``yield``s once: pytest's fixture protocol requires
+    the function to return an ``Iterator`` (or ``Generator``) of the
+    yielded type. The single ``yield`` produces ``None`` (no value),
+    so ``Iterator[None]`` is the precise contract.
     """
     clear_blob_caches()
     yield
