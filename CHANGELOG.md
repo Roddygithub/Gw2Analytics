@@ -24,6 +24,45 @@ VALIDATION: ruff clean + mypy clean (5 sub-pack modules + conftest) + the 18 cac
 
 The `[Unreleased]` backlog still contains pre-existing entries for v0.9.0 / v0.10.0 / v0.10.1 / v0.10.3 / v0.10.9 / v0.10.11+ cycles (576 lines total on 2026-07-12) that have shipped but aren't yet migrated into dated release sections. Full bucketing is a follow-up cycle (TODO: re-classify each subsection into the appropriate dated `[0.10.0]` / `[0.10.1]` / `[0.10.3]` / `[0.10.10]` bucket based on the matching ``apps/api/alembic/versions/`` migration head timestamp + the matching git commit date). This entry closes only the A2 plan 021 work; the broader accumulated backlog remains in `[Unreleased]` until the bucketing follow-up.
 
+
+### Added (apps/api - v0.10.11+ plan 144 LRU singleflight: collapse N concurrent cold-cache misses to 1 fetch)
+
+The pre-existing per-URI ``threading.Lock`` on ``_cached_get_events`` (apps/api/src/gw2analytics_api/routes/fights.py = plan 029) was AUGMENTED with a true singleflight on the cold-cache miss path. N parallel ``Promise.allSettled`` calls on a cold ``blob_uri`` now produce 1 MinIO GET + N-1 ``future.result()`` waits (vs the pre-singleflight 4 sequentialised MinIO GETs in the latch design). The per-URI latch stays as defence-in-depth: it bridges the nanosecond race-window between the in-flight Future pop in the ``finally`` block and the lru_cache decorator's atomic cache-write at function-return (a 5th concurrent caller could otherwise open a redundant Future in that brief window), AND it bounds the ``_IN_FLIGHT_FUTURES`` peak to ``maxsize=8`` (the same bound the lru_cache uses).
+
+- New module-level ``_IN_FLIGHT_FUTURES: dict[str, Future]`` + ``_IN_FLIGHT_FUTURES_META_LOCK: threading.Lock`` (commit ``dd5ee2f``).
+- New helper ``_get_or_create_inflight_future(uri) -> (Future, is_fetcher)`` mirrors ``_get_blob_uri_lock``'s double-checked-locking pattern -- fast path is a lock-free dict lookup, slow path re-checks under the meta-lock before insert.
+- ``_cached_get_events`` rewritten:
+  * ``future, is_fetcher = _get_or_create_inflight_future(blob_uri)``
+  * if ``not is_fetcher``: ``return future.result()`` (concurrent waiter)
+  * if ``is_fetcher``: fetch + ``future.set_result(result)`` -> ``return result``
+  * on Exception: ``future.set_exception(exc); raise`` (broadcasts to N waiters)
+  * on finally: pop the Future from the dict so a retry post-exception starts a fresh singleflight fetch.
+- Exception type narrowed from ``BaseException`` to ``Exception``: shutdown signals (KeyboardInterrupt / SystemExit) propagate without enabling the exception broadcast.
+- 2 NEW singleflight contract tests (``test_singleflight_collapses_to_single_fetcher`` + ``test_singleflight_exception_propagates_to_all_waiters``) alongside the existing 8 latch tests. Full 12-test suite passes (10 isolated runs of the 3 concurrency tests, zero flake).
+
+### Changed (dev/styling - sweep of 8 inherited non-E501 ruff violations)
+
+Sweeps up the pre-existing inherited style violations in ``libs/gw2_evtc_parser/tests/`` that were NOT introduced by the Phase 9 + singleflight work:
+
+- 3 ``N802``: 3 functions named with the ``F1`` calibration suffix (``test_is_buffremove_offset_52_empirical_lock_F1`` + ``test_is_ninety_offset_53_empirical_lock_F1`` + ``test_parse_events_offset_49_is_ev_buff_empirical_lock_F1``) get explicit ``# noqa: N802 -- F1 calibration suffix`` annotations (the suffix references the 2026-07-11 empirical calibration pilot; renaming to lowercase would lose the calibration-context grep hint).
+- 2 ``PLC0415``: 2 local imports inside test functions (``_CBTBUFREMOVE_KINDS`` inside ``test_cbtbuffremove_kinds_tuple_shape_locked`` in ``test_parser_byte_alignment.py`` + ``_EVENT_STRUCT`` inside ``test_parse_events_offset_49_is_ev_buff_empirical_lock_F1`` in ``test_parser_emit_buff.py``) hoisted to file-top imports.
+- 1 ``SIM300``: yoda condition in ``test_cbtbuffremove_kinds_tuple_shape_locked`` swapped to variable-first (auto-fixed by ruff).
+- 1 ``RUF059``: unused ``damage`` unpack in ``test_parse_events_emit_buff_remove_manual_collapses_to_remove_single`` renamed to ``_damage`` + explicit comment.
+
+### Added (libs/gw2_evtc_parser - v0.10.11+ Phase 9 step 2-EMIT-BRANCH + step 3 APPLY-BRANCH: dual-channel buff-lifecycle emit surface)
+
+The parser's :meth:`PythonEvtcParser.parse_events` now yields :class:`~gw2_core.BoonApplyEvent` records from BOTH ends of the arcdps buff-lifecycle spectrum via the dual-channel emit surface:
+
+- **Step 2 REMOVE channel** (commit ``e13ab3b``): the ``is_buffremove`` byte (arcdps ``cbtbuffremove`` enum, struct slot 6 = byte 52) drives the REMOVE branch. The predicate ``is_buffremove in (1, 2, 3)`` excludes the ``CBTB_NONE`` sentinel (0) so pure-damage / pure-heal records (which carry ``is_buffremove == 0`` as a default) do not pollute the BoonApplyEvent stream with phantom zero-duration applies. The per-yield defensive ``assert 0 <= is_buffremove - 1 < len(_CBTBUFREMOVE_KINDS)`` + the module-load ``_CBTBUFREMOVE_KINDS`` literal-content pin (``test_cbtbuffremove_kinds_tuple_shape_locked``) form a 2-layer defence against predicate/indexing drift.
+
+- **Step 3 APPLY channel** (commit ``a1bd696``): the ``_ev_buff`` byte (struct slot 13 = byte 49, renamed from the legacy ``_is_flanking``) drives the APPLY branch. Per the F1 calibration (2026-07-11 pilot on 12 real WvW fixtures), arcdps encodes mid-combat APPLY as a NON-statechange record with a non-zero ``ev.buff`` byte (the buff ID for the applied buff) -- NOT as a statechange record. The ``elif _ev_buff != 0 AND is_buffremove == 0`` predicate is mutually exclusive with the REMOVE branch via short-circuit.
+
+- **Step 3.5 real-fixture anchor** (commit ``0129331``): ``test_parser_applive_realfixture.py`` pins the dual-channel emit contract against the F1-pilot ``5b161ec0*.zevtc`` fixture (75 KB / 1,702 events, ratios: damage 1,567, heals 25, strips 77, BoonApply(apply) 32, BoonApply(remove) 1). The soft-bound ratio guard ``apply_count <= damage_count // 3`` (the measured ratio is 2.0%) is the phantom-leak signature: catches any future predicate widening to ``[0..3]`` (would push the ratio near 1.0 once every damage record leaks). Off-repo fixture policy: ``$WVW_ANALYTICS_DIR/uploads/5b161ec0*.zevtc`` (default ``/home/roddy/WvW_Analytics``) -- pytest.skipif makes the test cleanly skip when the sink is unavailable (offline CI stays green).
+
+- 8 hermetic predicate-boundary tests in ``test_parser_emit_buff.py`` (Step 2) cover the FULL arcdps REMOVE byte range {1, 2, 3} + the sentinel {0} + the out-of-range bytes {4, 5, 127, -128} + statechange-driven records + the canonical CBTS_BUFFAPPLY flavor + the no-magnitude REMOVE edge case. 5 NEW tests for Step 3 cover mid-combat APPLY + co-emit-with-damage + mutual exclusion with REMOVE + zero-ev_buff regression + statechange-filter lock.
+
+
+
 ## [0.10.15] - 2026-07-12: v0.10.14 cycle-end audit close-out (4 plans + ROADMAP sync)
 
 The v0.10.14 cycle-end audit at [`plans/AUDIT-2026-07-12-5d0d4d4.md`](./plans/AUDIT-2026-07-12-5d0d4d4.md) surfaced 5 OPEN findings (O1-O5) + 1 carry-forward (F15). v0.10.15 closes O1-O4 with atomic code-side fixes and ships F15 via the ROADMAP sync. O5 (pre-existing pytest + vitest fix-up) is explicitly deferred to v0.10.16+ per advisor-plan 036.
@@ -150,42 +189,235 @@ The v0.10.13 cycle shipped 5 plans closing deferred v0.10.7 + v0.10.8 followups 
 
 ## [Unreleased]
 
-### Added (apps/api - v0.10.11+ plan 144 LRU singleflight: collapse N concurrent cold-cache misses to 1 fetch)
 
-The pre-existing per-URI ``threading.Lock`` on ``_cached_get_events`` (apps/api/src/gw2analytics_api/routes/fights.py = plan 029) was AUGMENTED with a true singleflight on the cold-cache miss path. N parallel ``Promise.allSettled`` calls on a cold ``blob_uri`` now produce 1 MinIO GET + N-1 ``future.result()`` waits (vs the pre-singleflight 4 sequentialised MinIO GETs in the latch design). The per-URI latch stays as defence-in-depth: it bridges the nanosecond race-window between the in-flight Future pop in the ``finally`` block and the lru_cache decorator's atomic cache-write at function-return (a 5th concurrent caller could otherwise open a redundant Future in that brief window), AND it bounds the ``_IN_FLIGHT_FUTURES`` peak to ``maxsize=8`` (the same bound the lru_cache uses).
+## [0.10.2] - v0.10.2: 100-row cap on per-target roll-up + per-skill lists (hotfix followup #12)
 
-- New module-level ``_IN_FLIGHT_FUTURES: dict[str, Future]`` + ``_IN_FLIGHT_FUTURES_META_LOCK: threading.Lock`` (commit ``dd5ee2f``).
-- New helper ``_get_or_create_inflight_future(uri) -> (Future, is_fetcher)`` mirrors ``_get_blob_uri_lock``'s double-checked-locking pattern -- fast path is a lock-free dict lookup, slow path re-checks under the meta-lock before insert.
-- ``_cached_get_events`` rewritten:
-  * ``future, is_fetcher = _get_or_create_inflight_future(blob_uri)``
-  * if ``not is_fetcher``: ``return future.result()`` (concurrent waiter)
-  * if ``is_fetcher``: fetch + ``future.set_result(result)`` -> ``return result``
-  * on Exception: ``future.set_exception(exc); raise`` (broadcasts to N waiters)
-  * on finally: pop the Future from the dict so a retry post-exception starts a fresh singleflight fetch.
-- Exception type narrowed from ``BaseException`` to ``Exception``: shutdown signals (KeyboardInterrupt / SystemExit) propagate without enabling the exception broadcast.
-- 2 NEW singleflight contract tests (``test_singleflight_collapses_to_single_fetcher`` + ``test_singleflight_exception_propagates_to_all_waiters``) alongside the existing 8 latch tests. Full 12-test suite passes (10 isolated runs of the 3 concurrency tests, zero flake).
+### Fixed (apps/api - v0.10.2 hotfix followup #12)
 
-### Changed (dev/styling - sweep of 8 inherited non-E501 ruff violations)
+The 100-row cap on the per-target roll-up lists (`target_dps` + `target_healing` + `target_buff_removal` in `GET /api/v1/fights/{id}/events`; `skills` in `GET /api/v1/fights/{id}/skills`) is the v0.10.3 parser-bug mitigation. The pre-cap aggregator returned ALL groups, so a v0.10.3 regression that misreads `source_agent_id` (or the parser-side skill-table read) can produce hundreds of thousands of unique garbage IDs, the JSON response explodes to multi-MB, the connection drops (HTTP 000), and the analyst sees a Next.js "fetch failed" timeout on the fight drilldown page. The cap slices the per-target lists to the top-100 by damage / healing / strip descending (the aggregators already order by magnitude descending, so the kept rows ARE the analyst-relevant signal — the dropped tail is the noise floor). `event_windows` is NOT capped (it groups by time bucket, naturally bounded by fight duration).
 
-Sweeps up the pre-existing inherited style violations in ``libs/gw2_evtc_parser/tests/`` that were NOT introduced by the Phase 9 + singleflight work:
+- `apps/api/src/gw2analytics_api/routes/fights.py::get_fight_events` + `get_fight_skills`: cap `target_dps[:100]` + `target_healing[:100]` + `target_buff_removal[:100]` + `skills[:100]` after the aggregator runs. Comment block documents the v0.10.3 root cause + the "top-N is the analyst signal" rationale + the `event_windows`-uncapped exception.
+- `apps/api/tests/test_fight_rollup_cap.py` (NEW, 4 hermetic tests): one per capped list. Each test seeds a fight with 150 unique targets/skills + 150 events with descending magnitudes and asserts the response has exactly 100 rows, in descending order, with the top-100 by magnitude preserved. The 4 tests cover the 4 cap sites independently (DPS + Healing + BuffRemoval on `/events`; per-skill on `/skills`); pure-strip events (`value=0`, `buff_dmg>0`, `is_nondamage=1`) exercise the Phase 8 dual-emit-free path on the BuffRemoval test.
 
-- 3 ``N802``: 3 functions named with the ``F1`` calibration suffix (``test_is_buffremove_offset_52_empirical_lock_F1`` + ``test_is_ninety_offset_53_empirical_lock_F1`` + ``test_parse_events_offset_49_is_ev_buff_empirical_lock_F1``) get explicit ``# noqa: N802 -- F1 calibration suffix`` annotations (the suffix references the 2026-07-11 empirical calibration pilot; renaming to lowercase would lose the calibration-context grep hint).
-- 2 ``PLC0415``: 2 local imports inside test functions (``_CBTBUFREMOVE_KINDS`` inside ``test_cbtbuffremove_kinds_tuple_shape_locked`` in ``test_parser_byte_alignment.py`` + ``_EVENT_STRUCT`` inside ``test_parse_events_offset_49_is_ev_buff_empirical_lock_F1`` in ``test_parser_emit_buff.py``) hoisted to file-top imports.
-- 1 ``SIM300``: yoda condition in ``test_cbtbuffremove_kinds_tuple_shape_locked`` swapped to variable-first (auto-fixed by ruff).
-- 1 ``RUF059``: unused ``damage`` unpack in ``test_parse_events_emit_buff_remove_manual_collapses_to_remove_single`` renamed to ``_damage`` + explicit comment.
 
-### Added (libs/gw2_evtc_parser - v0.10.11+ Phase 9 step 2-EMIT-BRANCH + step 3 APPLY-BRANCH: dual-channel buff-lifecycle emit surface)
+## [0.10.1] - v0.10.1: schema-drift guard at startup + Arq parser worker (plan 010)
 
-The parser's :meth:`PythonEvtcParser.parse_events` now yields :class:`~gw2_core.BoonApplyEvent` records from BOTH ends of the arcdps buff-lifecycle spectrum via the dual-channel emit surface:
+### Added (apps/api + infra - v0.10.1 plan 010: schema-drift guard + Arq parser worker)
 
-- **Step 2 REMOVE channel** (commit ``e13ab3b``): the ``is_buffremove`` byte (arcdps ``cbtbuffremove`` enum, struct slot 6 = byte 52) drives the REMOVE branch. The predicate ``is_buffremove in (1, 2, 3)`` excludes the ``CBTB_NONE`` sentinel (0) so pure-damage / pure-heal records (which carry ``is_buffremove == 0`` as a default) do not pollute the BoonApplyEvent stream with phantom zero-duration applies. The per-yield defensive ``assert 0 <= is_buffremove - 1 < len(_CBTBUFREMOVE_KINDS)`` + the module-load ``_CBTBUFREMOVE_KINDS`` literal-content pin (``test_cbtbuffremove_kinds_tuple_shape_locked``) form a 2-layer defence against predicate/indexing drift.
+Closes 2 real bugs found by real-payload testing on 2026-07-09 (1,605 WvW `.zevtc` files, 2.6 GB, 11 accounts):
 
-- **Step 3 APPLY channel** (commit ``a1bd696``): the ``_ev_buff`` byte (struct slot 13 = byte 49, renamed from the legacy ``_is_flanking``) drives the APPLY branch. Per the F1 calibration (2026-07-11 pilot on 12 real WvW fixtures), arcdps encodes mid-combat APPLY as a NON-statechange record with a non-zero ``ev.buff`` byte (the buff ID for the applied buff) -- NOT as a statechange record. The ``elif _ev_buff != 0 AND is_buffremove == 0`` predicate is mutually exclusive with the REMOVE branch via short-circuit.
+- **Bug #1**: in-memory SQLAlchemy ORM registry went stale after the
+  `0009_webhook_secret_at_rest.py` migration was edited. The live DB
+  renamed the column `secret` → `ciphertext`; the running Uvicorn
+  process (started 1h42m BEFORE the migration edit) still held the
+  pre-migration class mappings. The webhook scheduler spammed
+  `psycopg.errors.UndefinedColumn: column webhook_subscriptions.secret
+  does not exist` every 5s — `/tmp/fastapi.log` grew to 253K chars of
+  stack traces.
+- **Bug #2**: CPU-bound `process_parse` blocked FastAPI's
+  `BackgroundTasks` thread pool on parallel uploads. 8 concurrent
+  `.zevtc` uploads all stuck on `pending` after 20s; the GIL serialised
+  the 8 pure-Python parse calls. Pre-existing TODO in
+  `services.py::process_parse` line ~60 already flagged this.
 
-- **Step 3.5 real-fixture anchor** (commit ``0129331``): ``test_parser_applive_realfixture.py`` pins the dual-channel emit contract against the F1-pilot ``5b161ec0*.zevtc`` fixture (75 KB / 1,702 events, ratios: damage 1,567, heals 25, strips 77, BoonApply(apply) 32, BoonApply(remove) 1). The soft-bound ratio guard ``apply_count <= damage_count // 3`` (the measured ratio is 2.0%) is the phantom-leak signature: catches any future predicate widening to ``[0..3]`` (would push the ratio near 1.0 once every damage record leaks). Off-repo fixture policy: ``$WVW_ANALYTICS_DIR/uploads/5b161ec0*.zevtc`` (default ``/home/roddy/WvW_Analytics``) -- pytest.skipif makes the test cleanly skip when the sink is unavailable (offline CI stays green).
+#### Bug #1 fix: schema-drift guard at startup
+- `apps/api/src/gw2analytics_api/schema_guard.py` (NEW): pure helper
+  `check_schema_drift()` that compares the alembic head on disk to
+  the `alembic_version.version_num` row in the DB. Raises
+  `RuntimeError` with an operator-facing message naming both heads so
+  the operator can grep `apps/api/alembic/versions/` for the missing
+  migration. Escape hatch `SKIP_SCHEMA_GUARD=1` for
+  rollback-in-flight scenarios (WARNING-logged so the bypass is
+  visible in `/tmp/fastapi.log`).
+- `apps/api/src/gw2analytics_api/main.py::lifespan`: calls
+  `check_schema_drift()` at the very top, BEFORE any other init. A
+  stale ORM registry now crashes Uvicorn at boot with an actionable
+  error instead of silently spamming the log for hours.
 
-- 8 hermetic predicate-boundary tests in ``test_parser_emit_buff.py`` (Step 2) cover the FULL arcdps REMOVE byte range {1, 2, 3} + the sentinel {0} + the out-of-range bytes {4, 5, 127, -128} + statechange-driven records + the canonical CBTS_BUFFAPPLY flavor + the no-magnitude REMOVE edge case. 5 NEW tests for Step 3 cover mid-combat APPLY + co-emit-with-damage + mutual exclusion with REMOVE + zero-ev_buff regression + statechange-filter lock.
+#### Bug #2 fix: Arq parser worker
+- `docker-compose.yml`: added `redis:7-alpine` service (port 6379,
+  healthcheck `redis-cli ping`).
+- `apps/api/pyproject.toml`: added `arq>=0.25` + `redis>=5.0` deps;
+  `uv lock` regenerated (93 packages).
+- `apps/api/src/gw2analytics_api/workers/parser_worker.py` (NEW):
+  async Arq job `parse_job(ctx, upload_id, raw_bytes)` that runs
+  `process_parse` + `dispatch_for_upload` chained via
+  `asyncio.to_thread`. **Closes a pre-existing race**:
+  `dispatch_for_upload` previously ran as a sibling
+  `BackgroundTasks.add_task` BEFORE `process_parse` committed, so
+  it short-circuited and zero webhook deliveries fired on every
+  successful upload. The chain guarantees `dispatch_for_upload`
+  awaits the parse commit.
+- `apps/api/src/gw2analytics_api/workers/parser_settings.py` (NEW):
+  `WorkerSettings` class with `functions=[parse_job]`,
+  `redis_settings=RedisSettings(...)`, `max_jobs=2`,
+  `job_timeout=600`. Runnable via
+  `arq gw2analytics_api.workers.parser_settings.WorkerSettings` in
+  a separate process. `ARQ_REDIS_HOST` + `ARQ_REDIS_PORT` env vars
+  override the localhost default for production deploys.
+- `apps/api/src/gw2analytics_api/main.py::lifespan`: tries to
+  create the Arq pool at startup; on failure logs a WARNING + sets
+  the pool to `None` (graceful fallback). The route handler takes
+  a sync-in-request fallback path that runs the parse + dispatch in
+  `asyncio.to_thread` (preserves the v0.10.0 test contract).
+- `apps/api/src/gw2analytics_api/routes/uploads.py`: route handler
+  is now `async def create_upload(request: Request, ...)`. New
+  helper `_enqueue_parse(request, upload_id, raw)` checks
+  `request.app.state.arq_pool` and either enqueues via Arq OR runs
+  the parse + dispatch in-request (fallback).
 
+#### Public contract change (note for integrators)
+- `UploadCreatedResponse.status` can now legitimately be
+  `"completed"` in the 201 response body when the Arq path's
+  fallback fires (Redis down at request time). Pre-v0.10.1 the
+  response was always `"pending"`. Integrators that poll right
+  after the POST and use `"pending"` as a "still processing"
+  signal should switch to the `GET /uploads/{id}` poll OR check
+  `fight_id !== null`.
+
+#### BREAKING for the failure path (note for integrators)
+- `POST /api/v1/uploads` now returns `HTTP 503 Service Unavailable`
+  (with body `"Parser worker unavailable. Check Redis is up."`)
+  when the Arq worker is unreachable. Pre-v0.10.1 the route
+  always returned 201 (success), 422 (validation), or 5xx
+  (server error). v0.10.1 with Redis down returns 503 — a
+  separate failure class. Integrators that retry on 5xx MUST
+  distinguish 503 (transient infrastructure failure; retry with
+  backoff) from 500 (programming bug; do not retry).
+  Production safety: the 503 surfaces the Redis misconfiguration
+  to operator dashboards instead of silently degrading to
+  multi-second POST latency. The pre-v0.10.1 sync-in-request
+  fallback is gated on `ALLOW_INREQUEST_PARSE_FALLBACK=1` (test
+  + dev environments only; production omits the env var to get
+  the loud 503).
+
+#### Tests (apps/api)
+- `apps/api/tests/conftest.py`: new autouse fixture
+  `_disable_arq_for_tests` points the broker at `localhost:1` so
+  the lifespan's pool creation fails fast (test env always uses
+  the sync-in-request fallback).
+- `apps/api/tests/test_schema_guard.py` (NEW, 4 tests):
+  no-drift passes / drift raises with both heads named /
+  `SKIP_SCHEMA_GUARD` escape hatch / NULL `alembic_version` row.
+- `apps/api/tests/test_uploads_arq.py` (NEW, 4 tests):
+  mock-Arq enqueue contract / sync-in-request fallback path /
+  idempotent re-parse of failed upload / no re-dispatch on
+  re-upload of completed (the pre-v0.10.1 contract is
+  preserved — double-dispatch would be a silent regression).
+- `apps/api/tests/test_parser_worker.py` (NEW, 4 tests): happy
+  path chain (`parse` → `dispatch`) / skip dispatch on parse
+  failure (Arq retry kicks in) / swallow dispatch failure
+  post-parse (no re-parse; manual operator re-dispatch) /
+  asyncio.to_thread contract.
+
+#### Planning
+- `plans/010-v101-schema-drift-guard-and-arq-parser.md` (NEW): the
+  v0.10.1 plan doc covering both bugs (the design output of the
+  round-1 diagnosis).
+
+#### Tests (cumulative)
+- Apps/api pytest: 92 (v0.10.0) → **104** (v0.10.1). Delta: +12
+  from the 3 new plan-010 test files.
+- Web vitest + Playwright: unchanged (the v0.10.1 cycle is
+  backend-only).
+- Total: 339 (v0.10.0) → 351 (v0.10.1).
+
+
+## [0.10.0] - v0.10.0: CSV injection guard + cross-account comparison timeline + webhook secret-at-rest envelope encryption (plans 030, 031, 032)
+
+### Added (web - v0.10.0 plan 030: CSV injection guard, OWASP CWE-1236)
+
+The v0.10.0 cycle (per `plans/010-v100-roadmap.md`) is now underway. Item A in the v0.10.0 cycle is the HIGH-severity CSV injection guard:
+
+- `web/src/lib/csv.ts`: new module-level `FORMULA_TRIGGERS = /^[=+\-@\t\r]/` regex (anchored at start; matches the 6 canonical spreadsheet formula-trigger chars). The private `csvEscape(value)` function now has a formula-guard branch that fires BEFORE the RFC 4180 branch: when a value starts with one of the 6 trigger chars, prefix with a literal `'` + wrap in double quotes per RFC 4180. Excel/Sheets drop the leading `'` on display but the formula is no longer parsed. Implementation uses a template literal (the template-literal form is the canonical Way to express \" + ' + value + \" with one escaping layer).
+- `web/tests/lib/csv.test.ts`: 12 NEW hermetic cases (6 trigger-char tests via `it.each` + safe-path alphanumeric + null + undefined + combined formula+dq + combined formula+comma) + 1 PlayerListRow integration test using the canonical inline `type Pr = import(\"@/lib/api\").PlayerListRow` pattern (TS type-position dynamic import; the `await` wrapper is invalid in a type position). Total csv.test.ts: **23/23** pass; full vitest: **97/97** across 15 files.
+- 4 attacker-controllable upload fields are now formula-safe: `name` on `PlayerListRow`/`PlayerProfile`/`PerFightBreakdownRow`, `skill_name` on `SkillUsageRow`, `subgroup` on `SquadRollupRow`, `description` on `WebhookSubscription`. OWASP CWE-1236 class closed on the existing CSV export surface.
+
+### Deferred (v0.10.0 backlog - tracked from `plans/010-v100-roadmap.md` scope)
+
+- **B (security HIGH)**: webhook secret-at-rest envelope encryption. NOW SHIPPED — see v0.10.0 plan 031 entry below. The previously-deferred-from-v0.9.1 hardening layer is closed: CWE-256 (plaintext storage of a password) is no longer surface-able via DB snapshot alone (KEK must ALSO be in the gateway process environment).
+- **C (UX)**: cross-account timeline comparison (M effort). NOW SHIPPED — see v0.10.0 plan 032 entry below. The squad-comparison use case (e.g. "how does my DPS compare to my healer's damage absorbed over the same fight window?") is closed with the new `GET /api/v1/players/compare/timeline?accounts=A&accounts=B` route + the new `/players/compare` page.
+
+### Added (apps/api + web - v0.10.0 plan 032: cross-account comparison timeline)
+
+The v0.10.0 cycle item C closes the maintainer's most-requested feature in the incident log (per `docs/ROADMAP.md` §1): the squad-comparison use case. The new endpoint + page let the analyst overlay 2-4 accounts' damage / healing / strip curves on a single chart with a metric radio (Damage / Healing / Buff removal), a linear/log Y-axis scale toggle, and the shared 25-zone TZ selector. ~16 files changed (3 new backend + 6 new web + 5 modified + 2 docs).
+
+- `libs/gw2_analytics/src/gw2_analytics/cross_account_timeline.py` (NEW, ~280 LoC): the stateless `CrossAccountTimelineAggregator` + Pydantic `CrossAccountTimelinePoint` + `CrossAccountTimelineSeries` models. Recency-first sort (mirrors the per-account contract) + day-bucketing (mirrors the per-account `_combine_day_midnight` helper). `aggregate(per_account_contributions, fight_id_to_started, bucket, tz)` is the single entry point.
+- `libs/gw2_analytics/tests/test_cross_account_timeline.py` (NEW, 7 hermetic cases): empty input / two-account / recency-first sort / account-with-no-fights / day-bucketing / default-tz-is-utc / invariant guard.
+- `apps/api/src/gw2analytics_api/routes/player_compare.py` (NEW, ~140 LoC): `GET /api/v1/players/compare/timeline?accounts=A&accounts=B&bucket=day&tz=Continent/City` with a **repeatable** `accounts` query param (`[2, 4]` unique accounts enforced by `Query(min_length=2, max_length=4)`). Reuses the per-account route's `_compute_contributions` helper. Declaration-order matters: MUST be included BEFORE the players router in `main.py` so the catch-all `{account_name:path}` doesn't greedily match `/players/compare/timeline` as `account_name="compare/timeline"`. Returns 422 on out-of-range, 422 on unknown IANA TZ, 200 with `points: []` for an unknown account (NOT 404 -- the analyst UX benefits from a same-shape response for all requested accounts).
+- `apps/api/src/gw2analytics_api/main.py`: includes `player_compare.router` BEFORE `players.router`; `version="0.8.6"` -> `"0.10.0"`.
+- `libs/gw2_analytics/src/gw2_analytics/__init__.py`: re-exports `CrossAccountTimelineAggregator` + `CrossAccountTimelineSeries`.
+- `web/src/lib/api.ts`: `fetchPlayerCompareTimeline(accounts, opts)` + `CrossAccountTimelinePoint` + `CrossAccountTimelineSeries` types.
+- `web/src/lib/timezones.ts` (NEW): the 25-city IANA catalog extracted from `PlayerTimelineSection` so the per-account + cross-account selectors ship the SAME curated set (pre-plan-032 the compare section had a 9-zone subset; the analyst who has used the per-account page would silently lose 16 zones on the compare view).
+- `web/src/components/CrossAccountTimelineChart.tsx` (NEW, ~280 LoC): purpose-built N-line SVG chart (NOT a wrapper around the existing `TimelineChart` because the cross-account use case is 1 metric × N accounts, the inverse of the per-account chart's N metrics × 1 account). 4-color palette (red / green / blue / purple) per account. Broken-line segments for missing dates (an account with no fight on date D renders no line through D, rather than a misleading 0-baseline). Shared absolute Y axis (log scale default; matches the per-account log mode's "1M damage vs 50 strip" use case).
+- `web/src/components/CrossAccountCompareSection.tsx` (NEW, ~280 LoC): Client Component. Owns the metric / scale / bucket / tz toggles + re-fetches the timeline when bucket / tz change. Read-only account chips (the in-page add/remove affordance is a v0.10.X followup; v0.10.0 ships set-via-URL).
+- `web/src/app/players/compare/page.tsx` (NEW, ~210 LoC): Server Component. Reads `?accounts=` from URL search params, validates 2-4 unique accounts, fetches initial timeline on the server, renders the section. Empty-state copy for `< 2` accounts; upstream-error card for `> 4` or 422.
+- `web/src/app/layout.tsx`: added Players + Compare secondary nav links between the brand and the search bar. Compare link goes to `/players/compare` (no query params); the page's empty-state copy guides the analyst to add accounts via URL.
+- `web/src/app/players/page.tsx`: added a "Compare the first 2 players" CTA that pre-fills the URL with the first 2 rows' `account_name`; also `width: "100%"` defensive fix on the main element.
+- `web/src/app/players/[account_name]/page.tsx`: `width: "100%"` defensive fix on the main element (the v0.9.0 visual regression on `:demo.<N>` accounts where the page rendered at ~900px wide instead of 1440px; the defensive fix prevents the silent collapse even when a downstream CSS rule would otherwise shrink the parent's intrinsic width; the root-cause investigation is a v0.10.X followup).
+- `web/src/components/PlayerTimelineSection.tsx`: replaced the local 25-zone `TIMEZONE_OPTIONS` const with the import from `web/src/lib/timezones.ts` (the shared module).
+- `web/tests/e2e/fixtures/cross-account-timeline.json` (NEW): 2-account fixture (TestAccount.1234 + TestAccount.5678) with overlapping but distinct fight sets across 3 dates (2026-07-07 + 2026-07-08 + 2026-07-09). Exercises the broken-line + legend + X-axis date-union paths.
+- `web/tests/e2e/mock-server.mjs`: added `/api/v1/players/compare/timeline` endpoint with a 422 on unknown `?accounts=` values.
+- `web/tests/e2e/players-compare.spec.ts` (NEW, 3 cases): initial render / metric radio toggles / 0-accounts empty state.
+- `web/tests/components/cross-account-timeline-chart.test.tsx` (NEW, 5 cases): empty state / multi-account polylines / default Damage caption / metric switch / log scale Y-axis labels.
+- `web/tests/components/cross-account-compare-section.test.tsx` (NEW, 2 cases): initial render + radio click.
+- `web/tests/app/players-compare-page.test.tsx` (NEW, 3 cases): empty state / too-many / valid render.
+
+### Deferred (v0.10.X followups - tracked from plan 032)
+
+- **In-page add/remove accounts in `/players/compare`**: v0.10.0 ships read-only chips; the full in-page add/remove UX is ~50 LoC and is a v0.10.X followup.
+- **Visual regression baseline for `/players/compare`**: a tracked `docs/screenshots/09-players-compare.png` (the route is dynamic; the fixture + e2e spec cover the e2e path; a visual baseline is a v0.10.X followup when the page settles).
+- **Per-account-vs-cross-account rate columns**: a per-second rate field on `CrossAccountTimelinePoint` is a v0.10.X followup; the v0.10.0 wire surface is the totals-only contract (matches the per-account timeline).
+- **900px bug root-cause investigation**: the `width: "100%"` defensive fix is in place but the underlying CSS root cause (likely the `auto-fit minmax(180px, 1fr)` stat grid + a downstream intrinsic-width shrink on `:demo.<N>` accounts) is a v0.10.X followup with a DevTools session.
+- **Port-1 conftest trick robustness** (v0.10.1 plan 010 followup):
+  `_disable_arq_for_tests` points RedisSettings at `localhost:1` to
+  make the lifespan's Arq pool init fail fast. The port-1 trick
+  works on every test host seen so far but is host-dependent
+  (port 1 is reserved `tcpmux` and could be open on exotic
+  configs). The robust alternative is to monkeypatch
+  `arq.create_pool` directly to raise a fake `ConnectionError`.
+  ~5 LoC; v0.10.X followup.
+- **`test_re_upload_completed_does_not_redispatch` parametrize**
+  (v0.10.1 plan 010 followup): the test pins the no-double-dispatch
+  contract for `status == "completed"` but not for `pending` or
+  any other non-failed status. Parametrize over 3-4 statuses to
+  pin the full contract. ~5 LoC; v0.10.X followup.
+- **`WorkerSettings.redis_settings` env-var override docstring**
+  (v0.10.1 plan 010 followup): the env var is read in
+  `parser_settings.py` but the module docstring does not document
+  it. Add a one-line note so operators discover the override
+  without grepping the source. ~3 LoC; v0.10.X followup.
+
+### Added (apps/api - v0.10.0 plan 031: webhook secret-at-rest envelope encryption, OWASP CWE-256)
+
+The v0.10.0 cycle item B closes the HIGH-severity CWE-256 (plaintext storage of a password) layer on the webhook subsystem. A stolen DB snapshot OR a flawed SELECT-leak no longer surfaces the plaintext HMAC secret directly; the attacker must ALSO have access to the gateway process's `SECRETS_KEK` env var. Implementation is server-side Python `cryptography.fernet.Fernet` (NOT Postgres `pgcrypto` `pgp_sym_encrypt` — the SQL wire exposure of the plaintext KEK in `pg_stat_statements` / `log_min_duration_statement` was a defense-in-depth violation; Python-side encryption keeps the KEK in process memory).
+
+- `apps/api/pyproject.toml`: `cryptography>=43.0.1` added to runtime deps.
+- `pyproject.toml` (root): `SECRETS_KEK=<44-char url-safe base64>` added to `[tool.pytest_env]` so the test suite has a valid 32-byte Fernet key at every pytest run.
+- `apps/api/.env.example`: `SECRETS_KEK` documented with the canonical Python one-liner for generating a fresh KEK + a defense-in-depth warning (any DB compromise must NOT suffice without the env KEK).
+- `apps/api/src/gw2analytics_api/crypto.py` (NEW): module-level Fernet envelope helper. `_get_fernet(kek)` is `lru_cache`d per KEK (one `Fernet(kek.encode("ascii"))` per process per env); `_resolve_kek(explicit=None)` reads `os.environ["SECRETS_KEK"]` with a clear error if missing; `encrypt_webhook_secret(plaintext: str, *, kek=None) -> bytes` and `decrypt_webhook_secret(ciphertext: bytes, *, kek=None) -> str` re-export the Fernet wrappers; `FernetInvalidToken` is an alias of `cryptography.fernet.InvalidToken` for clarity in audit logs.
+- `apps/api/src/gw2analytics_api/config.py`: new `secrets_kek: SecretStr = Field(validation_alias="SECRETS_KEK")` (required at startup; no default; fails lazy if env missing). The `_validate_secrets_kek` `mode="before"` field validator (1) rejects non-`str` input; (2) rejects any length != 44 (`Fernet._is_valid_key` spec); (3) `base64.urlsafe_b64decode` + asserts the decoded length is exactly 32 bytes (blocks `"a"*44` which decodes to 33 bytes); (4) `from exc` chains the inner decode error so the upstream cursor points at the original `binascii.Error` (ruff B904).
+- `apps/api/src/gw2analytics_api/models.py`: `OrmWebhookSubscription.secret: Mapped[str]` → `ciphertext: Mapped[bytes]` (LargeBinary).
+- `apps/api/alembic/versions/0009_webhook_secret_at_rest.py` (NEW, Python-driven data migration): `add_column("webhook_subscriptions", "ciphertext", LargeBinary(), nullable=False, server_default=sa.text("''::bytea"))` → Fernet-encrypt-in-Python loop (reads plaintext `secret`, writes Fernet envelope into `ciphertext` via batched UPDATE, with defensive `not isinstance(plaintext, str)` skip) → `drop_column("webhook_subscriptions", "secret")` → `op.alter_column("webhook_subscriptions", "ciphertext", server_default=None)` (drops the backfill-only default so future INSERTs cannot silently land with empty ciphertext). Symmetrical `downgrade()` rebuilds the plaintext column + restores via the SAME KEK. **Migration is NOT idempotent on a wet-DB re-run** (the docstring `## WARNING` block warns operators to drain + drop + re-seed rather than wipe `alembic_version`).
+- `apps/api/src/gw2analytics_api/routes/webhooks.py`: POST handler encrypts on insert via `encrypt_webhook_secret(plaintext) → subscription.ciphertext`. The route never decrypts (the secret is one-shot on POST and never returned by GET — the v0.9.0 contract).
+- `apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`: `_dispatch_single` decrypts-then-HMAC-signs per subscription (`Fernet` round-trip ~2us vs ~50ms HTTP POST). `FernetInvalidToken` caught per-sub with a `delivery.error = f"ciphertext corrupt: {FernetInvalidToken.__name__}: {exc}"` annotation; loop continues for OTHER valid subscribers (one corrupt row MUST NOT crash the whole dispatch loop).
+- `apps/api/src/gw2analytics_api/workers/webhook_scheduler.py`: mirror pattern in `_attempt_retry`. Same per-delivery `FernetInvalidToken` catch. On structural corruption, `delivery.attempt = _MAX_ATTEMPTS` is set terminal (no further retry spam on an unfixable row); `delivery.error` uses `delivery.attempt` (the post-set value) so a future tunable-isation of `_MAX_ATTEMPTS` doesn't leave the literal "3" in audit logs.
+- `apps/api/tests/test_webhooks_e2e.py`: 5 NEW hermetic tests — round-trip on canonical plaintext / settings-kek validator accepts 44-char + rejects 43/45/decoded-33 / env-path sibling test (proves the `validation_alias` plumbing works end-to-end AND validates against malformed KEK via the env branch) / on-disk ciphertext-never-contains-plaintext (CWE-256 closure proof at the wire boundary) / dispatch cross-sub isolation (one corrupt ciphertext does NOT freeze OTHER valid subscribers).
+- `apps/api/tests/test_webhooks_e2e.py`: 4 `# type: ignore[arg-type]` removed from the `Settings(secrets_kek=...)` test calls (mypy correctly flagged them as `[unused-ignore]` once pydantic-settings accepted str kwargs natively via `populate_by_name=True`).
+- `apps/api/tests/test_webhooks_e2e_scheduler.py`: `_bootstrap_webhook_environment` now seeds `ciphertext=encrypt_webhook_secret(...)` instead of plaintext `secret=...` (the model post-migration has no `secret` column).
+
+
+## [0.9.38] - v0.9.38: per-target rollup helper extraction (plan 117)
+
+### Refactor (apps/api - v0.9.38 plan 117: per-target rollup helper extraction)
+
+`get_fight_events` shrank from a 200+ line route handler to ~80 lines by extracting the 3 isomorphic per-target rollup branches (DPS + Healing + BuffRemoval) into a single `_aggregate_per_target_rollup` helper. The helper dispatches to the right per-target aggregator + output-row-type via a closed-form `if event_cls is ...` dispatch table; the schema-validation step + the 100-row cap (v0.10.2 hotfix followup #12) stay in the route handler because the right `RowOut` subclass + the cap policy are wire-format / payload-bound concerns, not aggregation concerns. Also consolidates the duplicate `_TIMELINE_*_WINDOW_S` + `_EVENTS_*_WINDOW_S` constants into a single module-level `_PER_FIGHT_DEFAULT_WINDOW_S` + `_PER_FIGHT_MAX_WINDOW_S` pair.
+
+- `apps/api/src/gw2analytics_api/routes/fights.py`: new `_aggregate_per_target_rollup` helper (lines ~122-180) + the 3 per-target rollup branches in `get_fight_events` refactored to call the helper (3 calls, one per `event_cls`) + the 2 pairs of duplicate window-s constants removed in favour of the module-level single-source.
+- `apps/api/tests/routes/test_fights_per_target_helper.py` (NEW, 5 hermetic tests): pins the helper's dispatch + invariants in isolation from the TestClient + Postgres + MinIO stack -- one test per `event_cls` branch (DPS + Healing + BuffRemoval), one test for the closed-form `ValueError` on unknown `event_cls` (a fresh subclass of `DamageEvent` does NOT match the dispatch table's `is` check, falls through to the error case), one test for the empty-iterator short-circuit (no `ZeroDivisionError` on `duration_s=0.0`).
+
+
+## [0.9.27] - v0.9.27: Phase 8 cascade in libs/gw2_analytics/event_window.py (plan 083)
 
 ### Fixed (libs/gw2_analytics - v0.9.27 plan 083: Phase 8 cascade in event_window.py)
 
@@ -214,6 +446,69 @@ The Phase 8 cycle that added `BuffRemovalEvent` as the third `Event` discriminat
 - `uv run pytest libs/gw2_analytics/tests/test_event_window.py`: 12 passed (PYTEST=0; 7 pre-existing + 5 new).
 - `uv run ruff check libs/gw2_analytics/`: clean (RUFF=0).
 - `uv run mypy --no-incremental libs`: clean (MYPY=0).
+
+
+## [0.10.10] - 2026-07-11: apps/api cold-phase flake fix on thundering-herd test
+
+### Fixed (apps/api - v0.10.10 cold-phase flake on thundering-herd test, pre-existing on main)
+
+The pre-existing ``test_fights_blob_cache_thundering_herd.py::test_concurrent_calls_to_same_uri_are_serialised`` was failing ~1/3 of CI runs (a deterministic test bug masked by ``gzip``-timestamp coincidence: 4 concurrent ``gzip.compress(b"event")`` calls produce different bytes unless they happen within the same wallclock second). The fix is in the test (the production code's latch contract was always correct):
+
+- Replaced the broken assertion ``assert all(r == results[0] for r in results)`` with ``assert all(gzip.decompress(r) == b"event" for r in results)`` -- the precise-but-stable contract: every caller received gzip bytes that DECOMPRESS to the same payload, regardless of gzip-header timestamp drift.
+- Verified: 10/10 isolated test runs PASS post-fix; full apps/api test_fights_blob_cache_thundering_herd.py suite (8 tests) PASS; no flake.
+
+
+## [0.10.9] - 2026-07-11: apps/api player-compare KeyError crash fix (plan 144 followup)
+
+### Fixed (apps/api - v0.10.9 plan 144: player-compare KeyError crash)
+
+- **apps/api v0.10.9 plan 144**: `GET /api/v1/players/compare/timeline`
+  raised `KeyError` on any non-empty dataset and was therefore broken in
+  production since v0.10.0 (plan 032). `get_compare_timeline` built
+  `per_account_contributions` as a plain `dict` and did an unconditional
+  `d[c.account_name].append(c)`, which `KeyError`s on the first
+  contribution of every account; the endpoint only survived the empty-DB
+  path. It also never scoped the result to the *requested* accounts.
+  Extract a pure `_group_contributions_by_account(contributions,
+  requested_accounts)` helper that pre-seeds the dict from the deduped
+  requested accounts and appends only requested accounts' contributions
+  ([plan 144](./plans/144-v0109-player-compare-keyerror-fix.md)). This
+  matches `CrossAccountTimelineAggregator`'s "one series per dict key"
+  contract: every requested account gets a series (empty `points` if it
+  attended no fights), and non-requested accounts are dropped. Surfaced
+  as finding C1 of the [2026-07-10 audit](./plans/AUDIT-2026-07-10-79c4501.md).
+- **apps/api/tests/test_player_compare_grouping.py** (NEW): 4 hermetic
+  (no-DB) tests pinning the helper — empty contributions pre-seed all
+  requested accounts, contributions route to the right account,
+  non-requested accounts are dropped, unknown requested accounts get an
+  empty list. The DB-backed `test_player_compare.py` validates the
+  end-to-end route on CI.
+
+#### Validation
+
+- `uv run pytest apps/api/tests/test_player_compare_grouping.py`: 4 passed.
+- `uv run ruff check` + `uv run mypy libs apps --no-incremental`: clean (106 source files).
+- The Postgres-backed `test_player_compare.py` was NOT run locally (no Docker); it validates the end-to-end route on CI.
+
+
+## [0.9.1] - v0.9.1: webhook hardening slice (HMAC bytes + replay + idempotency + suite-fast + SSRF block)
+
+### Added (apps/api + web - v0.9.1 webhook hardening slice)
+
+The 5 v0.9.1 audit plans (drift base `ef5e4f3`; see `plans/README.md` + `plans/004-008-v091-*.md`) plus the H1 (multi-tick scheduler test re-attempt) + H2 (lint-debt cleanup) followups land as part of this hardening slice. The slice closes the deferred Known Followup from v0.9.0 (`### Known followup (api - v0.9.1 webhook retry + DLQ)` above) and the first item of the v0.9.1 Deferred list (`webhook route tests`); the second Deferred item (`webhook secret-at-rest` at-rest `pgcrypto` envelope encryption) remains deferred to a future cycle. Plan-by-plan summary:
+
+- **Plan 004 — webhook Delivery schema `int`→`str`**: `apps/api/src/gw2analytics_api/schemas.py::WebhookDeliveryOut.id` and `WebhookDeliveryReplayOut.delivery_id` are now `str` (with `Field(min_length=1, max_length=64)` bounds) instead of `int`, matching the actual on-disk `f"dly_{uuid.uuid4()}"` discriminator. Pre-plan-004 the 2 new schemas would have raised `pydantic.ValidationError` on every serialisation; the route's downstream `_post_sub` helper's `cast("Response", client.post(...))` workaround in `test_webhooks_e2e.py` was a stopgap that masked the runtime failure. Plus 1 hermetic regression test pinning the `str` annotation + `min_length`/`max_length` bounds.
+- **Plan 005 — universal SSRF block for HTTPS**: `apps/api/src/gw2analytics_api/routes/webhooks.py::_validate_webhook_url` now applies a universal `is_private | is_loopback | is_link_local | is_multicast` check on the resolved address (direct IP literals via `ipaddress.ip_address`; hostnames via `socket.getaddrinfo` for IPv4 + IPv6 simultaneously) for BOTH `http` and `https` schemes. Pre-plan-005 an attacker could subscribe `https://10.0.0.1/`, `https://169.254.169.254/` (AWS IMDS), or `https://[::1]:6379/` (local Redis) and use the endpoint as an SSRF vector. Operator opt-out via `GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS=1` for trusted dev only (documented in `apps/api/.env.example` with operational-risk warning). Fail-closed on DNS errors (DNS-rebind defence). Plus 5 SSRF regression tests covering RFC1918 IPv4 literal, AWS-IMDS link-local, IPv6 loopback literal, hostname-resolves-to-private-via-monkeypatched-`getaddrinfo`, and the env opt-in escape hatch.
+- **Plan 006 — BG-task closed-session bug for `process_parse`**: `apps/api/src/gw2analytics_api/services.py::process_parse` signature changed from `(db: Session, upload_id, raw)` (request-scoped; closed by the dependency teardown before BG-task fires → `DetachedInstanceError` on the first query) to `(session_factory: Callable[[], Session], upload_id, raw)` (worker-scoped; `with session_factory() as db`). Both BG-task callers in `apps/api/src/gw2analytics_api/routes/uploads.py` updated to pass `get_sessionmaker()`. Matches the existing `webhook_dispatch.dispatch_for_upload(session_factory, upload_id)` DI pattern (the v0.9.0 worker was already correct; this plan retrofitted the parser to the same convention). Also added a focused regression test (no `time.sleep(0.1)` poll) that catches the regression where `process_parse` would re-introduce the closed-session dependency.
+- **Plan 007 — retry + DLQ + replay tests + scheduler worker**: `apps/api/src/gw2analytics_api/workers/webhook_scheduler.py` (NEW) is the asyncio-polling worker (`process_scheduled_retries(session_factory) -> int`, 5s poll interval, exponential backoff `{attempt: seconds} = {1: 1, 2: 10, 3: 100}` per design doc §5, `_MAX_ATTEMPTS = 3` before `OrmWebhookDlq` promotion). Lifted `webhook_dispatch.py`'s session-DI discipline (fresh worker-scoped `session_factory`) one-for-one. Started as a background `asyncio` task by `apps/api/src/gw2analytics_api/main.py`'s `lifespan` handler; cancel-safe on app shutdown. Routes: `POST /api/v1/webhooks/dlq/{delivery_id}/replay` in `routes/webhooks.py::replay_dlq_delivery` (deletes DLQ row + creates fresh delivery row in one atomic `db.commit()`; 404 if subscription missing/revoked or upload deleted). 4 canonical tests in `apps/api/tests/test_webhooks_e2e.py` (scheduler first-attempt success, exponential backoff after-failed-1st-tick, replay idempotency under concurrent `ThreadPoolExecutor` + `Session.commit` race-widener, HMAC byte-for-byte integrity across replays); the originally-stubbed multi-tick `test_retry_scheduler_failure_promotes_to_dlq_after_max_attempts` landed in a standalone `apps/api/tests/test_webhooks_e2e_scheduler.py` module via the H1 followup (flat `with`-block structure escapes the original in-session nested-dedent footgun; the original `pytest.skip` placeholder in `test_webhooks_e2e.py` is replaced by a stub-by-name pointer for search-by-name discoverability). `pytest-time-machine` + `respx` added to `apps/api/pyproject.toml` `[dependency-groups].dev`.
+- **Plan 008 — OpenAPI drift gate is now functional**: `web/src/lib/api/schema.d.ts` removed from `web/.gitignore` and committed as the 71 KB drift gate baseline. The CI workflow (`Detect API client drift` step, `git diff --exit-code -- web/src/lib/api/schema.d.ts` between `OpenAPI: regenerate web TypeScript client` and `Type-check web`) now has a tracked baseline to diff against — pre-plan-008 the gate silently passed because untracked-vs-commit diffs return zero. `CONTRIBUTING.md` gains a `## Regenerating the web TypeScript client` section documenting the contract: any backend PR touching `apps/api/src/gw2analytics_api/routes/*` MUST run `cd web && pnpm generate:api` and commit the regenerated `schema.d.ts` in the same PR.
+
+### Deferred (v0.9.2 followups - tracked after the v0.9.1 hardening close-out)
+
+- **webhook secret-at-rest**: the secret column is plaintext in PostgreSQL today. HMAC verification of incoming webhook calls requires plaintext, so we can't fully hash; the layered defence is `pgcrypto` envelope encryption with a `SECRETS_KEK` env var. v0.9.1 ships with plaintext (single-tenant local-dev threat model); v0.9.2 should add at-rest encryption or document the operator-led-DB-compromise risk in the deploy docs. NOT closed by the v0.9.1 hardening slice.
+
+
+## [0.9.0] - v0.9.0: Phase 9 of web + apps/api (shared TimelineChart + profession filter + TZ selector + upload wizard + webhooks backend + demo seeder)
 
 ### Changed (docs - README professional polish)
 
@@ -368,20 +663,6 @@ The Phase 8 cycle that added `BuffRemovalEvent` as the third `Event` discriminat
 
 - NEW ``apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`` (single-attempt). Fires one HMAC-SHA256-signed POST per active ``OrmWebhookSubscription`` row whenever ``Upload.status`` transitions to COMPLETED. Hooked into ``POST /api/v1/uploads`` as a sibling ``BackgroundTasks.add_task`` after ``process_parse`` -- clean domain separation (the parser never imports the dispatcher). Wire format per design doc §3.4: ``Content-Type: application/json`` + ``X-Gw2Analytics-Signature: sha256=<hex>`` + ``X-Gw2Analytics-Delivery: dly_<uuid>`` + ``User-Agent: Gw2Analytics-Webhook/0.9.0`` + body ``{"kind": "upload_completed", "upload_id", "fight_id", "sha256", "started_at"}``. The worker opens a **fresh, worker-scoped** SQLAlchemy session via the injected ``session_factory`` (does NOT reuse the request session that ``process_parse`` consumed; this is the same DI pattern the production migration toward a dedicated Arq worker process will reuse). Edge cases handled: upload row missing, non-COMPLETED status, missing OrmFight row, empty-active-subs, subscription-with-empty-secret, filter-kind-mismatch, ``httpx.HTTPError`` -> ``error=``<class>: <msg>``, non-2xx -> ``error=non-2xx response: <code>``. ``subs.filter_payload.kind == upload_completed`` is the sole match criterion today; other kinds are accepted on POST but produce zero deliveries. One ``db.commit()`` covers all N deliveries per upload (atomic).
 
-### Added (apps/api + web - v0.9.1 webhook hardening slice)
-
-The 5 v0.9.1 audit plans (drift base `ef5e4f3`; see `plans/README.md` + `plans/004-008-v091-*.md`) plus the H1 (multi-tick scheduler test re-attempt) + H2 (lint-debt cleanup) followups land as part of this hardening slice. The slice closes the deferred Known Followup from v0.9.0 (`### Known followup (api - v0.9.1 webhook retry + DLQ)` above) and the first item of the v0.9.1 Deferred list (`webhook route tests`); the second Deferred item (`webhook secret-at-rest` at-rest `pgcrypto` envelope encryption) remains deferred to a future cycle. Plan-by-plan summary:
-
-- **Plan 004 — webhook Delivery schema `int`→`str`**: `apps/api/src/gw2analytics_api/schemas.py::WebhookDeliveryOut.id` and `WebhookDeliveryReplayOut.delivery_id` are now `str` (with `Field(min_length=1, max_length=64)` bounds) instead of `int`, matching the actual on-disk `f"dly_{uuid.uuid4()}"` discriminator. Pre-plan-004 the 2 new schemas would have raised `pydantic.ValidationError` on every serialisation; the route's downstream `_post_sub` helper's `cast("Response", client.post(...))` workaround in `test_webhooks_e2e.py` was a stopgap that masked the runtime failure. Plus 1 hermetic regression test pinning the `str` annotation + `min_length`/`max_length` bounds.
-- **Plan 005 — universal SSRF block for HTTPS**: `apps/api/src/gw2analytics_api/routes/webhooks.py::_validate_webhook_url` now applies a universal `is_private | is_loopback | is_link_local | is_multicast` check on the resolved address (direct IP literals via `ipaddress.ip_address`; hostnames via `socket.getaddrinfo` for IPv4 + IPv6 simultaneously) for BOTH `http` and `https` schemes. Pre-plan-005 an attacker could subscribe `https://10.0.0.1/`, `https://169.254.169.254/` (AWS IMDS), or `https://[::1]:6379/` (local Redis) and use the endpoint as an SSRF vector. Operator opt-out via `GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS=1` for trusted dev only (documented in `apps/api/.env.example` with operational-risk warning). Fail-closed on DNS errors (DNS-rebind defence). Plus 5 SSRF regression tests covering RFC1918 IPv4 literal, AWS-IMDS link-local, IPv6 loopback literal, hostname-resolves-to-private-via-monkeypatched-`getaddrinfo`, and the env opt-in escape hatch.
-- **Plan 006 — BG-task closed-session bug for `process_parse`**: `apps/api/src/gw2analytics_api/services.py::process_parse` signature changed from `(db: Session, upload_id, raw)` (request-scoped; closed by the dependency teardown before BG-task fires → `DetachedInstanceError` on the first query) to `(session_factory: Callable[[], Session], upload_id, raw)` (worker-scoped; `with session_factory() as db`). Both BG-task callers in `apps/api/src/gw2analytics_api/routes/uploads.py` updated to pass `get_sessionmaker()`. Matches the existing `webhook_dispatch.dispatch_for_upload(session_factory, upload_id)` DI pattern (the v0.9.0 worker was already correct; this plan retrofitted the parser to the same convention). Also added a focused regression test (no `time.sleep(0.1)` poll) that catches the regression where `process_parse` would re-introduce the closed-session dependency.
-- **Plan 007 — retry + DLQ + replay tests + scheduler worker**: `apps/api/src/gw2analytics_api/workers/webhook_scheduler.py` (NEW) is the asyncio-polling worker (`process_scheduled_retries(session_factory) -> int`, 5s poll interval, exponential backoff `{attempt: seconds} = {1: 1, 2: 10, 3: 100}` per design doc §5, `_MAX_ATTEMPTS = 3` before `OrmWebhookDlq` promotion). Lifted `webhook_dispatch.py`'s session-DI discipline (fresh worker-scoped `session_factory`) one-for-one. Started as a background `asyncio` task by `apps/api/src/gw2analytics_api/main.py`'s `lifespan` handler; cancel-safe on app shutdown. Routes: `POST /api/v1/webhooks/dlq/{delivery_id}/replay` in `routes/webhooks.py::replay_dlq_delivery` (deletes DLQ row + creates fresh delivery row in one atomic `db.commit()`; 404 if subscription missing/revoked or upload deleted). 4 canonical tests in `apps/api/tests/test_webhooks_e2e.py` (scheduler first-attempt success, exponential backoff after-failed-1st-tick, replay idempotency under concurrent `ThreadPoolExecutor` + `Session.commit` race-widener, HMAC byte-for-byte integrity across replays); the originally-stubbed multi-tick `test_retry_scheduler_failure_promotes_to_dlq_after_max_attempts` landed in a standalone `apps/api/tests/test_webhooks_e2e_scheduler.py` module via the H1 followup (flat `with`-block structure escapes the original in-session nested-dedent footgun; the original `pytest.skip` placeholder in `test_webhooks_e2e.py` is replaced by a stub-by-name pointer for search-by-name discoverability). `pytest-time-machine` + `respx` added to `apps/api/pyproject.toml` `[dependency-groups].dev`.
-- **Plan 008 — OpenAPI drift gate is now functional**: `web/src/lib/api/schema.d.ts` removed from `web/.gitignore` and committed as the 71 KB drift gate baseline. The CI workflow (`Detect API client drift` step, `git diff --exit-code -- web/src/lib/api/schema.d.ts` between `OpenAPI: regenerate web TypeScript client` and `Type-check web`) now has a tracked baseline to diff against — pre-plan-008 the gate silently passed because untracked-vs-commit diffs return zero. `CONTRIBUTING.md` gains a `## Regenerating the web TypeScript client` section documenting the contract: any backend PR touching `apps/api/src/gw2analytics_api/routes/*` MUST run `cd web && pnpm generate:api` and commit the regenerated `schema.d.ts` in the same PR.
-
-### Deferred (v0.9.2 followups - tracked after the v0.9.1 hardening close-out)
-
-- **webhook secret-at-rest**: the secret column is plaintext in PostgreSQL today. HMAC verification of incoming webhook calls requires plaintext, so we can't fully hash; the layered defence is `pgcrypto` envelope encryption with a `SECRETS_KEK` env var. v0.9.1 ships with plaintext (single-tenant local-dev threat model); v0.9.2 should add at-rest encryption or document the operator-led-DB-compromise risk in the deploy docs. NOT closed by the v0.9.1 hardening slice.
-
 ### Tests
 
 - 7 new pytest tests in `apps/api/tests/test_players.py`.
@@ -437,15 +718,6 @@ The 5 v0.9.1 audit plans (drift base `ef5e4f3`; see `plans/README.md` + `plans/0
 
 
 
-### Added (apps/api - v0.9.2 schema `int`→`str` audit-replay hardening)
-
-These land in `apps/api/` + `apps/api/alembic/versions/` as the v0.9.2 followups announced in the 0.9.2 release section's [Deferred (v0.9.2 followups)] block:
-
-- **Plan 009 Step 1+2** (atomic webhook payload): webhook payload is now signed with HMAC byte-for-byte (no JSON re-ordering between dispatch and replay); the regression test in `apps/api/tests/test_webhooks_e2e.py` was hardened against dispatch-time JSON canonicalisation drift.
-- **Plan 009 Step 3** (row-level lock): `apps/api/src/gw2analytics_api/routes/webhooks.py::replay_dlq_delivery` now opens the DLQ lookup with `db.execute(select(OrmWebhookDlq).where(OrmWebhookDlq.id == delivery_id).with_for_update())` so concurrent replay requests collide on the row-level lock (`Postgres SELECT ... FOR UPDATE`); the losing thread sees NULL after the winner deletes + commits.
-- **Plan 009 Step 4** (discriminator-encoding docstring convention): CSS-style header + 3 helper docstrings documenting the `urlsafe_b64encode` vs `b64encode` vs `<uuid>` discriminator contract; cross-referenced from `CONTRIBUTING.md`'s new `## Webhook discriminator IDs` section.
-- **Plan 009 Step 5** (test isolation conftest): a function-scoped autouse `_isolate_test_state` fixture in the new `apps/api/tests/conftest.py` bulk-deletes from 6 tables (uploads, fights, fight_player_summaries, webhook_subscriptions, webhook_deliveries, webhook_dlq) before each test. DELETE order respects FKs; `webhook_dlq.subscription_id` has NO FK so it's deleted between `webhook_deliveries` and `webhook_subscriptions`. Provides explicit `client` + `get_sessionmaker` fixtures for plan-006 regression tests.
-
 ### Added (web - v0.9.0 plan/003: synthetic `.zevtc` demo seeder)
 
 - `apps/api/src/gw2analytics_api/scripts/seed_demo.py` (NEW, ~290 LoC): in-process synthetic `.zevtc` builder that emits minimal V1.3 EVTC files (header + agents + skills + a configurable event mix matching the Phase 7 v2 + Phase 8 roll-up trio the parser expects). Posts each file to the LIVE FastAPI server via `httpx.Client` (default `http://127.0.0.1:8000`), then polls `GET /api/v1/uploads/{uuid}` until the parser completes (a 30s budget with 1s interval). All 3 struct-size preconditions use explicit `RuntimeError` raises (not `assert`) so the guards survive `python -O` + `ruff S101`. CLI flags: `--num-fights N` (default 3), `--base-url URL` (default http://127.0.0.1:8000), `--no-poll` (just POST + exit). Unblocks "show me the UI with real data" by populating the same minimal-but-valid fixtures apps/api e2e tests use.
@@ -464,281 +736,6 @@ These land in `apps/api/` + `apps/api/alembic/versions/` as the v0.9.2 followups
 ### Added (web - v0.9.0: screenshots.mjs sync against seeded DB)
 
 - `web/scripts/screenshots.mjs`: pulls live `account_name` + `fight_id` from `/api/v1/players` + `/api/v1/fights` at script start (replaces the static mock-server fixture URLs that 404'd against the seed_demo-created `:demo.<N>` namespaces). Hard-fails loud when the gateway is empty/unreachable. `GATEWAY_BASE_URL` env override for remote gateways. The 8 captures in `docs/screenshots/` now materialise populated rows against the seeded DB; `/fights/<real-fight-id>` shows the populated 3196px AG Grid vs the prior 900px empty card.
-
-### Added (web - v0.10.0 plan 030: CSV injection guard, OWASP CWE-1236)
-
-The v0.10.0 cycle (per `plans/010-v100-roadmap.md`) is now underway. Item A in the v0.10.0 cycle is the HIGH-severity CSV injection guard:
-
-- `web/src/lib/csv.ts`: new module-level `FORMULA_TRIGGERS = /^[=+\-@\t\r]/` regex (anchored at start; matches the 6 canonical spreadsheet formula-trigger chars). The private `csvEscape(value)` function now has a formula-guard branch that fires BEFORE the RFC 4180 branch: when a value starts with one of the 6 trigger chars, prefix with a literal `'` + wrap in double quotes per RFC 4180. Excel/Sheets drop the leading `'` on display but the formula is no longer parsed. Implementation uses a template literal (the template-literal form is the canonical Way to express \" + ' + value + \" with one escaping layer).
-- `web/tests/lib/csv.test.ts`: 12 NEW hermetic cases (6 trigger-char tests via `it.each` + safe-path alphanumeric + null + undefined + combined formula+dq + combined formula+comma) + 1 PlayerListRow integration test using the canonical inline `type Pr = import(\"@/lib/api\").PlayerListRow` pattern (TS type-position dynamic import; the `await` wrapper is invalid in a type position). Total csv.test.ts: **23/23** pass; full vitest: **97/97** across 15 files.
-- 4 attacker-controllable upload fields are now formula-safe: `name` on `PlayerListRow`/`PlayerProfile`/`PerFightBreakdownRow`, `skill_name` on `SkillUsageRow`, `subgroup` on `SquadRollupRow`, `description` on `WebhookSubscription`. OWASP CWE-1236 class closed on the existing CSV export surface.
-
-### Deferred (v0.10.0 backlog - tracked from `plans/010-v100-roadmap.md` scope)
-
-- **B (security HIGH)**: webhook secret-at-rest envelope encryption. NOW SHIPPED — see v0.10.0 plan 031 entry below. The previously-deferred-from-v0.9.1 hardening layer is closed: CWE-256 (plaintext storage of a password) is no longer surface-able via DB snapshot alone (KEK must ALSO be in the gateway process environment).
-- **C (UX)**: cross-account timeline comparison (M effort). NOW SHIPPED — see v0.10.0 plan 032 entry below. The squad-comparison use case (e.g. "how does my DPS compare to my healer's damage absorbed over the same fight window?") is closed with the new `GET /api/v1/players/compare/timeline?accounts=A&accounts=B` route + the new `/players/compare` page.
-
-### Added (apps/api + web - v0.10.0 plan 032: cross-account comparison timeline)
-
-The v0.10.0 cycle item C closes the maintainer's most-requested feature in the incident log (per `docs/ROADMAP.md` §1): the squad-comparison use case. The new endpoint + page let the analyst overlay 2-4 accounts' damage / healing / strip curves on a single chart with a metric radio (Damage / Healing / Buff removal), a linear/log Y-axis scale toggle, and the shared 25-zone TZ selector. ~16 files changed (3 new backend + 6 new web + 5 modified + 2 docs).
-
-- `libs/gw2_analytics/src/gw2_analytics/cross_account_timeline.py` (NEW, ~280 LoC): the stateless `CrossAccountTimelineAggregator` + Pydantic `CrossAccountTimelinePoint` + `CrossAccountTimelineSeries` models. Recency-first sort (mirrors the per-account contract) + day-bucketing (mirrors the per-account `_combine_day_midnight` helper). `aggregate(per_account_contributions, fight_id_to_started, bucket, tz)` is the single entry point.
-- `libs/gw2_analytics/tests/test_cross_account_timeline.py` (NEW, 7 hermetic cases): empty input / two-account / recency-first sort / account-with-no-fights / day-bucketing / default-tz-is-utc / invariant guard.
-- `apps/api/src/gw2analytics_api/routes/player_compare.py` (NEW, ~140 LoC): `GET /api/v1/players/compare/timeline?accounts=A&accounts=B&bucket=day&tz=Continent/City` with a **repeatable** `accounts` query param (`[2, 4]` unique accounts enforced by `Query(min_length=2, max_length=4)`). Reuses the per-account route's `_compute_contributions` helper. Declaration-order matters: MUST be included BEFORE the players router in `main.py` so the catch-all `{account_name:path}` doesn't greedily match `/players/compare/timeline` as `account_name="compare/timeline"`. Returns 422 on out-of-range, 422 on unknown IANA TZ, 200 with `points: []` for an unknown account (NOT 404 -- the analyst UX benefits from a same-shape response for all requested accounts).
-- `apps/api/src/gw2analytics_api/main.py`: includes `player_compare.router` BEFORE `players.router`; `version="0.8.6"` -> `"0.10.0"`.
-- `libs/gw2_analytics/src/gw2_analytics/__init__.py`: re-exports `CrossAccountTimelineAggregator` + `CrossAccountTimelineSeries`.
-- `web/src/lib/api.ts`: `fetchPlayerCompareTimeline(accounts, opts)` + `CrossAccountTimelinePoint` + `CrossAccountTimelineSeries` types.
-- `web/src/lib/timezones.ts` (NEW): the 25-city IANA catalog extracted from `PlayerTimelineSection` so the per-account + cross-account selectors ship the SAME curated set (pre-plan-032 the compare section had a 9-zone subset; the analyst who has used the per-account page would silently lose 16 zones on the compare view).
-- `web/src/components/CrossAccountTimelineChart.tsx` (NEW, ~280 LoC): purpose-built N-line SVG chart (NOT a wrapper around the existing `TimelineChart` because the cross-account use case is 1 metric × N accounts, the inverse of the per-account chart's N metrics × 1 account). 4-color palette (red / green / blue / purple) per account. Broken-line segments for missing dates (an account with no fight on date D renders no line through D, rather than a misleading 0-baseline). Shared absolute Y axis (log scale default; matches the per-account log mode's "1M damage vs 50 strip" use case).
-- `web/src/components/CrossAccountCompareSection.tsx` (NEW, ~280 LoC): Client Component. Owns the metric / scale / bucket / tz toggles + re-fetches the timeline when bucket / tz change. Read-only account chips (the in-page add/remove affordance is a v0.10.X followup; v0.10.0 ships set-via-URL).
-- `web/src/app/players/compare/page.tsx` (NEW, ~210 LoC): Server Component. Reads `?accounts=` from URL search params, validates 2-4 unique accounts, fetches initial timeline on the server, renders the section. Empty-state copy for `< 2` accounts; upstream-error card for `> 4` or 422.
-- `web/src/app/layout.tsx`: added Players + Compare secondary nav links between the brand and the search bar. Compare link goes to `/players/compare` (no query params); the page's empty-state copy guides the analyst to add accounts via URL.
-- `web/src/app/players/page.tsx`: added a "Compare the first 2 players" CTA that pre-fills the URL with the first 2 rows' `account_name`; also `width: "100%"` defensive fix on the main element.
-- `web/src/app/players/[account_name]/page.tsx`: `width: "100%"` defensive fix on the main element (the v0.9.0 visual regression on `:demo.<N>` accounts where the page rendered at ~900px wide instead of 1440px; the defensive fix prevents the silent collapse even when a downstream CSS rule would otherwise shrink the parent's intrinsic width; the root-cause investigation is a v0.10.X followup).
-- `web/src/components/PlayerTimelineSection.tsx`: replaced the local 25-zone `TIMEZONE_OPTIONS` const with the import from `web/src/lib/timezones.ts` (the shared module).
-- `web/tests/e2e/fixtures/cross-account-timeline.json` (NEW): 2-account fixture (TestAccount.1234 + TestAccount.5678) with overlapping but distinct fight sets across 3 dates (2026-07-07 + 2026-07-08 + 2026-07-09). Exercises the broken-line + legend + X-axis date-union paths.
-- `web/tests/e2e/mock-server.mjs`: added `/api/v1/players/compare/timeline` endpoint with a 422 on unknown `?accounts=` values.
-- `web/tests/e2e/players-compare.spec.ts` (NEW, 3 cases): initial render / metric radio toggles / 0-accounts empty state.
-- `web/tests/components/cross-account-timeline-chart.test.tsx` (NEW, 5 cases): empty state / multi-account polylines / default Damage caption / metric switch / log scale Y-axis labels.
-- `web/tests/components/cross-account-compare-section.test.tsx` (NEW, 2 cases): initial render + radio click.
-- `web/tests/app/players-compare-page.test.tsx` (NEW, 3 cases): empty state / too-many / valid render.
-
-### Added (apps/api + infra - v0.10.1 plan 010: schema-drift guard + Arq parser worker)
-
-Closes 2 real bugs found by real-payload testing on 2026-07-09 (1,605 WvW `.zevtc` files, 2.6 GB, 11 accounts):
-
-- **Bug #1**: in-memory SQLAlchemy ORM registry went stale after the
-  `0009_webhook_secret_at_rest.py` migration was edited. The live DB
-  renamed the column `secret` → `ciphertext`; the running Uvicorn
-  process (started 1h42m BEFORE the migration edit) still held the
-  pre-migration class mappings. The webhook scheduler spammed
-  `psycopg.errors.UndefinedColumn: column webhook_subscriptions.secret
-  does not exist` every 5s — `/tmp/fastapi.log` grew to 253K chars of
-  stack traces.
-- **Bug #2**: CPU-bound `process_parse` blocked FastAPI's
-  `BackgroundTasks` thread pool on parallel uploads. 8 concurrent
-  `.zevtc` uploads all stuck on `pending` after 20s; the GIL serialised
-  the 8 pure-Python parse calls. Pre-existing TODO in
-  `services.py::process_parse` line ~60 already flagged this.
-
-#### Bug #1 fix: schema-drift guard at startup
-- `apps/api/src/gw2analytics_api/schema_guard.py` (NEW): pure helper
-  `check_schema_drift()` that compares the alembic head on disk to
-  the `alembic_version.version_num` row in the DB. Raises
-  `RuntimeError` with an operator-facing message naming both heads so
-  the operator can grep `apps/api/alembic/versions/` for the missing
-  migration. Escape hatch `SKIP_SCHEMA_GUARD=1` for
-  rollback-in-flight scenarios (WARNING-logged so the bypass is
-  visible in `/tmp/fastapi.log`).
-- `apps/api/src/gw2analytics_api/main.py::lifespan`: calls
-  `check_schema_drift()` at the very top, BEFORE any other init. A
-  stale ORM registry now crashes Uvicorn at boot with an actionable
-  error instead of silently spamming the log for hours.
-
-#### Bug #2 fix: Arq parser worker
-- `docker-compose.yml`: added `redis:7-alpine` service (port 6379,
-  healthcheck `redis-cli ping`).
-- `apps/api/pyproject.toml`: added `arq>=0.25` + `redis>=5.0` deps;
-  `uv lock` regenerated (93 packages).
-- `apps/api/src/gw2analytics_api/workers/parser_worker.py` (NEW):
-  async Arq job `parse_job(ctx, upload_id, raw_bytes)` that runs
-  `process_parse` + `dispatch_for_upload` chained via
-  `asyncio.to_thread`. **Closes a pre-existing race**:
-  `dispatch_for_upload` previously ran as a sibling
-  `BackgroundTasks.add_task` BEFORE `process_parse` committed, so
-  it short-circuited and zero webhook deliveries fired on every
-  successful upload. The chain guarantees `dispatch_for_upload`
-  awaits the parse commit.
-- `apps/api/src/gw2analytics_api/workers/parser_settings.py` (NEW):
-  `WorkerSettings` class with `functions=[parse_job]`,
-  `redis_settings=RedisSettings(...)`, `max_jobs=2`,
-  `job_timeout=600`. Runnable via
-  `arq gw2analytics_api.workers.parser_settings.WorkerSettings` in
-  a separate process. `ARQ_REDIS_HOST` + `ARQ_REDIS_PORT` env vars
-  override the localhost default for production deploys.
-- `apps/api/src/gw2analytics_api/main.py::lifespan`: tries to
-  create the Arq pool at startup; on failure logs a WARNING + sets
-  the pool to `None` (graceful fallback). The route handler takes
-  a sync-in-request fallback path that runs the parse + dispatch in
-  `asyncio.to_thread` (preserves the v0.10.0 test contract).
-- `apps/api/src/gw2analytics_api/routes/uploads.py`: route handler
-  is now `async def create_upload(request: Request, ...)`. New
-  helper `_enqueue_parse(request, upload_id, raw)` checks
-  `request.app.state.arq_pool` and either enqueues via Arq OR runs
-  the parse + dispatch in-request (fallback).
-
-#### Public contract change (note for integrators)
-- `UploadCreatedResponse.status` can now legitimately be
-  `"completed"` in the 201 response body when the Arq path's
-  fallback fires (Redis down at request time). Pre-v0.10.1 the
-  response was always `"pending"`. Integrators that poll right
-  after the POST and use `"pending"` as a "still processing"
-  signal should switch to the `GET /uploads/{id}` poll OR check
-  `fight_id !== null`.
-
-#### BREAKING for the failure path (note for integrators)
-- `POST /api/v1/uploads` now returns `HTTP 503 Service Unavailable`
-  (with body `"Parser worker unavailable. Check Redis is up."`)
-  when the Arq worker is unreachable. Pre-v0.10.1 the route
-  always returned 201 (success), 422 (validation), or 5xx
-  (server error). v0.10.1 with Redis down returns 503 — a
-  separate failure class. Integrators that retry on 5xx MUST
-  distinguish 503 (transient infrastructure failure; retry with
-  backoff) from 500 (programming bug; do not retry).
-  Production safety: the 503 surfaces the Redis misconfiguration
-  to operator dashboards instead of silently degrading to
-  multi-second POST latency. The pre-v0.10.1 sync-in-request
-  fallback is gated on `ALLOW_INREQUEST_PARSE_FALLBACK=1` (test
-  + dev environments only; production omits the env var to get
-  the loud 503).
-
-#### Tests (apps/api)
-- `apps/api/tests/conftest.py`: new autouse fixture
-  `_disable_arq_for_tests` points the broker at `localhost:1` so
-  the lifespan's pool creation fails fast (test env always uses
-  the sync-in-request fallback).
-- `apps/api/tests/test_schema_guard.py` (NEW, 4 tests):
-  no-drift passes / drift raises with both heads named /
-  `SKIP_SCHEMA_GUARD` escape hatch / NULL `alembic_version` row.
-- `apps/api/tests/test_uploads_arq.py` (NEW, 4 tests):
-  mock-Arq enqueue contract / sync-in-request fallback path /
-  idempotent re-parse of failed upload / no re-dispatch on
-  re-upload of completed (the pre-v0.10.1 contract is
-  preserved — double-dispatch would be a silent regression).
-- `apps/api/tests/test_parser_worker.py` (NEW, 4 tests): happy
-  path chain (`parse` → `dispatch`) / skip dispatch on parse
-  failure (Arq retry kicks in) / swallow dispatch failure
-  post-parse (no re-parse; manual operator re-dispatch) /
-  asyncio.to_thread contract.
-
-#### Planning
-- `plans/010-v101-schema-drift-guard-and-arq-parser.md` (NEW): the
-  v0.10.1 plan doc covering both bugs (the design output of the
-  round-1 diagnosis).
-
-#### Tests (cumulative)
-- Apps/api pytest: 92 (v0.10.0) → **104** (v0.10.1). Delta: +12
-  from the 3 new plan-010 test files.
-- Web vitest + Playwright: unchanged (the v0.10.1 cycle is
-  backend-only).
-- Total: 339 (v0.10.0) → 351 (v0.10.1).
-
-
-### Deferred (v0.10.X followups - tracked from plan 032)
-
-- **In-page add/remove accounts in `/players/compare`**: v0.10.0 ships read-only chips; the full in-page add/remove UX is ~50 LoC and is a v0.10.X followup.
-- **Visual regression baseline for `/players/compare`**: a tracked `docs/screenshots/09-players-compare.png` (the route is dynamic; the fixture + e2e spec cover the e2e path; a visual baseline is a v0.10.X followup when the page settles).
-- **Per-account-vs-cross-account rate columns**: a per-second rate field on `CrossAccountTimelinePoint` is a v0.10.X followup; the v0.10.0 wire surface is the totals-only contract (matches the per-account timeline).
-- **900px bug root-cause investigation**: the `width: "100%"` defensive fix is in place but the underlying CSS root cause (likely the `auto-fit minmax(180px, 1fr)` stat grid + a downstream intrinsic-width shrink on `:demo.<N>` accounts) is a v0.10.X followup with a DevTools session.
-- **Port-1 conftest trick robustness** (v0.10.1 plan 010 followup):
-  `_disable_arq_for_tests` points RedisSettings at `localhost:1` to
-  make the lifespan's Arq pool init fail fast. The port-1 trick
-  works on every test host seen so far but is host-dependent
-  (port 1 is reserved `tcpmux` and could be open on exotic
-  configs). The robust alternative is to monkeypatch
-  `arq.create_pool` directly to raise a fake `ConnectionError`.
-  ~5 LoC; v0.10.X followup.
-- **`test_re_upload_completed_does_not_redispatch` parametrize**
-  (v0.10.1 plan 010 followup): the test pins the no-double-dispatch
-  contract for `status == "completed"` but not for `pending` or
-  any other non-failed status. Parametrize over 3-4 statuses to
-  pin the full contract. ~5 LoC; v0.10.X followup.
-- **`WorkerSettings.redis_settings` env-var override docstring**
-  (v0.10.1 plan 010 followup): the env var is read in
-  `parser_settings.py` but the module docstring does not document
-  it. Add a one-line note so operators discover the override
-  without grepping the source. ~3 LoC; v0.10.X followup.
-
-### Refactor (apps/api - v0.9.38 plan 117: per-target rollup helper extraction)
-
-`get_fight_events` shrank from a 200+ line route handler to ~80 lines by extracting the 3 isomorphic per-target rollup branches (DPS + Healing + BuffRemoval) into a single `_aggregate_per_target_rollup` helper. The helper dispatches to the right per-target aggregator + output-row-type via a closed-form `if event_cls is ...` dispatch table; the schema-validation step + the 100-row cap (v0.10.2 hotfix followup #12) stay in the route handler because the right `RowOut` subclass + the cap policy are wire-format / payload-bound concerns, not aggregation concerns. Also consolidates the duplicate `_TIMELINE_*_WINDOW_S` + `_EVENTS_*_WINDOW_S` constants into a single module-level `_PER_FIGHT_DEFAULT_WINDOW_S` + `_PER_FIGHT_MAX_WINDOW_S` pair.
-
-- `apps/api/src/gw2analytics_api/routes/fights.py`: new `_aggregate_per_target_rollup` helper (lines ~122-180) + the 3 per-target rollup branches in `get_fight_events` refactored to call the helper (3 calls, one per `event_cls`) + the 2 pairs of duplicate window-s constants removed in favour of the module-level single-source.
-- `apps/api/tests/routes/test_fights_per_target_helper.py` (NEW, 5 hermetic tests): pins the helper's dispatch + invariants in isolation from the TestClient + Postgres + MinIO stack -- one test per `event_cls` branch (DPS + Healing + BuffRemoval), one test for the closed-form `ValueError` on unknown `event_cls` (a fresh subclass of `DamageEvent` does NOT match the dispatch table's `is` check, falls through to the error case), one test for the empty-iterator short-circuit (no `ZeroDivisionError` on `duration_s=0.0`).
-
-### Fixed (apps/api - v0.10.2 hotfix followup #12)
-
-The 100-row cap on the per-target roll-up lists (`target_dps` + `target_healing` + `target_buff_removal` in `GET /api/v1/fights/{id}/events`; `skills` in `GET /api/v1/fights/{id}/skills`) is the v0.10.3 parser-bug mitigation. The pre-cap aggregator returned ALL groups, so a v0.10.3 regression that misreads `source_agent_id` (or the parser-side skill-table read) can produce hundreds of thousands of unique garbage IDs, the JSON response explodes to multi-MB, the connection drops (HTTP 000), and the analyst sees a Next.js "fetch failed" timeout on the fight drilldown page. The cap slices the per-target lists to the top-100 by damage / healing / strip descending (the aggregators already order by magnitude descending, so the kept rows ARE the analyst-relevant signal — the dropped tail is the noise floor). `event_windows` is NOT capped (it groups by time bucket, naturally bounded by fight duration).
-
-- `apps/api/src/gw2analytics_api/routes/fights.py::get_fight_events` + `get_fight_skills`: cap `target_dps[:100]` + `target_healing[:100]` + `target_buff_removal[:100]` + `skills[:100]` after the aggregator runs. Comment block documents the v0.10.3 root cause + the "top-N is the analyst signal" rationale + the `event_windows`-uncapped exception.
-- `apps/api/tests/test_fight_rollup_cap.py` (NEW, 4 hermetic tests): one per capped list. Each test seeds a fight with 150 unique targets/skills + 150 events with descending magnitudes and asserts the response has exactly 100 rows, in descending order, with the top-100 by magnitude preserved. The 4 tests cover the 4 cap sites independently (DPS + Healing + BuffRemoval on `/events`; per-skill on `/skills`); pure-strip events (`value=0`, `buff_dmg>0`, `is_nondamage=1`) exercise the Phase 8 dual-emit-free path on the BuffRemoval test.
-
-### Added (apps/api - v0.10.0 plan 031: webhook secret-at-rest envelope encryption, OWASP CWE-256)
-
-The v0.10.0 cycle item B closes the HIGH-severity CWE-256 (plaintext storage of a password) layer on the webhook subsystem. A stolen DB snapshot OR a flawed SELECT-leak no longer surfaces the plaintext HMAC secret directly; the attacker must ALSO have access to the gateway process's `SECRETS_KEK` env var. Implementation is server-side Python `cryptography.fernet.Fernet` (NOT Postgres `pgcrypto` `pgp_sym_encrypt` — the SQL wire exposure of the plaintext KEK in `pg_stat_statements` / `log_min_duration_statement` was a defense-in-depth violation; Python-side encryption keeps the KEK in process memory).
-
-- `apps/api/pyproject.toml`: `cryptography>=43.0.1` added to runtime deps.
-- `pyproject.toml` (root): `SECRETS_KEK=<44-char url-safe base64>` added to `[tool.pytest_env]` so the test suite has a valid 32-byte Fernet key at every pytest run.
-- `apps/api/.env.example`: `SECRETS_KEK` documented with the canonical Python one-liner for generating a fresh KEK + a defense-in-depth warning (any DB compromise must NOT suffice without the env KEK).
-- `apps/api/src/gw2analytics_api/crypto.py` (NEW): module-level Fernet envelope helper. `_get_fernet(kek)` is `lru_cache`d per KEK (one `Fernet(kek.encode("ascii"))` per process per env); `_resolve_kek(explicit=None)` reads `os.environ["SECRETS_KEK"]` with a clear error if missing; `encrypt_webhook_secret(plaintext: str, *, kek=None) -> bytes` and `decrypt_webhook_secret(ciphertext: bytes, *, kek=None) -> str` re-export the Fernet wrappers; `FernetInvalidToken` is an alias of `cryptography.fernet.InvalidToken` for clarity in audit logs.
-- `apps/api/src/gw2analytics_api/config.py`: new `secrets_kek: SecretStr = Field(validation_alias="SECRETS_KEK")` (required at startup; no default; fails lazy if env missing). The `_validate_secrets_kek` `mode="before"` field validator (1) rejects non-`str` input; (2) rejects any length != 44 (`Fernet._is_valid_key` spec); (3) `base64.urlsafe_b64decode` + asserts the decoded length is exactly 32 bytes (blocks `"a"*44` which decodes to 33 bytes); (4) `from exc` chains the inner decode error so the upstream cursor points at the original `binascii.Error` (ruff B904).
-- `apps/api/src/gw2analytics_api/models.py`: `OrmWebhookSubscription.secret: Mapped[str]` → `ciphertext: Mapped[bytes]` (LargeBinary).
-- `apps/api/alembic/versions/0009_webhook_secret_at_rest.py` (NEW, Python-driven data migration): `add_column("webhook_subscriptions", "ciphertext", LargeBinary(), nullable=False, server_default=sa.text("''::bytea"))` → Fernet-encrypt-in-Python loop (reads plaintext `secret`, writes Fernet envelope into `ciphertext` via batched UPDATE, with defensive `not isinstance(plaintext, str)` skip) → `drop_column("webhook_subscriptions", "secret")` → `op.alter_column("webhook_subscriptions", "ciphertext", server_default=None)` (drops the backfill-only default so future INSERTs cannot silently land with empty ciphertext). Symmetrical `downgrade()` rebuilds the plaintext column + restores via the SAME KEK. **Migration is NOT idempotent on a wet-DB re-run** (the docstring `## WARNING` block warns operators to drain + drop + re-seed rather than wipe `alembic_version`).
-- `apps/api/src/gw2analytics_api/routes/webhooks.py`: POST handler encrypts on insert via `encrypt_webhook_secret(plaintext) → subscription.ciphertext`. The route never decrypts (the secret is one-shot on POST and never returned by GET — the v0.9.0 contract).
-- `apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`: `_dispatch_single` decrypts-then-HMAC-signs per subscription (`Fernet` round-trip ~2us vs ~50ms HTTP POST). `FernetInvalidToken` caught per-sub with a `delivery.error = f"ciphertext corrupt: {FernetInvalidToken.__name__}: {exc}"` annotation; loop continues for OTHER valid subscribers (one corrupt row MUST NOT crash the whole dispatch loop).
-- `apps/api/src/gw2analytics_api/workers/webhook_scheduler.py`: mirror pattern in `_attempt_retry`. Same per-delivery `FernetInvalidToken` catch. On structural corruption, `delivery.attempt = _MAX_ATTEMPTS` is set terminal (no further retry spam on an unfixable row); `delivery.error` uses `delivery.attempt` (the post-set value) so a future tunable-isation of `_MAX_ATTEMPTS` doesn't leave the literal "3" in audit logs.
-- `apps/api/tests/test_webhooks_e2e.py`: 5 NEW hermetic tests — round-trip on canonical plaintext / settings-kek validator accepts 44-char + rejects 43/45/decoded-33 / env-path sibling test (proves the `validation_alias` plumbing works end-to-end AND validates against malformed KEK via the env branch) / on-disk ciphertext-never-contains-plaintext (CWE-256 closure proof at the wire boundary) / dispatch cross-sub isolation (one corrupt ciphertext does NOT freeze OTHER valid subscribers).
-- `apps/api/tests/test_webhooks_e2e.py`: 4 `# type: ignore[arg-type]` removed from the `Settings(secrets_kek=...)` test calls (mypy correctly flagged them as `[unused-ignore]` once pydantic-settings accepted str kwargs natively via `populate_by_name=True`).
-- `apps/api/tests/test_webhooks_e2e_scheduler.py`: `_bootstrap_webhook_environment` now seeds `ciphertext=encrypt_webhook_secret(...)` instead of plaintext `secret=...` (the model post-migration has no `secret` column).
-
-### Note
-
-- The KEK is the sole decryption key. Loss of `SECRETS_KEK` OR a rotation without running a re-encrypt migration will permanently fail ALL existing webhook subscriptions (dispatch raises `FernetInvalidToken` on every POST, caught + logged but never recovered). Operators MUST store the KEK in a secrets manager (Vault / AWS Secrets Manager / sealed-secrets / etc.) and NEVER commit to git. Future KEK rotation is tracked for a v0.10.0+ dedicated rotation script (out of scope for plan 031).- Postgres `pgcrypto` was REJECTED for this implementation despite being a natural-looking choice; the KEK as a SQL parameter would cross the SQL wire on every encrypt/decrypt (visible in `pg_stat_statements` / verbose `log_min_duration_statement`). Defense-in-depth requires the KEK to stay inside the Python process memory.
-
-
-## [0.10.10] - 2026-07-11: apps/api cold-phase flake fix on thundering-herd test
-
-### Fixed (apps/api - v0.10.10 cold-phase flake on thundering-herd test, pre-existing on main)
-
-The pre-existing ``test_fights_blob_cache_thundering_herd.py::test_concurrent_calls_to_same_uri_are_serialised`` was failing ~1/3 of CI runs (a deterministic test bug masked by ``gzip``-timestamp coincidence: 4 concurrent ``gzip.compress(b"event")`` calls produce different bytes unless they happen within the same wallclock second). The fix is in the test (the production code's latch contract was always correct):
-
-- Replaced the broken assertion ``assert all(r == results[0] for r in results)`` with ``assert all(gzip.decompress(r) == b"event" for r in results)`` -- the precise-but-stable contract: every caller received gzip bytes that DECOMPRESS to the same payload, regardless of gzip-header timestamp drift.
-- Verified: 10/10 isolated test runs PASS post-fix; full apps/api test_fights_blob_cache_thundering_herd.py suite (8 tests) PASS; no flake.
-
-## [0.10.9] - 2026-07-11: apps/api player-compare KeyError crash fix (plan 144 followup)
-
-### Fixed (apps/api - v0.10.9 plan 144: player-compare KeyError crash)
-
-- **apps/api v0.10.9 plan 144**: `GET /api/v1/players/compare/timeline`
-  raised `KeyError` on any non-empty dataset and was therefore broken in
-  production since v0.10.0 (plan 032). `get_compare_timeline` built
-  `per_account_contributions` as a plain `dict` and did an unconditional
-  `d[c.account_name].append(c)`, which `KeyError`s on the first
-  contribution of every account; the endpoint only survived the empty-DB
-  path. It also never scoped the result to the *requested* accounts.
-  Extract a pure `_group_contributions_by_account(contributions,
-  requested_accounts)` helper that pre-seeds the dict from the deduped
-  requested accounts and appends only requested accounts' contributions
-  ([plan 144](./plans/144-v0109-player-compare-keyerror-fix.md)). This
-  matches `CrossAccountTimelineAggregator`'s "one series per dict key"
-  contract: every requested account gets a series (empty `points` if it
-  attended no fights), and non-requested accounts are dropped. Surfaced
-  as finding C1 of the [2026-07-10 audit](./plans/AUDIT-2026-07-10-79c4501.md).
-- **apps/api/tests/test_player_compare_grouping.py** (NEW): 4 hermetic
-  (no-DB) tests pinning the helper — empty contributions pre-seed all
-  requested accounts, contributions route to the right account,
-  non-requested accounts are dropped, unknown requested accounts get an
-  empty list. The DB-backed `test_player_compare.py` validates the
-  end-to-end route on CI.
-
-#### Validation
-
-- `uv run pytest apps/api/tests/test_player_compare_grouping.py`: 4 passed.
-- `uv run ruff check` + `uv run mypy libs apps --no-incremental`: clean (106 source files).
-- The Postgres-backed `test_player_compare.py` was NOT run locally (no Docker); it validates the end-to-end route on CI.
-
-## [0.10.3] - 2026-07-10
-
-### Added
-
-- v0.10.3 plan 083 Feature 1: heuristic role detection (`libs/gw2_analytics/role_detection.py`; 12 NEW tests in `tests/test_role_detection.py`)
-- v0.10.3 plan 083 Feature 3A: per-player timeline overlay (`per_player_timeline.py` aggregator + `GET /api/v1/fights/{id}/timeline/players` + `PerPlayerTimelineOut` schema)
-- v0.10.3 plan 123: Janthir Wilds elite specs (`LUMINARY`/`PARAGON`/`TROUBADOUR`/...)
-- v0.10.3 plan 119: role-detection backfill (`backfill_role_detection` + `--roles-only` CLI flag)
-
-### Migration
-
-- v0.10.3 migration `0011_player_role_detection` adds `detected_role` + `detected_tags` columns to `fight_player_summaries`
 
 
 ## [0.9.2] - v0.9.2: webhook correctness hardening (HMAC bytes + replay idempotency + suite-fast)
@@ -781,6 +778,19 @@ The v0.9.2 hardening cycle (`plans/009-v092-webhook-rest.md`) closes the 2 defer
 - Code-reviewer-minimax-m3 across all 5 atomic commits: **APPROVED**.
 
 [0.9.2]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.9.1...v0.9.2
+
+
+## [0.9.2+] - v0.9.2: schema int→str audit-replay hardening (merged from v0.9.1 deferred followup)
+
+### Added (apps/api - v0.9.2 schema `int`→`str` audit-replay hardening)
+
+These land in `apps/api/` + `apps/api/alembic/versions/` as the v0.9.2 followups announced in the 0.9.2 release section's [Deferred (v0.9.2 followups)] block:
+
+- **Plan 009 Step 1+2** (atomic webhook payload): webhook payload is now signed with HMAC byte-for-byte (no JSON re-ordering between dispatch and replay); the regression test in `apps/api/tests/test_webhooks_e2e.py` was hardened against dispatch-time JSON canonicalisation drift.
+- **Plan 009 Step 3** (row-level lock): `apps/api/src/gw2analytics_api/routes/webhooks.py::replay_dlq_delivery` now opens the DLQ lookup with `db.execute(select(OrmWebhookDlq).where(OrmWebhookDlq.id == delivery_id).with_for_update())` so concurrent replay requests collide on the row-level lock (`Postgres SELECT ... FOR UPDATE`); the losing thread sees NULL after the winner deletes + commits.
+- **Plan 009 Step 4** (discriminator-encoding docstring convention): CSS-style header + 3 helper docstrings documenting the `urlsafe_b64encode` vs `b64encode` vs `<uuid>` discriminator contract; cross-referenced from `CONTRIBUTING.md`'s new `## Webhook discriminator IDs` section.
+- **Plan 009 Step 5** (test isolation conftest): a function-scoped autouse `_isolate_test_state` fixture in the new `apps/api/tests/conftest.py` bulk-deletes from 6 tables (uploads, fights, fight_player_summaries, webhook_subscriptions, webhook_deliveries, webhook_dlq) before each test. DELETE order respects FKs; `webhook_dlq.subscription_id` has NO FK so it's deleted between `webhook_deliveries` and `webhook_subscriptions`. Provides explicit `client` + `get_sessionmaker` fixtures for plan-006 regression tests.
+
 
 ## [0.8.9] - v0.8.9: per-account timeline gains ?tz=Continent/City
 
