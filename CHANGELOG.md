@@ -331,6 +331,79 @@ Strict Playwright TypeScript narrowing via per-test typed `expect(actual).toBe(e
 
 [0.10.18]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.17...v0.10.18
 
+## [0.10.19] - 2026-07-12: M8 forward-deferred to v0.10.20 + docs-only cycle close-out
+
+### Note (M8 DEFERRED to v0.10.20)
+
+The v0.10.19 `mimo-half` cycle attempted to resolve the 11 M8 pytest
+failures surfaced at the v0.10.18.1 cycle-end audit
+(`plans/AUDIT-2026-07-13-2ffafc75.md`). After **6 iterations** on
+`apps/api/tests/conftest.py`'s `_disable_dotenv_for_tests` autouse fixture
+(4-arg typed signature → `*sources: object` → `*args, **kwargs` → keyword-only
+→ exact 6-parameter mixed signature matching pydantic-settings' actual call
+style), 3 residual failures persisted out of the original 11. Per the
+`code-reviewer-minimax-m3` strongest recommendation, the M8 K-cluster is
+DEFERRED to v0.10.20 and the v0.10.19 cycle ships as a **DOCS-ONLY
+CLOSE-OUT** to cap late-cycle re-iteration costs.
+
+**Critical clarification:** the 11 M8 K-cluster failures belong to the
+**Test-Substrate Mismatch (Bucket K)** class — meaning **NO
+production-code regressions exist**. The failures are exlusively in test
+substrate (conftest fixtures, autouse monkey-patching, pydantic-settings
+.env-file vs `monkeypatch.delenv` precedence semantics, DNS-executor pool
+size vs saturation-test concurrency). The K sub-bucket distribution is:
+
+- **K1 (5)**: `tests/test_uploads_arq.py` — Arq-Worker connectivity
+  leaks. The `_disable_arq_for_tests` autouse patches `arq.create_pool`
+  to raise `ConnectionError` but the `_mock_arq_pool` test fixture's
+  lifespan race is not hermetic enough; production path is correct.
+- **K2 (4)**: `tests/test_webhooks_e2e.py` (4 SSRF gate tests) —
+  IP-routing/`SSRF` gate semantics vs docker network namespace. With
+  dotenv disabled, gate correctly fires 422; without dotenv-disable,
+  the .env file's `GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS=1` makes the
+  test bypass the gate (test host leaks the dev opt-in).
+- **K3 (2)**: `tests/test_webhooks_dns_under_attack.py` +
+  `tests/test_webhooks_getaddrinfo_timeout.py` — DNS-resolver-pool
+  saturation/latency budget. Production `_DNS_EXECUTOR` has
+  `max_workers=32`; the saturation test's 100-tarpit burst completes
+  within the 2.0s `future.result(timeout)` fence on the production
+  pool but the test path needs `max_workers=1` to trigger the fence.
+  PR-2's `max_workers=1` was applied during the 6 iterations but the
+  conftest signature churn inverted the change in it3-6.
+
+### Adopted path (DEFER)
+
+1. **Discarded** dirty `apps/api/tests/conftest.py` and
+   `apps/api/tests/test_uploads_arq.py` iteration artifacts via
+   `git checkout main -- ...` (back to the v0.10.18.1 baseline).
+2. **Preserved** the plan-landing docs at commit `712522a` (already on
+   main via the `v0.10.19/plan-landing` ff-merge at cycle
+   start): `plans/RELEASE-v0.10.19.md` (M8 fix-up PRIMARY plan) +
+   `docs/v0.10.19-combat-readout-spike.md` (F17 Combat readout sizing)
+   + `plans/AUDIT-2026-07-13-RETROSPECTIVE-V01017-V010181.md` (closure
+   thread retrospective).
+3. **Authored** this cycle's 3 close-out docs (this `## [0.10.19]`
+   CHANGELOG entry + `docs/ROADMAP.md` stamp refresh +
+   `plans/AUDIT-2026-07-12-cd6e9ad.md` cycle-end audit).
+
+### Cycle topology
+
+| Commit | Purpose |
+|--------|---------|
+| `712522a` | plan-landing ff-merge (M8 fix-up + F17 spike + retrospective) |
+| marker | `--allow-empty` v0.10.19 cycle window |
+| docs1   | `CHANGELOG.md` `[0.10.19]` entry splice |
+| docs2   | `docs/ROADMAP.md` stamp refresh + M8-kept language |
+| audit   | `plans/AUDIT-2026-07-12-cd6e9ad.md` cycle-end audit |
+
+### Cross-references
+
+- **Cycle-end audit**: [`plans/AUDIT-2026-07-12-cd6e9ad.md`](./plans/AUDIT-2026-07-12-%3Cmarker-sha%3E.md)
+- **Release plan**: [`plans/RELEASE-v0.10.19.md`](./plans/RELEASE-v0.10.19.md) (M8 fix-up PRIMARY; K1+K2+K3 sub-bucket breakdown)
+- **Prior cycle audit (K1+K2+K3 discovery)**: [`plans/AUDIT-2026-07-13-2ffafc75.md`](./plans/AUDIT-2026-07-13-2ffafc75.md) (v0.10.18.1)
+- **F17 spike (forward-deferred blocker)**: [`docs/v0.10.19-combat-readout-spike.md`](./docs/v0.10.19-combat-readout-spike.md)
+- **Closure thread retrospective**: [`plans/AUDIT-2026-07-13-RETROSPECTIVE-V01017-V010181.md`](./plans/AUDIT-2026-07-13-RETROSPECTIVE-V01017-V010181.md)
+
 ## [0.10.18.1] - 2026-07-13: D2 pre-closure marker (plan 038 D2 vacuity confirmed) + NEW M8 forward-deferred discovery (11 webhook/Arq/DNS test-substrate mismatches)
 
 The v0.10.18.1 cycle (the post-v0.10.18 follow-up mimo-half, per the deferred D2 carry-forward in [`plans/RELEASE-v0.10.18.md`](./RELEASE-v0.10.18.md) and [`plans/v0.10.18-mimo-half-prompt.md`](./v0.10.18-mimo-half-prompt.md)) is a **two-fold closeout cycle** — mirroring the v0.10.18 D1 pre-closure pattern, but with a NEW high-priority backlog item surfaced by the diagnostic-first phase:
