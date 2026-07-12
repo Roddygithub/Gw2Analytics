@@ -491,6 +491,60 @@ The pre-existing ``test_fights_blob_cache_thundering_herd.py::test_concurrent_ca
 - The Postgres-backed `test_player_compare.py` was NOT run locally (no Docker); it validates the end-to-end route on CI.
 
 
+## [0.9.2] - v0.9.2: webhook correctness hardening (HMAC bytes + replay idempotency + suite-fast)
+
+The v0.9.2 hardening cycle (`plans/009-v092-webhook-rest.md`) closes the 2 deferred v0.9.1 test failures + 1 audit-flagged missing-convention + 1 uninvestigated suite timeout via 5 atomic commits (`85716b6` → `99faa35` → `a247430` → `abd7deb` → `d70c8c6`).
+
+### Added (apps/api - migration 0008 payload JSONB → LargeBinary)
+
+- `apps/api/alembic/versions/0008_payload_bytes.py` (NEW): alters both `webhook_deliveries.payload` + `webhook_dlq.payload` from `JSONB` to `LargeBinary` to preserve canonical bytes through retry/replay paths. **WARNING**: NOT data-preserving — existing JSONB rows lose their original dict structure on upgrade (acceptable: v0.9.2 marks the schema as fresh-start). Operators MUST drain DLQ + deliveries before applying or accept that pre-v0.9.2 rows become an opaque byte-bag. Documented in the migration's `# WARNING` header.
+- `apps/api/src/gw2analytics_api/models.py`: `OrmWebhookDelivery.payload: Mapped[bytes | None]` + `OrmWebhookDlq.payload: Mapped[bytes]` (was JSON `Mapped[dict]`).
+- `apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`: writes `payload = json.dumps(body_dict, separators=(",", ":")).encode("utf-8")` (canonical bytes that the HMAC signs).
+- `apps/api/src/gw2analytics_api/workers/webhook_scheduler.py`: reads stored `payload: bytes` verbatim on retry (no dict round-trip; no JSONB re-ordering hazard).
+- `apps/api/src/gw2analytics_api/routes/webhooks.py::replay_dlq_delivery`: copies `dlq.payload` (bytes) into `new_delivery.payload` (bytes) directly. Opens the DLQ lookup with `db.execute(select(OrmWebhookDlq).where(OrmWebhookDlq.id == delivery_id).with_for_update())` (Postgres `SELECT ... FOR UPDATE` row-level lock — exactly one of the concurrent threads reads + deletes the DLQ row; the second thread's transaction blocks until the first commits then sees NULL + raises 404).
+- `apps/api/tests/conftest.py` (NEW): function-scoped autouse `_isolate_test_state` fixture that bulk-deletes from 6 tables (uploads, fights, fight_player_summaries, webhook_subscriptions, webhook_deliveries, webhook_dlq) before each test. DELETE order respects FKs (children before parents; `webhook_dlq.subscription_id` has NO FK so it's deleted between `webhook_deliveries` and `webhook_subscriptions`). Provides 2 explicit pytest fixtures (`client`, `get_sessionmaker`) so the plan-006 regression test can use them in its signature.
+- `apps/api/src/gw2analytics_api/routes/webhooks.py`: 3 docstring additions (no code logic changes) on `_generate_subscription_id` (path-parameter → `urlsafe_b64encode`), `_generate_secret` (byte-only → plain `b64encode`), and `_generate_delivery_id` (UUID is URL-safe by definition; no encoding needed). Each cross-references the CONTRIBUTING.md convention.
+- `CONTRIBUTING.md`: new `## Webhook discriminator IDs` section with 3 bullet classifications + a classification guide for future discriminators + cross-references to the 3 helper docstrings.
+
+### Fixed (apps/api tests - 2 pre-existing test failures surfaced by Step 5)
+
+- `apps/api/tests/test_uploads_e2e.py::test_player_timeline_tz_422_when_invalid_timezone`: route returns `detail` as a plain string (e.g. `"unknown IANA timezone: 'Mars/Olympus'"`), not a FastAPI-validation list-detail. New assertion `assert "Mars/Olympus" in str(body.get("detail", ""))` handles both shapes.
+- `apps/api/tests/test_uploads_e2e.py::test_background_task_session_alive_at_invocation` (plan 006 regression test, 3 bugs): `probe = get_sessionmaker()` → `probe = get_sessionmaker()()` (double-call; the imported `get_sessionmaker` is a function that returns a sessionmaker; double-call yields a Session); `assert resp.status_code == 202` → `== 201` (correct REST semantics for the resource-creation + BG-task pattern; `UploadCreatedResponse` returns the created record synchronously + uses FastAPI `BackgroundTasks` for the async parse).
+
+### Note
+
+- The deferred `webhook secret-at-rest` item (from the v0.9.1 `### Deferred` note above) remains deferred — v0.9.2 ships HMAC byte-for-byte integrity but NOT pgcrypto envelope encryption. Tracking continues from the v0.9.1 close-out.
+- Plan 009 marked **COMPLETE** — see `plans/009-v092-webhook-rest.md` for the closing-summary table.
+
+### Tests
+
+- Apps/api pytest: **92 pass / 0 fail / 3 skip in ~10s** (was 90 / 1 fail / 2 skip in >600s pre-Step-5 — the post-Step-5 cleanup unblocked the suite).
+- Webhook e2e + scheduler: **22 pass / 0 fail / 1 skip** (unchanged from v0.9.1 close-out; the v0.9.2 followups are defect fixes, not new test coverage).
+- Cumulative apps/api pytest count: unchanged (the v0.9.2 delta is 0 — pre-existing fixes are regression guards, not new tests; the v0.9.1 +0 → +22 delta was the new test coverage).
+
+### Validation
+
+- `uv run ruff check apps/api`: clean (RUFF=0).
+- `uv run mypy --no-incremental libs apps`: clean (MYPY=0).
+- `uv run pytest apps/api/tests/`: pass (92 / 0 fail / 3 skip in ~10s wallclock).
+- `uv run pytest apps/api/tests/test_webhooks_e2e.py apps/api/tests/test_webhooks_e2e_scheduler.py`: pass (22 / 0 fail / 1 skip — the 1 skip is the pre-existing Windows-only concurrent-replay test; unrelated to v0.9.2).
+- Code-reviewer-minimax-m3 across all 5 atomic commits: **APPROVED**.
+
+[0.9.2]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.9.1...v0.9.2
+
+
+## [0.9.2+] - v0.9.2: schema int→str audit-replay hardening (merged from v0.9.1 deferred followup)
+
+### Added (apps/api - v0.9.2 schema `int`→`str` audit-replay hardening)
+
+These land in `apps/api/` + `apps/api/alembic/versions/` as the v0.9.2 followups announced in the 0.9.2 release section's [Deferred (v0.9.2 followups)] block:
+
+- **Plan 009 Step 1+2** (atomic webhook payload): webhook payload is now signed with HMAC byte-for-byte (no JSON re-ordering between dispatch and replay); the regression test in `apps/api/tests/test_webhooks_e2e.py` was hardened against dispatch-time JSON canonicalisation drift.
+- **Plan 009 Step 3** (row-level lock): `apps/api/src/gw2analytics_api/routes/webhooks.py::replay_dlq_delivery` now opens the DLQ lookup with `db.execute(select(OrmWebhookDlq).where(OrmWebhookDlq.id == delivery_id).with_for_update())` so concurrent replay requests collide on the row-level lock (`Postgres SELECT ... FOR UPDATE`); the losing thread sees NULL after the winner deletes + commits.
+- **Plan 009 Step 4** (discriminator-encoding docstring convention): CSS-style header + 3 helper docstrings documenting the `urlsafe_b64encode` vs `b64encode` vs `<uuid>` discriminator contract; cross-referenced from `CONTRIBUTING.md`'s new `## Webhook discriminator IDs` section.
+- **Plan 009 Step 5** (test isolation conftest): a function-scoped autouse `_isolate_test_state` fixture in the new `apps/api/tests/conftest.py` bulk-deletes from 6 tables (uploads, fights, fight_player_summaries, webhook_subscriptions, webhook_deliveries, webhook_dlq) before each test. DELETE order respects FKs; `webhook_dlq.subscription_id` has NO FK so it's deleted between `webhook_deliveries` and `webhook_subscriptions`. Provides explicit `client` + `get_sessionmaker` fixtures for plan-006 regression tests.
+
+
 ## [0.9.1] - v0.9.1: webhook hardening slice (HMAC bytes + replay + idempotency + suite-fast + SSRF block)
 
 ### Added (apps/api + web - v0.9.1 webhook hardening slice)
@@ -736,60 +790,6 @@ The 5 v0.9.1 audit plans (drift base `ef5e4f3`; see `plans/README.md` + `plans/0
 ### Added (web - v0.9.0: screenshots.mjs sync against seeded DB)
 
 - `web/scripts/screenshots.mjs`: pulls live `account_name` + `fight_id` from `/api/v1/players` + `/api/v1/fights` at script start (replaces the static mock-server fixture URLs that 404'd against the seed_demo-created `:demo.<N>` namespaces). Hard-fails loud when the gateway is empty/unreachable. `GATEWAY_BASE_URL` env override for remote gateways. The 8 captures in `docs/screenshots/` now materialise populated rows against the seeded DB; `/fights/<real-fight-id>` shows the populated 3196px AG Grid vs the prior 900px empty card.
-
-
-## [0.9.2] - v0.9.2: webhook correctness hardening (HMAC bytes + replay idempotency + suite-fast)
-
-The v0.9.2 hardening cycle (`plans/009-v092-webhook-rest.md`) closes the 2 deferred v0.9.1 test failures + 1 audit-flagged missing-convention + 1 uninvestigated suite timeout via 5 atomic commits (`85716b6` → `99faa35` → `a247430` → `abd7deb` → `d70c8c6`).
-
-### Added (apps/api - migration 0008 payload JSONB → LargeBinary)
-
-- `apps/api/alembic/versions/0008_payload_bytes.py` (NEW): alters both `webhook_deliveries.payload` + `webhook_dlq.payload` from `JSONB` to `LargeBinary` to preserve canonical bytes through retry/replay paths. **WARNING**: NOT data-preserving — existing JSONB rows lose their original dict structure on upgrade (acceptable: v0.9.2 marks the schema as fresh-start). Operators MUST drain DLQ + deliveries before applying or accept that pre-v0.9.2 rows become an opaque byte-bag. Documented in the migration's `# WARNING` header.
-- `apps/api/src/gw2analytics_api/models.py`: `OrmWebhookDelivery.payload: Mapped[bytes | None]` + `OrmWebhookDlq.payload: Mapped[bytes]` (was JSON `Mapped[dict]`).
-- `apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`: writes `payload = json.dumps(body_dict, separators=(",", ":")).encode("utf-8")` (canonical bytes that the HMAC signs).
-- `apps/api/src/gw2analytics_api/workers/webhook_scheduler.py`: reads stored `payload: bytes` verbatim on retry (no dict round-trip; no JSONB re-ordering hazard).
-- `apps/api/src/gw2analytics_api/routes/webhooks.py::replay_dlq_delivery`: copies `dlq.payload` (bytes) into `new_delivery.payload` (bytes) directly. Opens the DLQ lookup with `db.execute(select(OrmWebhookDlq).where(OrmWebhookDlq.id == delivery_id).with_for_update())` (Postgres `SELECT ... FOR UPDATE` row-level lock — exactly one of the concurrent threads reads + deletes the DLQ row; the second thread's transaction blocks until the first commits then sees NULL + raises 404).
-- `apps/api/tests/conftest.py` (NEW): function-scoped autouse `_isolate_test_state` fixture that bulk-deletes from 6 tables (uploads, fights, fight_player_summaries, webhook_subscriptions, webhook_deliveries, webhook_dlq) before each test. DELETE order respects FKs (children before parents; `webhook_dlq.subscription_id` has NO FK so it's deleted between `webhook_deliveries` and `webhook_subscriptions`). Provides 2 explicit pytest fixtures (`client`, `get_sessionmaker`) so the plan-006 regression test can use them in its signature.
-- `apps/api/src/gw2analytics_api/routes/webhooks.py`: 3 docstring additions (no code logic changes) on `_generate_subscription_id` (path-parameter → `urlsafe_b64encode`), `_generate_secret` (byte-only → plain `b64encode`), and `_generate_delivery_id` (UUID is URL-safe by definition; no encoding needed). Each cross-references the CONTRIBUTING.md convention.
-- `CONTRIBUTING.md`: new `## Webhook discriminator IDs` section with 3 bullet classifications + a classification guide for future discriminators + cross-references to the 3 helper docstrings.
-
-### Fixed (apps/api tests - 2 pre-existing test failures surfaced by Step 5)
-
-- `apps/api/tests/test_uploads_e2e.py::test_player_timeline_tz_422_when_invalid_timezone`: route returns `detail` as a plain string (e.g. `"unknown IANA timezone: 'Mars/Olympus'"`), not a FastAPI-validation list-detail. New assertion `assert "Mars/Olympus" in str(body.get("detail", ""))` handles both shapes.
-- `apps/api/tests/test_uploads_e2e.py::test_background_task_session_alive_at_invocation` (plan 006 regression test, 3 bugs): `probe = get_sessionmaker()` → `probe = get_sessionmaker()()` (double-call; the imported `get_sessionmaker` is a function that returns a sessionmaker; double-call yields a Session); `assert resp.status_code == 202` → `== 201` (correct REST semantics for the resource-creation + BG-task pattern; `UploadCreatedResponse` returns the created record synchronously + uses FastAPI `BackgroundTasks` for the async parse).
-
-### Note
-
-- The deferred `webhook secret-at-rest` item (from the v0.9.1 `### Deferred` note above) remains deferred — v0.9.2 ships HMAC byte-for-byte integrity but NOT pgcrypto envelope encryption. Tracking continues from the v0.9.1 close-out.
-- Plan 009 marked **COMPLETE** — see `plans/009-v092-webhook-rest.md` for the closing-summary table.
-
-### Tests
-
-- Apps/api pytest: **92 pass / 0 fail / 3 skip in ~10s** (was 90 / 1 fail / 2 skip in >600s pre-Step-5 — the post-Step-5 cleanup unblocked the suite).
-- Webhook e2e + scheduler: **22 pass / 0 fail / 1 skip** (unchanged from v0.9.1 close-out; the v0.9.2 followups are defect fixes, not new test coverage).
-- Cumulative apps/api pytest count: unchanged (the v0.9.2 delta is 0 — pre-existing fixes are regression guards, not new tests; the v0.9.1 +0 → +22 delta was the new test coverage).
-
-### Validation
-
-- `uv run ruff check apps/api`: clean (RUFF=0).
-- `uv run mypy --no-incremental libs apps`: clean (MYPY=0).
-- `uv run pytest apps/api/tests/`: pass (92 / 0 fail / 3 skip in ~10s wallclock).
-- `uv run pytest apps/api/tests/test_webhooks_e2e.py apps/api/tests/test_webhooks_e2e_scheduler.py`: pass (22 / 0 fail / 1 skip — the 1 skip is the pre-existing Windows-only concurrent-replay test; unrelated to v0.9.2).
-- Code-reviewer-minimax-m3 across all 5 atomic commits: **APPROVED**.
-
-[0.9.2]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.9.1...v0.9.2
-
-
-## [0.9.2+] - v0.9.2: schema int→str audit-replay hardening (merged from v0.9.1 deferred followup)
-
-### Added (apps/api - v0.9.2 schema `int`→`str` audit-replay hardening)
-
-These land in `apps/api/` + `apps/api/alembic/versions/` as the v0.9.2 followups announced in the 0.9.2 release section's [Deferred (v0.9.2 followups)] block:
-
-- **Plan 009 Step 1+2** (atomic webhook payload): webhook payload is now signed with HMAC byte-for-byte (no JSON re-ordering between dispatch and replay); the regression test in `apps/api/tests/test_webhooks_e2e.py` was hardened against dispatch-time JSON canonicalisation drift.
-- **Plan 009 Step 3** (row-level lock): `apps/api/src/gw2analytics_api/routes/webhooks.py::replay_dlq_delivery` now opens the DLQ lookup with `db.execute(select(OrmWebhookDlq).where(OrmWebhookDlq.id == delivery_id).with_for_update())` so concurrent replay requests collide on the row-level lock (`Postgres SELECT ... FOR UPDATE`); the losing thread sees NULL after the winner deletes + commits.
-- **Plan 009 Step 4** (discriminator-encoding docstring convention): CSS-style header + 3 helper docstrings documenting the `urlsafe_b64encode` vs `b64encode` vs `<uuid>` discriminator contract; cross-referenced from `CONTRIBUTING.md`'s new `## Webhook discriminator IDs` section.
-- **Plan 009 Step 5** (test isolation conftest): a function-scoped autouse `_isolate_test_state` fixture in the new `apps/api/tests/conftest.py` bulk-deletes from 6 tables (uploads, fights, fight_player_summaries, webhook_subscriptions, webhook_deliveries, webhook_dlq) before each test. DELETE order respects FKs; `webhook_dlq.subscription_id` has NO FK so it's deleted between `webhook_deliveries` and `webhook_subscriptions`. Provides explicit `client` + `get_sessionmaker` fixtures for plan-006 regression tests.
 
 
 ## [0.8.9] - v0.8.9: per-account timeline gains ?tz=Continent/City
