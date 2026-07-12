@@ -13,7 +13,9 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response as FastAPIResponse
 from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
+from prometheus_client import generate_latest
 from sqlalchemy.orm import Session
 
 # v0.10.8 plan 140 plan 140 Fix-E: switched from module-local binding to
@@ -189,6 +191,20 @@ app.add_middleware(
 @app.get("/healthz", include_in_schema=False)
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/v1/metrics", include_in_schema=False)
+def metrics() -> FastAPIResponse:
+    """Prometheus metrics endpoint (plan 017).
+
+    Returns all registered metrics in Prometheus exposition format.
+    The Content-Type is set to text/plain; version 0.0.4 of the
+    Prometheus exposition format is used.
+    """
+    return FastAPIResponse(
+        content=generate_latest(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
 
 
 app.include_router(uploads.router)

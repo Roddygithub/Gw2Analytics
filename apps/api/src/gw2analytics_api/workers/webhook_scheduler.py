@@ -31,6 +31,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -39,6 +40,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gw2analytics_api.crypto import FernetInvalidToken, decrypt_webhook_secret
+from gw2analytics_api.metrics import (
+    ARQ_JOB_DURATION,
+    ARQ_JOBS_COMPLETED,
+    ARQ_JOBS_FAILED,
+)
 from gw2analytics_api.models import (
     OrmWebhookDelivery,
     OrmWebhookDlq,
@@ -46,6 +52,9 @@ from gw2analytics_api.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Queue label for metrics (scheduler uses the "scheduler" queue)
+_QUEUE_LABEL = "scheduler"
 
 # Per design doc §5: 5s poll interval for the scheduler.
 _POLL_INTERVAL_S = 5.0
@@ -325,8 +334,15 @@ async def lifespan_scheduler(
     try:
         while True:
             try:
+                start_time = time.monotonic()
                 await asyncio.to_thread(process_scheduled_retries, session_factory)
+                elapsed = time.monotonic() - start_time
+                ARQ_JOB_DURATION.labels(queue=_QUEUE_LABEL, status="success").observe(elapsed)
+                ARQ_JOBS_COMPLETED.labels(queue=_QUEUE_LABEL).inc()
             except Exception:
+                elapsed = time.monotonic() - start_time
+                ARQ_JOBS_FAILED.labels(queue=_QUEUE_LABEL, error_type="scheduler_tick").inc()
+                ARQ_JOB_DURATION.labels(queue=_QUEUE_LABEL, status="failed").observe(elapsed)
                 logger.exception(
                     "scheduled-retries tick failed; continuing to "
                     "next interval (resilience: scheduler does "

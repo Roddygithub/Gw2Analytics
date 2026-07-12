@@ -30,6 +30,7 @@ dependencies = [
     # via ``arq.create_pool``.
     "arq>=0.25",
     "redis>=5.0,<8",
+    "prometheus_client>=0.20",  # v0.10.12 plan 017: Arq worker metrics + /metrics endpoint
     "gw2_core",
     "gw2_evtc_parser",
     "gw2_analytics",

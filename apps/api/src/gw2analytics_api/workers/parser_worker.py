@@ -66,14 +66,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 from uuid import UUID
 
 from gw2analytics_api.database import get_sessionmaker
+from gw2analytics_api.metrics import ARQ_JOB_DURATION, ARQ_JOBS_COMPLETED, ARQ_JOBS_FAILED
 from gw2analytics_api.services import process_parse
 from gw2analytics_api.workers.webhook_dispatch import dispatch_for_upload
 
 logger = logging.getLogger(__name__)
+
+# Queue label for metrics (parser worker uses the "parser" queue)
+_QUEUE_LABEL = "parser"
 
 
 async def parse_job(
@@ -110,9 +115,13 @@ async def parse_job(
     """
     sf = get_sessionmaker()
     parsed_upload_id = UUID(upload_id)
+    start_time = time.monotonic()
     try:
         await asyncio.to_thread(process_parse, sf, parsed_upload_id, raw_bytes)
     except Exception:
+        elapsed = time.monotonic() - start_time
+        ARQ_JOBS_FAILED.labels(queue=_QUEUE_LABEL, error_type="parse").inc()
+        ARQ_JOB_DURATION.labels(queue=_QUEUE_LABEL, status="failed").observe(elapsed)
         logger.exception(
             "parse_job parse failed for upload %s; not dispatching webhooks",
             upload_id,
@@ -130,6 +139,9 @@ async def parse_job(
             "(parse already committed; webhook deliveries skipped)",
             upload_id,
         )
+    elapsed = time.monotonic() - start_time
+    ARQ_JOBS_COMPLETED.labels(queue=_QUEUE_LABEL).inc()
+    ARQ_JOB_DURATION.labels(queue=_QUEUE_LABEL, status="success").observe(elapsed)
 
 
 __all__ = ["parse_job"]
