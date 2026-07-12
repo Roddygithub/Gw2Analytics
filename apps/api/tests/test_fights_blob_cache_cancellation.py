@@ -98,9 +98,7 @@ def test_cancelled_error_in_fetcher_broadcasts_to_waiters(
     )
 
     barrier = threading.Barrier(4)
-    capture: list[tuple[bytes | None, BaseException | None]] = [
-        (None, None)
-    ] * 4
+    capture: list[tuple[bytes | None, BaseException | None]] = [(None, None)] * 4
 
     def call(idx: int) -> None:
         barrier.wait(timeout=2.0)
@@ -172,9 +170,7 @@ def test_keyboard_interrupt_in_fetcher_broadcasts_to_waiters(
     )
 
     barrier = threading.Barrier(4)
-    capture: list[tuple[bytes | None, BaseException | None]] = [
-        (None, None)
-    ] * 4
+    capture: list[tuple[bytes | None, BaseException | None]] = [(None, None)] * 4
 
     def call(idx: int) -> None:
         barrier.wait(timeout=2.0)
@@ -204,8 +200,7 @@ def test_keyboard_interrupt_in_fetcher_broadcasts_to_waiters(
         )
 
     assert "s3://bucket/events/CTRLC.jsonl.gz" not in _IN_FLIGHT_FUTURES, (
-        f"In-flight Future leaked after KeyboardInterrupt: "
-        f"keys={list(_IN_FLIGHT_FUTURES.keys())}"
+        f"In-flight Future leaked after KeyboardInterrupt: keys={list(_IN_FLIGHT_FUTURES.keys())}"
     )
 
 
@@ -246,8 +241,7 @@ def test_normal_broadcast_cleans_up_after_success(
 
     # Singleflight collapsed 4 callers to 1 fetch on the SUCCESS path.
     assert fired["n"] == 1, (
-        f"Singleflight failed to dedupe on success path: fired "
-        f"{fired['n']} times (expected 1)"
+        f"Singleflight failed to dedupe on success path: fired {fired['n']} times (expected 1)"
     )
     # All 4 callers received the same bytes (the fetcher's output,
     # broadcast via ``future.set_result`` + 3x ``future.result()``).
@@ -255,12 +249,11 @@ def test_normal_broadcast_cleans_up_after_success(
     # stamps a fresh OS-mtime into the gzip header, so raw bytes
     # differ even when the underlying payload is identical.
     assert all(gzip.decompress(r) == b"event" for r in results), (
-        f"Success-path broadcast missed: not all callers received "
-        f"bytes that decompress to the shared ``b'event'`` payload"
+        "Success-path broadcast missed: not all callers received "
+        "bytes that decompress to the shared ``b'event'`` payload"
     )
 
     # The in-flight Future was cleared by the ``finally`` block.
     assert "s3://bucket/events/SUCCESS.jsonl.gz" not in _IN_FLIGHT_FUTURES, (
-        f"In-flight Future leaked after SUCCESS: "
-        f"keys={list(_IN_FLIGHT_FUTURES.keys())}"
+        f"In-flight Future leaked after SUCCESS: keys={list(_IN_FLIGHT_FUTURES.keys())}"
     )

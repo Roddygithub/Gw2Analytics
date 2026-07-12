@@ -130,7 +130,7 @@ def test_build_event_iterator_skips_empty_and_whitespace_only_lines() -> None:
         b'{"event_type":"DAMAGE","time_ms":1,"source_agent_id":1,'
         b'"target_agent_id":2,"skill_id":3,"damage":100}\n'
         b"\n"  # empty
-        b'   \n'  # whitespace only
+        b"   \n"  # whitespace only
         b'{"event_type":"DAMAGE","time_ms":2,"source_agent_id":1,'
         b'"target_agent_id":2,"skill_id":3,"damage":50}   \n'  # trailing whitespace
     )

@@ -550,7 +550,7 @@ class PythonEvtcParser:
                 # -- keep them in sync. (See ``test_parser_byte_alignment``
                 # for the module-level self-test pinning the literal
                 # contents of ``_CBTBUFREMOVE_KINDS``.)
-                assert 0 <= is_buffremove - 1 < len(_CBTBUFREMOVE_KINDS), (
+                assert 0 <= is_buffremove - 1 < len(_CBTBUFREMOVE_KINDS), (  # noqa: S101
                     f"Phase 9 Step 2-EMIT drift: predicate matched "
                     f"is_buffremove={is_buffremove} but "
                     f"_CBTBUFREMOVE_KINDS has {len(_CBTBUFREMOVE_KINDS)} "
