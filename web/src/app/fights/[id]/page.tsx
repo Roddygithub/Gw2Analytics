@@ -193,7 +193,22 @@ export default async function FightEventsPage({
   let skills: import("@/lib/api").FightSkills | null = null;
   let timeline: FightTimeline | null = null;
   let playerTimeline: FightPlayerTimeline | null = null;
+  // ``fetchError`` is the BLOCKING fetch failure (events endpoint:
+  // the per-target roll-ups + per-bucket event_windows all derive
+  // from the same blob upstream, so a missing events call means
+  // nothing useful renders). The per-section error map surfaces
+  // partial-failure diagnostics at the section level (squads /
+  // skills / timeline / playerTimeline can fail independently
+  // without blocking the page). v0.10.15 plan 035: per-section
+  // diagnostic chimps added next to each roll-up grid; the
+  // events-only failure mode retains the page-level banner.
   let fetchError: string | null = null;
+  const sectionErrors: {
+    squads?: string;
+    skills?: string;
+    timeline?: string;
+    playerTimeline?: string;
+  } = {};
   // ``fetchCached`` wraps each gateway call in an LRU (8 entries)
   // + TTL (60 s) cache with in-flight dedup so repeated
   // navigations to the same fight are served from cache.
@@ -213,15 +228,23 @@ export default async function FightEventsPage({
   }
   if (results[1].status === "fulfilled") {
     squads = results[1].value;
+  } else {
+    sectionErrors.squads = formatApiError(results[1].reason);
   }
   if (results[2].status === "fulfilled") {
     skills = results[2].value;
+  } else {
+    sectionErrors.skills = formatApiError(results[2].reason);
   }
   if (results[3].status === "fulfilled") {
     timeline = results[3].value;
+  } else {
+    sectionErrors.timeline = formatApiError(results[3].reason);
   }
   if (results[4].status === "fulfilled") {
     playerTimeline = results[4].value;
+  } else {
+    sectionErrors.playerTimeline = formatApiError(results[4].reason);
   }
 
   if (fetchError || !summary) {
@@ -379,6 +402,14 @@ export default async function FightEventsPage({
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>
           Per-subgroup (squad)
         </h2>
+        {sectionErrors.squads && (
+          <p
+            data-testid="squads-error"
+            style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
+          >
+            Failed to load squads: {sectionErrors.squads}
+          </p>
+        )}
         <SquadRollupsGrid
           rows={squads?.squads ?? []}
           columns={SQUAD_COLUMNS}
@@ -388,6 +419,14 @@ export default async function FightEventsPage({
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Per-skill</h2>
+        {sectionErrors.skills && (
+          <p
+            data-testid="skills-error"
+            style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
+          >
+            Failed to load skills: {sectionErrors.skills}
+          </p>
+        )}
         <SkillUsageTable rows={skills?.skills ?? []} filename={`${id}-skills.csv`} />
       </section>
 
@@ -406,6 +445,22 @@ export default async function FightEventsPage({
           series for trend reading). Showing both side-by-side
           lets the analyst correlate the absolute bucket
           magnitudes with the per-series trend lines. */}
+      {sectionErrors.timeline && (
+        <p
+          data-testid="timeline-error"
+          style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
+        >
+          Failed to load timeline: {sectionErrors.timeline}
+        </p>
+      )}
+      {sectionErrors.playerTimeline && (
+        <p
+          data-testid="player-timeline-error"
+          style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
+        >
+          Failed to load per-player timeline: {sectionErrors.playerTimeline}
+        </p>
+      )}
       <PerFightTimelineSection timeline={timeline} playerTimeline={playerTimeline} />
     </main>
   );
