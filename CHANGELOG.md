@@ -331,6 +331,12 @@ Strict Playwright TypeScript narrowing via per-test typed `expect(actual).toBe(e
 
 [0.10.18]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.17...v0.10.18
 
+## [0.10.20] - 2026-07-13: M8 PARTIAL-FIX (PR-1 K-1 fixed + PR-2 K-3 isolated + simplified PR-3 K-2 attempted; 12 residuals ▶ v0.10.21)
+
+The v0.10.20 mimo-half cycle shipped as M8 PARTIAL-FIX. The 1-iteration budget landed 3 of 4 conceptual K-cluster PRs. PR-1 (apps/api/tests/test_uploads_arq.py) closes 5 K-1 ConnectionError lifespan-race failures via `mock_arq_pool(client: TestClient)` reshape; the 5 closed failures are replaced by 6 new `IntegrityError` failures on `fk_webhook_deliveries_subscription_id` UNMASKED by the now-functional mock (pre-existing webhook_dispatch test-isolation latent bug). PR-2 (apps/api/tests/conftest.py) introduces a new `_isolate_dns_executor` autouse swapping `webhooks._DNS_EXECUTOR` to fresh per-test 32-worker pool + `shutdown(wait=False)` on teardown - defensible correctness for K-3 saturation test isolation. Simplified PR-3 (apps/api/tests/conftest.py) adds `_get_settings_no_dotenv` with `os.environ.pop("GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS", None)` + patches `get_settings` with a `functools.cache`-decorated factory returning `Settings(_env_file=None)` - preserves D2 baseline. D2 baseline (tests/test_uploads_e2e.py 36 of 36 PASS) preserved. 12 K-cluster residuals (K-1 = 6 UNMASKED FK + K-2 = 4 SSRF-gate + K-3 = 2 DNS tarpit) forward-blocked to v0.10.21 M-8-bis. Anchor commits off main on `v0.10.20/mimo-half` branch tip: M9 commit + PR-1 + PR-2+PR-3 + 3 close-out docs (CHANGELOG + ROADMAP + AUDIT). Cross-references: plans/RELEASE-v0.10.20.md + plans/AUDIT-2026-07-13-v0.10.20.md + plans/M9-pre-commit-hook-race-fix.md. ADR 002 WIP branch `v0.10.21/f17-statechange-extension` opened with marker file (NOT ff-merged yet).
+
+[0.10.20]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.19...v0.10.20
+
 ## [0.10.19] - 2026-07-12: M8 forward-deferred to v0.10.20 + docs-only cycle close-out
 
 ### Note (M8 DEFERRED to v0.10.20)
