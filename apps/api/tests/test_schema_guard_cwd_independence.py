@@ -25,7 +25,6 @@ test; pytest reverts after teardown.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -97,12 +96,12 @@ def test_alembic_config_uses_absolute_script_location(
         "the override is the v0.10.10 plan 030 fix for the CWD-dependent Alembic resolution"
     )
     script_location = captured["script_location"]
-    assert os.path.isabs(script_location), (
+    assert Path(script_location).is_absolute(), (
         f"script_location must be an absolute path, got {script_location!r}"
     )
     # The override path must end with ``alembic`` (the migrations
     # directory) and live as a sibling of the .ini's parent.
-    assert script_location.endswith(os.path.join("apps", "api", "alembic")), (
+    assert script_location.endswith(str(Path("apps") / "api" / "alembic")), (
         f"script_location must end with apps/api/alembic, got {script_location!r}"
     )
 
@@ -168,16 +167,23 @@ def test_check_schema_drift_from_apps_api_cwd(
 def test_check_schema_drift_from_arbitrary_cwd(
     _isolated_schema_guard_env: None,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    """Boot the guard from ``/tmp`` (an arbitrary CWD far from the repo).
+    """Boot the guard from an arbitrary CWD far from the repo.
 
     Pins the operator-experience fix: the guard works regardless
     of where the operator launched uvicorn from. Pre-fix: the
-    relative ``alembic/`` resolved against ``/tmp`` and raised
-    ``CommandError``. Post-fix: the absolute override closes the
-    gap.
+    relative ``alembic/`` resolved against an arbitrary CWD and
+    raised ``CommandError``. Post-fix: the absolute override
+    closes the gap.
+
+    The :func:`pytest.fixture` ``tmp_path`` provides a hermetic
+    per-test directory (replaces the pre-fix hardcoded ``/tmp``,
+    which tripped the S108 insecure-tempfile lint). The directory
+    is created and torn down by pytest for the duration of the
+    test.
     """
-    monkeypatch.chdir("/tmp")
+    monkeypatch.chdir(tmp_path)
     with (
         patch(
             "gw2analytics_api.schema_guard.ScriptDirectory.from_config",
@@ -206,5 +212,5 @@ def test_alembic_cfg_path_helper_is_unchanged() -> None:
     would re-introduce the bug.)
     """
     path = _alembic_cfg_path()
-    assert os.path.isabs(path)
-    assert path.endswith(os.path.join("apps", "api", "alembic.ini"))
+    assert Path(path).is_absolute()
+    assert path.endswith(str(Path("apps") / "api" / "alembic.ini"))
