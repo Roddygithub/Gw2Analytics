@@ -123,6 +123,17 @@ class Settings(BaseSettings):
         default=[],
         validation_alias="SECRETS_KEK_FALLBACK",
     )
+    # v0.10.12 plan 014: stuck-upload sweeper config.
+    # Interval between sweep iterations (seconds) and the
+    # staleness threshold for pending uploads (seconds).
+    stuck_sweeper_interval_s: int = Field(
+        default=300,
+        validation_alias="STUCK_SWEEPER_INTERVAL_S",
+    )
+    stuck_sweeper_threshold_s: int = Field(
+        default=300,
+        validation_alias="STUCK_SWEEPER_THRESHOLD_S",
+    )
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod

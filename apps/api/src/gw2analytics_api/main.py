@@ -37,6 +37,7 @@ from gw2analytics_api.routes import (
     uploads,
     webhooks,
 )
+from gw2analytics_api.workers.stuck_upload_sweeper import lifespan_stuck_upload_sweeper
 from gw2analytics_api.workers.webhook_scheduler import lifespan_scheduler
 
 logger = logging.getLogger(__name__)
@@ -123,9 +124,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     # Step 3: webhook retry+DLQ scheduler (v0.9.1, unchanged).
     scheduler_task = asyncio.create_task(lifespan_scheduler(_open_session))
+    # v0.10.12 plan 014: stuck-upload sweeper (marks stale pending
+    # uploads as failed when the arq worker dies mid-parse).
+    sweeper_task = asyncio.create_task(
+        lifespan_stuck_upload_sweeper(_open_session),
+    )
     try:
         yield
     finally:
+        sweeper_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweeper_task
         scheduler_task.cancel()
         with suppress(asyncio.CancelledError):
             await scheduler_task
