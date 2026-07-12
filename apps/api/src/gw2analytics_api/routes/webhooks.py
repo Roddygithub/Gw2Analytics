@@ -158,9 +158,8 @@ def _validate_webhook_url(url: str) -> None:
     # (handles IPv4 + IPv6 simultaneously). Fail-closed on DNS
     # errors to block DNS-rebind-style deferred attacks where the A
     # record resolves only later.
-    if (
-        not get_settings().gw2analytics_allow_private_webhook_urls
-        and _resolved_address_is_blocked(parsed.hostname)
+    if not get_settings().gw2analytics_allow_private_webhook_urls and _resolved_address_is_blocked(
+        parsed.hostname
     ):
         raise HTTPException(
             status_code=422,
@@ -318,12 +317,17 @@ def list_webhook_dlq(
     result to one subscription. ``limit``/``offset`` provide
     pagination for operational UIs.
     """
+    # v0.10.15 plan 034: normalize ``?subscription_id=`` (empty
+    # value) to ``None`` so the typed contract holds. FastAPI
+    # parses the empty query string as ``""`` (NOT as a missing
+    # param); centralising the collapse here makes the type
+    # contract enforceable in tests (assert subscription_id is
+    # None on ``?subscription_id=``).
+    subscription_id = subscription_id or None
+
     stmt = select(OrmWebhookDlq).order_by(OrmWebhookDlq.moved_to_dlq_at.desc())
-    if subscription_id:
+    if subscription_id is not None:
         stmt = stmt.where(OrmWebhookDlq.subscription_id == subscription_id)
-    # ``subscription_id`` is typed ``str | None``; an empty query
-    # string (``?subscription_id=``) arrives as "" and should be
-    # treated the same as "no filter".
 
     rows = db.execute(stmt.limit(limit).offset(offset)).scalars().all()
     return [
