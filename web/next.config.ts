@@ -43,6 +43,7 @@ const SECURITY_HEADERS = [
 ];
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   // dev-only: allow HMR on loopback variants (127.0.0.1, localhost).
   // Next.js 16 matches Origin exactly, hostname only, no port.
   // For LAN access (mobile testing), add your machine's IP from
