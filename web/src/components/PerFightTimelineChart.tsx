@@ -70,7 +70,7 @@ export type TimelineScale = "linear" | "log";
  * right by 1 character width and break the X-axis tick
  * alignment).
  */
-function formatSecondsLabel(ms: number): string {
+export function formatSecondsLabel(ms: number): string {
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);
   const rem = s % 60;

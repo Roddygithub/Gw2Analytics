@@ -88,6 +88,8 @@ import { EventWindowsTable } from "@/components/EventWindowsTable";
 import { EventWindowsChart } from "@/components/EventWindowsChart";
 import { SkillUsageTable } from "@/components/SkillUsageTable";
 import { PerFightTimelineSection } from "@/components/PerFightTimelineSection";
+import { ReplayPlayer } from "@/components/ReplayPlayer";
+import { fetchReplayTimeline } from "@/lib/replayFetcher";
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
 import { TargetFilter } from "@/components/TargetFilter";
 
@@ -108,6 +110,41 @@ function parseWindowS(raw: string | undefined): number {
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 1 || n > 600) return DEFAULT;
   return n;
+}
+
+/**
+ * Build the href for the page-level tab strip. The Replay tab is
+ * a URL-encoded alternate view of the SAME page (no client-side
+ * router required) so the href preserves the current
+ * ``window_s`` and ``target`` params (so the analyst keeps
+ * their drill-down context) and toggles the ``tab=`` param.
+ *
+ * Why a plain ``<a>`` tag (vs ``<Link>``)
+ * ======================================
+ * The tab stripes are pure GET navigation between two query-param
+ * variants of the same pathname. ``next/link`` adds client-side
+ * prefetching for ``prefetch={true}`` (the default) but for
+ * tab strips on a per-fight drilldown the prefetch benefit is
+ * zero (the prefetched route is identical to the current
+ * route modulo two query params; the render output is already
+ * cached server-side via the per-fight render's React cache).
+ * A plain ``<a href=...>`` is simpler + smaller + has no
+ * client-side hydration requirement.
+ */
+function buildTabHref(
+  fightId: string,
+  windowS: number,
+  targetFilter: number | null,
+  activeTab: "overview" | "replay",
+): string {
+  const qs = new URLSearchParams();
+  if (activeTab === "replay") qs.set("tab", "replay");
+  if (windowS !== 5) qs.set("window_s", String(windowS));
+  if (targetFilter !== null) qs.set("target", String(targetFilter));
+  const qsStr = qs.toString();
+  return qsStr
+    ? `/fights/${encodeURIComponent(fightId)}?${qsStr}`
+    : `/fights/${encodeURIComponent(fightId)}`;
 }
 
 /**
@@ -175,7 +212,11 @@ export default async function FightEventsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ window_s?: string; target?: string }>;
+  searchParams: Promise<{
+    window_s?: string;
+    target?: string;
+    tab?: string;
+  }>;
 }) {
   // Next.js 15+ delivers both route params AND search params as
   // Promises; await them to obtain the fight id + window_s +
@@ -183,10 +224,29 @@ export default async function FightEventsPage({
   // a SHA-256 (already URL-safe) but is the canonical guard
   // against any future id shape that happens to contain reserved
   // characters.
-  const { id } = await params;
-  const { window_s: window_s_raw, target: target_raw } = await searchParams;
+  //
+  // ``tab`` is the v0.10.17 D1 Replay-tab routing param: ``"replay"``
+  // renders ONLY the :class:`ReplayPlayer` section; the default
+  // (``null`` / ``""`` / any other value) renders the existing
+  // Overview content (per-target roll-ups + per-bucket windows +
+  // per-subgroup + per-skill + per-fight timeline). Whitelisted
+  // to exactly one of two values so an analyst typing
+  // ``?tab=foo`` falls back to Overview rather than triggering a
+  // error path.
+  const { id } = await params;  const { window_s: window_s_raw, target: target_raw, tab: tab_raw,
+  } = await searchParams;
   const windowS = parseWindowS(window_s_raw);
   const targetFilter = parseTarget(target_raw);
+  // v0.10.17 D1 round-2 fix: case-insensitive tab match. An
+  // analyst typing ``?tab=Replay`` or ``?tab=REPLAY`` is
+  // legitimate variation (hand-typed URL + URL bookmark
+  // conversions); strict-equal would silently drop them to
+  // ``"overview"``, which is a confusing UX (the analyst
+  // sees the Overview render but their URL says Replay). The
+  // match is also null-safe (``tab_raw`` may be ``undefined``
+  // when the URL has no ``?tab=``).
+  const activeTab: "overview" | "replay" =
+    (tab_raw ?? "").toLowerCase() === "replay" ? "replay" : "overview";
 
   let summary: FightEventsSummaryRow | null = null;
   let squads: import("@/lib/api").FightSquads | null = null;
@@ -218,7 +278,14 @@ export default async function FightEventsPage({
     fetchCached<FightEventsSummaryRow>(`${base}/events${qs}`),
     fetchCached<import("@/lib/api").FightSquads>(`${base}/squads`),
     fetchCached<import("@/lib/api").FightSkills>(`${base}/skills`),
-    fetchCached<FightTimeline>(`${base}/timeline${qs}`),
+    // v0.10.17 D1: route the per-fight timeline fetch via the
+    // :func:`fetchReplayTimeline` wrapper so the wrapper is
+    // NOT a dead-code deliverable. The wrapper preserves the
+    // ``fetchCached`` LRU + TTL contract (its body is a
+    // pass-through to :func:`fetchCached` after URL
+    // construction), so the cache key + the hit ratio are
+    // identical to the inline call it replaced.
+    fetchReplayTimeline(id, API_BASE_URL, { windowS }),
     fetchCached<FightPlayerTimeline>(`${base}/timeline/players${qs}`),
   ]);
   if (results[0].status === "fulfilled") {
@@ -333,6 +400,106 @@ export default async function FightEventsPage({
           (r) => r.target_agent_id === targetFilter,
         );
 
+  // v0.10.17 D1: the Replay tab is a URL-routed alternate view
+  // of the SAME page. When ``tab=replay`` is set, we render
+  // ONLY the :class:`ReplayPlayer` (the per-target roll-ups
+  // + per-bucket windows + per-subgroup + per-skill + per-fight
+  // timeline sections are all suppressed because they share
+  // data with the ReplayPlayer and would crowd the viewport).
+  // The fetch pipeline above still runs for BOTH tabs so the
+  // LRU ``/timeline`` cache stays warm for a tab toggle (and
+  // the per-section error map above still feeds the diagnostic
+  // chimp on the Replay tab's empty-state path).
+  if (activeTab === "replay") {
+    return (
+      <main
+        style={{
+          padding: "32px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "24px",
+        }}
+      >
+        <header
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <h1 style={{ fontSize: 28, marginBottom: 4 }}>
+              Fight {summary.fight_id}
+            </h1>
+            <p style={{ opacity: 0.7 }}>
+              Duration: {summary.duration_s.toFixed(2)} s
+              {targetFilter !== null ? ` — filtered to target ${targetFilter}` : ""}
+            </p>
+          </div>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+            data-testid="page-tab-strip"
+          >
+            <a
+              href={buildTabHref(id, windowS, targetFilter, "overview")}
+              data-testid="page-tab-overview"
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                fontSize: 13,
+                textDecoration: "none",
+                color: "var(--foreground)",
+                background: "var(--surface)",
+                fontFamily:
+                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+              }}
+            >
+              Overview
+            </a>
+            <a
+              href={buildTabHref(id, windowS, targetFilter, "replay")}
+              data-testid="page-tab-replay"
+              data-active="true"
+              aria-current="page"
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--accent)",
+                borderRadius: 4,
+                fontSize: 13,
+                textDecoration: "none",
+                color: "var(--accent-foreground, #fff)",
+                background: "var(--accent)",
+                fontFamily:
+                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+              }}
+            >
+              Replay
+            </a>
+          </div>
+        </header>
+        {timeline === null ? (
+          <p
+            data-testid="replay-tab-error"
+            style={{ color: "var(--accent)" }}
+          >
+            Failed to load timeline for the Replay tab:{" "}
+            {sectionErrors.timeline ?? "unknown error"}
+          </p>
+        ) : (
+          <ReplayPlayer fightId={id} timeline={timeline} />
+        )}
+      </main>
+    );
+  }
+
   return (
     <main
       style={{
@@ -368,6 +535,62 @@ export default async function FightEventsPage({
             targetNameMap={targetNameMap}
             fightId={id}
           />
+          {/* v0.10.17 D1: page-level tab strip -- "Replay" is
+              ALWAYS reachable from the Overview tab (the
+              ``/api/v1/fights/{id}/timeline`` endpoint that
+              powers the page's existing
+              :class:`PerFightTimelineSection` is the same
+              substrate the Replay tab uses, so there is no
+              additional fetch cost on the tab toggle). The
+              Replay tab is only disabled when ``timeline ===
+              null`` AND a transient backfill has yet to land
+              -- the in-tab empty-state surfaces the upstream
+              error in that case. */}
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+            data-testid="page-tab-strip"
+          >
+            <a
+              href={buildTabHref(id, windowS, targetFilter, "overview")}
+              data-testid="page-tab-overview"
+              data-active="true"
+              aria-current="page"
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--accent)",
+                borderRadius: 4,
+                fontSize: 13,
+                textDecoration: "none",
+                color: "var(--accent-foreground, #fff)",
+                background: "var(--accent)",
+                fontFamily:
+                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+              }}
+            >
+              Overview
+            </a>
+            <a
+              href={buildTabHref(id, windowS, targetFilter, "replay")}
+              data-testid="page-tab-replay"
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                fontSize: 13,
+                textDecoration: "none",
+                color: "var(--foreground)",
+                background: "var(--surface)",
+                fontFamily:
+                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+              }}
+            >
+              Replay
+            </a>
+          </div>
         </div>
       </header>
 

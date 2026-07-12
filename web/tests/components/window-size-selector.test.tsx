@@ -45,10 +45,22 @@ vi.mock("@/components/WindowSizeSelector", async (importOriginal) => {
   return actual;
 });
 
-// Mock the next/navigation hooks the selector depends on.
-const pushMock = vi.fn();
+// v0.10.17 D1 round-2 fix (out-of-scope but blocking): wrap
+// the shared mock-fn references in ``vi.hoisted`` so they
+// are initialised BEFORE the ``vi.mock`` factory for
+// ``next/navigation`` evaluates. The previous pattern placed
+// the ``const pushMock = vi.fn()`` and ``const searchParamsMock =
+// vi.fn(...)`` declarations AFTER the ``vi.mock(...)`` factory
+// -- but vitest hoists ``vi.mock`` calls above imports, so the
+// factory ran in the temporal-dead-zone of the ``const`` when
+// it tried to read ``searchParamsMock``. The ``vi.hoisted``
+// pattern is documented as "hoisted before vi.mock calls" so
+// the factory reference is safe.
+const { pushMock, searchParamsMock } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  searchParamsMock: vi.fn(() => new URLSearchParams()),
+}));
 
-const searchParamsMock = vi.fn(() => new URLSearchParams());
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
   usePathname: () => "/fights/abc123def456",
