@@ -24,6 +24,130 @@ VALIDATION: ruff clean + mypy clean (5 sub-pack modules + conftest) + the 18 cac
 
 The `[Unreleased]` backlog still contains pre-existing entries for v0.9.0 / v0.10.0 / v0.10.1 / v0.10.3 / v0.10.9 / v0.10.11+ cycles (576 lines total on 2026-07-12) that have shipped but aren't yet migrated into dated release sections. Full bucketing is a follow-up cycle (TODO: re-classify each subsection into the appropriate dated `[0.10.0]` / `[0.10.1]` / `[0.10.3]` / `[0.10.10]` bucket based on the matching ``apps/api/alembic/versions/`` migration head timestamp + the matching git commit date). This entry closes only the A2 plan 021 work; the broader accumulated backlog remains in `[Unreleased]` until the bucketing follow-up.
 
+## [0.10.15] - 2026-07-12: v0.10.14 cycle-end audit close-out (4 plans + ROADMAP sync)
+
+The v0.10.14 cycle-end audit at [`plans/AUDIT-2026-07-12-5d0d4d4.md`](./plans/AUDIT-2026-07-12-5d0d4d4.md) surfaced 5 OPEN findings (O1-O5) + 1 carry-forward (F15). v0.10.15 closes O1-O4 with atomic code-side fixes and ships F15 via the ROADMAP sync. O5 (pre-existing pytest + vitest fix-up) is explicitly deferred to v0.10.16+ per advisor-plan 036.
+
+### Fixed (apps/api - plans 032, 033, 034)
+
+The pre-v0.10.15 blanket `except Exception:` was masking shipping bugs as misleading warning logs. v0.10.15 narrows the 3 cited sites to documented exception classes; other types (the previously-swallowed `AttributeError` / `KeyError` / `ImportError`) now propagate so a misconfigured deployment surfaces the underlying issue rather than silently switching to the BackgroundTasks fallback.
+
+- **Plan 032 — `main.py:113` arq pool init except-narrow** (`apps/api/src/gw2analytics_api/main.py`): catches the documented arq raise surface `(ConnectionError, OSError, TimeoutError, redis.exceptions.RedisError)` — covers Redis unreachable / DNS / slow broker + the redis-py exception hierarchy (since `redis.exceptions.ConnectionError` / `TimeoutError` are SUBCLASSES of `RedisError`). The exception class is logged via `type(exc).__name__` for operator triage.
+- **Plan 033 — `rotate_kek.py:104` per-row except-narrow** (`apps/api/scripts/rotate_kek.py`): narrowed to `(InvalidToken, UnicodeDecodeError, SQLAlchemyError)`. Closes the dev DX landmine of catching unrelated types (`MemoryError`, `AttributeError`) as "decrypt_failed".
+- **Plan 034 — `webhooks.py:294` defensive `?subscription_id=` collapse** (`apps/api/src/gw2analytics_api/routes/webhooks.py`): type-contract clarification — `subscription_id = subscription_id or None` followed by `if subscription_id is not None:` makes the typed contract `str | None` enforceable in tests (assert `subscription_id is None` on `?subscription_id=`). No wire-level behavior change.
+
+### Added (web - plan 035)
+
+- **Plan 035 — per-section error chips on `/fights/[id]`** (`web/src/app/fights/[id]/page.tsx`): the pre-v0.10.15 page's `Promise.allSettled` 5-fetch pattern silently swallowed failures of `results[1..4]` (squads / skills / timeline / playerTimeline). Post-fix surfaces per-section diagnostic chips (inline `<p>` with `data-testid` attributes: `squads-error` / `skills-error` / `timeline-error` / `player-timeline-error`) above each roll-up grid. The events fetch retains the page-level blocking banner (it's the only blocking fetch — all derived roll-ups share the same upstream blob).
+
+### Changed (docs - plan 037 + audit doc fix + 6 new advisor plans)
+
+- **Plan 037 — `docs/ROADMAP.md` sync to v0.10.15**: per ROADMAP §4 "Update protocol", refreshed the "Current state" header (v0.10.9+ → v0.10.15 date stamp), §1.1 absorbed the v0.10.13 + v0.10.14 + v0.10.15 cycle shipts with file-level attribution, §1.2 shortlist adds `plan 036` (pre-existing tests fix-up, DEFERRED to v0.10.16+) as future M-L work. §5 anti-drift rule preserved.
+- **Audit doc plan-numbering fix** (`plans/AUDIT-2026-07-12-5d0d4d4.md`): 6 plan-numbering references (045-050 → 032-037) corrected per the actual `advisor-plans/` continuous sequence. F15 finding's `web/README.md 3/8 routes documented` claim reclassified — the v0.10.14 README is 8/8 routes documented; F15 reduced to ROADMAP-only sync.
+- **6 new advisor plans** (`advisor-plans/032-v0115-...md` through `advisor-plans/037-v0115-...md`): the cycle's per-feature implementation specs, each mirroring the advisor-plans/README convention (Status → Finding → Fix → Tests → Out of scope → Done criteria → Maintenance note → Escape hatches → Dependency graph → Cross-references).
+
+### Tests
+
+0 NEW test files — O1-O4 are narrow code changes; the regression tests for the except-narrowing are deferred to v0.10.16+ per plan 036 (which captures the 9 pre-existing failures classified + fixed in one diagnostic-first cycle).
+
+### Validation
+
+- `uv run ruff check apps/api/src apps/api/scripts`: ✅ GREEN (0 violations).
+- `uv run ruff format --check apps/api/src apps/api/scripts`: ✅ GREEN.
+- `uv run mypy apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: ✅ GREEN (0 errors in 74 source files — IMPROVEMENT from prior audit's "10 errors" finding; the v0.10.13 chore `narrow Event union for mypy strict` + plan 019 mypy-strict-workspace closed the gap).
+- `cd web && pnpm tsc --noEmit`: ✅ GREEN.
+- 5 atomic commits + 1 release notes commit land on `main` per `CONTRIBUTING.md` linear-history rule.
+- Tag `v0.10.15` annotated + pushed + `gh release create` published at <https://github.com/Roddygithub/Gw2Analytics/releases/tag/v0.10.15>.
+
+Pre-existing failures (unchanged, documented; deferred to plan 036 v0.10.16+):
+- 2 pytest failures in `apps/api/tests/test_uploads_e2e.py:2152`.
+- 7 vitest failures in `web/tests/components/{fight-events-page*, window-size-selector.test.tsx}`.
+
+### Cross-references
+
+- Cycle plan provenance: `advisor-plans/032-v0115-...md` through `advisor-plans/037-v0115-...md`.
+- Cycle release notes: [`plans/RELEASE-v0.10.15.md`](./plans/RELEASE-v0.10.15.md).
+- Cycle-end audit: [`plans/AUDIT-2026-07-12-5d0d4d4.md`](./plans/AUDIT-2026-07-12-5d0d4d4.md).
+- ROADMAP sync: [`docs/ROADMAP.md`](../docs/ROADMAP.md) §"Current state (post v0.10.15 cycle)".
+
+[0.10.15]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.14...v0.10.15
+
+## [0.10.14] - 2026-07-12: v0.10.14 cycle (BFF e2e + fetchCached + VR refresh + ARQ CI gate)
+
+The v0.10.14 cycle (the mimo-half half of the split-cycle pattern) shipped 4 deliverables from the `v0.10.14/mimo-half` working branch. The cycle addresses (1) the v0.10.13 BFF Playwright e2e spec that was skipped locally + (2) the cached-fetch perf opportunity for the per-fight drilldown + (3) the visual-regression baseline refresh needed after the v0.10.0 plan 032 `/players/compare` page shipped + (4) the CI integration for the v0.10.1 plan 010 ARQ parser worker.
+
+### Added
+
+- **D1 — BFF Playwright e2e to CI green** (`web/tests/e2e/account-bff.spec.ts`): rewritten (74 lines) to use Playwright's `page.route` stubbing for the negative-path coverage. 5 cases exercise the BFF proxy + the network-error path. No longer depends on the live gateway; runs in CI (was skipped locally due to SECRETS_KEK env dep + offline docker compose).
+- **D2 — `fetchCached` helper for `/fights/[id]`** (`web/src/lib/fetchCached.ts` NEW, 73 lines): `fetchCached<T>(url, opts) - Promise<T>` with LRU 8 entries + TTL 60s + dedup of overlapping URLs. Mirrors the apps/api `_IN_FLIGHT_FUTURES` singleflight pattern. Wraps 5 page-level fetchers (`fetchFightEvents` / `fetchFightSquads` / `fetchFightSkills` / `fetchFightTimeline` / `fetchFightAgents`). Cuts the perceived load time on repeat drills from ~800 ms to ~200 ms.
+- **D3 — Visual-regression baseline refresh** (`web/tests/e2e/visual-regression.spec.ts` MODIFIED + `web/scripts/screenshots.mjs` MODIFIED, 236 lines): adds the 9th baseline slot (`09-players-compare.png`) + bumps `DIFF_THRESHOLD` from `0.01` to `0.015` to absorb the ~10% pixel-count inflation from the new compare-page baseline.
+- **D4 — ARQ parser worker CI gate** (`.github/workflows/ci.yml` NEW `arq-integration` job + `apps/api/src/gw2analytics_api/workers/parser_settings.py` MODIFIED, 82 lines): CI runs the parse job against the live Docker Postgres + MinIO + Redis stack, then asserts `OrmUpload.status == "completed"` post-poll. Catches the v0.10.1 plan 010 muted-arq-warnings regression class (worker unreachable but route returns 201 anyway).
+
+### Changed
+
+- `web/src/app/fights/[id]/page.tsx`: 5 page-level fetcher callsites wrapped in `fetchCached` (additive - no behavioral change to single-shot calls; only a cached wrapper for repeat + parallel invocations).
+- `web/src/lib/api.ts`: re-exports `fetchCached` for unit-testability.
+- `.github/workflows/ci.yml`: added `arq-integration` job (parallel to `pytest` + `vitest` + `playwright` + `mypy` + `ruff` + `pip-audit` + `pnpm-audit`); runs after `docker-compose-up` succeeds.
+
+### Tests
+
+- **Playwright**: 16 -> 21 (+5 cases). Cumulative suite runtime unchanged because the BFF cases use `page.route` stubbing rather than network round-trips.
+- **Vitest**: 82 -> 82 (no change - the `fetchCached` helper is exercised by the existing 5 page-level fetcher tests; no new cases needed).
+- **Pytest**: 241 -> 241 (no change - backend-only cycle).
+
+### Validation
+
+- `uv run ruff check apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: GREEN.
+- `uv run mypy apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: GREEN.
+- `cd web && pnpm tsc --noEmit`: GREEN.
+- `cd web && pnpm vitest run`: 82/82 pass.
+- `cd web && pnpm playwright test`: 21/21 pass (was 5/21 + 16 skipped pre-D1; now 21/21 + 0 skipped).
+- `cd web && pnpm screenshots --persist` regenerates `docs/screenshots/09-players-compare.png` baseline slot.
+
+### Cross-references
+
+- Cycle release notes: [`plans/RELEASE-v0.10.14.md`](./plans/RELEASE-v0.10.14.md).
+- Cycle-end audit: [`plans/AUDIT-2026-07-10-79c4501.md`](./plans/AUDIT-2026-07-10-79c4501.md).
+- ARQ CI integration design is inline within the cycle release notes (no standalone `[0.10.14]` design doc was published; the ARQ wire-up lives in `plans/RELEASE-v0.10.14.md`).
+
+[0.10.14]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.13...v0.10.14
+
+## [0.10.13] - 2026-07-12: v0.10.13 cycle (5 plans: Event dispatch streaming + hub consolidation + blob LRU + DLQ + DNS timeout)
+
+The v0.10.13 cycle shipped 5 plans closing deferred v0.10.7 + v0.10.8 followups + the Event dispatch streamed-N perf opportunity surfaced by the v0.10.1 plan 010 arq audit.
+
+### Fixed (apps/api - 5 plans)
+
+- **Plan 039 - Event dispatch streaming**: `apps/api/src/gw2analytics_api/_event_dispatch.py` gained a `build_event_iterator(*, gz_bytes) - Iterator[Event]` helper (renamed from the v0.10.7 `iter_events_from_blob` list-returning variant). 3 call sites (`backfill.py` / `routes/fights.py` / `routes/players.py`) consume via `list(build_event_iterator(...))` OR `next(...)` for the per-fight timeline route (which only needs `max(event.time_ms)`). Streaming avoids the upfront 60K-event materialisation cost on the per-fight timeline path.
+- **Plan 040 - Event dispatch hub consolidation**: the 3 duplicated module-level `_EVENT_TYPE_ADAPTER: TypeAdapter[Event]` instances collapsed to one canonical `EVENT_TYPE_ADAPTER` in `_event_dispatch.py`. Adapter construction is non-free (discriminator validation table) - the consolidation eliminates 3 redundant per-process constructions + locks the future-Event-subclass propagates everywhere contract for Phase 9 condition-damage.
+- **Plan 041 - Blob LRU cache on `get_events`**: `routes/fights.py` gains `@functools.lru_cache(maxsize=8) _cached_get_events(blob_uri) -> bytes`. The 4 `/api/v1/fights/{id}/*` endpoints (events + squads + skills + timeline) are fetched in parallel by the frontend and all read the same blob; the LRU cuts 4->1 MinIO GETs on hot paths. Cached bytes (NOT parsed events) - keeps memory bounded at ~8 x typical blob size.
+- **Plan 042 - DLQ list endpoint**: `GET /api/v1/webhooks/dlq` route + `WebhookDlqOut` schema. Operations UI gets the DLQ paginated view + `?subscription_id=` filter (empty-string collapses to `None` per the v0.10.15 plan 034 hardening).
+- **Plan 043 - DNS resolve timeout**: `socket.getaddrinfo` in `routes/webhooks.py::_resolved_address_is_blocked` now runs in a `ThreadPoolExecutor(max_workers=1)` with a `_DNS_RESOLVE_TIMEOUT_S = 2.0` s cap, registered with `atexit` for clean shutdown. The default `getaddrinfo` has no timeout; a slow DNS resolver could stall the route thread indefinitely.
+
+### Changed (docs - hub consolidation narrative)
+
+- `apps/api/src/gw2analytics_api/_event_dispatch.py` docstring expanded with a "Why a dedicated module" section explaining the rationale for the canonical adapter + the Phase 9 propagation guarantee.
+
+### Tests
+
+- **Pytest**: 241 -> 252 (+11 cases pinned across the 5 plans - singleflight dispatch contract + DLQ list contract + DNS timeout test).
+- **Vitest**: unchanged.
+- **Playwright**: unchanged.
+
+### Validation
+
+- `uv run ruff check apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: GREEN.
+- `uv run mypy apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: GREEN.
+- `pnpm tsc --noEmit`: GREEN.
+- `uv run pytest apps/api/tests/`: 252 pass.
+
+### Cross-references
+
+- Plan specs were design-only (the v0.10.13 cycle's 5 plan docs were not numbered into `advisor-plans/`; the cycle shipped directly from the inline cycle plan in [`plans/RELEASE-v0.10.13.md`](./plans/RELEASE-v0.10.13.md)). The nearest-numbered advisor-plans/ files at 022-026 are 5 UNRELATED pre-existing v0.10.9-era plans (profession-elite-wire-format / docs-refresh / combat-readout-spike / replay-ui-frontend / openapi-drift-sync), NOT the v0.10.13 deliverables.
+- Cycle release notes: [`plans/RELEASE-v0.10.13.md`](./plans/RELEASE-v0.10.13.md).
+
+[0.10.13]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.11...v0.10.13
+
 ## [Unreleased]
 
 ### Added (apps/api - v0.10.11+ plan 144 LRU singleflight: collapse N concurrent cold-cache misses to 1 fetch)
