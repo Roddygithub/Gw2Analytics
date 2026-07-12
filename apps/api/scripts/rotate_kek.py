@@ -26,8 +26,9 @@ import json
 import os
 import sys
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from gw2analytics_api.models import OrmWebhookSubscription
@@ -101,7 +102,11 @@ def rotate_kek() -> int:
                 rotated_count += 1
                 audit_line = {"subscription_id": sub.id, "status": "rotated"}
                 print(json.dumps(audit_line))
-            except Exception as exc:
+            except (
+                InvalidToken,
+                UnicodeDecodeError,
+                SQLAlchemyError,
+            ) as exc:
                 session.rollback()
                 failed_count += 1
                 audit_line = {
