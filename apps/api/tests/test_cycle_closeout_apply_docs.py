@@ -250,29 +250,39 @@ def test_marker_substituted_in_all_three_docs(scratch_repo: dict[str, Any]) -> N
 
     Closes a coverage gap: prior tests verified each doc was mutated, but the
     substitution consistency across docs was implicit. This test EXPLICITLY
-    verifies the marker SHA appears in CHANGELOG.md, docs/ROADMAP.md, and
-    plans/AUDIT-2026-07-12-<marker>.md + that NO lingering `MARKER` placeholder
-    text survives in any of the 3 docs.
+    verifies the marker SHA appears in CHANGELOG.md + docs/ROADMAP.md + the
+    AUDIT file (via glob-based path read-back for forward-compat with any
+    --audit-date value the script may use).
+
+    The AUDIT path read-back is GLOB-based (``AUDIT-*-<marker>.md``) rather
+    than hardcoded ``AUDIT-2026-07-12-<marker>.md`` so this test stays
+    portable across v0.10.19 → v0.10.20+ cycles (which use different cycle-end
+    dates). The script's audit-date parameterization is exercised end-to-end.
     """
     apply_docs = _import_apply_docs()
     apply_docs(marker=scratch_repo["marker"], root=scratch_repo["repo_root"])
 
     ch = (scratch_repo["repo_root"] / "CHANGELOG.md").read_text()
     rd = (scratch_repo["repo_root"] / "docs" / "ROADMAP.md").read_text()
-    audit = (
-        scratch_repo["repo_root"]
-        / "plans"
-        / f"AUDIT-2026-07-12-{scratch_repo['marker']}.md"
-    ).read_text()
 
-    # Each doc contains the marker SHA.
-    assert scratch_repo["marker"] in ch
-    assert scratch_repo["marker"] in rd
-    assert scratch_repo["marker"] in audit
-
-    # No doc retains the literal `MARKER` placeholder text.
-    assert "MARKER" not in ch.split("## [0.10.19]")[0] + ch[: ch.find("## [0.10.19]")]
-    # AUDIT template uses "MARKER" placeholder pre-substitution.
-    assert "MARKER placeholder" not in audit or "MARKER" not in audit.replace(
-        "MARKER placeholder", ""
+    # Glob-based AUDIT read-back: forward-compat with any `--audit-date` value.
+    audit_files = sorted(
+        (scratch_repo["repo_root"] / "plans").glob(
+            f"AUDIT-*-{scratch_repo['marker']}.md"
+        )
     )
+    assert len(audit_files) == 1, (
+        f"Expected exactly 1 AUDIT file matching AUDIT-*-{scratch_repo['marker']}.md, "
+        f"found {len(audit_files)}: {[f.name for f in audit_files]}"
+    )
+    audit = audit_files[0].read_text()
+
+    # Each doc contains the marker SHA (CLOSED-form assertion; no substring bugs).
+    assert ch.count(scratch_repo["marker"]) >= 1
+    assert rd.count(scratch_repo["marker"]) >= 1
+    assert audit.count(scratch_repo["marker"]) >= 1
+
+    # No doc retains the literal `MARKER placeholder` template-body text.
+    assert "MARKER placeholder" not in ch
+    assert "MARKER placeholder" not in rd
+    assert "MARKER placeholder" not in audit
