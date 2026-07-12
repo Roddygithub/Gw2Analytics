@@ -260,7 +260,9 @@ jobs:
       # ``pnpm run build && pnpm run start -- -p 3000`` when
       # ``isCI`` is truthy, so the ``webServer`` block handles
       # the production build + serve cycle on its own. No
-      # explicit ``next build`` step is needed here.
+      # explicit ``next build`` step is needed here. Includes the
+      # /account BFF e2e (account-bff.spec.ts) which runs in the
+      # chromium project via route-intercepted mock responses.
       - name: Playwright E2E tests
         working-directory: web
         run: pnpm exec playwright test
@@ -331,3 +333,40 @@ jobs:
           name: visual-regression-diffs
           path: web/tests/e2e/.visual-regression-output/
           retention-days: 7
+
+  arq-integration:
+    name: ARQ worker integration
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync workspace dependencies (frozen lock)
+        run: uv sync --frozen
+
+      - name: ARQ worker integration tests
+        working-directory: apps/api
+        run: uv run pytest tests/test_parser_worker.py tests/test_uploads_arq.py -v
+        env:
+          SECRETS_KEK: "ci-test-kek-000000000000000000000000000000"
+          ARQ_REDIS_HOST: localhost
+          ARQ_REDIS_PORT: 6379

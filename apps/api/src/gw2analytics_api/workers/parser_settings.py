@@ -49,6 +49,16 @@ from gw2analytics_api.workers.parser_worker import parse_job
 _REDIS_HOST: str = get_settings().arq_redis_host
 _REDIS_PORT: int = get_settings().arq_redis_port
 
+# Defensive guard: port 1 is almost certainly a misconfiguration
+# (e.g. a Docker port-mapping typo or an unset env var defaulting
+# to 1).  Fail fast at import time so the arq CLI surfaces a clear
+# error instead of hanging on a connection timeout.
+if _REDIS_PORT == 1:
+    raise RuntimeError(
+        f"ARQ_REDIS_PORT is {_REDIS_PORT} — likely a misconfiguration. "
+        "Set ARQ_REDIS_PORT to the real Redis port (default: 6379)."
+    )
+
 
 class WorkerSettings:
     """Arq worker configuration for the parser pipeline.
