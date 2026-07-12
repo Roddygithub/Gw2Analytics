@@ -125,7 +125,7 @@ from minio.error import S3Error
 from sqlalchemy import delete
 from sqlalchemy.orm import Session, sessionmaker
 
-from gw2analytics_api.config import get_settings
+from gw2analytics_api.config import Settings, get_settings
 from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory
 from gw2analytics_api.main import app
 from gw2analytics_api.models import (
@@ -271,6 +271,42 @@ def _disable_arq_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
     monkeypatch.setattr("arq.create_pool", _fake_create_pool)
 
+
+
+# -----------------------------------------------------------------------
+# v0.10.20 plan M8 PR-3 simplified (K-2 .env hermeticity)
+# -----------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _get_settings_no_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    os.environ.pop("GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS", None)
+    import functools
+    @functools.cache
+    def _no_dotenv_get_settings() -> Settings:
+        return Settings(_env_file=None)
+    monkeypatch.setattr(
+        "gw2analytics_api.config.get_settings",
+        _no_dotenv_get_settings,
+    )
+
+
+# -----------------------------------------------------------------------
+# v0.10.20 plan M8 PR-2 (K-3 DNS executor isolation)
+# -----------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _isolate_dns_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[None, None, None]:
+    from gw2analytics_api.routes import webhooks
+    import concurrent.futures
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=webhooks.DNS_POOL_MAX_WORKERS,
+        thread_name_prefix="dns_test_iso",
+    )
+    monkeypatch.setattr(webhooks, "_DNS_EXECUTOR", executor)
+    try:
+        yield
+    finally:
+        executor.shutdown(wait=False)
 
 # ---------------------------------------------------------------------------
 # v0.10.8 plan 140 Fix-B: in-memory FakeMinio for the S3 read-path mocks
