@@ -39,6 +39,16 @@ export interface paths {
         /**
          * List Fights
          * @description Return up to ``limit`` fights (skipping the first ``offset``).
+         *
+         *     v0.10.12 PR 3.2: the pre-PR-3.2 response shape was a naked
+         *     ``list[FightOut]`` which carried no pagination cursor on the
+         *     wire. The wrapper :class:`FightsPageOut` carries both the
+         *     trimmed page (the ``fights`` list) AND the cursor (``limit``
+         *     + ``offset``) so a future frontend pagination UX can render
+         *     "Showing X-Y of N" without a second round-trip. See the
+         *     schema docstring for the cursor-vs-total-count design
+         *     trade-off (we deliberately omit ``total_count`` to avoid
+         *     forcing a per-request ``COUNT(*)`` query).
          */
         get: operations["list_fights_api_v1_fights_get"];
         put?: never;
@@ -245,6 +255,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fights/{fight_id}/timeline/players": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fight Player Timeline
+         * @description Return the per-player timeline (1 series per player, damage + healing + strip over time).
+         *
+         *     v0.10.3 plan 083 Feature 3A ships this as a SEPARATE endpoint
+         *     (not folded into :class:`PerFightTimelineOut`) for the same
+         *     reason the squads + skills endpoints are separate: a single
+         *     bound response would force the page to refetch the full
+         *     event blob even when only the per-player view is requested.
+         *     The route reuses :func:`_load_fight_events` (the same shared
+         *     helper the per-target trio + squads + skills + aggregated
+         *     timeline endpoints use), loads the fight's ``OrmFightAgent``
+         *     rows to build the source-side attribution map, and invokes
+         *     :class:`gw2_analytics.per_player_timeline.PerPlayerTimelineAggregator`
+         *     on the parsed events + the agent iterable.
+         *
+         *     The aggregator applies the second-layer
+         *     ``account_name``-non-empty filter (the per-source-side
+         *     contract in :func:`apps.api.services._persist_player_summaries`).
+         *     NPC agents are silently dropped (they have no
+         *     ``account_name`` registered in the arcdps account-name
+         *     stream); events whose ``source_agent_id`` maps to an NPC
+         *     are silently dropped at the aggregator's source-side
+         *     attribution step.
+         *
+         *     Response codes match :func:`get_fight_timeline` exactly:
+         *
+         *     - ``404 Not Found``: fight id is unknown OR the events
+         *       blob is missing (pre-Phase 7 row OR the parser pass
+         *       yielded zero events after filtering).
+         *     - ``422 Unprocessable Entity``: ``window_s`` is outside
+         *       ``[1, 600]``. Handled by FastAPI before this handler
+         *       runs.
+         *     - ``502 Bad Gateway``: events blob is present but
+         *       corrupt (gzip decompression failure or non-JSON
+         *       payload).
+         *
+         *     A fight with zero player agents (a 0-player NPC-only
+         *     fight) returns ``200 OK`` with ``series: []`` -- NOT
+         *     ``404 Not Found``. The ``/timeline`` endpoint raises
+         *     ``404`` on a 0-event fight (the blob is present but the
+         *     parser yielded no events); a 0-player fight is a different
+         *     state (the blob is present, the parser yielded events,
+         *     but every event is NPC-sourced so the source-side
+         *     attribution has nothing to attribute to). The 2 endpoints'
+         *     empty-state contracts diverge by design.
+         */
+        get: operations["get_fight_player_timeline_api_v1_fights__fight_id__timeline_players_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health/summary": {
         parameters: {
             query?: never;
@@ -320,6 +393,38 @@ export interface paths {
          *     :func:`_parse_profession_filter` helper.
          */
         get: operations["list_players_api_v1_players_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/players/compare/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Compare Timeline
+         * @description Return one per-account series per requested account.
+         *
+         *     Iterates the v0.10.10 plan 028 SQL helpers once per
+         *     requested account (one ``get_account_contributions_from_sql``
+         *     + one ``_load_slow_path_contributions`` per account, 2-4
+         *     accounts per request). Replaces the v0.10.0 plan 032
+         *     ``select(OrmFight).all() + _compute_contributions(db, fights)``
+         *     pattern that loaded the entire ``OrmFight`` table per
+         *     request (the O(N) full-table scan that plan 028 was designed
+         *     to eliminate). The cross-account response shape is a list of
+         *     series; each series carries the same ``points`` shape as the
+         *     per-account timeline (so a future v0.11.0 client could reuse
+         *     the chart component without forking the per-account canvas).
+         */
+        get: operations["get_compare_timeline_api_v1_players_compare_timeline_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -487,6 +592,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/webhooks/dlq": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Webhook Dlq
+         * @description List dead-letter webhook deliveries.
+         *
+         *     Returns DLQ rows ordered by ``moved_to_dlq_at`` descending
+         *     (most recent first). Pass ``subscription_id`` to restrict the
+         *     result to one subscription. ``limit``/``offset`` provide
+         *     pagination for operational UIs.
+         */
+        get: operations["list_webhook_dlq_api_v1_webhooks_dlq_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/webhooks/dlq/{delivery_id}/replay": {
         parameters: {
             query?: never;
@@ -551,22 +681,7 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /**
-         * AccountEnrichedOut
-         * @description GET /api/v1/account response.
-         *
-         *     Composed in :mod:`gw2analytics_api.routes.account` from two
-         *     upstream calls (``AsyncGuildWars2Client.account_get`` +
-         *     ``worlds_get([account.world_id])``) so the client gets a single
-         *     (world_id, world_name, world_population) tuple per GW2 API key.
-         *
-         *     ``world_population`` is the canonical capitalised ``Population``
-         *     string exactly as the v2 API emits (``"Low" | "Medium" | "High" |
-         *     "VeryHigh" | "Full"``). Forward-compat is delegated to ``gw2_core``
-         *     ``Population`` parsing; if the v2 API grows a new bucket, the
-         *     underlying ``WorldInfo`` validation raises and the route surfaces
-         *     a 502 rather than silently coercing to a known bucket.
-         */
+        /** AccountEnrichedOut */
         AccountEnrichedOut: {
             /** World Id */
             world_id: number;
@@ -601,14 +716,66 @@ export interface components {
             file: string;
         };
         /**
-         * EventBucketOut
-         * @description Response schema for ``GET /api/v1/fights/{fight_id}/events``.
+         * CrossAccountTimelinePoint
+         * @description One per-fight timeline point within a per-account series.
          *
-         *     Mirrors :class:`gw2_analytics.event_window.EventBucket` so the
-         *     OpenAPI shape is locked before the parser-side integration in
-         *     Phase 6 v2. Phase 6 v1 returns an empty list — this schema is
-         *     future-proofed for the moment parsing of events arrives.
+         *     Mirrors :class:`gw2_analytics.player_profile.PlayrTimelinePoint`'s
+         *     wire shape -- ``fight_id`` + ``started_at`` + the 3 totals -- so
+         *     the route layer can reuse the same JSON surface for both the
+         *     per-account and the cross-account timeline responses. The
+         *     rechristening is purely cosmetic (the cross-account aggregator
+         *     wraps the per-account points list without any field-level
+         *     divergence); using a separate type here guards against future
+         *     divergence (e.g. a per-account-vs-cross-account rate column
+         *     for fair comparison would not silently leak into the
+         *     per-account route).
          */
+        CrossAccountTimelinePoint: {
+            /** Fight Id */
+            fight_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Total Buff Removal
+             * @default 0
+             */
+            total_buff_removal: number;
+            /**
+             * Total Damage
+             * @default 0
+             */
+            total_damage: number;
+            /**
+             * Total Healing
+             * @default 0
+             */
+            total_healing: number;
+        };
+        /**
+         * CrossAccountTimelineSeries
+         * @description One per-account series within a cross-account timeline response.
+         *
+         *     The chart renders one polyline per series; the page-level
+         *     section consumes the ``series`` array directly. The shape
+         *     deliberately mirrors the existing per-account ``PlayerTimeline``
+         *     so the cross-account route can be a thin wrapper over the
+         *     per-account timeline logic.
+         */
+        CrossAccountTimelineSeries: {
+            /** Account Name */
+            account_name: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /** Points */
+            points?: components["schemas"]["CrossAccountTimelinePoint"][];
+        };
+        /** EventBucketOut */
         EventBucketOut: {
             /**
              * Damage Total
@@ -630,57 +797,7 @@ export interface components {
             /** Start Ms */
             start_ms: number;
         };
-        /**
-         * FightEventsSummaryOut
-         * @description Combined aggregation payload returned by ``GET /api/v1/fights/{fight_id}/events``.
-         *
-         *     Phase 7 v1 ships a single bound response so the frontend can render
-         *     the timeline + per-target DPS without two extra round-trips.
-         *     Phase 7 v1 of the API adds the per-target healing roll-up as a
-         *     sibling field, completing the v2 Event union consumption on the
-         *     HTTP surface (the v2 ``Event`` discriminated union
-         *     ``DamageEvent | HealingEvent`` is now materialised as both a
-         *     per-target DPS roll-up AND a per-target healing roll-up in a
-         *     single round-trip).
-         *
-         *     Contract:
-         *
-         *     - ``duration_s`` is computed natively from
-         *       ``max(event.time_ms) / 1000.0`` because the V1.3 EVTC header
-         *       does not carry a wall-clock duration scalar.
-         *     - ``target_dps`` is empty when the parser yielded zero damage events
-         *       (after the ``is_statechange == 0`` ``/`` ``is_nondamage == 0``
-         *       ``/`` ``value > 0`` filter); the route returns ``404 Not Found``
-         *       when the events blob is missing entirely (pre-Phase-7 row OR the
-         *       blob upload failed).
-         *     - ``target_healing`` is the strict parallel of ``target_dps``
-         *       (filtered by ``isinstance(e, HealingEvent)`` and rolled up via
-         *       :class:`gw2_analytics.target_healing.TargetHealingAggregator`).
-         *       Empty when the parser yielded zero healing events; the
-         *       damage-only / heal-only / mixed-fight cases all surface
-         *       correctly because the route filters at the call site rather
-         *       than branching inside the aggregator.
-         *     - ``target_buff_removal`` (Phase 8) is the third sibling roll-up,
-         *       filtered by ``isinstance(e, BuffRemovalEvent)`` and rolled up via
-         *       :class:`gw2_analytics.target_buff_removal.TargetBuffRemovalAggregator`.
-         *       The parser yields ``BuffRemovalEvent`` from two distinct paths:
-         *       (a) a single ``cbtevent`` record with ``is_statechange == 0``,
-         *       ``is_nondamage > 0``, ``value > 0``, ``buff_dmg > 0`` yields
-         *       BOTH a ``HealingEvent`` AND a ``BuffRemovalEvent`` (corrupting
-         *       / confusion skills that heal the caster + strip a boon); (b) a
-         *       record with ``is_nondamage > 0``, ``value == 0``,
-         *       ``buff_dmg > 0`` yields ONLY a ``BuffRemovalEvent`` (pure
-         *       strip). Empty when the parser yielded zero strip events.
-         *     - ``event_windows`` is empty when there are no events. The
-         *       ``EventWindowAggregator`` accepts the full ``Iterable[Event]``
-         *       and accounts damage + healing in one bucket
-         *       (``damage_total`` + ``healing_total`` + ``event_count``).
-         *       Phase 8 deliberately does NOT extend ``EventBucketOut`` with a
-         *       ``buff_removal_total`` field -- the per-bucket window contract
-         *       is locked and the heterogeneous stream passes through unchanged
-         *       (the aggregator's unknown-event fallback increases
-         *       ``event_count``).
-         */
+        /** FightEventsSummaryOut */
         FightEventsSummaryOut: {
             /** Duration S */
             duration_s: number;
@@ -735,18 +852,7 @@ export interface components {
              */
             started_at: string;
         };
-        /**
-         * FightSkillsOut
-         * @description Combined payload from ``GET /api/v1/fights/{fight_id}/skills``.
-         *
-         *     v0.7.0 ships the skill-usage roll-up as a separate endpoint
-         *     (not folded into :class:`FightEventsSummaryOut`); same
-         *     rationale as :class:`FightSquadsOut`. The route loads the
-         *     fight's ``OrmFightSkill`` rows to build the
-         *     ``skill_id -> skill_name`` map and invokes
-         *     :class:`gw2_analytics.skill_usage.SkillUsageAggregator` on
-         *     the split event streams.
-         */
+        /** FightSkillsOut */
         FightSkillsOut: {
             /** Fight Id */
             fight_id: string;
@@ -756,21 +862,7 @@ export interface components {
              */
             skills: components["schemas"]["SkillUsageRowOut"][];
         };
-        /**
-         * FightSquadsOut
-         * @description Combined payload from ``GET /api/v1/fights/{fight_id}/squads``.
-         *
-         *     v0.7.0 ships the squad-rollup as a separate endpoint (not
-         *     folded into :class:`FightEventsSummaryOut`) so the per-fight
-         *     drill-down page can fetch it in parallel with the per-target
-         *     roll-ups via ``Promise.all``; folding it into the existing
-         *     payload would force the page to refetch the full event blob
-         *     even when only the squad view is requested. The route
-         *     decompresses the same events blob, splits by ``isinstance``,
-         *     and invokes
-         *     :class:`gw2_analytics.squad_rollup.SquadRollupAggregator` on
-         *     the same ``duration_s`` used by the per-target trio.
-         */
+        /** FightSquadsOut */
         FightSquadsOut: {
             /** Duration S */
             duration_s: number;
@@ -782,21 +874,64 @@ export interface components {
              */
             squads: components["schemas"]["SquadRollupRowOut"][];
         };
+        /**
+         * FightsPageOut
+         * @description Paginated response shape for ``GET /api/v1/fights``.
+         *
+         *     v0.10.12 PR 3.2 closes the thin-route per-handler
+         *     schema-typing gap identified by Phase C's architect verdict:
+         *     the pre-PR-3.2 handler returned a naked ``list[FightOut]``
+         *     which is technically valid for ``response_model=`` but
+         *     loses the pagination cursor (``limit``, ``offset``) on
+         *     the wire. A frontend operator page cannot render "Showing
+         *     50 of N fights" without either (A) a second round-trip
+         *     asking for the same set + a ``COUNT(*)`` query or (B)
+         *     reading the cursor back from the request that produced
+         *     the page. This wrapper carries both the trimmed page
+         *     (the ``fights`` list) AND the pagination cursor
+         *     (``limit``, ``offset``) so the next iteration of the
+         *     frontend pagination UX has the cursor metadata without
+         *     a second round-trip.
+         *
+         *     Field semantics mirror the handler's ``Query`` params
+         *     (``limit`` clamped to ``[1, 500]``; ``offset`` clamped
+         *     to ``[0, ∞)``). The defaults match the handler so a
+         *     frontend that consumes a hard-coded call site gets the
+         *     same out-of-the-box behaviour. ``total_count`` is
+         *     deliberately NOT in this wrapper: adding it would force
+         *     a separate ``SELECT count(*) FROM fights`` round-trip
+         *     per request and the architect verdict explicitly
+         *     scoped this PR to the schema-typing gap closure, not
+         *     the pagination-enhancement feature.
+         */
+        FightsPageOut: {
+            /**
+             * Fights
+             * @default []
+             */
+            fights: components["schemas"]["FightOut"][];
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /**
-         * PerFightBreakdownRowOut
-         * @description One row of the per-fight breakdown on :class:`PlayerProfileOut`.
-         *
-         *     The route computes one of these per ``(fight_id, account_name)``
-         *     pair by walking the fight's events blob and accumulating
-         *     magnitudes where ``event.source_agent_id`` maps to
-         *     ``account_name`` via :class:`OrmFightAgent`.
-         */
+        /** PerFightBreakdownRowOut */
         PerFightBreakdownRowOut: {
+            /** Detected Role */
+            detected_role?: string | null;
+            /** Detected Tags */
+            detected_tags?: string[] | null;
             /** Fight Id */
             fight_id: string;
             /**
@@ -811,37 +946,7 @@ export interface components {
             /** Total Healing */
             total_healing: number;
         };
-        /**
-         * PerFightTimelineOut
-         * @description Response from ``GET /api/v1/fights/{fight_id}/timeline``.
-         *
-         *     v0.8.9 ships this as a SEPARATE endpoint (not folded into
-         *     :class:`FightEventsSummaryOut`) for the same reason the
-         *     squads + skills endpoints are separate: a single bound
-         *     response would force the page to refetch the full event
-         *     blob even when only the per-fight timeline is requested.
-         *     The route reuses :func:`_load_fight_events` (the same
-         *     shared helper the per-target trio + squads + skills
-         *     endpoints use) and invokes
-         *     :class:`gw2_analytics.per_fight_timeline.PerFightTimelineAggregator`
-         *     on the parsed events.
-         *
-         *     - ``fight_id`` echoes the path param so the wire consumer
-         *       can verify which fight the timeline belongs to.
-         *     - ``window_s`` echoes the query param so the consumer can
-         *       verify the bucket size the route applied (matches the
-         *       ``window_s`` contract on :func:`get_fight_events`).
-         *     - ``duration_s`` mirrors the same scalar on
-         *       :class:`FightEventsSummaryOut` (computed natively as
-         *       ``max(event.time_ms) / 1000.0`` because the V1.3 EVTC
-         *       header does not carry a wall-clock duration).
-         *     - ``points`` is the list of :class:`PerFightTimelinePointOut`
-         *       rows, sorted ascending by ``window_start_ms``. Empty
-         *       when the parser yielded zero events (a defensive empty
-         *       list -- the per-fight timeline is the "what happened
-         *       in this fight" use case, and a 0-event fight has no
-         *       timeline to show).
-         */
+        /** PerFightTimelineOut */
         PerFightTimelineOut: {
             /** Duration S */
             duration_s: number;
@@ -855,22 +960,7 @@ export interface components {
             /** Window S */
             window_s: number;
         };
-        /**
-         * PerFightTimelinePointOut
-         * @description One row of the per-fight timeline on :class:`PerFightTimelineOut`.
-         *
-         *     v0.8.9 ships this lean schema for the new per-fight timeline
-         *     chart: ``window_start_ms`` + ``window_end_ms`` (the
-         *     half-open ``[start, end)`` range) + the 3 totals. The chart
-         *     consumes only the 3 totals per bucket (no rate columns, no
-         *     per-target roll-ups). Mirrors the wire shape of
-         *     :class:`EventBucketOut` (the per-bucket row on the existing
-         *     ``/events`` endpoint) but with ``window_start_ms`` /
-         *     ``window_end_ms`` instead of ``start_ms`` / ``end_ms`` so the
-         *     two endpoints' row shapes are visually distinct (the
-         *     per-fight timeline is its own wire surface, not a folded-in
-         *     extension of the events payload).
-         */
+        /** PerFightTimelinePointOut */
         PerFightTimelinePointOut: {
             /** Total Buff Removal */
             total_buff_removal: number;
@@ -883,20 +973,46 @@ export interface components {
             /** Window Start Ms */
             window_start_ms: number;
         };
-        /**
-         * PlayerListRowOut
-         * @description One row of the cross-fight player roll-up returned by ``GET /api/v1/players``.
-         *
-         *     Lean schema for the list endpoint: the analyst scans a
-         *     paginated AG Grid of accounts. The full per-fight breakdown
-         *     lives on :class:`PlayerProfileOut` (returned by the detail
-         *     endpoint).
-         *
-         *     ``account_name`` is the operational identity (stable across
-         *     uploads). ``name`` is the last-seen char-name (cosmetic
-         *     identity). The three totals are summed across every fight the
-         *     account attended.
-         */
+        /** PerPlayerTimelineOut */
+        PerPlayerTimelineOut: {
+            /** Duration S */
+            duration_s: number;
+            /** Fight Id */
+            fight_id: string;
+            /**
+             * Series
+             * @default []
+             */
+            series: components["schemas"]["PerPlayerTimelineSeriesOut"][];
+            /** Window S */
+            window_s: number;
+        };
+        /** PerPlayerTimelinePointOut */
+        PerPlayerTimelinePointOut: {
+            /** Total Buff Removal */
+            total_buff_removal: number;
+            /** Total Damage */
+            total_damage: number;
+            /** Total Healing */
+            total_healing: number;
+            /** Window End Ms */
+            window_end_ms: number;
+            /** Window Start Ms */
+            window_start_ms: number;
+        };
+        /** PerPlayerTimelineSeriesOut */
+        PerPlayerTimelineSeriesOut: {
+            /** Account Name */
+            account_name: string;
+            /** Name */
+            name: string;
+            /**
+             * Points
+             * @default []
+             */
+            points: components["schemas"]["PerPlayerTimelinePointOut"][];
+        };
+        /** PlayerListRowOut */
         PlayerListRowOut: {
             /** Account Name */
             account_name: string;
@@ -915,23 +1031,7 @@ export interface components {
             /** Total Healing */
             total_healing: number;
         };
-        /**
-         * PlayerProfileOut
-         * @description Full player profile returned by ``GET /api/v1/players/{account_name}``.
-         *
-         *     Mirrors :class:`gw2_analytics.player_profile.PlayerProfile`
-         *     with the addition of the per-fight breakdown array
-         *     (``per_fight_breakdown``) and the ``started_at`` timestamps
-         *     on each fight row. v0.7.0 ships the player-centric view of
-         *     the dataset; the route joins on ``OrmFightAgent.account_name``
-         *     to build the cross-fight roll-up.
-         *
-         *     ``account_name`` is URL-encoded in the request path because
-         *     arcdps prefixes the value with ``:`` (e.g. ``:account.1234``);
-         *     FastAPI's path-parameter parser handles the decoding. The
-         *     route raises ``404 Not Found`` when no agent in any fight
-         *     carries the requested ``account_name``.
-         */
+        /** PlayerProfileOut */
         PlayerProfileOut: {
             /** Account Name */
             account_name: string;
@@ -960,38 +1060,7 @@ export interface components {
             /** Total Healing */
             total_healing: number;
         };
-        /**
-         * PlayerTimelineOut
-         * @description Response from ``GET /api/v1/players/{account_name}/timeline``.
-         *
-         *     The ``total`` field is the un-paginated count of attended
-         *     fights (the same scalar as :attr:`PlayerProfileOut.fights_attended`).
-         *     The client uses ``total`` to decide whether the "Load more"
-         *     button should render (``points.length < total`` means there
-         *     are more fights to fetch). The ``limit`` + ``offset`` echo
-         *     the request params so the client can compute the next-page
-         *     URL without a separate round-trip.
-         *
-         *     v0.8.0 of the API surfaces the timeline as a separate
-         *     endpoint (not folded into :class:`PlayerProfileOut`) so the
-         *     profile page can fetch the first page in parallel with the
-         *     profile + per-fight breakdown via ``Promise.allSettled`` --
-         *     a single bound response would force the page to refetch the
-         *     full per-fight breakdown just to learn ``total``.
-         *
-         *     v0.8.1 of the API: the ``bucket`` field exposes the per-fight
-         *     (``"fight"``, default) vs per-day (``"day"``) grouping
-         *     contract. ``"day"`` collapses all fights sharing a calendar
-         *     day into one point whose ``total_damage`` / ``total_healing``
-         *     / ``total_buff_removal`` are the SUM of the day's fights.
-         *     The ``started_at`` of a day-bucketed point is the day's
-         *     midnight (UTC) so the chart's X-axis can detect the
-         *     day-aligned timestamps and render ``MM/DD`` instead of
-         *     ``MM/DD HH:MM``. The ``fight_id`` of a day-bucketed point
-         *     is the most-recent fight_id of the day (the deterministic
-         *     tiebreaker; the chart keys on ``fight_id`` so the React
-         *     reconciler is happy).
-         */
+        /** PlayerTimelineOut */
         PlayerTimelineOut: {
             /** Account Name */
             account_name: string;
@@ -1018,16 +1087,7 @@ export interface components {
              */
             tz: string;
         };
-        /**
-         * PlayerTimelinePointOut
-         * @description One row of the per-fight historical timeline on :class:`PlayerTimelineOut`.
-         *
-         *     Strict parallel of :class:`PerFightBreakdownRowOut` (the per-fight
-         *     breakdown on the profile page): ``fight_id`` + ``started_at`` +
-         *     the 3 totals. v0.8.0 ships this lean schema for the timeline
-         *     chart -- the analyst UI consumes only the 3 totals per fight
-         *     (no rate columns, no per-target roll-ups).
-         */
+        /** PlayerTimelinePointOut */
         PlayerTimelinePointOut: {
             /** Fight Id */
             fight_id: string;
@@ -1050,16 +1110,7 @@ export interface components {
             /** Name */
             name: string;
         };
-        /**
-         * SkillUsageRowOut
-         * @description One per-skill roll-up row in :class:`FightSkillsOut`.
-         *
-         *     Mirrors :class:`gw2_analytics.skill_usage.SkillUsageRow`; the
-         *     ``hit_count`` field is kept on the API surface (it's the
-         *     per-skill event frequency, the only per-skill signal that
-         *     doesn't depend on a duration). v0.7.0 ships this fifth
-         *     roll-up.
-         */
+        /** SkillUsageRowOut */
         SkillUsageRowOut: {
             /** Hit Count */
             hit_count: number;
@@ -1074,17 +1125,7 @@ export interface components {
             /** Total Healing */
             total_healing: number;
         };
-        /**
-         * SquadRollupRowOut
-         * @description One per-subgroup roll-up row in :class:`FightSquadsOut`.
-         *
-         *     Mirrors :class:`gw2_analytics.squad_rollup.SquadRollupRow` with
-         *     the ``hit_count`` field dropped from the API surface
-         *     (analyst-only signal; UI shows ``total_damage`` +
-         *     ``total_healing`` + ``total_buff_removal`` + the three
-         *     per-second rates only). v0.7.0 ships this fourth roll-up,
-         *     source-side (the subgroup is the actor's, not the target's).
-         */
+        /** SquadRollupRowOut */
         SquadRollupRowOut: {
             /** Bps */
             bps: number;
@@ -1146,21 +1187,7 @@ export interface components {
             /** Total Fights */
             total_fights: number;
         };
-        /**
-         * TargetBuffRemovalRowOut
-         * @description One buff-removal roll-up row in :class:`FightEventsSummaryOut`.
-         *
-         *     Mirrors
-         *     :class:`gw2_analytics.target_buff_removal.TargetBuffRemovalRow`
-         *     with the ``strip_count`` field dropped from the API surface
-         *     (analyst-only signal; UI shows ``total_buff_removal`` + ``bps``
-         *     only). Strict parallel of :class:`TargetDpsRowOut` /
-         *     :class:`TargetHealingRowOut` so the trio reads as one design.
-         *     Phase 8 ships this third roll-up.
-         *
-         *     v0.8.3 of the API: optional ``name`` field, strict parallel of
-         *     :attr:`TargetDpsRowOut.name`. See that field for the contract.
-         */
+        /** TargetBuffRemovalRowOut */
         TargetBuffRemovalRowOut: {
             /** Bps */
             bps: number;
@@ -1171,22 +1198,7 @@ export interface components {
             /** Total Buff Removal */
             total_buff_removal: number;
         };
-        /**
-         * TargetDpsRowOut
-         * @description One damage roll-up row in :class:`FightEventsSummaryOut`.
-         *
-         *     Mirrors :class:`gw2_analytics.target_dps.TargetDpsRow` with the
-         *     ``attack_count`` field dropped from the API surface (analyst-only
-         *     signal; UI shows ``total_damage`` + ``dps`` only).
-         *
-         *     v0.8.3 of the API: the optional ``name`` field surfaces the
-         *     player-name denormalisation passed to the aggregator's
-         *     ``name_map`` parameter. ``None`` (serialised as ``null``) when
-         *     the agent id has no registered char-name (an NPC) or when the
-         *     route did not pass a ``name_map``; the frontend falls back to
-         *     the raw ``target_agent_id`` in that case. The field is additive
-         *     -- existing wire consumers ignore it.
-         */
+        /** TargetDpsRowOut */
         TargetDpsRowOut: {
             /** Dps */
             dps: number;
@@ -1197,19 +1209,7 @@ export interface components {
             /** Total Damage */
             total_damage: number;
         };
-        /**
-         * TargetHealingRowOut
-         * @description One healing roll-up row in :class:`FightEventsSummaryOut`.
-         *
-         *     Mirrors :class:`gw2_analytics.target_healing.TargetHealingRow`
-         *     with the ``heal_count`` field dropped from the API surface
-         *     (analyst-only signal; UI shows ``total_healing`` + ``hps`` only).
-         *     Strict parallel of :class:`TargetDpsRowOut` so the pair reads as
-         *     one design.
-         *
-         *     v0.8.3 of the API: optional ``name`` field, strict parallel of
-         *     :attr:`TargetDpsRowOut.name`. See that field for the contract.
-         */
+        /** TargetHealingRowOut */
         TargetHealingRowOut: {
             /** Hps */
             hps: number;
@@ -1220,10 +1220,7 @@ export interface components {
             /** Total Healing */
             total_healing: number;
         };
-        /**
-         * UploadCreatedResponse
-         * @description Returned from POST /uploads before parsing is finalised.
-         */
+        /** UploadCreatedResponse */
         UploadCreatedResponse: {
             /**
              * Id
@@ -1275,15 +1272,7 @@ export interface components {
             /** Error Type */
             type: string;
         };
-        /**
-         * WebhookDeliveryReplayOut
-         * @description Response item for POST /api/v1/webhooks/dlq/{delivery_id}/replay.
-         *
-         *     `restart` indicates whether the replay was queued vs already
-         *     scheduled for retry (idempotent on concurrent calls). When
-         *     `restart=True`, ``next_attempt_at`` echoes the freshly
-         *     computed schedule time.
-         */
+        /** WebhookDeliveryReplayOut */
         WebhookDeliveryReplayOut: {
             /** Attempt */
             attempt: number;
@@ -1301,28 +1290,23 @@ export interface components {
             /** Upload Id */
             upload_id: string;
         };
-        /**
-         * WebhookSubscriptionCreate
-         * @description POST /api/v1/webhooks request body (v0.9.0 backend).
-         *
-         *     The integrator does NOT supply a ``secret`` on create -- the
-         *     gateway generates a fresh ``whsec_<base64(32bytes)>`` and
-         *     returns it ONCE in the 201 response (see
-         *     :class:`WebhookSubscriptionCreatedOut`).
-         *
-         *     The ``url`` field is validated as HTTPS-or-localhost per
-         *     design doc §7.3 (HTTPS-only with a single explicit exception
-         *     for localhost development). The route layer enforces this
-         *     via the private ``_validate_webhook_url`` helper; this
-         *     schema is the structural wire contract only.
-         *
-         *     The ``filter`` field is ``dict[str, object]`` (matches the
-         *     JSONB column on ``webhook_subscriptions``). The integrator
-         *     pins a subset of keys today (``upload_status``,
-         *     ``fight_result``); v0.9.1 will add a ``field_validator`` to
-         *     enforce string-valued filters if the spec decides to lock
-         *     the contract.
-         */
+        /** WebhookDlqOut */
+        WebhookDlqOut: {
+            /** Id */
+            id: string;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Moved To Dlq At
+             * Format: date-time
+             */
+            moved_to_dlq_at: string;
+            /** Subscription Id */
+            subscription_id: string;
+            /** Upload Id */
+            upload_id: string;
+        };
+        /** WebhookSubscriptionCreate */
         WebhookSubscriptionCreate: {
             /** Description */
             description?: string | null;
@@ -1333,16 +1317,7 @@ export interface components {
             /** Url */
             url: string;
         };
-        /**
-         * WebhookSubscriptionCreatedOut
-         * @description Response from POST /api/v1/webhooks (v0.9.0 backend).
-         *
-         *     Returned ONCE -- the integrator must capture ``secret`` NOW
-         *     and store it securely; it's never returned again. The
-         *     ``id`` field is the ``wh_<uuid>`` discriminator that the
-         *     integrator uses to identify the subscription on subsequent
-         *     ``GET`` and ``DELETE`` calls.
-         */
+        /** WebhookSubscriptionCreatedOut */
         WebhookSubscriptionCreatedOut: {
             /**
              * Created At
@@ -1362,19 +1337,7 @@ export interface components {
             /** Url */
             url: string;
         };
-        /**
-         * WebhookSubscriptionOut
-         * @description Response item from GET /api/v1/webhooks (v0.9.0 backend).
-         *
-         *     Strict subset of :class:`WebhookSubscriptionCreatedOut` --
-         *     excludes the ``secret`` field (one-time only on POST per
-         *     design doc §3.2). Excludes ``revoked_at`` too: per design
-         *     doc §4, revoked subscriptions return 404 from public view
-         *     (so listing them at all would leak existence). An
-         *     auditor-side panel that surfaces revoked subscriptions
-         *     with their revocation timestamp is a v0.9.1 followup
-         *     (``GET /api/v1/webhooks?include_revoked=true``).
-         */
+        /** WebhookSubscriptionOut */
         WebhookSubscriptionOut: {
             /**
              * Created At
@@ -1439,7 +1402,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FightOut"][];
+                    "application/json": components["schemas"]["FightsPageOut"];
                 };
             };
             /** @description Validation Error */
@@ -1614,6 +1577,40 @@ export interface operations {
             };
         };
     };
+    get_fight_player_timeline_api_v1_fights__fight_id__timeline_players_get: {
+        parameters: {
+            query?: {
+                /** @description Time-bucket size for the per-player timeline roll-up. Defaults to 5 seconds; bounded 1 <= window_s <= 600 (10 minutes). Same contract as the aggregated ``/timeline`` endpoint. */
+                window_s?: number;
+            };
+            header?: never;
+            path: {
+                fight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PerPlayerTimelineOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_health_summary_api_v1_health_summary_get: {
         parameters: {
             query?: never;
@@ -1655,6 +1652,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlayerListRowOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compare_timeline_api_v1_players_compare_timeline_get: {
+        parameters: {
+            query: {
+                /** @description Repeatable query param: ``?accounts=A&accounts=B`` (up to 4). The route emits one per-account series in the response. An account with no attended fights is reported as a series with ``points: []`` (NOT a 404 -- the analyst UX benefits from a same-shape response for all requested accounts). */
+                accounts: string[];
+                /** @description Same semantics as the per-account timeline route: ``fight`` (default -- one point per attended fight) vs ``day`` (one point per UTC calendar day, totals summed across the day's fights; ``started_at`` is day-midnight in the requested TZ). */
+                bucket?: "fight" | "day";
+                /** @description Same semantics as the per-account timeline route: the day-bucketing TZ (IANA name). Invalid names return 422 (canonical FastAPI query-param validation contract). The ``fight`` bucketing mode is unaffected by ``tz``. */
+                tz?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrossAccountTimelineSeries"][];
                 };
             };
             /** @description Validation Error */
@@ -1766,6 +1799,20 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Parser worker unavailable. The Arq broker (Redis) was unreachable at lifespan startup, so the upload pipeline cannot be enqueued. Set ALLOW_INREQUEST_PARSE_FALLBACK=1 to opt-in to the synchronous in-request fallback (degrades response latency; closes the GIL bottleneck mitigation). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "detail": "Parser worker unavailable. Check Redis is up. Set ALLOW_INREQUEST_PARSE_FALLBACK=1 to opt-in to in-request parsing."
+                     *     }
+                     */
+                    "application/json": unknown;
+                };
+            };
         };
     };
     get_upload_api_v1_uploads__upload_id__get: {
@@ -1839,6 +1886,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WebhookSubscriptionCreatedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_webhook_dlq_api_v1_webhooks_dlq_get: {
+        parameters: {
+            query?: {
+                subscription_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookDlqOut"][];
                 };
             };
             /** @description Validation Error */
