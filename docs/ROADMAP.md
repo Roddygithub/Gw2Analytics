@@ -11,7 +11,16 @@ off.
 
 ---
 
-## Current state (post v0.10.20 cycle)
+## Current state (post v0.10.22 cycle)
+
+The v0.10.21 cycle closed the 5 security and reliability recommendations
+surfaced by the project-wide audit (Node dependency bumps, CORS hardening,
+webhook dispatch parallelization, MinIO hard-failure handling, and the
+Ruff/Mypy cleanup). The v0.10.22 follow-up restructured the webhook
+dispatch loop so synchronous SQLAlchemy work runs in worker threads while
+outbound HTTP requests stay concurrent, removing the remaining event-loop
+blocking risk. See `CHANGELOG.md` [Unreleased] and the v0.10.21 / v0.10.22
+tags for details.
 
 - **Latest shipped tag:** v0.10.20 (M8 PARTIAL-FIX mimo-half cycle). The **v0.10.20 mimo-half** cycle landed 5 atomic commits + this audit close-out (6th commit). 12 v0.10.21 cycle-scope items forward-deferred per `plans/AUDIT-2026-07-13-v0.10.20.md` §4 (4 true test residuals: K-1 dispatch-FK ×2 + K-2 SSRF-gate ×2; 8 substrate-improvement + cycle-authoring + cross-validation + future-cycle items). Close-out docs shipped: `## [0.10.20]` CHANGELOG entry spliced (`5c8864e`) + `docs/ROADMAP.md` refresh (`c7b3bfa`) + `plans/AUDIT-2026-07-13-v0.10.20.md` (this commit file, 6th commit).
 
