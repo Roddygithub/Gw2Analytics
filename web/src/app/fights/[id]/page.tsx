@@ -58,6 +58,8 @@
  * required.
  */
 
+import { fetchCached } from "@/lib/fetchCached";
+import { API_BASE_URL } from "@/lib/env";
 import {
   fetchFightEvents,
   fetchFightPlayerTimeline,
@@ -187,49 +189,22 @@ export default async function FightEventsPage({
   const targetFilter = parseTarget(target_raw);
 
   let summary: FightEventsSummaryRow | null = null;
-  // v0.7.1 of web: also fetch the per-subgroup + per-skill
-  // roll-ups in parallel via ``Promise.allSettled`` so the page
-  // renders the 5 roll-up sections (per-target damage + healing
-  // + buff-removal + per-subgroup + per-skill) from a single
-  // round-trip. ``Promise.allSettled`` (NOT ``Promise.all``) so
-  // a single fetcher failure does not cascade -- the per-target
-  // trio is the primary surface and a transient squads/skills
-  // failure should not blank the whole page. The common
-  // upstream-blob failure mode (S3Error on /events) still
-  // surfaces the unified error card below.
-  //
-  // v0.8.9 of web (plan/002): the per-fight timeline
-  // (``fetchFightTimeline``) joins the parallel fetch in the
-  // 4th slot. A transient timeline failure (502 blob corrupt,
-  // 404 unknown fight) degrades to a section-level "Per-fight
-  // timeline unavailable" caption WITHOUT blanking the page --
-  // the per-target trio + per-subgroup + per-skill sections
-  // are still rendered. Only the /events failure (slot 0) flips
-  // the page to the unified error card above.
   let squads: import("@/lib/api").FightSquads | null = null;
   let skills: import("@/lib/api").FightSkills | null = null;
   let timeline: FightTimeline | null = null;
-  // v0.10.3 plan 083 Feature 3A: the per-player timeline
-  // joins the parallel fetch in the 5th slot. A transient
-  // per-player failure (502 blob corrupt, 404 unknown fight)
-  // degrades to a tab-level "Per-player timeline unavailable"
-  // caption WITHOUT blanking the page -- the aggregated
-  // timeline tab stays functional on the same underlying
-  // blob. Only the /events failure (slot 0) flips the page
-  // to the unified error card above.
   let playerTimeline: FightPlayerTimeline | null = null;
-  // ``fetchError`` carries the user-facing error string (already
-  // formatted via :func:`formatApiError` so the page renders the
-  // exact same text a Client Component would). The body of the
-  // error card just inlines the string verbatim -- no extra
-  // ``Upstream error:`` prefix is needed.
   let fetchError: string | null = null;
+  // ``fetchCached`` wraps each gateway call in an LRU (8 entries)
+  // + TTL (60 s) cache with in-flight dedup so repeated
+  // navigations to the same fight are served from cache.
+  const base = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(id)}`;
+  const qs = windowS !== 5 ? `?window_s=${windowS}` : "";
   const results = await Promise.allSettled([
-    fetchFightEvents(id, { windowS }),
-    fetchFightSquads(id),
-    fetchFightSkills(id),
-    fetchFightTimeline(id, { windowS }),
-    fetchFightPlayerTimeline(id, { windowS }),
+    fetchCached<FightEventsSummaryRow>(`${base}/events${qs}`),
+    fetchCached<import("@/lib/api").FightSquads>(`${base}/squads`),
+    fetchCached<import("@/lib/api").FightSkills>(`${base}/skills`),
+    fetchCached<FightTimeline>(`${base}/timeline${qs}`),
+    fetchCached<FightPlayerTimeline>(`${base}/timeline/players${qs}`),
   ]);
   if (results[0].status === "fulfilled") {
     summary = results[0].value;
