@@ -224,12 +224,16 @@ def _cached_get_events(blob_uri: str) -> bytes:
             result = get_events(blob_uri)
         future.set_result(result)
         return result
-    except Exception as exc:
-        # Propagate to all N waiters via the future channel. ``Exception``
-        # (not ``BaseException``) is the right choice: ``KeyboardInterrupt``
-        # + ``SystemExit`` should propagate without enabling the broadcast,
-        # so a shutdown signal aborts all N waiters independently of the
-        # cache layer's success/failure semantics.
+    except BaseException as exc:
+        # Propagate to all N waiters via the future channel. ``BaseException``
+        # is the right choice (v0.10.13 plan 029): ``asyncio.CancelledError`` /
+        # ``KeyboardInterrupt`` / ``SystemExit`` are all ``BaseException``-
+        # derived in Python 3.9+, and a SIGINT/Cancel arriving mid-fetch on
+        # the fetcher would otherwise leave the N waiters stuck on an
+        # unresolved ``future.result()`` -- the silent-hang the pre-plan-029
+        # implementation had. ``MemoryError`` / ``RecursionError`` are
+        # intentionally in the catch net too: a leaked waiter is worse
+        # than a retry-on-next-request for a request-scoped cache.
         future.set_exception(exc)
         raise
     finally:
