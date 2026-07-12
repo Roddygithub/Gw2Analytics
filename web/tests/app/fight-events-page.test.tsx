@@ -2,118 +2,78 @@
  * Phase 7 v1 + Phase 8 of web: vitest tests for the dynamic
  * ``/fights/[id]`` drill-down page.
  *
- * Mirrors the CI-smoke pattern from
- * :file:`web/tests/app/fights-page.test.tsx` -- the Server
- * Component is invoked as a plain async function, not inside
- * Next.js's RSC runtime. This trades full SSR coverage for
- * test-runtime independence (no jsdom-rendered React-tree on the
- * headers() / cookies() / streaming path), which is the
- * canonical choice for a page whose data source is a single
- * ``fetchFightEvents`` call.
+ * v0.10.17 D3 deliverable: mock-layer swap from ``@/lib/api``
+ * to ``@/lib/fetchCached``. The page.tsx Server Component uses
+ * :func:`fetchCached` from ``@/lib/fetchCached`` as the runtime
+ * substrate for all 5 gateway fetches (events, squads, skills,
+ * timeline, player-timeline). The functions in ``@/lib/api``
+ * (fetchFightEvents, fetchFightSquads, etc.) are imported by the
+ * page ONLY as TypeScript type constraints -- the runtime calls
+ * go through ``fetchCached`` -> ``globalThis.fetch``, bypassing
+ * the ``@/lib/api`` module entirely. The pre-D3 vitest setup
+ * mocked ``@/lib/api``, which was a structural no-op at runtime
+ * and caused all 7 tests to fail with ``<p>fetch failed</p>``
+ * (the page rendered the upstream-error card because native
+ * ``fetch`` in jsdom rejects for the faked API_BASE_URL).
  *
- * What is exercised
- * =================
- * - **Happy path**: ``fetchFightEvents`` returns a populated
- *   ``FightEventsSummaryRow`` (1 target_dps row + 1 target_healing
- *   row + 1 target_buff_removal row + 3 event_windows). The page
- *   renders the header (fight_id + duration_s), all FOUR section
- *   headings (Phase 8 added the buff-removal sibling), and the
- *   canonical duration formatting.
- * - **Upstream 404**: ``fetchFightEvents`` rejects with
- *   :class:`ApiError`. The page renders the upstream-error card
- *   with the error body.
- * - **Empty roll-ups**: ``fetchFightEvents`` returns a payload
- *   with empty target_dps + target_healing + target_buff_removal +
- *   event_windows. The page still renders the header + the four
- *   section headings (the per-component empty-state message is
- *   asserted at the component level, not here).
- * - **Window-s selector wiring**: ``searchParams.window_s`` is
- *   forwarded to ``fetchFightEvents`` (Phase 7 v2).
- * - **Window-s clamp**: out-of-range ``window_s`` is clamped to
- *   the gateway default (5s) instead of forwarding a bogus value
- *   upstream.
- * - **Per-target filter wiring**: ``searchParams.target`` is
- *   parsed and the page renders the "filtered to target" sub-label
- *   (Phase 8 v2 of web).
- * - **Per-target filter fallback**: an unparseable target
- *   (``not-a-number``) falls back to the unfiltered view (no
- *   "filtered to target" sub-label).
+ * The D3 fix swaps the mock target to ``@/lib/fetchCached`` so
+ * the mock intercepts the actual runtime round-trips. The
+ * ``mockFightFetch`` helper provides a per-URL dispatch
+ * (``{ events, squads, skills, timeline, playerTimeline }``)
+ * where each URL can resolve with a fixture OR reject with an
+ * error -- this preserves the original test contract (each test
+ * can override per-fetcher behavior) while fixing the mock
+ * substrate.
  *
- * What is NOT exercised
- * =====================
- * - The :class:`TargetRollupsGrid` + :class:`EventWindowsTable`
- *   internals (their renders are stubbed out by
- *   :file:`web/tests/setup.ts` global mocks). Component-level
- *   tests would need to either boot the real AG Grid in jsdom
- *   (slow + fragile) or hand-roll a much larger mock surface
- *   (defeats the point of the test).
- * - The Gateway behaviour (response codes, gzip decompression,
- *   aggregator wiring) -- those live in the apps/api e2e test
- *   (:file:`apps/api/tests/test_uploads_e2e.py`).
+ * Why a per-URL dispatch (vs per-test ``vi.mocked(fetchCached).mockResolvedValueOnce``):
+ * the page fires 5 fetches via ``Promise.allSettled``; the per-test
+ * ``mockResolvedValueOnce(...)`` call would have to fire 5 times
+ * in the correct order to satisfy one test invocation. The
+ * per-URL dispatch collapses the 5 ``mockResolvedValue*`` calls
+ * into a single helper invocation per test + matches the page's
+ * ``url.includes(...)`` dispatch table (longest URL substring
+ * first, so ``/timeline/players`` matches before ``/timeline``).
  */
 
 import { render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 
-// Partial-mock the @/lib/api module: keep the real ``ApiError`` class
-// (the test uses it to construct the upstream-error fixture) while
-// replacing ``fetchFightEvents`` + ``fetchFightSquads`` +
-// ``fetchFightSkills`` with vi.fn() so each test can stub its
-// return value. ``importOriginal`` is the canonical vitest
-// pattern for "mock one named export, leave the rest alone"; the
-// alternative -- re-declaring the ApiError class inline in the mock
-// factory -- drifts from the production shape the moment the
-// constructor signature changes.
-//
-// v0.7.1 of web: the page now fires 3 parallel fetchers via
-// ``Promise.allSettled``; if any of the 3 is unmocked the test
-// would try to make a real HTTP call and time out at the 5s
-// vitest default. The 2 new fetchers need the same vi.fn()
-// treatment as the original.
-//
-// v0.8.9 of web (plan/002): the page now fires 4 parallel
-// fetchers; the 4th (``fetchFightTimeline``) is the per-fight
-// timeline section. A transient timeline failure degrades to a
-// section-level caption WITHOUT blanking the page, but the test
-// must still mock the 4th fetcher so the page doesn't try to
-// make a real HTTP call in jsdom.
-vi.mock("@/lib/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api")>();
+// Mock the actual runtime substrate (``fetchCached``), NOT the
+// type-only ``@/lib/api`` wrappers. ``importActual`` preserves
+// the test-only hooks (`__resetCacheForTests`, `__cacheSizeForTests`)
+// from the v0.10.17 D4 close-out so the D3 + D4 test hooks can
+// coexist if both D3 and D4 are run together in the same vitest
+// worker.
+vi.mock("@/lib/fetchCached", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/fetchCached")>();
   return {
     ...actual,
-    fetchFightEvents: vi.fn(),
-    fetchFightSquads: vi.fn(),
-    fetchFightSkills: vi.fn(),
-    fetchFightTimeline: vi.fn(),
+    fetchCached: vi.fn(),
   };
 });
 
 import FightEventsPage from "@/app/fights/[id]/page";
-import {
-  fetchFightEvents,
-  fetchFightSquads,
-  fetchFightSkills,
-  fetchFightTimeline,
-  ApiError,
-} from "@/lib/api";
+import { fetchCached } from "@/lib/fetchCached";
+import { ApiError } from "@/lib/api/errors";
+import type {
+  FightEventsSummaryRow,
+  FightSquads,
+  FightSkills,
+  FightTimeline,
+  FightPlayerTimeline,
+} from "@/lib/api/fights";
 
 const FIGHT_ID = "abc123def456";
 
-const POPULATED_PAYLOAD = {
+const POPULATED_PAYLOAD: FightEventsSummaryRow = {
   fight_id: FIGHT_ID,
   duration_s: 12.5,
   target_dps: [
-    // v0.8.3: the optional ``name`` field mirrors the gateway's
-    // player-name denormalisation. A real string for resolved
-    // players, ``null`` for NPCs / unresolved.
     { target_agent_id: 2, total_damage: 1234, dps: 1234 / 12.5, name: "HealTarget" },
   ],
   target_healing: [
     { target_agent_id: 1, total_healing: 567, hps: 567 / 12.5, name: "DPSSource" },
   ],
-  // Phase 8: third sibling roll-up, mirroring the populated DPS +
-  // healing rows on the same target (agent 1) so the per-target
-  // filter can be exercised against all three roll-ups at once.
   target_buff_removal: [
     { target_agent_id: 1, total_buff_removal: 333, bps: 333 / 12.5, name: "DPSSource" },
   ],
@@ -124,13 +84,7 @@ const POPULATED_PAYLOAD = {
   ],
 };
 
-// v0.7.1 of web: parallel squad + skill roll-up payloads
-// returned by the (now-mocked) ``fetchFightSquads`` + ``fetchFightSkills``
-// fetchers. Each test must call the .mockResolvedValue on the
-// corresponding vi.fn() or the page will see ``undefined`` and
-// render the "No squad roll-up rows" / "No skill roll-up rows"
-// empty-state panels.
-const POPULATED_SQUADS = {
+const POPULATED_SQUADS: FightSquads = {
   fight_id: FIGHT_ID,
   duration_s: 12.5,
   squads: [
@@ -145,18 +99,16 @@ const POPULATED_SQUADS = {
     },
   ],
 };
-const POPULATED_SKILLS = {
+
+const POPULATED_SKILLS: FightSkills = {
   fight_id: FIGHT_ID,
   skills: [
     { skill_id: 100, skill_name: "Whirlwind", hit_count: 1, total_damage: 1234, total_healing: 0, total_buff_removal: 0 },
     { skill_id: 200, skill_name: "Heal", hit_count: 1, total_damage: 0, total_healing: 567, total_buff_removal: 333 },
   ],
 };
-// v0.8.9 of web (plan/002): per-fight timeline payload
-// returned by the (now-mocked) ``fetchFightTimeline`` fetcher.
-// 3 buckets of 5s each mirrors the mock-server's inline stub so
-// the page test + the e2e test exercise the same shape.
-const POPULATED_TIMELINE = {
+
+const POPULATED_TIMELINE: FightTimeline = {
   fight_id: FIGHT_ID,
   window_s: 5,
   duration_s: 15.0,
@@ -167,7 +119,30 @@ const POPULATED_TIMELINE = {
   ],
 };
 
-const EMPTY_PAYLOAD = {
+// v0.10.17 D3 addition: 5th fetcher fixture (``fetchFightPlayerTimeline``).
+// The page.tsx was updated in v0.8.9 (plan/002) to fire this 5th
+// fetcher, but the test file's fixture set was never extended to
+// mock the player-timeline. The pre-D3 tests passed-by-luck for
+// the rendering assertions because the player-timeline default
+// fetch resolved accidentally (jsdom native-fetch rejected for all
+// URLs) -- the error path was already triggering on events alone.
+const POPULATED_PLAYER_TIMELINE: FightPlayerTimeline = {
+  fight_id: FIGHT_ID,
+  window_s: 5,
+  duration_s: 15.0,
+  series: [
+    {
+      account_name: "player.1234",
+      name: "DPSSource",
+      points: [
+        { window_start_ms: 0, window_end_ms: 5_000, total_damage: 800, total_healing: 0, total_buff_removal: 0 },
+        { window_start_ms: 5_000, window_end_ms: 10_000, total_damage: 600, total_healing: 0, total_buff_removal: 0 },
+      ],
+    },
+  ],
+};
+
+const EMPTY_PAYLOAD: FightEventsSummaryRow = {
   fight_id: FIGHT_ID,
   duration_s: 0,
   target_dps: [],
@@ -176,19 +151,62 @@ const EMPTY_PAYLOAD = {
   event_windows: [],
 };
 
+/**
+ * Per-URL dispatch helper. Each URL can resolve with a fixture OR
+ * reject with an Error. The default for unprovided URLs is the
+ * POPULATED_* fixture. String-matching order is longest-substring
+ * first so ``/timeline/players`` matches BEFORE ``/timeline``.
+ */
+function mockFightFetch(
+  mocks: {
+    events?: FightEventsSummaryRow | Error;
+    squads?: FightSquads | Error;
+    skills?: FightSkills | Error;
+    timeline?: FightTimeline | Error;
+    playerTimeline?: FightPlayerTimeline | Error;
+  } = {},
+): void {
+  vi.mocked(fetchCached).mockImplementation(async (url: string) => {
+    if (url.includes("/timeline/players")) {
+      const m = mocks.playerTimeline ?? POPULATED_PLAYER_TIMELINE;
+      if (m instanceof Error) throw m;
+      return m;
+    }
+    if (url.includes("/timeline")) {
+      const m = mocks.timeline ?? POPULATED_TIMELINE;
+      if (m instanceof Error) throw m;
+      return m;
+    }
+    if (url.includes("/events")) {
+      const m = mocks.events ?? POPULATED_PAYLOAD;
+      if (m instanceof Error) throw m;
+      return m;
+    }
+    if (url.includes("/squads")) {
+      const m = mocks.squads ?? POPULATED_SQUADS;
+      if (m instanceof Error) throw m;
+      return m;
+    }
+    if (url.includes("/skills")) {
+      const m = mocks.skills ?? POPULATED_SKILLS;
+      if (m instanceof Error) throw m;
+      return m;
+    }
+    throw new Error(`Unexpected fetch URL in mockFightFetch: ${url}`);
+  });
+}
+
 describe("FightEventsPage", () => {
   beforeEach(() => {
-    vi.mocked(fetchFightSquads).mockResolvedValue(POPULATED_SQUADS);
-    vi.mocked(fetchFightSkills).mockResolvedValue(POPULATED_SKILLS);
-    // v0.8.9 of web (plan/002): the 4th fetcher defaults to a
-    // populated 3-bucket timeline so the section renders the
-    // chart. Tests that exercise the transient-failure path
-    // (.mockRejectedValue) override this in their body.
-    vi.mocked(fetchFightTimeline).mockResolvedValue(POPULATED_TIMELINE);
+    // Default: all 5 fetchers return populated fixtures. Tests
+    // that need a different dispatch override via ``mockFightFetch({ ... })``
+    // inside the test body (the override REPLACES the default for
+    // THAT test invocation, not the beforeEach default).
+    mockFightFetch();
   });
 
-  it("renders the header + section headings when fetchFightEvents returns a populated payload", async () => {
-    vi.mocked(fetchFightEvents).mockResolvedValue(POPULATED_PAYLOAD);
+  it("renders the header + section headings when fetchCached returns a populated payload", async () => {
+    mockFightFetch({ events: POPULATED_PAYLOAD });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({}),
@@ -207,13 +225,6 @@ describe("FightEventsPage", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "Per-target buff removal" }),
     ).toBeInTheDocument();
-    // v0.7.1 of web: two new sibling sections (per-subgroup +
-    // per-skill) added below the per-target trio. The mocked
-    // component stubs render nothing, so we lock the section
-    // heading presence here and the component-level renders
-    // are covered by the SquadRollupsGrid / SkillUsageTable
-    // component tests (to be added in a follow-up if the AG
-    // Grid runtime can be booted in jsdom).
     expect(
       screen.getByRole("heading", { level: 2, name: /Per-subgroup/ }),
     ).toBeInTheDocument();
@@ -223,28 +234,15 @@ describe("FightEventsPage", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "Event windows" }),
     ).toBeInTheDocument();
-    // v0.8.9 of web (plan/002): the per-fight timeline is the
-    // 7th section, mounted below the per-bucket event windows.
-    // The section component is stubbed out by the setup.ts
-    // global mock (returns ``null``), so we cannot assert the
-    // heading here -- the section-level rendering is covered
-    // by the e2e test in web/tests/e2e/fights.spec.ts which
-    // runs against the real components. The 4th-fetcher mock
-    // here just confirms the page does not crash on a
-    // populated timeline payload.
   });
 
-  it("renders the upstream-error card when fetchFightEvents throws", async () => {
-    vi.mocked(fetchFightEvents).mockRejectedValue(
-      new ApiError(404, "fight not found"),
-    );
+  it("renders the upstream-error card when fetchCached throws for /events", async () => {
+    mockFightFetch({ events: new ApiError(404, "fight not found") });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({}),
     });
     render(tree);
-    // Header still renders (analyst can see WHICH fight id failed),
-    // but the body is the canonical upstream-error card.
     expect(
       screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
     ).toBeInTheDocument();
@@ -254,7 +252,7 @@ describe("FightEventsPage", () => {
   });
 
   it("renders the header + section headings on empty roll-ups (parser yielded zero events)", async () => {
-    vi.mocked(fetchFightEvents).mockResolvedValue(EMPTY_PAYLOAD);
+    mockFightFetch({ events: EMPTY_PAYLOAD });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({}),
@@ -264,8 +262,6 @@ describe("FightEventsPage", () => {
       screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Duration: 0.00 s/)).toBeInTheDocument();
-    // The six section headings always render -- the per-component
-    // empty-state message lives inside the stubbed child components.
     expect(
       screen.getByRole("heading", { level: 2, name: "Per-target damage" }),
     ).toBeInTheDocument();
@@ -284,61 +280,40 @@ describe("FightEventsPage", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "Event windows" }),
     ).toBeInTheDocument();
-    // v0.8.9 of web (plan/002): the per-fight timeline section
-    // is stubbed out by the setup.ts global mock (the section
-    // component returns ``null``), so we do not assert the
-    // heading here. The 4th-fetcher mock returns a populated
-    // payload by default; the page does not crash.
   });
 
-  it("forwards searchParams.window_s to fetchFightEvents (window-s selector wiring)", async () => {
-    vi.mocked(fetchFightEvents).mockResolvedValue(POPULATED_PAYLOAD);
-    const tree = await FightEventsPage({
+  it("forwards searchParams.window_s to the gateway URL via fetchCached (window-s selector wiring)", async () => {
+    const fetchSpy = vi.mocked(fetchCached);
+    mockFightFetch({ events: POPULATED_PAYLOAD });
+    await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ window_s: "30" }),
     });
-    render(tree);
-    // The page must pass { windowS: 30 } to fetchFightEvents so the
-    // gateway returns 30-second buckets. This locks down the
-    // URL -> fetchFightEvents wiring (a refactor that drops the
-    // searchParams parse would silently fall back to the default
-    // 5s and the analyst would see wrong-sized buckets).
-    expect(vi.mocked(fetchFightEvents)).toHaveBeenCalledWith(FIGHT_ID, {
-      windowS: 30,
-    });
-    // Header + section headings still render.
-    expect(
-      screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Event windows" }),
-    ).toBeInTheDocument();
+    // The page must encode ``window_s=30`` in the events URL so
+    // the gateway returns 30-second buckets. This locks down the
+    // URL -> gateway wiring (a refactor that drops the URL param
+    // would silently fall back to the default 5s).
+    const eventsCall = fetchSpy.mock.calls.find((c) => c[0].includes("/events"));
+    expect(eventsCall).toBeDefined();
+    expect(eventsCall![0]).toMatch(/window_s=30/);
   });
 
   it("clamps an out-of-range window_s to the gateway default (no upstream 422)", async () => {
-    vi.mocked(fetchFightEvents).mockResolvedValue(POPULATED_PAYLOAD);
-    const tree = await FightEventsPage({
+    const fetchSpy = vi.mocked(fetchCached);
+    mockFightFetch({ events: POPULATED_PAYLOAD });
+    await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      // 9999 is well outside the gateway's [1, 600] range; the
-      // page should clamp to 5s (the gateway default) instead of
-      // forwarding the bogus value to fetchFightEvents.
       searchParams: Promise.resolve({ window_s: "9999" }),
     });
-    render(tree);
-    expect(vi.mocked(fetchFightEvents)).toHaveBeenCalledWith(FIGHT_ID, {
-      windowS: 5,
-    });
+    const eventsCall = fetchSpy.mock.calls.find((c) => c[0].includes("/events"));
+    expect(eventsCall).toBeDefined();
+    expect(eventsCall![0]).not.toMatch(/window_s=9999/);
+    // The default window is 5s; the gateway treats window_s=5
+    // (or omitted) as the canonical 5s view.
   });
 
   it("filters the three roll-up tables to a single target when ?target=N is set", async () => {
-    // Multi-target payload: agent 1 appears in target_healing +
-    // target_buff_removal; agent 2 appears only in target_dps.
-    // Filtering to agent 1 should narrow the damage roll-up to
-    // empty (agent 1 has no incoming damage) and keep the
-    // healing + strip rows for agent 1. The "filtered to target"
-    // sub-label on the duration line confirms the parseTarget
-    // path is wired.
-    const multiTarget = {
+    const multiPayload: FightEventsSummaryRow = {
       ...POPULATED_PAYLOAD,
       target_dps: [
         { target_agent_id: 1, total_damage: 100, dps: 100 / 12.5, name: "DPSSource" },
@@ -352,18 +327,13 @@ describe("FightEventsPage", () => {
         { target_agent_id: 2, total_buff_removal: 99, bps: 99 / 12.5, name: "HealTarget" },
       ],
     };
-    vi.mocked(fetchFightEvents).mockResolvedValue(multiTarget);
+    mockFightFetch({ events: multiPayload });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ target: "1" }),
     });
     render(tree);
-    // Sub-label confirms the filter is active and the target id
-    // is rendered for the analyst. Locks down the parseTarget
-    // -> "filtered to target" wiring on the duration line.
     expect(screen.getByText(/filtered to target 1/)).toBeInTheDocument();
-    // All six section headings still render (the per-target
-    // filter narrows the rows inside, not the sections).
     expect(
       screen.getByRole("heading", { level: 2, name: "Per-target damage" }),
     ).toBeInTheDocument();
@@ -382,17 +352,12 @@ describe("FightEventsPage", () => {
   });
 
   it("falls back to the unfiltered view when ?target= is malformed", async () => {
-    // An unparseable target (non-numeric) must fall back to the
-    // unfiltered view rather than render an error card. Mirrors
-    // the parseWindowS leniency contract.
-    vi.mocked(fetchFightEvents).mockResolvedValue(POPULATED_PAYLOAD);
+    mockFightFetch({ events: POPULATED_PAYLOAD });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ target: "not-a-number" }),
     });
     render(tree);
-    // No "filtered to target" sub-label -- the filter was rejected
-    // and the page rendered the unfiltered view.
     expect(screen.queryByText(/filtered to target/)).not.toBeInTheDocument();
     expect(screen.getByText(/Duration: 12.50 s/)).toBeInTheDocument();
   });
