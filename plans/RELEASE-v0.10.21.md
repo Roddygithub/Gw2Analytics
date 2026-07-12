@@ -35,10 +35,10 @@
 | 4 | TASK-K-2-SSRF-SUBSTRATE-REWORK-B | K-2 SSRF substrate | YES | S |
 | 5 | TASK-SUBSTRATE-MONOREPO-A | Cross-cutting conftest | NO (cycle-authoring) | M |
 | 6 | TASK-M9-EXCLUDE-BROADEN-A | pre-commit M9 | NO (substrate) | XS |
-| 7 | TASK-K-1-DISPATCH-FK-C | K-1 cross-validation | NO (passes; cross-validate) | XS |
-| 8 | TASK-K-1-DISPATCH-FK-D | K-1 cross-validation | NO (passes; cross-validate) | XS |
-| 9 | TASK-K-3-EXECUTOR-MOCK-A | K-3 executor mock | NO (substrate-improvement) | M |
-| 10 | TASK-K-3-EXECUTOR-MOCK-B | K-3 cross-validation | NO (cross-validation) | XS |
+| 7 | TASK-K-3-EXECUTOR-MOCK-A | K-3 executor mock | NO (substrate-improvement) | M |
+| 8 | TASK-K-3-EXECUTOR-MOCK-B | K-3 cross-validation | NO (cross-validation) | XS |
+| 9 | TASK-K-1-DISPATCH-FK-C | K-1 cross-validation | NO (passes; cross-validate) | XS |
+| 10 | TASK-K-1-DISPATCH-FK-D | K-1 cross-validation | NO (passes; cross-validate) | XS |
 | 11 | TASK-M-8-BIS-PLAN-LANDING | Cycle-authoring (this doc) | NO | XS (lands at close-out) |
 | 12 | (intentionally out of M-8-bis sub-cycle) | F17 sub-cycle | — | — |
 
@@ -175,7 +175,8 @@ At the end of the v0.10.21 mimo-half cycle, the executor MUST verify:
 2. `pytest tests/test_uploads_arq.py --tb=line -q` → all 7 cases PASS (K-1 dispatch FK closed).
 3. `pytest tests/test_webhooks_e2e.py --tb=line -q` → all 22 cases PASS (K-2 SSRF-gate + 18 non-SSRF closed).
 4. `pytest tests/test_webhooks_dns_under_attack.py tests/test_webhooks_getaddrinfo_timeout.py tests/test_webhooks_dns_executor_concurrency.py` → all DNS-concurrency cases PASS (K-3 closed).
-5. `pytest tests/test_parser_emit_buffapply.py` (NEW F17 test) → all BuffApply emit predicate cases PASS if F17 is in this cycle; else defer to F17-only sub-cycle.
+5a. (F17 conditional — gates ONLY if F17 ships in v0.10.21 per §5 2-phase flow) `pytest tests/test_parser_emit_buffapply.py` (NEW F17 test) → all BuffApply emit predicate cases PASS; `pytest tests/test_parser_byte_alignment.py` extended assertions PASS.
+5b. WIP branch `v0.10.21/f17-statechange-extension` ff-merged to main ONLY after step 1-4 PASS (post M-8-bis close-out, pre-tag-force-advance). If F17 lands in v0.10.21: ff-merge per §5 phase 2 BEFORE cycle-end tag. If F17 defers: WIP branch preserved (NOT ff-merged in v0.10.21).
 6. Full surface `pytest tests` → 297+ / 297+ green (no D2 regression; K-cluster now zero).
 7. `ruff check` + `mypy --no-incremental` on the modified `apps/api/tests/` + new pod scripts + new tests → clean.
 8. CHANGELOG `[0.10.21]` entry spliced with K-cluster closed + F17 sub-cycle landed language.
