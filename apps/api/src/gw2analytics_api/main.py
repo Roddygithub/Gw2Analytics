@@ -104,24 +104,43 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # without arq).
     _app.state.arq_pool = None
     try:
+        import redis.exceptions  # noqa: PLC0415
         from arq import create_pool  # noqa: PLC0415
 
         from gw2analytics_api.workers.parser_settings import WorkerSettings  # noqa: PLC0415
 
         _app.state.arq_pool = await create_pool(WorkerSettings.redis_settings)
         logger.info("arq pool initialised (host=%s)", WorkerSettings.redis_settings.host)
-    except Exception:
-        # The try/except is intentionally broad: arq
-        # raises a mix of ``ConnectionError`` (Redis
-        # unreachable), ``OSError`` (DNS), and
-        # ``TimeoutError`` (slow broker) on init
-        # failure. The operator's signal is the WARNING
-        # log; the fallback path in the upload route
-        # keeps the API serving traffic.
+    except (
+        ConnectionError,
+        OSError,
+        TimeoutError,
+        redis.exceptions.RedisError,
+    ) as exc:
+        # The try/except is intentionally narrow: arq is documented
+        # to raise ``ConnectionError`` (Redis unreachable), ``OSError``
+        # (DNS), and ``TimeoutError`` (slow broker) on init failure.
+        # In practice the underlying ``redis-py`` library's exceptions
+        # (``redis.exceptions.ConnectionError``,
+        # ``redis.exceptions.TimeoutError``) are SUBCLASSES of
+        # ``redis.exceptions.RedisError`` (NOT the builtin
+        # ``ConnectionError`` / ``TimeoutError``), so the bare
+        # builtins do NOT catch them. We add ``RedisError`` to the
+        # tuple to catch the unwrapped redis exceptions that reach
+        # ``arq.create_pool`` in some arq versions. Other exception
+        # classes (e.g. ``AttributeError`` from a typo'd
+        # ``redis_settings``) propagate so a misconfigured deployment
+        # surfaces the underlying misconfiguration rather than masking
+        # it with a misleading "arq pool init failed" warning.
+        # v0.10.15 plan 032: narrowed from ``except Exception`` to the
+        # 4 specific exception classes documented in this comment;
+        # an ``AttributeError`` / ``KeyError`` / ``ImportError`` now
+        # propagates.
         logger.exception(
-            "arq pool init failed; uploads will use the "
+            "arq pool init failed (type=%s); uploads will use the "
             "BackgroundTasks fallback (slower on parallel "
             "uploads, but functional)",
+            type(exc).__name__,
         )
 
     # Step 3: webhook retry+DLQ scheduler (v0.9.1, unchanged).
