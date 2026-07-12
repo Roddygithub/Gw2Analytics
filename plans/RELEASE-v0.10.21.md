@@ -176,7 +176,7 @@ At the end of the v0.10.21 mimo-half cycle, the executor MUST verify:
 3. `pytest tests/test_webhooks_e2e.py --tb=line -q` → all 22 cases PASS (K-2 SSRF-gate + 18 non-SSRF closed).
 4. `pytest tests/test_webhooks_dns_under_attack.py tests/test_webhooks_getaddrinfo_timeout.py tests/test_webhooks_dns_executor_concurrency.py` → all DNS-concurrency cases PASS (K-3 closed).
 5a. (F17 conditional — gates ONLY if F17 ships in v0.10.21 per §5 2-phase flow) `pytest tests/test_parser_emit_buffapply.py` (NEW F17 test) → all BuffApply emit predicate cases PASS; `pytest tests/test_parser_byte_alignment.py` extended assertions PASS.
-5b. WIP branch `v0.10.21/f17-statechange-extension` ff-merged to main ONLY after step 1-4 PASS (post M-8-bis close-out, pre-tag-force-advance). If F17 lands in v0.10.21: ff-merge per §5 phase 2 BEFORE cycle-end tag. If F17 defers: WIP branch preserved (NOT ff-merged in v0.10.21).
+5b. WIP branch `v0.10.21/f17-statechange-extension` ff-merged to main ONLY post M-8-bis close-out + pre-tag-force-advance. **F17 deferral gate:** if F17 phase 1 has NOT produced at least 1 commit on the WIP branch by step-5 execution time, F17 defers to v0.10.22 sub-cycle (NOT v0.10.21); WIP branch preserved; v0.10.21 cycle may STILL declare CLOSED if steps 1-4 PASS + D2/D1 baselines preserved.
 6. Full surface `pytest tests` → 297+ / 297+ green (no D2 regression; K-cluster now zero).
 7. `ruff check` + `mypy --no-incremental` on the modified `apps/api/tests/` + new pod scripts + new tests → clean.
 8. CHANGELOG `[0.10.21]` entry spliced with K-cluster closed + F17 sub-cycle landed language.
