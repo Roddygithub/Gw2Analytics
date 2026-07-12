@@ -264,9 +264,8 @@ no longer in the shortlist. **F18 Replay UI is no longer listed in
 §1 v1.0 candidates** — it shipped in v0.10.17 (D1 + D2 + D5) and
 is now in §1.1 cycle shipts (see "v0.10.17 cycle shipts" above).
 
-**M8 PR status (v0.10.20 cycle PARTIAL-FIX):** M8 shipped as PARTIAL-FIX in the v0.10.20 mimo-half cycle (closes 5 of 11 lifecycle-race subtype failures via PR-1 K-1 + closes 2 of 2 saturation subtypes via PR-2 K-3 per-test executor; 4 SSRF-gate residuals + 6 NEW dispatch-FK subtype failures + substrate-pollution remain forward-blocked). See `plans/RELEASE-v0.10.21.md` for the v0.10.21 cycle plan-landing picking up the 12 TASK-Y forward-blockers (canonical enumeration lives in the relevant AUDIT §A + AUDIT §4 as cited inside that plan).
+**M8 PR status (v0.10.20 cycle PARTIAL-FIX):** M8 shipped as PARTIAL-FIX in the v0.10.20 mimo-half cycle (closes 5 of 11 lifecycle-race subtype failures via PR-1 K-1 + closes 2 of 2 saturation subtypes via PR-2 K-3 per-test executor; 4 SSRF-gate residuals + 6 NEW dispatch-FK subtype failures + substrate-pollution remain forward-blocked). See `plans/RELEASE-v0.10.21.md` for the v0.10.21 cycle plan-landing picking up the 12 TASK-Y forward-blockers (canonical enumeration lives in the AUDIT doc, cited inside that plan; AUDIT §A invariant pasted below verbatim from `plans/AUDIT-2026-07-13-v0.10.20.md`).
 
-> Source: verbatim paste from `plans/AUDIT-2026-07-13-v0.10.20.md` §A (v0.10.20 cycle-ship audit, M8 invariant):
 > **Cycle may NOT be relabeled as "completed"** until the 12 v0.10.21 cycle-scope items close (4 true test residuals + 8 substrate-improvement / cycle-authoring / cross-validation items). The maintainer invariant stated above is the contract.
 
 ---
