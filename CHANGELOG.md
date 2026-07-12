@@ -274,7 +274,65 @@ Round-2 fix: sub-case 6 swaps `vi.spyOn().mockResolvedValue(new Response(...))` 
 
 [0.10.17]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.15...v0.10.17
 
+## [0.10.18] - 2026-07-13: pre-existing vitest pre-closure marker + Replay UI Playwright e2e + README parity D4 (plan 038 D1-D4 partial)
+
+The v0.10.18 cycle (the post-v0.10.17 follow-up mimo-half, per the deferred D1-D4 scope in [`plans/v0.10.18-mimo-half-prompt.md`](./plans/v0.10.18-mimo-half-prompt.md)) shipped 2 of the 4 scoped deliverables (D3 + D4) + a 0-line marker for D1 + 1 deliverable (D2) remains docker-blocked pending operator action.
+
+### Note (D1 pre-closure -- 0-line marker)
+
+The v0.10.18 brief scoped D1 as "close the 6 residual pre-existing vitest failures in `web/tests/components/fight-events-page*` (carry-forward O6 from the v0.10.17 cycle-end audit)". The diagnostic-first phase of the cycle revealed the count was STALE: the v0.10.17 D3 commit `52fd60f fix(test): mock layer swap to fix 7 pre-existing vitest failures` had closed ALL 7 pre-existing failures atomically (NOT "1 of 7" as the v0.10.17 audit hypothesised). The 7 failures shared ONE root cause: the test file mocked the wrong module (`@/lib/api` instead of `@/lib/fetchCached`); the v0.10.17 D3 substrate swap closed all 7 in one commit. A diagnostic `pnpm vitest run` against the v0.10.18 D1 marker commit passes 7/7 in ~1 second on `web/tests/app/fight-events-page.test.tsx`. D1 reduces to a 0-line `--allow-empty` commit (`4610a10`) documenting the discovery so the 4-deliverable thread is preserved in git lineage for downstream tooling that expected four commits.
+
+### Deferred (D2 -- docker-blocked, operator-action pending)
+
+D2 is "close the 2 pre-existing pytest failures in `apps/api/tests/test_uploads_e2e.py`" per the v0.10.18 brief. The 2 failures are Postgres-fixture-gated: they require `docker compose up -d` to spin up the local Postgres + MinIO + Redis stack. The cycle shipped WITHOUT the D2 fix landed because `docker compose up -d` from a developer terminal is outside the agent's autonomy. An operator can close O6 in a follow-up cycle: run `docker compose up -d`, run `pytest apps/api/tests/test_uploads_e2e.py`, diagnose, fix + atomic commit on the working branch.
+
+### Added (web tests - D3: Replay UI Playwright e2e spec)
+
+NEW `web/tests/e2e/replay-ui.spec.ts` (~100 LoC, 4 Playwright e2e cases for the F18 Replay UI on `/fights/[id]?tab=replay`). Targets the existing inline `/api/v1/fights/{id}/timeline?window_s=N` stub in `web/tests/e2e/mock-server.mjs` (3 buckets, 5s window each) -- NO mock-server edit required.
+
+- Case 1: page tab strip shows the "Replay" tab on `/fights/<fight-id>?tab=replay` + section heading renders.
+- Case 2: scrubber responds to keyboard navigation (focus + ArrowRight x2) with `aria-valuenow` updates + the `B3` current-bucket badge appears.
+- Case 3: play/pause toggle flips `aria-pressed` without console errors -- covers the `setInterval` / `setIsPlaying(false)` deferred-via-`setTimeout(0)` conservation contract via the integration surface.
+- Case 4: speed-toggle buttons reflect `aria-pressed` for the 1x / 2x / 4x / 8x playback-speed cluster.
+
+Strict Playwright TypeScript narrowing via per-test typed `expect(actual).toBe(expected)` assertions.
+
+### Changed (docs - D4: README parity sync, F16 fix-up)
+
+`README.md` `## Screenshots` table gained a 7th row: `/fights/[id]?tab=replay` mapped to `docs/screenshots/08-fight-drilldown.png`. The README's `## API surface` table is unchanged (already had `/api/v1/fights/{id}/timeline?window_s=N` at row 7 from v0.10.17). The v0.10.18 D4 closes the UI-compass gap for the Replay UI. LOC delta: ~3.
+
+### Tests (cumulative)
+
+- Web Playwright: 21 (cycle-start at v0.10.17 main) -> 25 (cycle-end at v0.10.18 main). Delta: +4 cases from D3.
+- Web vitest: 162 (cycle-start) -> 162 (cycle-end). Delta: 0 (cycle is docs-only + Playwright e2e on the Replay UI; vitest surface unchanged).
+- Apps/api pytest: unchanged in this cycle (D2 is deferred; the cycle is web-only).
+
+### Validation
+
+- `uv run ruff check apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: GREEN (cycle is web-only, backend untouched).
+- `uv run mypy apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: GREEN (0 errors in 74 source files).
+- `cd web && pnpm tsc --noEmit`: GREEN (the new spec is strict-mode clean).
+- `cd web && pnpm vitest run`: GREEN (28 files / 162 tests = 100% pass; the 7 pre-existing vitest failures are pre-closed by v0.10.17 D3 atomic mock-layer swap).
+- 3 atomic code+tests commits (D1 marker `--allow-empty` + D3 spec + D4 README row) + 2 docs commits (release+changelog + roadmap+audit) land on `main` per `CONTRIBUTING.md` linear-history rule.
+- Tag `v0.10.18` annotated + pushed + `gh release create` published at <https://github.com/Roddygithub/Gw2Analytics/releases/tag/v0.10.18>.
+
+### Pre-existing failures AFTER v0.10.18 (carry-forward O6 to a v0.10.X docker-block follow-up)
+
+- 0 vitest failures (down from 7 pre-v0.10.17 D3; the residual 6 hypothesised at the v0.10.17 cycle-end audit were closed by v0.10.17 D3 in atomic mock-layer swap -- the "6" framing was a hypothesis turned out wrong at v0.10.18 D1 marker discovery).
+- 2 pytest failures in `apps/api/tests/test_uploads_e2e.py` (STABLE from v0.10.15 release notes; docker-blocked pending operator action -- see D2 deferred note above).
+
+### Cross-references
+
+- Cycle plan provenance: [`plans/v0.10.18-mimo-half-prompt.md`](./plans/v0.10.18-mimo-half-prompt.md) (the parent brief).
+- Cycle release notes: [`plans/RELEASE-v0.10.18.md`](./plans/RELEASE-v0.10.18.md).
+- Cycle-end audit: [`plans/AUDIT-2026-07-20-1405720.md`](./plans/AUDIT-2026-07-20-1405720.md).
+- Predecessor pre-closure audit: [`plans/AUDIT-2026-07-13-3b2e71f.md`](./plans/AUDIT-2026-07-13-3b2e71f.md) (the v0.10.17 cycle-end audit whose O6 finding set the v0.10.18 D1 scope).
+- ROADMAP sync: [`docs/ROADMAP.md`](../docs/ROADMAP.md) "Current state (post v0.10.18 cycle)" + section 1.1 cycle shipts v0.10.18 entry + section 1.2 shortlist re-classification (D2 docker-blocked pytest follow-up + AG Grid M6).
+
+[0.10.18]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.17...v0.10.18
+
 ## [Unreleased]
+
 
 
 ## [0.10.2] - v0.10.2: 100-row cap on per-target roll-up + per-skill lists (hotfix followup #12)
