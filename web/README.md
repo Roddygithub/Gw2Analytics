@@ -110,6 +110,40 @@ the top of `web/tests/e2e/visual-regression.spec.ts`); a future
 cycle could lower it to 0.5% for stricter diffing (catches
 font-rendering drift across Node versions).
 
+## E2E tests and `SECRETS_KEK`
+
+The Playwright suite in `tests/e2e/` is **fully isolated from the
+real backend**. It spins up a local mock HTTP server
+(`tests/e2e/mock-server.mjs`) that returns the same JSON shapes the
+gateway would, so the E2E tests exercise the Next.js SSR + HTTP
+pipeline without Postgres, MinIO, or the FastAPI process.
+
+Because of this isolation:
+
+- **You do NOT need `SECRETS_KEK` to run `pnpm test:e2e`.**
+- The only environment variable Playwright needs is `API_BASE_URL`,
+  which `playwright.config.ts` already sets to the mock server
+  (`http://127.0.0.1:8080`).
+
+If you are testing the full stack manually (Next.js dev server +
+real FastAPI gateway), you **will** need a valid `SECRETS_KEK` for
+the gateway to start. Generate one with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Then export it before starting the gateway:
+
+```bash
+export SECRETS_KEK="<the-44-char-key>"
+uv run fastapi dev apps/api/src/gw2analytics_api/main.py
+```
+
+The deterministic test KEK used by `pytest` is defined in the root
+`pyproject.toml` (`[tool.pytest_env]`); do **not** use it for
+production.
+
 ## Architecture
 
 - **Server Components** fetch directly from `process.env.API_BASE_URL`

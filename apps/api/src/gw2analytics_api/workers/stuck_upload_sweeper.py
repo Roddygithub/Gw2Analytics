@@ -23,6 +23,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gw2analytics_api.config import get_settings
@@ -62,7 +63,7 @@ async def lifespan_stuck_upload_sweeper(
                     session_factory,
                     threshold_s,
                 )
-            except Exception:
+            except SQLAlchemyError:
                 logger.exception("stuck-upload sweeper tick failed; continuing to next interval")
             await asyncio.sleep(interval_s)
     except asyncio.CancelledError:

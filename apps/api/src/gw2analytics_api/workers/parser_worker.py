@@ -119,6 +119,8 @@ async def parse_job(
     try:
         await asyncio.to_thread(process_parse, sf, parsed_upload_id, raw_bytes)
     except Exception:
+        # Deliberately broad: any parse failure must be recorded as a
+        # failed Arq job and then re-raised so Arq retries the job.
         elapsed = time.monotonic() - start_time
         ARQ_JOBS_FAILED.labels(queue=_QUEUE_LABEL, error_type="parse").inc()
         ARQ_JOB_DURATION.labels(queue=_QUEUE_LABEL, status="failed").observe(elapsed)
@@ -130,10 +132,10 @@ async def parse_job(
     try:
         await dispatch_for_upload(sf, parsed_upload_id)
     except Exception:
-        # The parse already committed; a missed webhook is an
-        # operational concern (manual re-dispatch) and is NOT
-        # worth a re-parse (which would create a duplicate
-        # fight row). Log + swallow.
+        # Deliberately broad: the parse already committed; a missed
+        # webhook is an operational concern (manual re-dispatch) and is
+        # NOT worth a re-parse (which would create a duplicate fight
+        # row). Log and swallow.
         logger.exception(
             "parse_job dispatch failed for upload %s "
             "(parse already committed; webhook deliveries skipped)",

@@ -56,6 +56,7 @@ from datetime import UTC, datetime
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gw2analytics_api.crypto import FernetInvalidToken, decrypt_webhook_secret
@@ -363,7 +364,7 @@ async def dispatch_for_upload(
             session_factory,
             upload_id,
         )
-    except Exception:
+    except SQLAlchemyError:
         logger.exception(
             "webhook dispatch prepare phase crashed for upload %s",
             upload_id,
@@ -398,7 +399,7 @@ async def dispatch_for_upload(
 
     try:
         await asyncio.to_thread(_finalize_deliveries, session_factory, outcomes)
-    except Exception:
+    except SQLAlchemyError:
         logger.exception(
             "webhook dispatch finalize phase crashed for upload %s; "
             "delivery rows may be left in an incomplete state",

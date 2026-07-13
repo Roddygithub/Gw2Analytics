@@ -37,6 +37,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gw2analytics_api.crypto import FernetInvalidToken, decrypt_webhook_secret
@@ -150,7 +151,7 @@ def process_scheduled_retries(session_factory: Callable[[], Session]) -> int:
 
             db.commit()
             return delivered_count + failed_count
-        except Exception:
+        except SQLAlchemyError:
             logger.exception("scheduled-retries tick crashed; rolling back the cycle")
             db.rollback()
             raise
@@ -340,6 +341,9 @@ async def lifespan_scheduler(
                 ARQ_JOB_DURATION.labels(queue=_QUEUE_LABEL, status="success").observe(elapsed)
                 ARQ_JOBS_COMPLETED.labels(queue=_QUEUE_LABEL).inc()
             except Exception:
+                # Top-level resilience boundary: the scheduler must survive
+                # any unexpected failure (DB, metrics, thread pool) and retry
+                # on the next poll interval. CancelledError is handled below.
                 elapsed = time.monotonic() - start_time
                 ARQ_JOBS_FAILED.labels(queue=_QUEUE_LABEL, error_type="scheduler_tick").inc()
                 ARQ_JOB_DURATION.labels(queue=_QUEUE_LABEL, status="failed").observe(elapsed)
