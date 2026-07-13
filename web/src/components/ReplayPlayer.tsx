@@ -221,7 +221,7 @@ const SNAPSHOT_VALUE_STYLE: React.CSSProperties = {
  * bucket rather than every bucket. Capped at 1 so a short
  * replay does NOT skip any labels.
  */
-function computeReadoutStep(N: number): number {
+function computeReadoutStep(_N: number): number {
   // One label per ~120 px of bar-chart width; the bar chart
   // width is ``N * (BAR_WIDTH_PX + BAR_GAP_PX)`` so the step
   // is ``120 / 16`` = 7 (floor) = 7.

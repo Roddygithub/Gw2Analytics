@@ -116,7 +116,7 @@ function readStoredScale(): TimelineScale {
     if (raw === "linear" || raw === "log") {
       return raw;
     }
-  } catch (_) {
+  } catch {
     // ``localStorage`` can throw in private-browsing mode or
     // when the user has disabled it -- fall through to the
     // default. The try/catch is intentionally narrow
@@ -192,6 +192,7 @@ export function PlayerTimelineSection({
   // synchronously reads ``localStorage``; the write-effect
   // runs on every ``scale`` change.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe localStorage read on mount is a valid pattern
     setScale(readStoredScale());
   }, []);
   useEffect(() => {
@@ -200,7 +201,7 @@ export function PlayerTimelineSection({
     }
     try {
       window.localStorage.setItem(SCALE_TOGGLE_STORAGE_KEY, scale);
-    } catch (_) {
+    } catch {
       // Same swallow as the reader -- private-browsing
       // mode / disabled storage is non-fatal. The state
       // still updates for the current session.

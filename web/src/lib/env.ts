@@ -71,6 +71,7 @@ function _resolveApiBaseUrl(): string {
           `Error: ${
             err instanceof Error ? err.message : String(err)
           }`,
+        { cause: err },
       );
     }
   }
