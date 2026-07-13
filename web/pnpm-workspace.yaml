@@ -2,5 +2,13 @@ packages: []
 allowBuilds:
   esbuild: false
 ignoreScripts: false
-# Build-script allowlist moved to .npmrc.
 verify-deps-before-run: true
+
+# Security overrides: force patched versions of transitive dependencies
+# to silence `pnpm audit` findings. These can be removed once Next.js
+# and Vitest update their own dependency ranges to pull in the patched
+# versions natively.
+overrides:
+  vite: 6.4.3
+  esbuild: 0.25.12
+  postcss: 8.5.16

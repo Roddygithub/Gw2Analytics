@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Security dependency overrides** (`web/pnpm-workspace.yaml`): added workspace overrides to force non-vulnerable versions of `vite` (6.4.3), `esbuild` (0.25.12), and `postcss` (8.5.16), closing 5 `pnpm audit` findings (1 high, 4 moderate).
 - **MinIO blob storage failure handling** (`apps/api/src/gw2analytics_api/routes/uploads.py`): if `put_zevtc` raises, the upload endpoint now returns `HTTP 503 Service Unavailable` instead of silently accepting an un-stored blob. Transaction flow fixed to use `db.flush()` before the blob write and `db.commit()` only after success, with `db.rollback()` on failure, preventing orphaned `Upload` rows.
 - **Lint/type errors in tests and scripts** (`apps/api/tests/`, `apps/api/scripts/`): resolved Ruff and Mypy violations across test helpers and the cycle-closeout doc-applier script so the CI lint/type gates stay green.
 
