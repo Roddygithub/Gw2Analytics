@@ -8,7 +8,7 @@ FastAPI routes use; tests can call it directly.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from functools import lru_cache
+from functools import cache
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -20,7 +20,7 @@ class Base(DeclarativeBase):
     """Declarative base for every ORM model in this app."""
 
 
-@lru_cache(maxsize=1)
+@cache
 def get_engine() -> Engine:
     """Return the process-wide SQLAlchemy engine, built on first call."""
     settings = get_settings()
@@ -31,7 +31,7 @@ def get_engine() -> Engine:
     )
 
 
-@lru_cache(maxsize=1)
+@cache
 def get_sessionmaker() -> sessionmaker[Session]:
     """Return the process-wide sessionmaker."""
     return sessionmaker(

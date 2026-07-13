@@ -8,7 +8,7 @@ blob exists for re-parsing when the parser learns to read more events.
 from __future__ import annotations
 
 import io
-from functools import lru_cache
+from functools import cache
 
 from minio import Minio
 from minio.error import S3Error
@@ -16,7 +16,7 @@ from minio.error import S3Error
 from gw2analytics_api.config import get_settings
 
 
-@lru_cache(maxsize=1)
+@cache
 def get_minio() -> Minio:
     """Return the process-wide MinIO client."""
     s = get_settings()
