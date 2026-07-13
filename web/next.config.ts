@@ -35,11 +35,14 @@ const SECURITY_HEADERS = [
     key: "Content-Security-Policy",
     // 'self' for default + script-src + style-src; 'unsafe-inline' for
     // styles is required by Next.js SSR output (the framework emits
-    // inline <style> tags during streaming SSR). If a future
-    // contributor adds an inline <script>, the CSP will block it --
-    // migrate the script to a bundled file before relaxing this.
+    // inline <style> tags during streaming SSR). 'unsafe-inline' for
+    // scripts is required by Next.js 16 / React 19 streaming SSR, which
+    // injects a small inline bootstrapping script (e.g. self.__next_r)
+    // to coordinate hydration. If a future contributor adds a custom
+    // inline <script>, prefer a nonce-based CSP instead of broadening
+    // this directive further.
     value:
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   },
 ];
 
