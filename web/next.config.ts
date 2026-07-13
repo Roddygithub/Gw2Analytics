@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import createBundleAnalyzer from "@next/bundle-analyzer";
 
 // v0.10.x plan 011: application-layer fallback for the security headers
 // emitted at the Caddy reverse-proxy layer (Caddyfile plan 008).
@@ -42,6 +43,10 @@ const SECURITY_HEADERS = [
   },
 ];
 
+const withBundleAnalyzer = createBundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+});
+
 const nextConfig: NextConfig = {
   output: "standalone",
   // dev-only: allow HMR on loopback variants (127.0.0.1, localhost).
@@ -59,4 +64,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withBundleAnalyzer(nextConfig);
