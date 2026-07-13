@@ -36,32 +36,18 @@ envelope is the locked-in pattern.
 
 from __future__ import annotations
 
-import threading
+from functools import lru_cache
 
 from cryptography.fernet import Fernet
 from cryptography.fernet import InvalidToken as FernetInvalidToken
 
 from gw2analytics_api.config import get_settings
 
-# Cache Fernet instances keyed by KEK string. Fernet construction is
-# ~1ms; the hot path (webhook dispatch) decrypts once per sub per
-# upload so the cache pays off for gateways with many active subs.
-# The lock is conservative (Python dict GIL is sufficient for
-# type-stable keys, but explicit Lock matches the v0.8.3
-# best-practice convention for the role/auth checks already in
-# the routes, so future readers find a familiar shape).
-_FERNET_CACHE: dict[str, Fernet] = {}
-_FERNET_LOCK = threading.Lock()
 
-
+@lru_cache(maxsize=8)
 def _get_fernet(kek: str) -> Fernet:
     """Return a cached Fernet keyed by the URL-safe base64 KEK string."""
-    with _FERNET_LOCK:
-        f = _FERNET_CACHE.get(kek)
-        if f is None:
-            f = Fernet(kek.encode("ascii"))
-            _FERNET_CACHE[kek] = f
-        return f
+    return Fernet(kek.encode("ascii"))
 
 
 def _resolve_kek(explicit: str | None) -> str:

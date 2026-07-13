@@ -8,27 +8,24 @@ blob exists for re-parsing when the parser learns to read more events.
 from __future__ import annotations
 
 import io
+from functools import lru_cache
 
 from minio import Minio
 from minio.error import S3Error
 
 from gw2analytics_api.config import get_settings
 
-_client: Minio | None = None
 
-
+@lru_cache(maxsize=1)
 def get_minio() -> Minio:
     """Return the process-wide MinIO client."""
-    global _client  # noqa: PLW0603
-    if _client is None:
-        s = get_settings()
-        _client = Minio(
-            s.minio_endpoint,
-            access_key=s.minio_access_key,
-            secret_key=s.minio_secret_key,
-            secure=s.minio_secure,
-        )
-    return _client
+    s = get_settings()
+    return Minio(
+        s.minio_endpoint,
+        access_key=s.minio_access_key,
+        secret_key=s.minio_secret_key,
+        secure=s.minio_secure,
+    )
 
 
 def _ensure_bucket(client: Minio, bucket: str) -> None:

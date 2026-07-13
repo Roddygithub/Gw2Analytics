@@ -8,6 +8,7 @@ FastAPI routes use; tests can call it directly.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from functools import lru_cache
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -19,34 +20,26 @@ class Base(DeclarativeBase):
     """Declarative base for every ORM model in this app."""
 
 
-_engine: Engine | None = None
-_SessionLocal: sessionmaker[Session] | None = None
-
-
+@lru_cache(maxsize=1)
 def get_engine() -> Engine:
     """Return the process-wide SQLAlchemy engine, built on first call."""
-    global _engine  # noqa: PLW0603 -- intentional lazy init
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_engine(
-            settings.database_url,
-            future=True,
-            pool_pre_ping=True,
-        )
-    return _engine
+    settings = get_settings()
+    return create_engine(
+        settings.database_url,
+        future=True,
+        pool_pre_ping=True,
+    )
 
 
+@lru_cache(maxsize=1)
 def get_sessionmaker() -> sessionmaker[Session]:
     """Return the process-wide sessionmaker."""
-    global _SessionLocal  # noqa: PLW0603
-    if _SessionLocal is None:
-        _SessionLocal = sessionmaker(
-            bind=get_engine(),
-            autocommit=False,
-            autoflush=False,
-            expire_on_commit=False,
-        )
-    return _SessionLocal
+    return sessionmaker(
+        bind=get_engine(),
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
 
 
 def get_session() -> Iterator[Session]:
