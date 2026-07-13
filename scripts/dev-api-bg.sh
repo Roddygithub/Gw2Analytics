@@ -133,8 +133,19 @@ cd "$API_PATH"
 # Start uvicorn in a detached tmux session. The -H 0.0.0.0 flag binds all
 # interfaces (127.0.0.1 + localhost + LAN). Without it, a browser hitting
 # 127.0.0.1:8000 gets ERR_CONNECTION_REFUSED.
+#
+# Explicitly inject the resolved env vars into the tmux session via
+# ``-e`` so the process is not affected by tmux daemon environment
+# caching or pydantic-settings' .env path resolution from apps/api/.
 tmux new-session -d -s "$SESSION" \
-  "exec uv run uvicorn gw2analytics_api.main:app --host 0.0.0.0 --port ${PORT} 2>&1 | tee ${LOG}"
+  -e "DATABASE_URL=${DATABASE_URL}" \
+  -e "S3_ENDPOINT=${S3_ENDPOINT}" \
+  -e "S3_ACCESS_KEY=${S3_ACCESS_KEY}" \
+  -e "S3_SECRET_KEY=${S3_SECRET_KEY}" \
+  -e "S3_BUCKET=${S3_BUCKET}" \
+  -e "SECRETS_KEK=${SECRETS_KEK}" \
+  -e "ALLOW_INREQUEST_PARSE_FALLBACK=${ALLOW_INREQUEST_PARSE_FALLBACK}" \
+  "uv run uvicorn gw2analytics_api.main:app --host 0.0.0.0 --port ${PORT} 2>&1 | tee ${LOG}"
 
 # Poll for ready (max 90s — alembic schema-drift check + DB connect can be slow)
 echo "starting uvicorn in tmux session '$SESSION' (logs: $LOG) ..."
