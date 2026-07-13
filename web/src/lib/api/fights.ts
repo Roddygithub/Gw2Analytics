@@ -121,11 +121,18 @@ export async function fetchFights(): Promise<FightRow[]> {
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
   }
-  const rows: unknown = await resp.json();
-  if (!Array.isArray(rows)) {
+  const data: unknown = await resp.json();
+  // v0.10.12: the backend returns a paginated page object
+  // { fights, limit, offset }; the fights array is what the
+  // grid consumes.
+  const page =
+    data !== null && typeof data === "object" && "fights" in data
+      ? (data as { fights: unknown }).fights
+      : data;
+  if (!Array.isArray(page)) {
     throw new ApiError(500, "upstream returned non-array");
   }
-  return rows as FightRow[];
+  return page as FightRow[];
 }
 
 export async function fetchFightEvents(

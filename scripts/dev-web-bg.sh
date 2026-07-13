@@ -163,8 +163,33 @@ cd "$WEB_PATH"
 # `> ${LOG}` (not `>>`) truncates the log on each restart so a stale
 # failed parse doesn't pollute the next run's log (the previous run's
 # errors are already in the git history of the user's mental model).
-tmux new-session -d -s "$SESSION" \
-  "while true; do pnpm exec next dev -H 0.0.0.0 -p ${PORT} > ${LOG} 2>&1 || sleep 30; sleep 2; done"
+#
+# We export the resolved env vars inside a generated wrapper script so
+# the tmux session picks them up reliably (tmux does not inherit the
+# current shell's environment). See dev-api-bg.sh for the same pattern.
+WRAPPER=$(mktemp /tmp/web-dev-wrapper.XXXXXX.sh)
+cat > "$WRAPPER" <<EOF
+#!/usr/bin/env bash
+# Preserve the parent shell's PATH so pnpm/node resolve inside tmux.
+export PATH=$(printf '%q' "$PATH")
+export DATABASE_URL=$(printf '%q' "$DATABASE_URL")
+export S3_ENDPOINT=$(printf '%q' "$S3_ENDPOINT")
+export S3_ACCESS_KEY=$(printf '%q' "$S3_ACCESS_KEY")
+export S3_SECRET_KEY=$(printf '%q' "$S3_SECRET_KEY")
+export S3_BUCKET=$(printf '%q' "$S3_BUCKET")
+export SECRETS_KEK=$(printf '%q' "$SECRETS_KEK")
+export API_BASE_URL=$(printf '%q' "$API_BASE_URL")
+rm -f "\$0"
+while true; do
+  pnpm exec next dev -H 0.0.0.0 -p ${PORT} > ${LOG} 2>&1 || sleep 30
+  sleep 2
+done
+EOF
+chmod +x "$WRAPPER"
+
+# Run the wrapper through bash explicitly so it works even if /tmp is
+# mounted noexec (the file still needs read permission, not execute).
+tmux new-session -d -s "$SESSION" "bash \"$WRAPPER\""
 
 # Poll for ready (max 60s)
 echo "starting pnpm dev in tmux session '$SESSION' (logs: $LOG) ..."

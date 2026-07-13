@@ -142,6 +142,8 @@ cd "$API_PATH"
 WRAPPER=$(mktemp /tmp/api-dev-wrapper.XXXXXX.sh)
 cat > "$WRAPPER" <<EOF
 #!/usr/bin/env bash
+# Preserve the parent shell's PATH so uv/uvicorn resolve inside tmux.
+export PATH=$(printf '%q' "$PATH")
 export DATABASE_URL=$(printf '%q' "$DATABASE_URL")
 export S3_ENDPOINT=$(printf '%q' "$S3_ENDPOINT")
 export S3_ACCESS_KEY=$(printf '%q' "$S3_ACCESS_KEY")
