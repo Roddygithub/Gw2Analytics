@@ -162,3 +162,19 @@ class TestPlayerDamageAggregator:
         ]
         with pytest.raises(ValueError, match=r"tie on total_damage"):
             PlayerDamageAggregator._check_invariants(rows, expected_sum=200, duration_s=10.0)
+
+    def test_custom_dps_split_getter(self) -> None:
+        """Phase 6 v2 hook: a custom split getter carves condi vs power."""
+
+        def split(event: DamageEvent) -> tuple[int, int]:
+            # deterministic split: half condi, half power (rounded)
+            return (event.damage // 2, event.damage - event.damage // 2)
+
+        rows = PlayerDamageAggregator().aggregate(
+            [_damage(source=7, damage=100)],
+            duration_s=10.0,
+            dps_split_getter=split,
+        )
+        assert rows[0].dps == 10.0
+        assert rows[0].dps_condi == 5.0
+        assert rows[0].dps_power == 5.0

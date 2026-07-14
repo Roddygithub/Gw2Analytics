@@ -13,9 +13,12 @@ from pydantic import ValidationError
 
 from gw2_analytics.player_defense import PlayerDefenseAggregator, PlayerDefenseRow
 from gw2_core import (
+    BlockEvent,
     CCEvent,
     DamageEvent,
     DeathEvent,
+    DodgeEvent,
+    InterruptEvent,
 )
 
 
@@ -58,6 +61,43 @@ def _death(
         source_agent_id=source,
         target_agent_id=0,
         skill_id=0,
+    )
+
+
+def _dodge(
+    source: int,
+    time_ms: int = 0,
+) -> DodgeEvent:
+    return DodgeEvent(
+        time_ms=time_ms,
+        source_agent_id=source,
+        target_agent_id=0,
+        skill_id=0,
+    )
+
+
+def _block(
+    source: int,
+    time_ms: int = 0,
+) -> BlockEvent:
+    return BlockEvent(
+        time_ms=time_ms,
+        source_agent_id=source,
+        target_agent_id=0,
+        skill_id=0,
+    )
+
+
+def _interrupt(
+    source: int,
+    target: int = 0,
+    time_ms: int = 0,
+) -> InterruptEvent:
+    return InterruptEvent(
+        time_ms=time_ms,
+        source_agent_id=source,
+        target_agent_id=target,
+        skill_id=44,
     )
 
 
@@ -184,3 +224,35 @@ class TestPlayerDefenseAggregator:
             PlayerDefenseAggregator._check_invariants(
                 rows, expected_damage_total=200, barrier_by_player={}
             )
+
+    def test_dodge_block_interrupt_events(self) -> None:
+        """Wave 5 SCAFFOLD: dodge/block/interrupt events fill their stub columns."""
+        rows = PlayerDefenseAggregator().aggregate(
+            [],
+            [],
+            [],
+            dodge_events=[_dodge(source=7), _dodge(source=7)],
+            block_events=[_block(source=7)],
+            interrupt_events=[_interrupt(source=7, target=9)],
+        )
+        assert len(rows) == 1
+        assert rows[0].agent_id == 7
+        assert rows[0].dodges == 2
+        assert rows[0].blocks == 1
+        assert rows[0].interrupts == 1
+
+    def test_barrier_portion_getter(self) -> None:
+        """Phase 6 v2 hook: a custom barrier getter fills barrier_absorbed."""
+
+        def barrier(event: DamageEvent) -> int:
+            return event.damage // 2
+
+        rows = PlayerDefenseAggregator().aggregate(
+            [_damage(target=7, damage=100)],
+            [],
+            [],
+            barrier_portion_getter=barrier,
+        )
+        assert len(rows) == 1
+        assert rows[0].damage_taken == 100
+        assert rows[0].barrier_absorbed == 50

@@ -161,3 +161,18 @@ class TestPlayerHealAggregator:
         ]
         with pytest.raises(ValueError, match=r"tie on total_healing"):
             PlayerHealAggregator._check_invariants(rows, expected_sum=200, duration_s=10.0)
+
+    def test_custom_barrier_portion_getter(self) -> None:
+        """Phase 6 v2 hook: a custom barrier getter carves barrier from heals."""
+
+        def barrier(event: HealingEvent) -> int:
+            return event.healing // 4
+
+        rows = PlayerHealAggregator().aggregate(
+            [_healing(source=7, healing=120)],
+            duration_s=10.0,
+            barrier_portion_getter=barrier,
+        )
+        assert rows[0].hps == 12.0
+        assert rows[0].barrier_total == 30
+        assert rows[0].barrier_ps == 3.0
