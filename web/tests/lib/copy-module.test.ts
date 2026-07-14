@@ -125,4 +125,94 @@ describe("copy-module centraliSation invariant", () => {
       expect(value.trim().length).toBeGreaterThan(0);
     }
   });
+
+  it("surface-scanner: no inline UI strings in centralisation-touched component sources", () => {
+    // Surface-scanner smoke — a CURATED set of source files touched by the
+    // recent centraliSation sweeps. A full surface-scanner (all of
+    // web/src/{components,app}) is a follow-up; this scoped version verifies
+    // the *sweep-across-this-cycle* invariant without drowning in
+    // false-positives from unrelated component UI (CSV columns in SkillUsage,
+    // tier badges in FightsGrid, etc.).
+    const CURATED_BASENAMES = new Set([
+      "FightsGrid.tsx",
+      "SkillUsageTable.tsx",
+      "PlayerTimelineSection.tsx",
+    ]);
+
+    // The error.tsx files live under multiple paths; include BOTH root
+    // error.tsx and fights/[id]/error.tsx via path-suffix matching.
+    const TARGETS = listWebSourceFiles().filter((file) => {
+      const basename = path.basename(file);
+      if (CURATED_BASENAMES.has(basename)) return true;
+      if (file.endsWith("/app/error.tsx")) return true;
+      if (file.endsWith("/app/fights/[id]/error.tsx")) return true;
+      return false;
+    });
+
+    const knownValueSet = new Set(
+      KNOWN_CONSTANTS.map(({ value }) => value),
+    );
+
+    // Inline UI patterns to scan. Each pattern's FIRST capture group is the
+    // candidate string.
+    //
+    // NOTE: The `<button>TEXT</button>` pattern is INTENTIONALLY OMITTED.
+    // A naive implementation regex would fail when a button's opening tag
+    // spans multiple lines AND has an `onClick={() => ...}` arrow function
+    // attribute -- the `=>` operator is misinterpreted as the opening tag's
+    // closing `>`, causing the regex to slurp attribute content as if it
+    // were button text. The aria-label + placeholder patterns are
+    // sufficient for the analyst-facing-string centraliSation invariant
+    // (button-text is captured indirectly by the click-handler labels on
+    // the centraliSed buttons in the curated scope).
+    const INLINE_PATTERNS: Array<{ pattern: RegExp; source: string }> = [
+      {
+        source: "aria-label=\\\"TEXT\\\"",
+        pattern: /aria-label="([^"]{2,})"/g,
+      },
+      {
+        source: "placeholder=\\\"TEXT\\\"",
+        pattern: /placeholder="([^"]{2,})"/g,
+      },
+    ];
+
+    // Reject CSS values, prop names, and other false-positives before the
+    // centraliSation membership check.
+    function isRealLabel(s: string): boolean {
+      const trimmed = s.trim();
+      if (!trimmed) return false;
+      // Pure-prop / pure-css tokens.
+      if (/^[\d.]+(px|em|rem|vw|vh|%)?$/.test(trimmed)) return false;
+      if (/^[a-z][a-z-]*$/.test(trimmed)) return false;
+      // Dynamic interpolation in source.
+      if (trimmed.includes("${")) return false;
+      return true;
+    }
+
+    const residues: Array<{ file: string; pattern: string; value: string }> = [];
+    for (const file of TARGETS) {
+      const content = fs.readFileSync(file, "utf-8");
+      for (const { pattern, source } of INLINE_PATTERNS) {
+        pattern.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const value = match[1];
+          if (!isRealLabel(value)) continue;
+          if (!knownValueSet.has(value)) {
+            residues.push({ file: path.basename(file), pattern: source, value });
+          }
+        }
+      }
+    }
+
+    // Strict assertion: 0 residues. The surface-scanner now scans
+    // aria-label + placeholder patterns (button-text pattern is
+    // intentionally omitted — see the INLINE_PATTERNS comment).
+    expect(
+      residues,
+      `Surface-scanner found inline UI strings outside @/lib/copy/error-messages:\n${residues
+        .map((r) => `  ${r.file} / ${r.pattern} -> "${r.value}"`)
+        .join("\n")}`,
+    ).toHaveLength(0);
+  });
 });
