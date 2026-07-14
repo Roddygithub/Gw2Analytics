@@ -27,7 +27,13 @@ readonly SSD_UUID=1E18-2168
 # desktop where the drive holds personal photos + backups. If the host runs a
 # multi-user system, tighten to umask=0077 (mode 0600, owner-only). The
 # nofail flag is mandatory: keeps boot working even when the SSD is unplugged.
-readonly SSD_FSTAB_LINE="UUID=${SSD_UUID}  ${SSD_MNT}  exfat  defaults,nofail,noatime,uid=${UID},gid=1000,umask=0022  0  0"
+# uid=1000 hardcoded (NOT ${UID}): the script runs under sudo, where
+# ``\$\{UID\}`` resolves to 0 (root) -- roddy's actual uid is 1000
+# regardless of sudo context. Tests: ``id -u roddy`` returns 1000 on
+# this host. umask=0022 keeps the drive world-readable by default
+# (safe for a single-user desktop; tighten to umask=0077 if
+# multi-user).
+readonly SSD_FSTAB_LINE="UUID=${SSD_UUID}  ${SSD_MNT}  exfat  defaults,nofail,noatime,uid=1000,gid=1000,umask=0022  0  0"
 
 MODE_PR=1
 for arg in "$@"; do
