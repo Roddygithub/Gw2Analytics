@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 /**
  * EVTC magic-bytes validation against the GW2 ArcDPS-evtc log format
- * spec (https://github.com/baaron4/GW2-ArcDPS-Bridge/blob/master/evtc.md).
+ * spec (the upstream ArcDPS evtc.h record format (see the GW2 community "gw2evtc" project for the canonical spec)).
  *
  * The 4-byte ASCII magic ``EVTC`` precedes a 4-byte build-number hash
  * plus a 4-byte day-number stamp. Bytes 12\u201331 are reserved; combat-event
