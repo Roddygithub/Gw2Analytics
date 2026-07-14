@@ -79,9 +79,11 @@ describe.skipIf(!HAS_KEY)("GW2_API_KEY live health-check", () => {
     expect(out.body).not.toBeNull();
     // We do not lock to a single canonical name (ArenaNet may rotate the
     // app name), but we assert it is non-empty so we know GW2 accepted
-    // the key as a recognised token.
-    expect(typeof out.body?.id).toBe("string");
-    expect(out.body.id.length).toBeGreaterThan(0);
+    // the key as a recognised token. Capture once to narrow null for
+    // tsc-strict without optional chaining noise.
+    const body = out.body!;
+    expect(typeof body.id).toBe("string");
+    expect(body.id.length).toBeGreaterThan(0);
   });
 
   it("exposes the progression / guilds / builds permissions", async () => {
