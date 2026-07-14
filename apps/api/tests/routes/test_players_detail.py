@@ -31,7 +31,7 @@ def test_detail_200() -> None:
         events=events,
     )
     post_upload(client, blob)
-    account_name = f":synth.{a}"
+    account_name = f"synth.{a}"
     encoded = quote(account_name, safe="")
     detail_resp = client.get(f"/api/v1/players/{encoded}")
     assert detail_resp.status_code == 200, detail_resp.text

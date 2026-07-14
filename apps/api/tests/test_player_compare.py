@@ -65,7 +65,7 @@ def _post_compare_fight(n_players: int, suffix: str | None = None) -> tuple[str,
         if upload_resp.status_code == 200 and upload_resp.json()["status"] == "completed":
             time.sleep(0.1)
             fight_id = str(upload_resp.json()["fight_id"])
-            account_names = [f":synth.{base_id + i}" for i in range(n_players)]
+            account_names = [f"synth.{base_id + i}" for i in range(n_players)]
             return fight_id, account_names
         time.sleep(0.1)
     raise AssertionError(f"upload {upload_id} did not complete in 5s")
@@ -173,7 +173,7 @@ def test_compare_unknown_account_returns_empty_points_series() -> None:
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=1, suffix=suffix)
     known = account_names[0]
-    unknown = f":synth.{_uuid.uuid4().hex}"
+    unknown = f"synth.{_uuid.uuid4().hex}"
     resp = client.get(
         "/api/v1/players/compare/timeline", params=[("accounts", known), ("accounts", unknown)]
     )

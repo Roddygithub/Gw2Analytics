@@ -99,7 +99,7 @@ def test_backfill_recreates_summary_rows_from_blob() -> None:
         )
         assert len(rows) == 2  # 2 player agents
         by_account = {r.account_name: r for r in rows}
-        a_row = by_account[f":synth.{base_id_a}"]
+        a_row = by_account[f"synth.{base_id_a}"]
         assert a_row.total_damage == 1_234 + 567
         assert a_row.total_healing == 0
         assert a_row.total_buff_removal == 0
@@ -144,7 +144,7 @@ def test_backfill_recreates_summary_rows_from_blob() -> None:
         )
         assert len(rows) == 2
         by_account = {r.account_name: r for r in rows}
-        a_row = by_account[f":synth.{base_id_a}"]
+        a_row = by_account[f"synth.{base_id_a}"]
         assert a_row.total_damage == 1_234 + 567
         assert a_row.total_healing == 0
         assert a_row.total_buff_removal == 0
@@ -152,7 +152,7 @@ def test_backfill_recreates_summary_rows_from_blob() -> None:
         # (not the source), so B's damage is 0. B is the
         # SOURCE of the heal event above, so B's healing is
         # 400. B has no strip events.
-        b_row = by_account[f":synth.{base_id_b}"]
+        b_row = by_account[f"synth.{base_id_b}"]
         assert b_row.total_damage == 0
         assert b_row.total_healing == 400
         assert b_row.total_buff_removal == 0

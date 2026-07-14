@@ -394,7 +394,7 @@ def _backfill_pre_phase7(
                 # operator manually UPDATEing the agent
                 # row via SQL with a > 128 char name, then
                 # running the backfill).
-                account_name=_sanitize_name(agent.account_name),
+                account_name=_sanitize_name(agent.account_name.lstrip(":")),
                 name=_sanitize_name(agent.name),
                 profession=int(agent.profession),
                 elite_spec=int(agent.elite_spec),
