@@ -112,7 +112,7 @@ The readout tab becomes the canonical **"what did each player do in this fight"*
 ## §6 Counterpart documents + cross-references
 
 - **Upstream provider:** [`plans/WAVE-8-parser-side.md`](WAVE-8-parser-side.md) — the backend parser + Skills DB workstream (Bl A: statechange extension; Bl B: Skills DB catalog).
-- **Parallel dev work:** [`plans/BLOCKER-C-role-classifier.md`](BLOCKER-C-role-classifier.md) — the role-classifier implementation per the spike doc §2 Blocker C (calibration phase, after R.1-R.4 are stable). TODO if absent (separate scope from THIS plan).
+- **Parallel dev work:** [`plans/BLOCKER-C-role-classifier.md`](BLOCKER-C-role-classifier.md) — the role-classifier implementation per the spike doc §2 Blocker C (calibration phase, after R.1-R.4 are stable).
 - **Source-of-truth sub-block descriptions + Effort tags + cycle topology:** [`docs/v0.10.19-combat-readout-spike.md`](../docs/v0.10.19-combat-readout-spike.md) §3 (F17 impl sub-blocks W.1-W.12).
 - **Table contracts + icon-licensing decision + default sort:** [`docs/v0.9.0-combat-readout-design.md`](../docs/v0.9.0-combat-readout-design.md) §2 + §3-§6 + §8 + §13.
 - **Cycle position + cross-cycle dependencies:** [`docs/ROADMAP.md`](../docs/ROADMAP.md) §1.1.
