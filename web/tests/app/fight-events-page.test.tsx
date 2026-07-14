@@ -643,19 +643,24 @@ describe("FightEventsPage", () => {
       screen.getByTestId("player-skill-error"),
     ).toHaveTextContent(/fight unavailable/i);
     // The per-player chip carries the canonical user-facing
-    // prefix "Failed to load per-player skills:" that
+    // prefix (FAILED_TO_LOAD_PER_PLAYER_SKILLS) that
     // distinguishes it from the agents-dropdown chip
-    // ("Failed to load player list:"). Locks down the
+    // (FAILED_TO_LOAD_PLAYER_LIST). Locks down the
     // cascade-wrapping semantics so a future refactor can't
     // accidentally strip the prefix and surface the raw
     // upstream error (which would be confusing -- the analyst
-    // can't tell which fetch failed).
+    // can't tell which fetch failed). The assertions below
+    // pass the constant directly to toHaveTextContent --
+    // jest-dom matches by substring for a string argument,
+    // so the @/lib/copy/error-messages module remains the
+    // sole English-coupling point (a future i18n refactor
+    // edits only that module).
     expect(
       screen.getByTestId("player-skill-error"),
-    ).toHaveTextContent(new RegExp(FAILED_TO_LOAD_PER_PLAYER_SKILLS));
+    ).toHaveTextContent(FAILED_TO_LOAD_PER_PLAYER_SKILLS);
     expect(
       screen.getByTestId("player-skill-agents-error"),
-    ).toHaveTextContent(new RegExp(FAILED_TO_LOAD_PLAYER_LIST));
+    ).toHaveTextContent(FAILED_TO_LOAD_PLAYER_LIST);
     // Exactly 2 elements match the cascade substring -- forbids
     // a 3rd duplicate chip. RTL counts matches by element (1
     // match per `<p>` containing the substring), so 2 chips
