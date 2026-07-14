@@ -718,6 +718,69 @@ def test_player_detail_404_when_account_unknown() -> None:
     assert resp.status_code == 404
 
 
+def test_player_routes_accept_colon_prefixed_account_name() -> None:
+    """Retrocompatibility: routes that accept ``account_name`` in the URL
+    still tolerate the legacy arcdps ``:`` prefix.
+
+    The persistence layer now stores account names in bare form
+    (``synth.<id>``), but external bookmarks / frontend URLs may
+    still reference the old colon-prefixed form (``%3Asynth.<id>``).
+    The player detail, player timeline, and per-fight player-skills
+    routes all strip the leading ``:`` defensively and return the
+    canonical bare account_name on the wire.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+
+    # The fixture seeds agent A as a player with bare account_name
+    # ``synth.<base_id_a>``. Build the legacy colon-prefixed form
+    # and URL-encode it so the request path contains ``%3Asynth...``.
+    bare_account_name = f"synth.{base_id_a}"
+    colon_prefixed = f":{bare_account_name}"
+    encoded = quote(colon_prefixed, safe="")
+    assert encoded.startswith("%3A"), (
+        "the colon must be URL-encoded for this retrocompatibility test"
+    )
+
+    # Player detail with colon prefix.
+    detail_resp = client.get(f"/api/v1/players/{encoded}")
+    assert detail_resp.status_code == 200, detail_resp.text
+    detail = detail_resp.json()
+    assert detail["account_name"] == bare_account_name
+    assert detail["fights_attended"] >= 1
+
+    # Player timeline with colon prefix.
+    timeline_resp = client.get(f"/api/v1/players/{encoded}/timeline")
+    assert timeline_resp.status_code == 200, timeline_resp.text
+    timeline = timeline_resp.json()
+    assert timeline["account_name"] == bare_account_name
+    assert timeline["total"] >= 1
+
+    # Per-fight player skills with colon prefix. Agent A is the
+    # source of the seeded damage event, so the skill roll-up
+    # must contain at least one skill row.
+    skills_resp = client.get(f"/api/v1/fights/{fight_id}/players/{encoded}/skills")
+    assert skills_resp.status_code == 200, skills_resp.text
+    skills = skills_resp.json()
+    assert skills["fight_id"] == fight_id
+    assert skills["account_name"] == bare_account_name
+    assert skills["agent_id"] == base_id_a
+    assert len(skills["skills"]) == 1
+    assert skills["skills"][0]["total_damage"] == 1_234
+
+
 def test_fight_squads_returns_per_subgroup_rollup() -> None:
     """v0.7.0: GET /api/v1/fights/{id}/squads returns the squad roll-up.
 

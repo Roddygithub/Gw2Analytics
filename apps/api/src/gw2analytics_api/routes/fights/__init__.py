@@ -853,7 +853,7 @@ def get_fight_player_skills(
 
     return PlayerSkillsOut(
         fight_id=fight_id,
-        account_name=account_name,
+        account_name=bare_account_name,
         agent_id=player_agent.agent_id,
         loadout=PlayerSkillLoadoutOut(
             profession=format_profession(player_agent.profession),
