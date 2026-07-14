@@ -65,7 +65,7 @@ import {
   PLAYER_TIMELINE_TIMEZONE_ARIA_LABEL,
   PLAYER_TIMELINE_TZ_SELECTOR_ARIA_LABEL,
   PLAYER_TIMELINE_Y_AXIS_SCALE_ARIA_LABEL,
-} from "@/lib/copy/error-messages";
+} from "@/lib/copy/player-timeline";
 
 const BUTTON_STYLE: React.CSSProperties = {
   padding: "8px 16px",

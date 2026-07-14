@@ -36,7 +36,7 @@ import {
   FIGHTS_GRID_COLUMN_FIGHT_ID,
   FIGHTS_GRID_COLUMN_GAME_TYPE,
   FIGHTS_GRID_COLUMN_STARTED_UTC,
-} from "@/lib/copy/error-messages";
+} from "@/lib/copy/fights-grid";
 
 // Side-effect import: registers AllCommunityModule exactly once
 // (see ag-grid-setup.ts). Importing here (rather than re-running

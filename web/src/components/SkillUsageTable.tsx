@@ -40,7 +40,7 @@ import {
   SKILL_USAGE_TABLE_COLUMN_TOTAL_HEALING,
   SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP,
   SKILL_USAGE_TABLE_EMPTY_STATE,
-} from "@/lib/copy/error-messages";
+} from "@/lib/copy/skill-usage-table";
 import { CsvDownloadButton } from "./CsvDownloadButton";
 
 /**

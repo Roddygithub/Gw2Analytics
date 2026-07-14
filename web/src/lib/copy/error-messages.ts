@@ -1,44 +1,71 @@
 /**
- * User-facing error message constants for the ``/fights/[id]``
- * Server Component's diagnostic chips.
+ * Cross-cutting user-facing error + loading + UI affordance constants
+ * for the web frontend.
  *
- * v0.10.18 deliverable (part of the ``feat/integrate-zevtc-fixture``
- * branch's hard-close-out): the per-player section chips used to
- * inline the "Failed to load X:" prefix strings directly in
- * ``src/app/fights/[id]/page.tsx``. The cascade regression test
- * (https://github.com/Roddygithub/Gw2Analytics -- branch
- * ``feat/integrate-zevtc-fixture``, commit ``d20bdd4``) then
- * asserted those prefixes by string-literal regex, coupling the
- * test to the English copy. A future i18n refactor (English ->
- * French / German / etc.) would silently break the assertions
- * without breaking the cascade *behavior*.
+ * v0.10.22-night-mode deliverable: this file used to be a kitchen-sink
+ * 257-LoC + 44-export module covering 4 unrelated concerns. The split
+ * landed 3 NEW sibling sub-modules so each module owns a single concern:
  *
- * This module centralises the prefix strings so a single edit
- * propagates to both the page render AND the test assertion
- * regex. Project-wide i18n is *out of scope* for v0.10.x --
- * this module exists to make the eventual i18n a 1-file edit
- * rather than a 3-file edit.
+ *   - @/lib/copy/error-messages        (THIS file -- error / loading / affordance)
+ *   - @/lib/copy/fights-grid           (AG Grid column headers)
+ *   - @/lib/copy/skill-usage-table     (SkillUsageTable headers + empty state)
+ *   - @/lib/copy/player-timeline       (PlayerTimelineSection controls)
+ *
+ * Why direct imports (no barrel re-export)
+ * ========================================
+ * The split decision was: each importer (FightsGrid.tsx,
+ * SkillUsageTable.tsx, PlayerTimelineSection.tsx) points directly at
+ * its sub-module instead of a barrel re-exporting all 4. Rationale:
+ *
+ *   - A barrel recreates the kitchen-sink problem at the barrel layer
+ *     (a single `import * from "@/lib/copy"` re-introduces the same
+ *     blur, defeating the type-system enforcement of single-concern
+ *     imports).
+ *   - Direct imports force type-system-level evidence that each
+ *     component depends on the SPECIFIC sub-module it needs (a
+ *     FightsGrid.tsx that imports from `@/lib/copy/player-timeline`
+ *     is a typecheck error -- the wrong-scope import is loud).
+ *   - Direct imports are tree-shake friendly (each sub-module is a
+ *     separate file the bundler can drop if no importer uses it).
+ *
+ * Trade-off: 3 components each need a one-line import-path update
+ * (`@/lib/copy/error-messages` -> `@/lib/copy/<their-sub-module>`).
+ * This is a tangible but bounded cost that's mechanical to execute +
+ * mechanical to review.
+ *
+ * v0.10.18 origin: the per-player section chips used to inline the
+ * "Failed to load X:" prefix strings directly in
+ * `src/app/fights/[id]/page.tsx`. The cascade regression test then
+ * asserted those prefixes by string-literal regex, coupling the test
+ * to the English copy. A future i18n refactor (English -> French /
+ * German / etc.) would silently break the assertions without breaking
+ * the cascade behavior.
+ *
+ * This module centralises the error/loading affordances so a single
+ * edit propagates to both the page render AND the test assertion
+ * regex. Project-wide i18n is OUT OF SCOPE for v0.10.x -- THIS and
+ * the 3 sibling sub-modules exist to make the eventual i18n a
+ * 4-file edit instead of a kitchen-sink refactor.
  *
  * Why NO trailing space in each prefix
  * =====================================
  * The page.tsx renders each prefix as a standalone JSX segment
- * followed by the upstream ``{error}`` interpolation with a
- * single space between them (e.g.,
- * ``<p>{PREFIX} {error}</p>``). Stripping the trailing space
- * from the constant means:
- *   - the prefix string matches the test's
- *     ``new RegExp(constant)`` pattern exactly (no regex
- *     metacharacter in the constant makes the pattern safe);
+ * followed by the upstream ``{error}`` interpolation with a single
+ * space between them (e.g., ``<p>{PREFIX} {error}</p>``). Stripping
+ * the trailing space from the constant means:
+ *   - the prefix string matches the test's ``new RegExp(constant)``
+ *     pattern exactly (no regex metacharacter in the constant makes
+ *     the pattern safe);
  *   - HTML output is identical to the inlined baseline
- *     (``"<prefix>: <error>"`` -- the literal space character
- *     is a single U+0020, not a tab or non-breaking space).
+ *     (``"<prefix>: <error>"`` -- the literal space character is a
+ *     single U+0020, not a tab or non-breaking space).
  *
  * Trade-off: a future maintainer who changes the prefix to
  * ``"Failed to load"`` (without the trailing colon) would
- * inadvertently drop the colon from the rendered text. The
- * JSDoc on each export below makes the contract explicit so
- * a code-search ``FAILED_TO_LOAD_PER_PLAYER_SKILLS`` is
- * enough to recover the intent.
+ * inadvertently drop the colon from the rendered text. The JSDoc on
+ * each export below makes the contract explicit so a code-search
+ * ``FAILED_TO_LOAD_PER_PLAYER_SKILLS`` is enough to recover the
+ * intent.
  */
 
 /**
@@ -123,10 +150,10 @@ export const FIGHTS_GRID_BROWSE_FIGHT_PAGE = "← Browse fights grid";
  * Format prefix that the API layer prepends to every `ApiError`'s
  * rendered copy. Used by `formatApiError` in
  * `web/src/lib/api/errors.ts` to build the user-facing string
- * `"Upstream error: <status>: <message>"`. Traling space IS intentional
- * (it separates prefix from `err.status`); do NOT drop without
- * updating the JSX interpolation site. Backs 2 vitest assertions
- * (`fight-events-page.test.tsx` + `fights-page.test.tsx`).
+ * `"Upstream error: <status>: <message>"`. Trailing space IS
+ * intentional (separates prefix from `err.status`); do NOT drop
+ * without updating the JSX interpolation site. Backs 2 vitest
+ * assertions (`fight-events-page.test.tsx` + `fights-page.test.tsx`).
  */
 export const UPSTREAM_ERROR_PREFIX = "Upstream error: ";
 
@@ -135,123 +162,3 @@ export const UPSTREAM_ERROR_PREFIX = "Upstream error: ";
  *  (per-fight error boundary). The two surfaces share the same affordance
  *  copy; centralising here keeps the retry-action text in lockstep. */
 export const TRY_AGAIN_BUTTON_LABEL = "Try again";
-
-// ===========================================================================
-// AG Grid column headers (FightsGrid — the read-only fights-list table)
-// ===========================================================================
-
-/** Column header for the AG Grid `#` column. */
-export const FIGHTS_GRID_COLUMN_FIGHT_ID = "Fight ID";
-
-/** Column header for the AG Grid `Encounter` column. */
-export const FIGHTS_GRID_COLUMN_ENCOUNTER = "Encounter";
-
-/** Column header for the AG Grid `Agents` column (count of players). */
-export const FIGHTS_GRID_COLUMN_AGENTS = "Agents";
-
-/** Column header for the AG Grid `Build` column (player build composition). */
-export const FIGHTS_GRID_COLUMN_BUILD = "Build";
-
-/** Column header for the AG Grid start-time column. The `(UTC)` suffix is
- *  intentional and shown verbatim in the rendered UI. */
-export const FIGHTS_GRID_COLUMN_STARTED_UTC = "Started (UTC)";
-
-/** Column header for the AG Grid `Game type` column (raid / fractal / strike / wvw). */
-export const FIGHTS_GRID_COLUMN_GAME_TYPE = "Game type";
-
-// ===========================================================================
-// SkillUsageTable — column headers + empty-state fallback
-// ===========================================================================
-
-/** Column header for the `id` column (numeric GW2 skill id). */
-export const SKILL_USAGE_TABLE_COLUMN_SKILL_ID = "Skill id";
-
-/** Column header for the `name` column (resolved skill name from skills DB). */
-export const SKILL_USAGE_TABLE_COLUMN_SKILL_NAME = "Skill name";
-
-/** Column header for the `hits` column. */
-export const SKILL_USAGE_TABLE_COLUMN_HIT_COUNT = "Hit count";
-
-/** Column header for the `damage` column. */
-export const SKILL_USAGE_TABLE_COLUMN_TOTAL_DAMAGE = "Total damage";
-
-/** Column header for the `healing` column. */
-export const SKILL_USAGE_TABLE_COLUMN_TOTAL_HEALING = "Total healing";
-
-/** Column header for the `strip` column (boon-strip aggregates). */
-export const SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP = "Total strip";
-
-/** Empty-state row fallback when the per-fight skill roll-up stream is empty. */
-export const SKILL_USAGE_TABLE_EMPTY_STATE = "No skill roll-up rows.";
-
-// ===========================================================================
-// PlayerTimelineSection — section heading + most-clicked controls
-// ===========================================================================
-
-/** Section-level aria-label for the <section aria-label> wrapper of
- *  ``PlayerTimelineSection``. The "Per-account" prefix signals the per-account
- *  horizontal scope single-player UX (vs CrossAccountTimelineSection which
- *  reuses the same name in its own wrapper). */
-export const PLAYER_TIMELINE_SECTION_ARIA_LABEL = "Per-account historical timeline";
-
-/** Section-level <h2> heading text. Rendered at the top-left of the section. */
-export const PLAYER_TIMELINE_HEADING = "Historical timeline";
-
-/** Bucket toggle button text (Per-fight bucketing). Maps the engine's
- *  ``"fight"`` state value to the analyst-facing display string. */
-export const PLAYER_TIMELINE_BUCKET_PER_FIGHT = "Per fight";
-
-/** Bucket toggle button text (Per-day bucketing). Maps the engine's
- *  ``"day"`` state value to the analyst-facing display string. */
-export const PLAYER_TIMELINE_BUCKET_PER_DAY = "Per day";
-
-/** Load-more button primary action text. Rendered when `hasMore=true`. */
-export const PLAYER_TIMELINE_LOAD_MORE = "Load more";
-
-/** Load-more button `aria-label` when `hasMore=true`. */
-export const PLAYER_TIMELINE_LOAD_MORE_ARIA_LABEL = "Load more timeline points";
-
-/** Load-more button `aria-label` when `hasMore=false` (terminal state). */
-export const PLAYER_TIMELINE_NO_MORE_ARIA_LABEL = "No more timeline points";
-
-/** Button text rendered mid-fetch (during the `isLoading` toggle). */
-export const PLAYER_TIMELINE_LOADING = "Loading\u2026";
-
-/** Terminal state text when `bucket="day"` and no more pages. */
-export const PLAYER_TIMELINE_ALL_LOADED_DAYS = "All days loaded";
-
-/** Terminal state text when `bucket="fight"` (the default) and no more pages. */
-export const PLAYER_TIMELINE_ALL_LOADED_FIGHTS = "All fights loaded";
-
-/** Bucket-toggle button `aria-label` (Per-fight). */
-export const PLAYER_TIMELINE_BUCKET_PER_FIGHT_ARIA_LABEL = "Per-fight bucketing";
-
-/** Bucket-toggle button `aria-label` (Per-day). */
-export const PLAYER_TIMELINE_BUCKET_PER_DAY_ARIA_LABEL = "Per-day bucketing";
-
-/** Toggle group `aria-label` for the controls row (bucket + scale + TZ). */
-export const PLAYER_TIMELINE_CONTROLS_ARIA_LABEL = "Timeline controls";
-
-/** Bucket-toggle group `aria-label` (parent of the Per-fight / Per-day buttons). */
-export const PLAYER_TIMELINE_BUCKETING_ARIA_LABEL = "Timeline bucketing";
-
-/** Scale-toggle group `aria-label` (parent of the Linear / Log buttons). */
-export const PLAYER_TIMELINE_Y_AXIS_SCALE_ARIA_LABEL = "Timeline Y-axis scale";
-
-/** Scale-toggle button text (Linear; per-series normalised 0-100%). */
-export const PLAYER_TIMELINE_LINEAR = "Linear";
-
-/** Scale-toggle button `aria-label` (Linear; full text describes the visual + behaviour). */
-export const PLAYER_TIMELINE_LINEAR_BUTTON_ARIA_LABEL = "Linear Y-axis scale (per-series normalised)";
-
-/** Scale-toggle button text (Log; shared log Y-axis across the 3 series). */
-export const PLAYER_TIMELINE_LOG = "Log";
-
-/** Scale-toggle button `aria-label` (Log; full text). */
-export const PLAYER_TIMELINE_LOG_BUTTON_ARIA_LABEL = "Logarithmic Y-axis scale (shared across all 3 series)";
-
-/** TZ-toggle group `aria-label` (parent of the timezone <select>). */
-export const PLAYER_TIMELINE_TIMEZONE_ARIA_LABEL = "Timeline timezone";
-
-/** TZ selector `aria-label` (Day-bucket region/city picker). */
-export const PLAYER_TIMELINE_TZ_SELECTOR_ARIA_LABEL = "Day-bucket timezone (region/city)";

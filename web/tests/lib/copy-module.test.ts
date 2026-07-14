@@ -22,6 +22,9 @@ import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as errorMessages from "@/lib/copy/error-messages";
+import * as fightsGrid from "@/lib/copy/fights-grid";
+import * as skillUsageTable from "@/lib/copy/skill-usage-table";
+import * as playerTimeline from "@/lib/copy/player-timeline";
 
 /**
  * Walk the web/src tree (excluding node_modules + tests) and return every
@@ -81,14 +84,23 @@ function isStringEntry(entry: [string, unknown]): entry is [string, string] {
  *
  * v0.10.22-night-mode: KNOWN_CONSTANTS captures every string export as
  * {name, value} so the linkage invariant can assert identifier-OR-value
- * matching. The single-module form below will follow the sub-module
- * split as a ruff-surface-level refactor.
+ * matching. The SUBMODULES tuple below aggregates all 4 sub-modules --
+ * direct imports (no barrel re-export) so the type system enforces
+ * single-concern scope for each importer.
  */
-const KNOWN_CONSTANTS: Array<{ name: string; value: string }> = Object.entries(
+const SUBMODULES = [
   errorMessages,
-)
-  .filter(isStringEntry)
-  .map(([name, value]) => ({ name, value }));
+  fightsGrid,
+  skillUsageTable,
+  playerTimeline,
+] as const;
+
+const KNOWN_CONSTANTS: Array<{ name: string; value: string }> = SUBMODULES.flatMap(
+  (m) =>
+    Object.entries(m)
+      .filter(isStringEntry)
+      .map(([name, value]) => ({ name, value })),
+);
 
 describe("copy-module centraliSation invariant", () => {
   it("exports AT LEAST 10 string constants (encourages centraliSation)", () => {
