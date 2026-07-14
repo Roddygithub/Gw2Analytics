@@ -122,6 +122,52 @@ const server = createServer(async (req, res) => {
   // GET; the original client-side page called POST. Both return
   // the same stub.
   if ((method === "GET" || method === "POST") && path === "/api/v1/account") {
+    const apiKey = process.env.GW2_API_KEY;
+    if (apiKey) {
+      try {
+        const accCtrl = new AbortController();
+        const accTimeout = setTimeout(() => accCtrl.abort(), 5_000);
+        const accRes = await fetch(
+          `https://api.guildwars2.com/v2/account?access_token=${encodeURIComponent(apiKey)}`,
+          { signal: accCtrl.signal },
+        );
+        clearTimeout(accTimeout);
+        if (!accRes.ok) {
+          throw new Error(`GW2 /account returned HTTP ${accRes.status}`);
+        }
+        const accData = await accRes.json();
+        const worldCtrl = new AbortController();
+        const worldTimeout = setTimeout(() => worldCtrl.abort(), 5_000);
+        const worldRes = await fetch(
+          `https://api.guildwars2.com/v2/worlds?id=${encodeURIComponent(String(accData.world))}`,
+          { signal: worldCtrl.signal },
+        );
+        clearTimeout(worldTimeout);
+        if (!worldRes.ok) {
+          throw new Error(`GW2 /worlds returned HTTP ${worldRes.status}`);
+        }
+        const worldData = await worldRes.json();
+        if (!worldData || typeof worldData.name !== "string") {
+          throw new Error("GW2 /worlds returned unexpected payload shape");
+        }
+        return jsonResponse(
+          res,
+          200,
+          JSON.stringify({
+            world_id: accData.world,
+            world_name: worldData.name,
+            world_population: worldData.population,
+          }),
+        );
+      } catch (err) {
+        console.warn(
+          `[mock-server] LIVE GW2 fetch failed -- falling back to stub: ${err && err.message ? err.message : err}`,
+        );
+        // Fall through to the deterministic stub below so the E2E suite
+        // and the analyst's screen remain stable even when the GW2 v2
+        // API is unreachable or the key is revoked.
+      }
+    }
     return jsonResponse(
       res,
       200,
