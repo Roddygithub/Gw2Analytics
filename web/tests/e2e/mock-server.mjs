@@ -168,15 +168,7 @@ const server = createServer(async (req, res) => {
         // API is unreachable or the key is revoked.
       }
     }
-    return jsonResponse(
-      res,
-      200,
-      JSON.stringify({
-        world_id: 1001,
-        world_name: "Fixture World",
-        world_population: "Medium",
-      }),
-    );
+    return jsonResponse(res, 200, await loadFixture("account-stub.json"));
   }
 
   // POST /api/v1/uploads (v0.3.0-web) -- multipart form-data
