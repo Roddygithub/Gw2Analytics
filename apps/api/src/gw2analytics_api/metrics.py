@@ -132,8 +132,7 @@ STUCK_SWEEPER_ITERATION_DURATION = Histogram(
 #: stale rows (a non-delta means the sweeper is broken OR there
 #: were no stale rows to pick up — log correlation needed).
 _STUCK_SWEEPER_MARKED_FAILED_HELP = (
-    "Total uploads promoted pending to failed by the "
-    "stuck-upload sweeper"
+    "Total uploads promoted pending to failed by the stuck-upload sweeper"
 )
 STUCK_SWEEPER_MARKED_FAILED = Counter(
     "stuck_sweeper_marked_failed_total",

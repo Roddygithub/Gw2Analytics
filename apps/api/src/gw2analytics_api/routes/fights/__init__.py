@@ -803,8 +803,7 @@ def get_fight_player_skills(
     # field stores the bare form).
     bare_account_name = account_name.lstrip(":")
     player_agent = db.execute(
-        select(OrmFightAgent)
-        .where(
+        select(OrmFightAgent).where(
             OrmFightAgent.fight_id == fight_id,
             OrmFightAgent.account_name == bare_account_name,
             OrmFightAgent.is_player.is_(True),

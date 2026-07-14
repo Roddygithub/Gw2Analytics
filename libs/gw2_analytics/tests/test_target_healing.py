@@ -143,3 +143,45 @@ class TestTargetHealingAggregator:
         by_target = {r.target_agent_id: r for r in rows}
         assert by_target[7].name == "HealBrand"
         assert by_target[9].name is None
+
+    def test_check_invariants_raises_on_sum_mismatch(self) -> None:
+        rows = [
+            TargetHealingRow.model_construct(
+                target_agent_id=1, total_healing=100, heal_count=1, hps=10.0
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"sum of row\.total_healing"):
+            TargetHealingAggregator._check_invariants(rows, expected_sum=200)
+
+    def test_check_invariants_raises_on_heal_count_below_one(self) -> None:
+        rows = [
+            TargetHealingRow.model_construct(
+                target_agent_id=1, total_healing=100, heal_count=0, hps=10.0
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"heal_count.*must be >= 1"):
+            TargetHealingAggregator._check_invariants(rows, expected_sum=100)
+
+    def test_check_invariants_raises_on_wrong_ordering(self) -> None:
+        rows = [
+            TargetHealingRow.model_construct(
+                target_agent_id=1, total_healing=100, heal_count=1, hps=10.0
+            ),
+            TargetHealingRow.model_construct(
+                target_agent_id=2, total_healing=200, heal_count=1, hps=20.0
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"not ordered by"):
+            TargetHealingAggregator._check_invariants(rows, expected_sum=300)
+
+    def test_check_invariants_raises_on_tie_not_broken(self) -> None:
+        rows = [
+            TargetHealingRow.model_construct(
+                target_agent_id=2, total_healing=100, heal_count=1, hps=10.0
+            ),
+            TargetHealingRow.model_construct(
+                target_agent_id=1, total_healing=100, heal_count=1, hps=10.0
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"tie on total_healing"):
+            TargetHealingAggregator._check_invariants(rows, expected_sum=200)

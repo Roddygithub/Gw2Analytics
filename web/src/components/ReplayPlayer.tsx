@@ -180,7 +180,7 @@ const CONTROL_BUTTON_ACTIVE: React.CSSProperties = {
   ...CONTROL_BUTTON_BASE,
   background: "var(--accent)",
   color: "var(--accent-foreground, #fff)",
-  borderColor: "var(--accent)",
+  border: "1px solid var(--accent)",
 };
 
 const SNAPSHOT_PANEL_STYLE: React.CSSProperties = {

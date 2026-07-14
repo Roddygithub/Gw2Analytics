@@ -164,9 +164,7 @@ def test_player_skills_404_unknown_account(
     )
     fight_id = post_upload(client, blob)
 
-    resp = client.get(
-        f"/api/v1/fights/{fight_id}/players/UnknownAccount.0000/skills"
-    )
+    resp = client.get(f"/api/v1/fights/{fight_id}/players/UnknownAccount.0000/skills")
     assert resp.status_code == 404
 
 

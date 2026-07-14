@@ -3,6 +3,24 @@ import { vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 /**
+ * RootLayout renders an <html> element. jsdom wraps the rendered
+ * tree in a <div>, which triggers a React hydration warning that
+ * is not actionable in unit tests. We silence that specific
+ * message here so the test output stays clean.
+ */
+const originalConsoleError = console.error;
+console.error = (...args: unknown[]) => {
+  const message = typeof args[0] === "string" ? args[0] : "";
+  if (
+    message.includes("<html> cannot be a child of") ||
+    message.includes("<body> cannot be a child of")
+  ) {
+    return;
+  }
+  originalConsoleError(...args);
+};
+
+/**
  * ``@/components/FightsGrid`` is the AG Grid client wrapper. The
  * page-level Server Component tests transitively import it, but
  * booting AG Grid's full runtime in jsdom would require a real

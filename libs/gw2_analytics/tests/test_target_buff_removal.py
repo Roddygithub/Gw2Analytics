@@ -147,3 +147,45 @@ class TestTargetBuffRemovalAggregator:
         by_target = {r.target_agent_id: r for r in rows}
         assert by_target[7].name == "HealBrand"
         assert by_target[9].name is None
+
+    def test_check_invariants_raises_on_sum_mismatch(self) -> None:
+        rows = [
+            TargetBuffRemovalRow.model_construct(
+                target_agent_id=1, total_buff_removal=100, strip_count=1, bps=10.0
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"sum of row\.total_buff_removal"):
+            TargetBuffRemovalAggregator._check_invariants(rows, expected_sum=200)
+
+    def test_check_invariants_raises_on_strip_count_below_one(self) -> None:
+        rows = [
+            TargetBuffRemovalRow.model_construct(
+                target_agent_id=1, total_buff_removal=100, strip_count=0, bps=10.0
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"strip_count.*must be >= 1"):
+            TargetBuffRemovalAggregator._check_invariants(rows, expected_sum=100)
+
+    def test_check_invariants_raises_on_wrong_ordering(self) -> None:
+        rows = [
+            TargetBuffRemovalRow.model_construct(
+                target_agent_id=1, total_buff_removal=100, strip_count=1, bps=10.0
+            ),
+            TargetBuffRemovalRow.model_construct(
+                target_agent_id=2, total_buff_removal=200, strip_count=1, bps=20.0
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"not ordered by"):
+            TargetBuffRemovalAggregator._check_invariants(rows, expected_sum=300)
+
+    def test_check_invariants_raises_on_tie_not_broken(self) -> None:
+        rows = [
+            TargetBuffRemovalRow.model_construct(
+                target_agent_id=2, total_buff_removal=100, strip_count=1, bps=10.0
+            ),
+            TargetBuffRemovalRow.model_construct(
+                target_agent_id=1, total_buff_removal=100, strip_count=1, bps=10.0
+            ),
+        ]
+        with pytest.raises(ValueError, match=r"tie on total_buff_removal"):
+            TargetBuffRemovalAggregator._check_invariants(rows, expected_sum=200)
