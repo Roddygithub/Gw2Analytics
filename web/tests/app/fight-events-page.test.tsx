@@ -55,6 +55,10 @@ vi.mock("@/lib/fetchCached", async (importActual) => {
 import FightEventsPage from "@/app/fights/[id]/page";
 import { fetchCached } from "@/lib/fetchCached";
 import { ApiError } from "@/lib/api/errors";
+import {
+  FAILED_TO_LOAD_PLAYER_LIST,
+  FAILED_TO_LOAD_PER_PLAYER_SKILLS,
+} from "@/lib/copy/error-messages";
 import type {
   FightEventsSummaryRow,
   FightSquads,
@@ -648,10 +652,10 @@ describe("FightEventsPage", () => {
     // can't tell which fetch failed).
     expect(
       screen.getByTestId("player-skill-error"),
-    ).toHaveTextContent(/Failed to load per-player skills:/);
+    ).toHaveTextContent(new RegExp(FAILED_TO_LOAD_PER_PLAYER_SKILLS));
     expect(
       screen.getByTestId("player-skill-agents-error"),
-    ).toHaveTextContent(/Failed to load player list:/);
+    ).toHaveTextContent(new RegExp(FAILED_TO_LOAD_PLAYER_LIST));
     // Exactly 2 elements match the cascade substring -- forbids
     // a 3rd duplicate chip. RTL counts matches by element (1
     // match per `<p>` containing the substring), so 2 chips

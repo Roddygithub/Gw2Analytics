@@ -93,6 +93,11 @@ import { PlayerReadoutDefense } from "@/components/PlayerReadoutDefense";
 import { fetchReplayTimeline } from "@/lib/replayFetcher";
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
 import { TargetFilter } from "@/components/TargetFilter";
+import {
+  FAILED_TO_LOAD_PLAYER_LIST,
+  FAILED_TO_LOAD_PER_PLAYER_SKILLS,
+  FAILED_TO_LOAD_FIGHT_DETAILS,
+} from "@/lib/copy/error-messages";
 
 export const dynamic = "force-dynamic";
 
@@ -405,7 +410,7 @@ export default async function FightEventsPage({
     // Agents fetch failed before we could validate the
     // account; the agents fetch error is the root cause for
     // the per-player section too. Surface it.
-    accountSkillsError = fightDetailsError ?? "Failed to load fight details.";
+    accountSkillsError = fightDetailsError ?? FAILED_TO_LOAD_FIGHT_DETAILS;
   }
 
   // Tour 6 v0.11.0-prep: Combat-readout payload fetch for the
@@ -975,7 +980,7 @@ export default async function FightEventsPage({
             data-testid="player-skill-agents-error"
             style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
           >
-            Failed to load player list: {fightDetailsError}
+            {FAILED_TO_LOAD_PLAYER_LIST} {fightDetailsError}
           </p>
         ) : (
           <PlayerSkillUsageFilter
@@ -997,7 +1002,7 @@ export default async function FightEventsPage({
             data-testid="player-skill-error"
             style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
           >
-            Failed to load per-player skills: {accountSkillsError}
+            {FAILED_TO_LOAD_PER_PLAYER_SKILLS} {accountSkillsError}
           </p>
         ) : null}
         {accountFilter === null ? (
