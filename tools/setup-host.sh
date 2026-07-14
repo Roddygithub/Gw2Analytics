@@ -26,12 +26,25 @@ set -euo pipefail
 # read-write for whatever user happens to run the script. The WARN is
 # non-fatal so the script still completes its other steps (smartmontools,
 # fstab edit) gracefully.
-if [ "$(id -u)" != "1000" ]; then
-  echo "[setup-host] WARN: expected uid 1000 (user 'roddy'), got $(id -u)."
+# Sanity check: this script assumes roddy (uid=1000). A future operator
+# running on a different machine will need to re-derive the SSD_FSTAB_LINE
+# below. We warn loudly instead of silently mis-mounting the SSD as
+# read-write for whatever user happens to run the script. The WARN is
+# non-fatal so the script still completes its other steps (smartmontools,
+# fstab edit) gracefully.
+#
+# IMPORTANT: we use ``${SUDO_UID:-$UID}`` because the script is INVOKED via
+# ``sudo`` (required to install smartmontools + write /etc/fstab + run
+# mount -a). Inside the sudo context ``$UID`` resolves to 0 (root), which
+# would always trip the check; ``$SUDO_UID`` reflects the original
+# operator (set by sudo(8)). The fstab line itself hardcodes ``uid=1000``
+# so the mount works for roddy even when this script runs as root.
+INVOKER_UID="${SUDO_UID:-$UID}"
+if [ "$INVOKER_UID" != "1000" ]; then
+  echo "[setup-host] WARN: expected uid 1000 (user 'roddy'), got $INVOKER_UID."
   echo "[setup-host] Re-derive SSD_FSTAB_LINE in this script before mount -a"
   echo "[setup-host] completes, or your SSD will be world-readable as the"
   echo "[setup-host] wrong owner."
-  exit 1
 fi
 readonly SSD_DEV=/dev/sdb1
 readonly SSD_MNT="/run/media/${USER}/Raspberry-P"
@@ -110,8 +123,21 @@ echo "[2/4] /etc/fstab auto-mount line for $SSD_UUID"
 FSTAB=/etc/fstab
 FSTAB_BAK="${FSTAB}.bak-$(date +%F-%H%M%S)"
 
-if grep -qE "^UUID=${SSD_UUID}\\b" "$FSTAB" 2>/dev/null; then
-  echo "  ! UUID=${SSD_UUID} is already in $FSTAB -- skipping the append"
+EXISTING_LINE=$(grep -E "^UUID=${SSD_UUID}\b" "$FSTAB" 2>/dev/null || true)
+if [ -n "$EXISTING_LINE" ]; then
+  if [ "$EXISTING_LINE" = "$SSD_FSTAB_LINE" ]; then
+    echo "  + $SSD_FSTAB_LINE already present and correct -- skipping the append"
+  else
+    # Stale or malformed line (typically a uid=0 or wrong-mount-point
+    # artefact from a prior buggy run that we want to self-heal). Backup
+    # the existing fstab, delete the bad line, append the correct one.
+    echo "  ! Stale/incorrect entry found for UUID=${SSD_UUID}. Repairing."
+    sudo cp -p "$FSTAB" "$FSTAB_BAK"
+    echo "  + backed up to $FSTAB_BAK"
+    sudo sed -i -E "/^UUID=${SSD_UUID}\b/d" "$FSTAB"
+    echo "$SSD_FSTAB_LINE" | sudo tee -a "$FSTAB" >/dev/null
+    echo "  + replaced bad entry with: $SSD_FSTAB_LINE"
+  fi
 else
   sudo cp -p "$FSTAB" "$FSTAB_BAK"
   echo "  + backed up to $FSTAB_BAK"
@@ -127,7 +153,7 @@ MOUNT_OUT=$(sudo mount -a -v 2>&1) || MOUNT_RC=$?
 MOUNT_RC=${MOUNT_RC:-0}
 echo "$MOUNT_OUT" | grep -E "$SSD_UUID|$SSD_MNT" || true
 if [ "$MOUNT_RC" -ne 0 ]; then
-  echo "  ! mount -a exited non-zero ($MOUNT_RC) -- fstab line may be malformed. Check:sudo mount -a -v 2>&1 | grep -B2 -A2 "error""
+  echo "  ! mount -a exited non-zero ($MOUNT_RC) -- fstab line may be malformed. Check: sudo mount -a -v 2>&1 | grep -B2 -A2 \"error\""
 fi
 
 # --------------------------------------------------------------------------
