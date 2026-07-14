@@ -20,6 +20,19 @@ set -euo pipefail
 # 0. PRELUDE
 # --------------------------------------------------------------------------
 
+# Sanity check: this script assumes roddy (uid=1000). A future operator
+# running on a different machine will need to re-derive the SSD_FSTAB_LINE
+# below. We warn loudly instead of silently mis-mounting the SSD as
+# read-write for whatever user happens to run the script. The WARN is
+# non-fatal so the script still completes its other steps (smartmontools,
+# fstab edit) gracefully.
+if [ "$(id -u)" != "1000" ]; then
+  echo "[setup-host] WARN: expected uid 1000 (user 'roddy'), got $(id -u)."
+  echo "[setup-host] Re-derive SSD_FSTAB_LINE in this script before mount -a"
+  echo "[setup-host] completes, or your SSD will be world-readable as the"
+  echo "[setup-host] wrong owner."
+  exit 1
+fi
 readonly SSD_DEV=/dev/sdb1
 readonly SSD_MNT="/run/media/${USER}/Raspberry-P"
 readonly SSD_UUID=1E18-2168
