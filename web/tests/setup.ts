@@ -3,6 +3,40 @@ import { vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 /**
+ * jsdom emits an ExperimentalWarning about localStorage when no
+ * storage file is configured. Provide a minimal in-memory store so
+ * components that read/write ``window.localStorage`` do not pollute
+ * stderr, without suppressing other Node.js warnings.
+ */
+const localStorageMock = (() => {
+  let store: Record<string, string> = {};
+  return {
+    get length() {
+      return Object.keys(store).length;
+    },
+    key: (index: number) => Object.keys(store)[index] ?? null,
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => {
+      store[key] = String(value);
+    },
+    removeItem: (key: string) => {
+      delete store[key];
+    },
+    clear: () => {
+      store = {};
+    },
+  } as Storage;
+})();
+Object.defineProperty(window, "localStorage", {
+  value: localStorageMock,
+  writable: true,
+});
+
+beforeEach(() => {
+  localStorageMock.clear();
+});
+
+/**
  * ``@/components/FightsGrid`` is the AG Grid client wrapper. The
  * page-level Server Component tests transitively import it, but
  * booting AG Grid's full runtime in jsdom would require a real

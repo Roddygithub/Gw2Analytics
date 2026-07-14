@@ -148,6 +148,18 @@ class TestPlayerBoonsAggregator:
         )
         assert rows[0].name == "BoonBrand"
 
+    def test_name_map_resolves_other_boons_out_keys(self) -> None:
+        """name_map is also used to resolve human-readable names for unknown buff IDs."""
+        rows = PlayerBoonsAggregator().aggregate(
+            [
+                _boon_apply(source=5, target=5, skill_id=8888),
+                _boon_apply(source=5, target=5, skill_id=9999),
+            ],
+            duration_s=10.0,
+            name_map={8888: "Might", 9999: None},
+        )
+        assert rows[0].other_boons_out == {"Might": 1, "Unknown (9999)": 1}
+
     def test_model_is_frozen_pydantic(self) -> None:
         row = PlayerBoonsRow(
             agent_id=1,
