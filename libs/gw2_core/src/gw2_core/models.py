@@ -25,9 +25,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, WrapValidator
 
 # ---------------------------------------------------------------------------
 # Enums (IntEnum because EVTC stores them as 4-byte little-endian integers)
@@ -253,6 +253,13 @@ class EventType(StrEnum):
     BUFF_REMOVAL = "BUFF_REMOVAL"
     BOON_APPLY = "BOON_APPLY"
     CC = "CC"
+    CONDITION_REMOVE = "CONDITION_REMOVE"
+    DOWN = "DOWN"
+    DEATH = "DEATH"
+    STUN_BREAK = "STUN_BREAK"
+    DODGE = "DODGE"
+    BLOCK = "BLOCK"
+    INTERRUPT = "INTERRUPT"
 
 
 class BaseEvent(BaseModel):
@@ -389,23 +396,269 @@ class CCEvent(BaseEvent):
     )
 
 
-# Discriminated union for forward-compat downstream consumers that
-# accept "any event" (e.g. the EventWindowAggregator buckets damage +
-# healing in one shot without forcing the caller to split the stream)
-# AND for JSONL round-trip in apps/api/services (the per-fight events
-# blob is a heterogeneous stream of damage + healing + buff-removal
-# records written one ``model_dump_json()`` per line). The
-# ``Annotated`` + ``Field(discriminator="event_type")`` combination
-# tells Pydantic v2 to dispatch on the ``event_type`` literal at
-# validation time, so a ``TypeAdapter(Event).validate_json(line)`` call
-# materialises the matching subclass with no manual ``isinstance``
-# ladder. Declared via the PEP 695 ``type`` statement (Python 3.12+)
-# so mypy treats the right-hand side as a type expression without
-# any ``# type: ignore``.
-type Event = Annotated[
-    DamageEvent | HealingEvent | BuffRemovalEvent | BoonApplyEvent | CCEvent,
-    Field(discriminator="event_type"),
-]  # PEP 695 type statement; mypy accepts at the type-expression slot
+class ConditionRemoveEvent(BaseEvent):
+    """One outgoing condition-removal event (Combat readout §3.4 / §9.1).
+
+    Mirrors :class:`BuffRemovalEvent` semantically
+    (``condition_removal`` is the per-hit integer stacks /
+    magnitude) but tags the statechange variety so the heal
+    table's ``Cleanses`` column + the §3.3 ``Strips`` healing
+    column can attribute GW2 conditions (burn / freeze /
+    torment / etc) distinct from boons once a skills DB
+    catalog lands.
+
+    The boon-vs-condition wire-distinction is NOT made at the
+    arcdps API level — BOTH go through ``is_buffremove``
+    statechange records; the distinction comes from the
+    skills DB catalog (deferred to v0.11.0 per
+    ``docs/v0.9.0-combat-readout-design.md`` §9). Until
+    then, this class is the forward-compat landing pad for
+    condition-removals once the skill-catalog lookup is
+    wired.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.CONDITION_REMOVE] = EventType.CONDITION_REMOVE
+    condition_removal: int = Field(..., ge=0)
+
+
+class DownEvent(BaseEvent):
+    """One ``is_statechange == 5`` (ChangeDown) statechange event.
+
+    The actor (the player who went down) is encoded as
+    ``source_agent_id``; ``target_agent_id`` and ``skill_id``
+    are both ``0`` because down events have no relevant
+    secondary target or skill attribution (the ``ge=0``
+    constraint on :class:`BaseEvent` accepts ``0``).
+
+    Combat readout §3 ``Down contribution DPS`` column needs
+    both the down event + the subsequent damage events
+    targeting that downed agent to compute per-player
+    down-contribution DPS; until Phase 6 v2 (parser-stream
+    switch) delivers the statechange records this class
+    exists as the parser-side landing pad.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.DOWN] = EventType.DOWN
+
+
+class DeathEvent(BaseEvent):
+    """One ``is_statechange == 4`` (ChangeDead) statechange event.
+
+    Actor-only shape (mirrors :class:`DownEvent`): the dying
+    player is ``source_agent_id``; both ``target_agent_id``
+    and ``skill_id`` are ``0``. The ``killed_by_agent_id`` +
+    ``killing_skill_id`` Optional fields are forward-compat
+    for Phase 6 v2 (when the parser yields the ``kill``
+    tuple from the arcdps state transition); pre-Phase-6-v2
+    streams parse cleanly because both fields default to
+    ``None`` and Pydantic v2 ``extra="forbid"`` only blocks
+    UNKNOWN keys, not unknown-``None`` values on
+    pre-declared fields.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.DEATH] = EventType.DEATH
+    killed_by_agent_id: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Phase 6 v2 forward-compat: the agent responsible for the kill. "
+            "``None`` for pre-Phase-6-v2 streams where the kill attribution "
+            "is not derivable from the actor-only statechange record."
+        ),
+    )
+    killing_skill_id: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Phase 6 v2 forward-compat: the skill id responsible for the kill. "
+            "``None`` for pre-Phase-6-v2 streams where the killing skill is "
+            "not yet extracted from the arcdps state transition."
+        ),
+    )
+
+
+class StunBreakEvent(BaseEvent):
+    """One ``is_statechange == 56`` (StunBreak) statechange event.
+
+    Actor-only shape (mirrors :class:`DownEvent` /
+    :class:`DeathEvent`): the player who broke the stun is
+    ``source_agent_id``; secondary target/skill fields are
+    ``0``. Combat readout §4 ``Breakstunt`` column aggregates
+    across the fight.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.STUN_BREAK] = EventType.STUN_BREAK
+
+
+class DodgeEvent(BaseEvent):
+    """One ``Dodge`` tracking event (Combat readout §6 forward-compat SCAFFOLD).
+
+    Actor-only shape (mirrors :class:`DownEvent` /
+    :class:`DeathEvent` / :class:`StunBreakEvent`): the player
+    who dodged is ``source_agent_id``; ``target_agent_id`` and
+    ``skill_id`` are ``0`` because dodge is a player-action, NOT
+    skill-attributable (the arcdps in-game overlay logger is the
+    authoritative dodge tracker; the :mod:`libs.gw2_evtc_parser`
+    ``EvtcParser`` Protocol V1.3 does NOT surface dodge events,
+    so the parser-stream switch in Phase 6 v2 is the precondition
+    for production-realistic dodge yields).
+
+    Combat readout §6 ``Dodges`` column is the count of
+    :class:`DodgeEvent` rows where ``source_agent_id == player``.
+    The Wave 5 SCAFFOLD ships this Event dataclass so the
+    :class:`PlayerDefenseAggregator` can fill the previously-stub
+    ``dodges`` column without a Phase 6 v2 dependency in the
+    aggregator code.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.DODGE] = EventType.DODGE
+
+
+class BlockEvent(BaseEvent):
+    """One ``Block`` tracking event (Combat readout §6 forward-compat SCAFFOLD).
+
+    Actor-only shape (mirrors :class:`DodgeEvent`): the player
+    who blocked is ``source_agent_id``;
+    ``target_agent_id`` + ``skill_id`` are ``0`` because
+    block is a player-action, NOT skill-attributable (the
+    arcdps in-game overlay logger is the canonical source for
+    block counts; the :mod:`libs.gw2_evtc_parser` V1.3 parser
+    does NOT surface block events, so the parser-stream switch
+    in Phase 6 v2 is the precondition for production-realistic
+    block yields).
+
+    Combat readout §6 ``Blocks`` column is the count of
+    :class:`BlockEvent` rows where ``source_agent_id == player``.
+    The Wave 5 SCAFFOLD ships this Event dataclass so the
+    :class:`PlayerDefenseAggregator` can fill the previously-stub
+    ``blocks`` column without a Phase 6 v2 dependency in the
+    aggregator code.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.BLOCK] = EventType.BLOCK
+
+
+class InterruptEvent(BaseEvent):
+    """One ``Interrupt`` event (Combat readout §6 + §9 forward-compat SCAFFOLD).
+
+    Full :class:`BaseEvent` shape (NOT actor-only — explicit
+    contrast with :class:`DodgeEvent` / :class:`BlockEvent` which
+    ARE actor-only). The asymmetry is by design:
+
+    - ``DodgeEvent`` + ``BlockEvent``: player-action tracking
+      where ``target_agent_id = 0`` and ``skill_id = 0`` because
+      arcdps records dodge + block as player-side actions
+      without a target or skill attribution (the arcdps in-game
+      overlay logger is the canonical source; V1.3 parser does
+      NOT surface yield a skill or target).
+    - ``InterruptEvent``: target + skill CARRIES the forensic
+      signal that future per-skill analytics (the v0.11.0 skills
+      DB catalog) will surface -- a target agent (the enemy whose
+      cast was interrupted) + a skill_id (the interrupt mechanic).
+      Truncating these via actor-only shape would lose the
+      per-interrupt attribution.
+
+    Combat readout §6 ``Interrupts`` column is the count of
+    :class:`InterruptEvent` rows where ``source_agent_id == player``.
+    ``target_agent_id`` + ``skill_id`` carry the per-interrupt
+    attribution for the future per-skill forensic layer (Phase 6
+    v2 parser-stream switch yields the actual events; pre-Phase-6-v2
+    streams parse cleanly because all fields fall back to ``0``).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.INTERRUPT] = EventType.INTERRUPT
+
+
+# ---------------------------------------------------------------------
+# Event dispatch table (Wave 6 partition refactor — Tour 5 wrap-up)
+# ---------------------------------------------------------------------
+#
+# Wave 5 left this as a flat 12-member Annotated union under
+# ``Field(discriminator="event_type")``. The empirical Pydantic v2
+# discriminator-perf cliff is between 12 and 20 members; adding
+# Event#13 pre-Wave-6 would have caused a per-event validation
+# regression across the per-fight drill-down page fetches.
+#
+# Wave 6 replaces it with a Python dict-lookup dispatch +
+# a per-class ``model_validate`` call wrapped via ``WrapValidator``.
+# Adding Event#13+ now requires ONLY one new entry in ``_EVENT_MAP``
+# (NO union-membership change, NO consumer-side update, NO schema
+# bump for existing JSONL blobs). The POST-Wave-5 FORBIDDEN clause is
+# RESOLVED by this dispatch-table design.
+_EVENT_MAP: dict[EventType, type[BaseEvent]] = {
+    EventType.DAMAGE: DamageEvent,
+    EventType.HEALING: HealingEvent,
+    EventType.BUFF_REMOVAL: BuffRemovalEvent,
+    EventType.BOON_APPLY: BoonApplyEvent,
+    EventType.CC: CCEvent,
+    EventType.CONDITION_REMOVE: ConditionRemoveEvent,
+    EventType.DOWN: DownEvent,
+    EventType.DEATH: DeathEvent,
+    EventType.STUN_BREAK: StunBreakEvent,
+    EventType.DODGE: DodgeEvent,
+    EventType.BLOCK: BlockEvent,
+    EventType.INTERRUPT: InterruptEvent,
+}
+
+
+def _dispatch_event(
+    v: Any,
+    handler: Any,
+) -> BaseEvent:
+    """WrapValidator routing via the ``_EVENT_MAP`` dict for O(1) dispatch.
+
+    Steps: (1) read ``event_type`` from raw input dict; (2) map to the
+    subclass via ``_EVENT_MAP[et]``; (3) call ``cls.model_validate(v)``;
+    (4) fall through to ``handler(v)`` on unknown ``event_type``. The
+    fall-through preserves the ``ValidationError`` contract on unknown
+    event_type values (the
+    ``test_unknown_event_type_raises_validation_error`` regression).
+    """
+    if isinstance(v, dict):
+        et_str = v.get("event_type")
+        if et_str is not None:
+            try:
+                et = EventType(et_str)
+            except ValueError:
+                pass  # unknown enum: fall through to handler
+            else:
+                cls = _EVENT_MAP.get(et)
+                if cls is not None:
+                    return cls.model_validate(v)
+    return handler(v)
+
+
+# Discriminated routing for forward-compat downstream consumers that
+# accept "any event" (the EventWindowAggregator + the JSONL round-trip
+# in apps/api/services). The routing mechanism is a Python-dict
+# dispatch table (``_EVENT_MAP``) wired through ``WrapValidator`` for
+# O(1) lookup (vs Pydantic v2 discriminator linear-scan at N >= 12).
+# Declared via the PEP 695 ``type`` statement (Python 3.12+); mypy
+# treats the right-hand side as a type expression without `# type: ignore`.
+#
+# Wave 6 partition refactor (Tour 5 wrap-up): the FORBIDDEN-on-13th-
+# member clause is RESOLVED. Adding Event#13+ now requires ONLY one
+# new entry in ``_EVENT_MAP`` (no union-membership change, no
+# consumer-side update). Wire compatibility: preserved (JSONL lines
+# without explicit ``category`` field still validate correctly via the
+# ``event_type`` discriminator).
+type Event = Annotated[BaseEvent, WrapValidator(_dispatch_event)]
+# PEP 695 type statement; mypy accepts at the type-expression slot
+# See _EVENT_MAP + _dispatch_event (above) for the O(1) dispatch table.
 
 
 # ---------------------------------------------------------------------------
@@ -454,13 +707,19 @@ class WorldInfo(BaseModel):
 
 
 __all__ = [
+    "_EVENT_MAP",
     "AccountInfo",
     "Agent",
     "BaseEvent",
+    "BlockEvent",
     "BoonApplyEvent",
     "BuffRemovalEvent",
     "CCEvent",
+    "ConditionRemoveEvent",
     "DamageEvent",
+    "DeathEvent",
+    "DodgeEvent",
+    "DownEvent",
     "EliteSpec",
     "Event",
     "EventType",
@@ -468,8 +727,11 @@ __all__ = [
     "Fight",
     "GameType",
     "HealingEvent",
+    "InterruptEvent",
     "Population",
     "Profession",
     "Skill",
+    "StunBreakEvent",
     "WorldInfo",
+    "_dispatch_event",
 ]
