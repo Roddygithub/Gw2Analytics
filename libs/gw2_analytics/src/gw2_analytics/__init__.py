@@ -72,6 +72,16 @@ from gw2_analytics.per_fight_timeline import (
     PerFightTimelineAggregator,
     PerFightTimelineRow,
 )
+from gw2_analytics.player_boons import (
+    PlayerBoonsAggregator,
+    PlayerBoonsRow,
+)
+from gw2_analytics.player_damage import PlayerDamageAggregator, PlayerDamageRow
+from gw2_analytics.player_defense import (
+    PlayerDefenseAggregator,
+    PlayerDefenseRow,
+)
+from gw2_analytics.player_heal import PlayerHealAggregator, PlayerHealRow
 from gw2_analytics.player_profile import (
     FightContribution,
     PlayerProfile,
@@ -86,7 +96,17 @@ from gw2_analytics.target_buff_removal import (
 from gw2_analytics.target_dps import TargetDpsAggregator, TargetDpsRow
 from gw2_analytics.target_healing import TargetHealingAggregator, TargetHealingRow
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
+# Wave 6 PART-2 (Phase 3 SCAFFOLD-getter plumbing close-out):
+# bumped 0.7.0 -> 0.8.0 for semver symmetry with gw2_core 0.6.0.
+# SCAFFOLD-tier (MINOR bump):
+#   the Boons union-key fix is a behavior change so MINOR (not
+#   PATCH) is the conservative semver choice. The wire-shape stays
+#   byte-equivalent to pre-Wave-6 PART-2 so PATCH is also
+#   defensible -- MINOR chosen because the Boons row-builder
+#   iteration set went from `unique_sources` to
+#   `unique_sources-or-unique_targets_only` (pure-target-agent
+#   rows now surface).
 
 __all__ = [
     "CombatantRollup",
@@ -102,6 +122,14 @@ __all__ = [
     "MultiFightAggregator",
     "PerFightTimelineAggregator",
     "PerFightTimelineRow",
+    "PlayerBoonsAggregator",
+    "PlayerBoonsRow",
+    "PlayerDamageAggregator",
+    "PlayerDamageRow",
+    "PlayerDefenseAggregator",
+    "PlayerDefenseRow",
+    "PlayerHealAggregator",
+    "PlayerHealRow",
     "PlayerProfile",
     "PlayerProfileAggregator",
     "SingleFightAggregator",

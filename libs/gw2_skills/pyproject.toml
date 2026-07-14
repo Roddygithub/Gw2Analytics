@@ -1,0 +1,48 @@
+[project]
+name = "gw2_skills"
+version = "0.1.0"
+description = "GW2 skills/buffs/conditions catalog library (Plan 045 v0.9.0 combat-readout skills DB step 2)."
+requires-python = ">=3.12"
+# Pure-Python: Pydantic v2 typed catalog lookup. No IO, no DB, no parser dependency.
+# Read-only data layer for combat-readout Calibration + boon-vs-condition wire distinction.
+authors = [
+    { name = "Buffy", email = "buffy@local" },
+]
+dependencies = [
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+# Future Tour 6 will add element/condition-vs-boon disambiguation as a lib dep.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gw2_skills"]
+
+[tool.ruff]
+# Ruff shares the workspace rules; this file imports the workspace rules via the
+# parent ``pyproject.toml`` chain. Inline rules here cover only the SCAFFOLD
+# surface.
+line-length = 100
+target-version = "py312"
+
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PLR"]
+ignore = [
+    "PLR0912",  # too-many-branches (the catalog classification has 12+ branches).
+]
+
+
+[tool.pyright]
+include = ["src/gw2_skills"]
+pythonVersion = "3.12"
+strict = ["src/gw2_skills"]
+
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]

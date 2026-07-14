@@ -95,7 +95,9 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
                 elite_spec=_elite_id(agent.elite),
                 is_player=agent.is_player,
                 account_name=(
-                    None if agent.account_name is None else _sanitize_name(agent.account_name)
+                    None
+                    if agent.account_name is None
+                    else _sanitize_name(agent.account_name.lstrip(":"))
                 ),
                 subgroup=(None if agent.subgroup is None else _sanitize_name(agent.subgroup)),
             ),

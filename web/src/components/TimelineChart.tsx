@@ -74,6 +74,8 @@
  * pre-existing :class:`EventWindowsChart` makes.
  */
 
+/* eslint-disable react-refresh/only-export-components */
+
 import { useMemo } from "react";
 import { PlayerTimelineLegend } from "@/components/PlayerTimelineLegend";
 

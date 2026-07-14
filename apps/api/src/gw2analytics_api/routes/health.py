@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from gw2analytics_api.database import get_session
 from gw2analytics_api.health import SummaryDrift, summary_drift
+from gw2analytics_api.metrics import HEALTH_DRIFT_COUNT
 
 router = APIRouter(prefix="/api/v1/health", tags=["health"])
 
@@ -62,8 +63,18 @@ def get_health_summary(db: Session = Depends(get_session)) -> SummaryDrift:  # n
     it is safe to poll from a monitoring system at a high
     cadence (the query plan uses the ``fights`` PK index
     + the ``fight_player_summaries`` PK index).
+
+    Plan 017 close-out: also sets the ``HEALTH_DRIFT_COUNT``
+    Prometheus gauge on every probe call so the
+    ``GET /api/v1/metrics`` endpoint exposes the drift
+    number for operator-side alerting on any non-zero
+    value. The gauge is a single-process, in-memory
+    accumulator (no DB round-trip beyond what
+    :func:`summary_drift` already does).
     """
-    return summary_drift(db)
+    drift = summary_drift(db)
+    HEALTH_DRIFT_COUNT.set(int(drift["drift_count"]))
+    return drift
 
 
 __all__ = ["router"]

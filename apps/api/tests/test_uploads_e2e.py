@@ -315,7 +315,7 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     for a in fight["agents"]:
         assert a["is_player"] is True
         assert a["account_name"] is not None
-        assert a["account_name"].startswith(":synth.")
+        assert a["account_name"].startswith("synth.")
         assert a["subgroup"] == ""
     # V1.3: skills round-trip
     assert len(fight["skills"]) == 2
@@ -431,8 +431,8 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
         # 2 summary rows (one per (fight_id, account_name) pair).
         assert len(summary_rows) == 2
         by_account = {r.account_name: r for r in summary_rows}
-        a_row = by_account[f":synth.{base_id_a}"]
-        b_row = by_account[f":synth.{base_id_b}"]
+        a_row = by_account[f"synth.{base_id_a}"]
+        b_row = by_account[f"synth.{base_id_b}"]
         # A's source-side totals: A is the SOURCE of the 2 damage
         # events only (the heal + strip events all flow B -> A,
         # so B is their source). A's damage is 1_234 + 567; heal
@@ -470,7 +470,7 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     assert players_resp.status_code == 200, players_resp.text
     players_rows = players_resp.json()
     players_by_account = {r["account_name"]: r for r in players_rows}
-    a_player = players_by_account[f":synth.{base_id_a}"]
+    a_player = players_by_account[f"synth.{base_id_a}"]
     # Source-side attribution: A is the source of 2 damage events
     # only (the heal + strip events all flow B -> A). The
     # player route's cross-fight roll-up feeds the same per-(fight,
@@ -511,9 +511,9 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
         assert len(summary_rows) == 2
         by_account = {r.account_name: r for r in summary_rows}
         # Totals are unchanged (same events blob => same totals).
-        assert by_account[f":synth.{base_id_a}"].total_damage == 1_234 + 567
-        assert by_account[f":synth.{base_id_a}"].total_healing == 0
-        assert by_account[f":synth.{base_id_b}"].total_buff_removal == 300 + 200
+        assert by_account[f"synth.{base_id_a}"].total_damage == 1_234 + 567
+        assert by_account[f"synth.{base_id_a}"].total_healing == 0
+        assert by_account[f"synth.{base_id_b}"].total_buff_removal == 300 + 200
     finally:
         session.close()
 
@@ -652,7 +652,7 @@ def test_players_list_returns_accounts_present_in_fight() -> None:
     assert isinstance(rows, list)
     assert len(rows) >= 2
     accounts = {r["account_name"] for r in rows}
-    assert any(a.startswith(":synth.") for a in accounts)
+    assert any(a.startswith("synth.") for a in accounts)
 
 
 def test_player_detail_returns_profile_with_per_fight_breakdown() -> None:
@@ -716,6 +716,69 @@ def test_player_detail_404_when_account_unknown() -> None:
     """v0.7.0: GET /api/v1/players/{unknown} returns 404."""
     resp = client.get("/api/v1/players/does-not-exist-1234")
     assert resp.status_code == 404
+
+
+def test_player_routes_accept_colon_prefixed_account_name() -> None:
+    """Retrocompatibility: routes that accept ``account_name`` in the URL
+    still tolerate the legacy arcdps ``:`` prefix.
+
+    The persistence layer now stores account names in bare form
+    (``synth.<id>``), but external bookmarks / frontend URLs may
+    still reference the old colon-prefixed form (``%3Asynth.<id>``).
+    The player detail, player timeline, and per-fight player-skills
+    routes all strip the leading ``:`` defensively and return the
+    canonical bare account_name on the wire.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    events = [
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+    ]
+    fight_id = _post_minimal_fight(events, suffix=suffix)
+
+    # The fixture seeds agent A as a player with bare account_name
+    # ``synth.<base_id_a>``. Build the legacy colon-prefixed form
+    # and URL-encode it so the request path contains ``%3Asynth...``.
+    bare_account_name = f"synth.{base_id_a}"
+    colon_prefixed = f":{bare_account_name}"
+    encoded = quote(colon_prefixed, safe="")
+    assert encoded.startswith("%3A"), (
+        "the colon must be URL-encoded for this retrocompatibility test"
+    )
+
+    # Player detail with colon prefix.
+    detail_resp = client.get(f"/api/v1/players/{encoded}")
+    assert detail_resp.status_code == 200, detail_resp.text
+    detail = detail_resp.json()
+    assert detail["account_name"] == bare_account_name
+    assert detail["fights_attended"] >= 1
+
+    # Player timeline with colon prefix.
+    timeline_resp = client.get(f"/api/v1/players/{encoded}/timeline")
+    assert timeline_resp.status_code == 200, timeline_resp.text
+    timeline = timeline_resp.json()
+    assert timeline["account_name"] == bare_account_name
+    assert timeline["total"] >= 1
+
+    # Per-fight player skills with colon prefix. Agent A is the
+    # source of the seeded damage event, so the skill roll-up
+    # must contain at least one skill row.
+    skills_resp = client.get(f"/api/v1/fights/{fight_id}/players/{encoded}/skills")
+    assert skills_resp.status_code == 200, skills_resp.text
+    skills = skills_resp.json()
+    assert skills["fight_id"] == fight_id
+    assert skills["account_name"] == bare_account_name
+    assert skills["agent_id"] == base_id_a
+    assert len(skills["skills"]) == 1
+    assert skills["skills"][0]["total_damage"] == 1_234
 
 
 def test_fight_squads_returns_per_subgroup_rollup() -> None:
@@ -942,7 +1005,7 @@ def test_player_timeline_returns_paginated_recency_first_points() -> None:
     assert fight_id_a != fight_id_b
 
     # Pick the shared account_name (agent A's ``:synth.<id>``).
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
 
     # Default limit/offset: returns up to 20 most-recent points.
@@ -1044,7 +1107,7 @@ def test_player_timeline_default_bucket_is_fight() -> None:
         ),
     ]
     _post_minimal_fight(events, suffix=suffix)
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
     resp = client.get(f"/api/v1/players/{encoded}/timeline")
     assert resp.status_code == 200, resp.text
@@ -1085,7 +1148,7 @@ def test_player_timeline_day_bucket_aggregates_per_day() -> None:
         ),
     ]
     _post_minimal_fight(events, suffix=suffix)
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
     resp = client.get(
         f"/api/v1/players/{encoded}/timeline",
@@ -1170,7 +1233,7 @@ def test_player_timeline_day_bucket_splits_across_days() -> None:
         ),
     ]
     fight_id_1 = _post_minimal_fight(events, suffix=suffix)
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
 
     # Fight 2: inline a custom POST so the 2 fights share
@@ -1293,7 +1356,7 @@ def test_player_timeline_tz_default_is_utc() -> None:
         ),
     ]
     fight_id = _post_minimal_fight(events, suffix=suffix)
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
 
     # Pin ``started_at`` to a fixed mid-afternoon UTC timestamp
@@ -1371,7 +1434,7 @@ def test_player_timeline_tz_europe_paris() -> None:
         ),
     ]
     fight_id = _post_minimal_fight(events, suffix=suffix)
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
 
     # 2024-01-15 23:30:00 UTC = 2024-01-16 00:30:00 Europe/Paris
@@ -1464,7 +1527,7 @@ def test_player_timeline_tz_america_new_york() -> None:
         ),
     ]
     fight_id = _post_minimal_fight(events, suffix=suffix)
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
 
     # 2024-01-15 02:30:00 UTC = 2024-01-14 21:30:00 America/New_York
@@ -1575,7 +1638,7 @@ def test_player_timeline_tz_422_when_invalid_timezone() -> None:
     # ``ZoneInfo(tz)`` parse block. Use the real account_name
     # (NOT ``"anything"`` -- the 404 would fire first and mask
     # the 422 we are actually testing).
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
 
     resp = client.get(
@@ -1633,7 +1696,7 @@ def test_player_timeline_tz_europe_paris_dst_spring_forward() -> None:
         ),
     ]
     fight_id = _post_minimal_fight(events, suffix=suffix)
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
 
     # 2024-03-31 01:30 UTC = 03:30 CEST (post-jump). Paris
@@ -1698,7 +1761,7 @@ def test_player_timeline_tz_america_new_york_dst_fall_back() -> None:
         ),
     ]
     fight_id = _post_minimal_fight(events, suffix=suffix)
-    account_name = f":synth.{base_id_a}"
+    account_name = f"synth.{base_id_a}"
     encoded = quote(account_name, safe="")
 
     # 2024-11-03 06:30 UTC = 01:30 EST (post-fall-back). NY
@@ -1966,8 +2029,8 @@ def test_fight_player_timeline_returns_per_player_per_bucket_series() -> None:
     # > total_damage(B)=0; if A and B tied on damage, ascending
     # ``account_name`` would break the tie. With the
     # ``base_id_b = base_id_a + 1`` setup, lex order agrees.
-    assert series_a["account_name"] == f":synth.{base_id_a}"
-    assert series_b["account_name"] == f":synth.{base_id_b}"
+    assert series_a["account_name"] == f"synth.{base_id_a}"
+    assert series_b["account_name"] == f"synth.{base_id_b}"
 
     # A is the SOURCE of the damage event only. Per-bucket
     # placement: bucket 1 (t=1.5s).

@@ -29,6 +29,14 @@ import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 
 import type { FightRow } from "@/lib/api";
+import {
+  FIGHTS_GRID_COLUMN_AGENTS,
+  FIGHTS_GRID_COLUMN_BUILD,
+  FIGHTS_GRID_COLUMN_ENCOUNTER,
+  FIGHTS_GRID_COLUMN_FIGHT_ID,
+  FIGHTS_GRID_COLUMN_GAME_TYPE,
+  FIGHTS_GRID_COLUMN_STARTED_UTC,
+} from "@/lib/copy/fights-grid";
 
 // Side-effect import: registers AllCommunityModule exactly once
 // (see ag-grid-setup.ts). Importing here (rather than re-running
@@ -45,7 +53,7 @@ export function FightsGrid({ rows }: { rows: FightRow[] }) {
     () => [
       {
         field: "id",
-        headerName: "Fight ID",
+        headerName: FIGHTS_GRID_COLUMN_FIGHT_ID,
         sortable: true,
         filter: true,
         minWidth: 240,
@@ -69,35 +77,35 @@ export function FightsGrid({ rows }: { rows: FightRow[] }) {
       },
       {
         field: "encounter_id",
-        headerName: "Encounter",
+        headerName: FIGHTS_GRID_COLUMN_ENCOUNTER,
         sortable: true,
         filter: true,
         maxWidth: 120,
       },
       {
         field: "agent_count",
-        headerName: "Agents",
+        headerName: FIGHTS_GRID_COLUMN_AGENTS,
         sortable: true,
         filter: true,
         maxWidth: 100,
       },
       {
         field: "build_version",
-        headerName: "Build",
+        headerName: FIGHTS_GRID_COLUMN_BUILD,
         sortable: true,
         filter: true,
         maxWidth: 120,
       },
       {
         field: "started_at",
-        headerName: "Started (UTC)",
+        headerName: FIGHTS_GRID_COLUMN_STARTED_UTC,
         sortable: true,
         filter: true,
         maxWidth: 220,
       },
       {
         field: "game_type",
-        headerName: "Game type",
+        headerName: FIGHTS_GRID_COLUMN_GAME_TYPE,
         sortable: true,
         filter: true,
         maxWidth: 110,

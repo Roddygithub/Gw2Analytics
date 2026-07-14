@@ -65,7 +65,7 @@ def _post_compare_fight(n_players: int, suffix: str | None = None) -> tuple[str,
         if upload_resp.status_code == 200 and upload_resp.json()["status"] == "completed":
             time.sleep(0.1)
             fight_id = str(upload_resp.json()["fight_id"])
-            account_names = [f":synth.{base_id + i}" for i in range(n_players)]
+            account_names = [f"synth.{base_id + i}" for i in range(n_players)]
             return fight_id, account_names
         time.sleep(0.1)
     raise AssertionError(f"upload {upload_id} did not complete in 5s")
@@ -173,7 +173,7 @@ def test_compare_unknown_account_returns_empty_points_series() -> None:
     suffix = _uuid.uuid4().hex[:8]
     _, account_names = _post_compare_fight(n_players=1, suffix=suffix)
     known = account_names[0]
-    unknown = f":synth.{_uuid.uuid4().hex}"
+    unknown = f"synth.{_uuid.uuid4().hex}"
     resp = client.get(
         "/api/v1/players/compare/timeline", params=[("accounts", known), ("accounts", unknown)]
     )
@@ -182,3 +182,29 @@ def test_compare_unknown_account_returns_empty_points_series() -> None:
     assert len(series) == 2
     unknown_series = next(s for s in series if s["account_name"] == unknown)
     assert unknown_series["points"] == []
+
+
+def test_compare_accepts_colon_prefixed_account_names() -> None:
+    """Colon-prefixed account names are accepted and normalised to bare form.
+
+    Regression guard for the account_name colon-prefix normalisation:
+    clients that still send the legacy ``:synth.<id>`` form (or any
+    other account name with a leading colon) must get the same
+    response as the bare form, with the response echoing the bare
+    account_name.
+    """
+    assert client is not None  # mypy: narrow TestClient | None → TestClient
+    suffix = _uuid.uuid4().hex[:8]
+    _, account_names = _post_compare_fight(n_players=2, suffix=suffix)
+    colon_prefixed = [f":{name}" for name in account_names]
+    resp = client.get(
+        "/api/v1/players/compare/timeline",
+        params=[("accounts", a) for a in colon_prefixed],
+    )
+    assert resp.status_code == 200, resp.text
+    series = resp.json()
+    assert len(series) == 2
+    accounts_in_response = {s["account_name"] for s in series}
+    assert accounts_in_response == set(account_names)
+    for s in series:
+        assert not s["account_name"].startswith(":")

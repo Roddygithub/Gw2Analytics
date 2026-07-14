@@ -144,9 +144,13 @@ def get_compare_timeline(
     seen: set[str] = set()
     deduped_accounts: list[str] = []
     for acct in accounts:
-        if acct not in seen:
-            seen.add(acct)
-            deduped_accounts.append(acct)
+        # Strip the optional leading ':' (legacy arcdps prefix) so
+        # the route accepts both bare and colon-prefixed account
+        # names, matching the per-account player routes.
+        bare_acct = acct.lstrip(":")
+        if bare_acct not in seen:
+            seen.add(bare_acct)
+            deduped_accounts.append(bare_acct)
     if len(deduped_accounts) < 2:
         # The ``Query(..., min_length=2)`` validator already returns
         # 422 on len < 2 raw; this guard handles the POST-de-dup

@@ -152,6 +152,35 @@ vi.mock("@/components/SkillUsageTable", () => ({
 }));
 
 /**
+ * Tour 4 v0.10.13 plan 044: ``@/components/PlayerSkillUsageTable``
+ * is the per-player roll-up table + loadout strip on the per-fight
+ * drill-down page. The page-level Server Component tests transitively
+ * import it, so we mock it as a no-op to keep the page test focused
+ * on the page's own render contract; a dedicated component-level
+ * test in
+ * :file:`web/tests/components/player-skill-usage-table.test.tsx`
+ * exercises the full render chrome (loadout bar, skill table,
+ * empty-state panel, CSV button visibility).
+ */
+vi.mock("@/components/PlayerSkillUsageTable", () => ({
+  PlayerSkillUsageTable: () => null,
+}));
+
+/**
+ * Tour 4 v0.10.13 plan 044: ``@/components/PlayerSkillUsageFilter``
+ * is the per-player dropdown Client Component that drives the
+ * ``?account=`` URL search-param on ``/fights/[id]``. Mocked as a
+ * no-op at the page-level test layer so the page test can assert
+ * on the per-player section's wrapping chrome without booting the
+ * Next.js router; a dedicated component-level test in
+ * :file:`web/tests/components/player-skill-usage-filter.test.tsx`
+ * exercises the dropdown + ``router.push`` interaction directly.
+ */
+vi.mock("@/components/PlayerSkillUsageFilter", () => ({
+  PlayerSkillUsageFilter: () => null,
+}));
+
+/**
  * v0.7.1 of web: ``@/components/PlayersGrid`` is the AG Grid
  * Community wrapper for the ``/players`` paginated list. Mocked
  * as a no-op so the page-level tests can render the wrapper
@@ -204,9 +233,7 @@ vi.mock("@/components/PlayerTimelineSection", () => ({
  */
 vi.mock("@/components/PerFightTimelineSection", () => ({
   PerFightTimelineSection: () => null,
-}));
-
-/**
+}));/**
  * v0.8.9 of web (plan/002): ``@/components/PerFightTimelineChart``
  * is the inline-SVG Client Component for the per-fight timeline
  * chart. We do NOT mock it here: the page-level Server
@@ -222,8 +249,50 @@ vi.mock("@/components/PerFightTimelineSection", () => ({
  * with ``importOriginal`` to keep the pure helpers available,
  * but that approach replaced the React component with
  * ``() => null`` -- which silently broke the component-level
- * test (it rendered nothing, so ``querySelectorAll("text")``
+ * test (it rendered nothing, so ``querySelectorAll( "text" )``
  * returned an empty array). The fix is to mock the section
  * wrapper (which is the actual page-level concern) and let the
  * chart be tested directly at the component level.
  */
+
+/**
+ * Tour 6 Wave 7 (Workstream F): ``@/components/PlayerReadoutDamage``
+ * is the AG Grid Community 34 Client Component for the Combat
+ * readout §3 Damage table (per docs/v0.9.0-combat-readout-design.md).
+ * Mocked as a no-op at the page-level test layer so the page test
+ * can render the wrapper without booting AG Grid's runtime in
+ * jsdom (no canvas, no offsetWidth). A dedicated component-level
+ * test in :file:`web/tests/components/combat-readout.test.tsx`
+ * exercises the column defs + default sort + empty-state panel.
+ */
+vi.mock("@/components/PlayerReadoutDamage", () => ({
+  PlayerReadoutDamage: () => null,
+}));
+
+/**
+ * Tour 6 Wave 7 (Workstream F): ``@/components/PlayerReadoutHeal``.
+ * Mocked as a no-op at the page-level test layer; component-level
+ * coverage lives in :file:`web/tests/components/combat-readout.test.tsx`.
+ */
+vi.mock("@/components/PlayerReadoutHeal", () => ({
+  PlayerReadoutHeal: () => null,
+}));
+
+/**
+ * Tour 6 Wave 7 (Workstream F): ``@/components/PlayerReadoutBoons``.
+ * Mocked as a no-op at the page-level test layer; the dynamic
+ * ``other_boons_total`` ``valueGetter`` is exercised at the
+ * component level in :file:`web/tests/components/combat-readout.test.tsx`.
+ */
+vi.mock("@/components/PlayerReadoutBoons", () => ({
+  PlayerReadoutBoons: () => null,
+}));
+
+/**
+ * Tour 6 Wave 7 (Workstream F): ``@/components/PlayerReadoutDefense``.
+ * Mocked as a no-op at the page-level test layer; component-level
+ * coverage lives in :file:`web/tests/components/combat-readout.test.tsx`.
+ */
+vi.mock("@/components/PlayerReadoutDefense", () => ({
+  PlayerReadoutDefense: () => null,
+}));

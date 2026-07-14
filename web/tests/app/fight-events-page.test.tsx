@@ -55,6 +55,12 @@ vi.mock("@/lib/fetchCached", async (importActual) => {
 import FightEventsPage from "@/app/fights/[id]/page";
 import { fetchCached } from "@/lib/fetchCached";
 import { ApiError } from "@/lib/api/errors";
+import { UPSTREAM_ERROR_PREFIX } from "@/lib/copy/error-messages";
+import {
+  FAILED_TO_LOAD_PLAYER_LIST,
+  FAILED_TO_LOAD_PER_PLAYER_SKILLS,
+  PER_PLAYER_PROMPT_PLACEHOLDER,
+} from "@/lib/copy/error-messages";
 import type {
   FightEventsSummaryRow,
   FightSquads,
@@ -151,11 +157,87 @@ const EMPTY_PAYLOAD: FightEventsSummaryRow = {
   event_windows: [],
 };
 
+// Tour 4 plan 044: the bare ``/fights/:id`` fetch-side enum
+// grammar (a regex, NOT an exact match). Anchored at the
+// canonical ``API_BASE_URL`` (``http://test/api`` per the
+// ``setup.ts`` mock) so a future test that uses ANY fight-id
+// or that adds a query-param to the URL still matches. The
+// trailing ``(?:[?#]|$)`` group accepts an end-of-string OR a
+// query-string start (``?``) OR a fragment start (``#``) so
+// any future query-param additions don't silently drop into
+// the ``throw new Error(...)`` catch-all.
+const BARE_FIGHT_URL_REGEX = new RegExp(
+  `^http://test/api/api/v1/fights/${FIGHT_ID}(?:[?#]|$)`,
+);
+
+// Tour 4 plan 044 fixture: populated ``FightOut`` with the
+// 2-agent stub the page's ``PlayerSkillUsageFilter``
+// dropdown pre-filters on. Mirrors the canonical wire shape
+// so a regression in the field contract surfaces here as a
+// TS compile error too.
+const POPULATED_FIGHT_DETAILS: import("@/lib/api/fights").FightOut = {
+  id: FIGHT_ID,
+  build_version: "20250714-123456",
+  encounter_id: 1,
+  agent_count: 2,
+  started_at: "2026-07-14T12:00:00Z",
+  game_type: 4,
+  agents: [
+    {
+      agent_id: 1234,
+      name: "Fighty McFight",
+      profession: "Warrior",
+      elite_spec: "Berserker",
+      is_player: true,
+      account_name: "TestAccount.1234",
+      subgroup: "1",
+    },
+    {
+      agent_id: 5678,
+      name: "Heal Bot",
+      profession: "Guardian",
+      elite_spec: "Firebrand",
+      is_player: true,
+      account_name: "TestAccount.5678",
+      subgroup: "2",
+    },
+  ],
+  skills: [],
+};
+
+// Tour 4 plan 044 fixture: populated per-player skill row
+// (Whirlwind 3000dmg) for ``TestAccount.1234``. Matches the
+// backend V1-stub ``PlayerSkillsOut`` shape so a regression
+// in ``skill_id`` / ``skill_name`` / totals contract surfaces
+// here as a TS compile error too.
+const POPULATED_PLAYER_SKILLS: import("@/lib/api/fights").PlayerSkills = {
+  fight_id: FIGHT_ID,
+  account_name: "TestAccount.1234",
+  agent_id: 1234,
+  loadout: {
+    profession: "Warrior",
+    elite_spec: "Berserker",
+    equipped_skill_ids: [],
+  },
+  skills: [
+    {
+      skill_id: 100,
+      skill_name: "Whirlwind",
+      hit_count: 2,
+      total_damage: 3000,
+      total_healing: 0,
+      total_buff_removal: 0,
+    },
+  ],
+};
+
 /**
  * Per-URL dispatch helper. Each URL can resolve with a fixture OR
  * reject with an Error. The default for unprovided URLs is the
  * POPULATED_* fixture. String-matching order is longest-substring
- * first so ``/timeline/players`` matches BEFORE ``/timeline``.
+ * first so ``/timeline/players`` matches BEFORE ``/timeline`` AND
+ * ``/players/:account/skills`` matches BEFORE the bare fight-id
+ * catch-all.
  */
 function mockFightFetch(
   mocks: {
@@ -164,9 +246,26 @@ function mockFightFetch(
     skills?: FightSkills | Error;
     timeline?: FightTimeline | Error;
     playerTimeline?: FightPlayerTimeline | Error;
+    fightDetails?: import("@/lib/api/fights").FightOut | Error;
+    playerSkills?: import("@/lib/api/fights").PlayerSkills | Error;
   } = {},
 ): void {
   vi.mocked(fetchCached).mockImplementation(async (url: string) => {
+    // Tour 4 plan 044: the per-player fetch URL is the most
+    // specific (it has 2 path segments after ``/fights/`` AND the
+    // path-after-``/players/`` includes ``/skills``). Check
+    // FIRST so the bare ``/fights/:id`` (which is also a fetch)
+    // matches the fightDetails slot instead of the playerSkills
+    // slot -- a bare ``url.includes("/players/")`` substring
+    // check would otherwise be ambiguous between the two.
+    const playerSkillsPathMatch = url.match(
+      /\/api\/v1\/fights\/[^/]+\/players\/[^/]+\/skills/,
+    );
+    if (playerSkillsPathMatch !== null) {
+      const m = mocks.playerSkills ?? POPULATED_PLAYER_SKILLS;
+      if (m instanceof Error) throw m;
+      return m;
+    }
     if (url.includes("/timeline/players")) {
       const m = mocks.playerTimeline ?? POPULATED_PLAYER_TIMELINE;
       if (m instanceof Error) throw m;
@@ -189,6 +288,19 @@ function mockFightFetch(
     }
     if (url.includes("/skills")) {
       const m = mocks.skills ?? POPULATED_SKILLS;
+      if (m instanceof Error) throw m;
+      return m;
+    }
+    // Tour 4 bare ``/fights/:id`` catch-all: must be checked
+    // LAST so it doesn't shadow any of the more-specific
+    // sub-path handlers above. The page.tsx fires this fetch
+    // via ``fetchCached<import("@/lib/api").FightOut>(base)``
+    // for the player dropdown options. The regex (NOT an exact
+    // match) accepts any trailing query-string or fragment so
+    // a future test or refactor that adds params doesn't
+    // silently fall through to the ``throw`` catch-all.
+    if (BARE_FIGHT_URL_REGEX.test(url)) {
+      const m = mocks.fightDetails ?? POPULATED_FIGHT_DETAILS;
       if (m instanceof Error) throw m;
       return m;
     }
@@ -247,7 +359,7 @@ describe("FightEventsPage", () => {
       screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Upstream error: 404: 404: fight not found/),
+      screen.getByText(`${UPSTREAM_ERROR_PREFIX}404: 404: fight not found`),
     ).toBeInTheDocument();
   });
 
@@ -360,5 +472,211 @@ describe("FightEventsPage", () => {
     render(tree);
     expect(screen.queryByText(/filtered to target/)).not.toBeInTheDocument();
     expect(screen.getByText(/Duration: 12.50 s/)).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Tour 4 v0.10.13 plan 044 page-level coverage: the per-player
+  // section on ``/fights/[id]`` with the ``?account=`` URL filter.
+  // -------------------------------------------------------------------------
+
+  it("renders the per-player section heading + the prompt placeholder on first load (no ?account= URL filter)", async () => {
+    // First-load state: no ``?account=`` URL filter. The page
+    // shows the per-player section heading + the
+    // ``PlayerSkillUsageFilter`` dropdown + the "Pick a player"
+    // prompt placeholder. The dedicated component-level vitest
+    // tests (in :file:`web/tests/components/player-skill-usage-filter.test.tsx`)
+    // cover the dropdown's interaction contract; this page-level
+    // assertion pins the WRAPPING chrome.
+    mockFightFetch({ events: POPULATED_PAYLOAD });
+    const tree = await FightEventsPage({
+      params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({}),
+    });
+    render(tree);
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
+        name: /Per-player \(SkillUsage attribution\)/,
+      }),
+    ).toBeInTheDocument();
+    // The "Pick a player" prompt placeholder carries the
+    // canonical ``player-skill-prompt`` testid so the
+    // screenshot-script can locate it without a label query.
+    expect(screen.getByTestId("player-skill-prompt")).toBeInTheDocument();
+    expect(screen.getByText(PER_PLAYER_PROMPT_PLACEHOLDER)).toBeInTheDocument();
+  });
+
+  it("renders the section-level error chip when ?account= points at an account NOT in the fight's agents", async () => {
+    // Lenient contract: an analyst mistyping ``?account=`` to a
+    // value that's not in the fight's agent list surfaces a
+    // section-level diagnostic chimp (``player-skill-error``)
+    // rather than the page-level 404 card. The page.tsx agent
+    // lookup filters for ``is_player === true && account_name
+    // === accountFilter``; an unmatched account raises the
+    // canonical "Player ... not found in this fight" string
+    // (NOT a 404 -- the 404 contract is the gateway's, NOT the
+    // page's).
+    mockFightFetch({ events: POPULATED_PAYLOAD });
+    const tree = await FightEventsPage({
+      params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({ account: "UnknownAccount.9999" }),
+    });
+    render(tree);
+    // The per-player section still renders (the prompt
+    // placeholder is NOT shown when ``accountFilter !== null``
+    // AND ``accountSkills === null``).
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
+        name: /Per-player \(SkillUsage attribution\)/,
+      }),
+    ).toBeInTheDocument();
+    // The section-level error chip carries the
+    // ``player-skill-error`` testid.
+    expect(screen.getByTestId("player-skill-error")).toBeInTheDocument();
+    expect(screen.getByText(/not found in this fight/i)).toBeInTheDocument();
+    // The prompt placeholder is NOT shown when an account is set
+    // (the per-player-section body has only 3 valid states:
+    // prompt / error / table; the prompt is suppressed when the
+    // URL points at an account).
+    expect(
+      screen.queryByTestId("player-skill-prompt"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the upstream error chip when the per-player fetch throws (accountSkillsError !== null from the page's fetch catch)", async () => {
+    // The page.tsx cascades an upstream error from the per-player
+    // fetch into the section's ``accountSkillsError`` field.
+    // The page renders the ``player-skill-error`` chimp with
+    // the upstream error message. This test pins the
+    // error-propagation contract independently from the
+    // agent-not-found path (a different error class -- gateway
+    // throws 502 vs page-level agent-mismatch).
+    mockFightFetch({
+      events: POPULATED_PAYLOAD,
+      playerSkills: new ApiError(502, "events blob corrupt"),
+    });
+    const tree = await FightEventsPage({
+      params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({ account: "TestAccount.1234" }),
+    });
+    render(tree);
+    expect(screen.getByTestId("player-skill-error")).toBeInTheDocument();
+    expect(screen.getByText(/events blob corrupt/i)).toBeInTheDocument();
+  });
+
+  it("renders the agents-fetch error chip when the bare /fights/:id fetch fails (cascades to per-player section)", async () => {
+    // The page.tsx cascades the agents-fetch error to the per-
+    // player section's ``accountSkillsError`` field as well --
+    // "Failed to load player list: ..." -- so the analyst sees
+    // the root cause rather than a misleading "not found in
+    // this fight".
+    mockFightFetch({
+      events: POPULATED_PAYLOAD,
+      fightDetails: new ApiError(502, "fight unavailable"),
+    });
+    const tree = await FightEventsPage({
+      params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({ account: "TestAccount.1234" }),
+    });
+    render(tree);
+    // The agents-fetch-specific chip carries the
+    // ``player-skill-agents-error`` testid; the per-player
+    // section chip carries ``player-skill-error`` (the latter
+    // is the user-facing one because it explains the per-player
+    // section's failure mode). We scope the text-content
+    // assertion to the agents-error chip (NOT a document-wide
+    // ``getByText``) because the same upstream error string
+    // cascades to the per-player chip too -- a document-wide
+    // query would throw ``getMultipleElementsFoundError``.
+    expect(
+      screen.getByTestId("player-skill-agents-error"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("player-skill-agents-error"),
+    ).toHaveTextContent(/fight unavailable/i);
+  });
+
+  // -------------------------------------------------------------------------
+  // v0.10.18 regression-locking test: the dual-banner cascade
+  // contract. When the bare ``/fights/:id`` (agents-list) fetch
+  // throws 502, the page.tsx cascades the upstream error into
+  // BOTH chips: ``player-skill-agents-error`` (the agents-
+  // dropdown diagnostic) AND ``player-skill-error`` (the
+  // per-player-section diagnostic). The same substring "fight
+  // unavailable" appears in 2 places. The pre-fix test used
+  // ``screen.getByText(/fight unavailable/i)`` which threw
+  // ``getMultipleElementsFoundError`` -- the fix scopes
+  // assertions to the specific testid. This regression test
+  // pins:
+  //   1. BOTH chips are present
+  //   2. BOTH chips carry the upstream error substring
+  //   3. the per-player chip carries the canonical
+  //      "Failed to load per-player skills:" prefix that
+  //      distinguishes it from the agents-dropdown chip
+  //   4. exactly 2 elements match the cascade substring
+  //      (forbids a 3rd duplicate chip -- the original bug
+  //      class)
+  //   5. the prompt placeholder is hidden when accountFilter
+  //      is set (preserves the 3-state body contract)
+  // -------------------------------------------------------------------------
+  it("locks the dual-banner cascade contract on agents-fetch 502 (regression)", async () => {
+    mockFightFetch({
+      events: POPULATED_PAYLOAD,
+      fightDetails: new ApiError(502, "fight unavailable"),
+    });
+    const tree = await FightEventsPage({
+      params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({ account: "TestAccount.1234" }),
+    });
+    render(tree);
+    // BOTH chips are present.
+    expect(
+      screen.getByTestId("player-skill-agents-error"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("player-skill-error")).toBeInTheDocument();
+    // BOTH chips cascade the upstream error substring. Testid-
+    // scoped (NOT `screen.getByText` which would throw
+    // MultipleElementsFoundError on the 2-match case).
+    expect(
+      screen.getByTestId("player-skill-agents-error"),
+    ).toHaveTextContent(/fight unavailable/i);
+    expect(
+      screen.getByTestId("player-skill-error"),
+    ).toHaveTextContent(/fight unavailable/i);
+    // The per-player chip carries the canonical user-facing
+    // prefix (FAILED_TO_LOAD_PER_PLAYER_SKILLS) that
+    // distinguishes it from the agents-dropdown chip
+    // (FAILED_TO_LOAD_PLAYER_LIST). Locks down the
+    // cascade-wrapping semantics so a future refactor can't
+    // accidentally strip the prefix and surface the raw
+    // upstream error (which would be confusing -- the analyst
+    // can't tell which fetch failed). The assertions below
+    // pass the constant directly to toHaveTextContent --
+    // jest-dom matches by substring for a string argument,
+    // so the @/lib/copy/error-messages module remains the
+    // sole English-coupling point (a future i18n refactor
+    // edits only that module).
+    expect(
+      screen.getByTestId("player-skill-error"),
+    ).toHaveTextContent(FAILED_TO_LOAD_PER_PLAYER_SKILLS);
+    expect(
+      screen.getByTestId("player-skill-agents-error"),
+    ).toHaveTextContent(FAILED_TO_LOAD_PLAYER_LIST);
+    // Exactly 2 elements match the cascade substring -- forbids
+    // a 3rd duplicate chip. RTL counts matches by element (1
+    // match per `<p>` containing the substring), so 2 chips
+    // yields 2 matches. A future refactor that adds a 3rd
+    // warning banner reusing the upstream text would explode
+    // this assertion -- which is the original bug class
+    // (cascading error string missing the per-section scoping).
+    expect(screen.getAllByText(/fight unavailable/i)).toHaveLength(2);
+    // Prompt placeholder hidden when accountFilter is set
+    // (preserves the canonical 3-state body contract: prompt /
+    // error / table, with the prompt suppressed on the URL-
+    // filtered path).
+    expect(
+      screen.queryByTestId("player-skill-prompt"),
+    ).not.toBeInTheDocument();
   });
 });

@@ -65,9 +65,18 @@
  * 50-150 KB to the bundle for features we don't need.
  */
 
+/* eslint-disable react-refresh/only-export-components */
+
 "use client";
 
 import { useMemo } from "react";
+import {
+  CROSS_ACCOUNT_TIMELINE_EMPTY_STATE,
+  CROSS_ACCOUNT_TIMELINE_LEGEND_ARIA_LABEL,
+  CROSS_ACCOUNT_TIMELINE_METRIC_DAMAGE_LABEL,
+  CROSS_ACCOUNT_TIMELINE_METRIC_HEALING_LABEL,
+  CROSS_ACCOUNT_TIMELINE_METRIC_STRIP_CHART_LABEL,
+} from "@/lib/copy/cross-account-timeline";
 
 export interface CrossAccountSeriesInput {
   account_name: string;
@@ -116,9 +125,9 @@ const METRIC_FIELD: Record<
 };
 
 const METRIC_LABEL: Record<CrossAccountMetric, string> = {
-  damage: "Damage",
-  healing: "Healing",
-  strip: "Buff removal",
+  damage: CROSS_ACCOUNT_TIMELINE_METRIC_DAMAGE_LABEL,
+  healing: CROSS_ACCOUNT_TIMELINE_METRIC_HEALING_LABEL,
+  strip: CROSS_ACCOUNT_TIMELINE_METRIC_STRIP_CHART_LABEL,
 };
 
 /**
@@ -255,11 +264,11 @@ export function CrossAccountTimelineChart({
   }, [aligned]);
 
   if (allDates.length === 0) {
-    return (
-      <div style={EMPTY_STYLE}>
-        No timeline data available for comparison.
-      </div>
-    );
+  return (
+    <div style={EMPTY_STYLE}>
+      {CROSS_ACCOUNT_TIMELINE_EMPTY_STATE}
+    </div>
+  );
   }
 
   const innerW = CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
@@ -352,7 +361,7 @@ export function CrossAccountTimelineChart({
             flexWrap: "wrap",
           }}
           role="list"
-          aria-label="Account legend"
+          aria-label={CROSS_ACCOUNT_TIMELINE_LEGEND_ARIA_LABEL}
         >
           {aligned.map((a) => (
             <span key={a.account_name} role="listitem">

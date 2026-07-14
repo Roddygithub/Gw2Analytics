@@ -76,3 +76,23 @@ web/tests/e2e/.visual-regression-output/
 # (mirrors the dump_openapi.py -> /openapi.json convention above).
 /screenshots/
 web/screenshots/
+
+# Per-release operator-facing transfer artefacts (placed at the
+# project root for the analyst's local-session use during each
+# release window; never committed). Force-add a specific file via
+# ``git add -f <file>`` if a future maintainer wants to keep one
+# as a project asset:
+#   - PUSH_INSTRUCTIONS*.md: 1-shot manual ``gh pr create``
+#     recipe (per-release; one-time use during each wave's
+#     release window).
+#   - handoff*.md: per-release v0.10.x night-mode status doc
+#     (operator-facing handoff; each release window may have its
+#     own numbered handoff).
+#   - v*-pre.bundle: per-release git bundle for offline
+#     transfer (binary; never committed -- git bundles are
+#     first-class transfer artefacts, not project assets). The
+#     ``-pre`` suffix matches the canonical v0.10.x
+#     pre-release naming convention (vMAJOR.MINOR.PATCH-pre).
+/PUSH_INSTRUCTIONS*.md
+/handoff*.md
+/v*-pre.bundle

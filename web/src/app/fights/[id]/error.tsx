@@ -23,6 +23,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { FIGHTS_GRID_BROWSE_FIGHT_PAGE, TRY_AGAIN_BUTTON_LABEL } from "@/lib/copy/error-messages";
 
 const PANEL_STYLE: React.CSSProperties = {
   marginTop: "32px",
@@ -96,10 +97,10 @@ export default function FightError({
           style={RETRY_BTN_STYLE}
           data-testid="fight-error-retry"
         >
-          Try again
+          {TRY_AGAIN_BUTTON_LABEL}
         </button>
         <Link href="/fights" style={LINK_STYLE}>
-          ← Browse fights grid
+          {FIGHTS_GRID_BROWSE_FIGHT_PAGE}
         </Link>
       </div>
     </section>

@@ -259,7 +259,7 @@ def _post_minimal_fight_with_professions(
         if upload_resp.json()["status"] == "completed":
             time.sleep(0.1)
             fight_id = str(upload_resp.json()["fight_id"])
-            account_names = [f":synth.{base_id_a + i}" for i in range(len(professions))]
+            account_names = [f"synth.{base_id_a + i}" for i in range(len(professions))]
             return fight_id, account_names
         time.sleep(0.1)
     msg = f"upload {upload_id} did not reach 'completed' within 5s"

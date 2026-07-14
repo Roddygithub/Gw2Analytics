@@ -43,6 +43,29 @@ import { useEffect, useState } from "react";
 import { fetchPlayerTimeline, formatApiError, type PlayerTimeline } from "@/lib/api";
 import { PlayerTimelineChart, type TimelineScale } from "@/components/PlayerTimelineChart";
 import { TIMEZONE_OPTIONS } from "@/lib/timezones";
+import {
+  PLAYER_TIMELINE_ALL_LOADED_DAYS,
+  PLAYER_TIMELINE_ALL_LOADED_FIGHTS,
+  PLAYER_TIMELINE_BUCKET_PER_DAY,
+  PLAYER_TIMELINE_BUCKET_PER_DAY_ARIA_LABEL,
+  PLAYER_TIMELINE_BUCKET_PER_FIGHT,
+  PLAYER_TIMELINE_BUCKET_PER_FIGHT_ARIA_LABEL,
+  PLAYER_TIMELINE_BUCKETING_ARIA_LABEL,
+  PLAYER_TIMELINE_CONTROLS_ARIA_LABEL,
+  PLAYER_TIMELINE_HEADING,
+  PLAYER_TIMELINE_LINEAR,
+  PLAYER_TIMELINE_LINEAR_BUTTON_ARIA_LABEL,
+  PLAYER_TIMELINE_LOAD_MORE,
+  PLAYER_TIMELINE_LOAD_MORE_ARIA_LABEL,
+  PLAYER_TIMELINE_LOADING,
+  PLAYER_TIMELINE_LOG,
+  PLAYER_TIMELINE_LOG_BUTTON_ARIA_LABEL,
+  PLAYER_TIMELINE_NO_MORE_ARIA_LABEL,
+  PLAYER_TIMELINE_SECTION_ARIA_LABEL,
+  PLAYER_TIMELINE_TIMEZONE_ARIA_LABEL,
+  PLAYER_TIMELINE_TZ_SELECTOR_ARIA_LABEL,
+  PLAYER_TIMELINE_Y_AXIS_SCALE_ARIA_LABEL,
+} from "@/lib/copy/player-timeline";
 
 const BUTTON_STYLE: React.CSSProperties = {
   padding: "8px 16px",
@@ -317,8 +340,7 @@ export function PlayerTimelineSection({
 
   return (
     <section
-      style={{ display: "flex", flexDirection: "column", gap: 12 }}
-      aria-label="Per-account historical timeline"
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}          aria-label={PLAYER_TIMELINE_SECTION_ARIA_LABEL}
     >
       <div
         style={{
@@ -329,11 +351,11 @@ export function PlayerTimelineSection({
           flexWrap: "wrap",
         }}
       >
-        <h2 style={{ fontSize: 18, fontWeight: 600 }}>Historical timeline</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600 }}>{PLAYER_TIMELINE_HEADING}</h2>
         <div
           style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}
           role="group"
-          aria-label="Timeline controls"
+          aria-label={PLAYER_TIMELINE_CONTROLS_ARIA_LABEL}
         >
           <span style={CAPTION_STYLE}>
             Showing {timeline.points.length} of {timeline.total} {unit}
@@ -342,7 +364,7 @@ export function PlayerTimelineSection({
           <div
             style={{ display: "flex", alignItems: "center", gap: 4 }}
             role="group"
-            aria-label="Timeline bucketing"
+            aria-label={PLAYER_TIMELINE_BUCKETING_ARIA_LABEL}
           >
             <button
               type="button"
@@ -355,10 +377,10 @@ export function PlayerTimelineSection({
                     ? BUCKET_BUTTON_ACTIVE_STYLE
                     : BUCKET_BUTTON_STYLE
               }
-              aria-label="Per-fight bucketing"
+              aria-label={PLAYER_TIMELINE_BUCKET_PER_FIGHT_ARIA_LABEL}
               aria-pressed={bucket === "fight"}
             >
-              Per fight
+              {PLAYER_TIMELINE_BUCKET_PER_FIGHT}
             </button>
             <button
               type="button"
@@ -371,10 +393,10 @@ export function PlayerTimelineSection({
                     ? BUCKET_BUTTON_ACTIVE_STYLE
                     : BUCKET_BUTTON_STYLE
               }
-              aria-label="Per-day bucketing"
+              aria-label={PLAYER_TIMELINE_BUCKET_PER_DAY_ARIA_LABEL}
               aria-pressed={bucket === "day"}
             >
-              Per day
+              {PLAYER_TIMELINE_BUCKET_PER_DAY}
             </button>
           </div>
           {/* v0.8.2 of web: scale toggle (Linear / Log). Pure
@@ -385,7 +407,7 @@ export function PlayerTimelineSection({
           <div
             style={{ display: "flex", alignItems: "center", gap: 4 }}
             role="group"
-            aria-label="Timeline Y-axis scale"
+            aria-label={PLAYER_TIMELINE_Y_AXIS_SCALE_ARIA_LABEL}
           >
             <button
               type="button"
@@ -395,10 +417,10 @@ export function PlayerTimelineSection({
                   ? BUCKET_BUTTON_ACTIVE_STYLE
                   : BUCKET_BUTTON_STYLE
               }
-              aria-label="Linear Y-axis scale (per-series normalised)"
+              aria-label={PLAYER_TIMELINE_LINEAR_BUTTON_ARIA_LABEL}
               aria-pressed={scale === "linear"}
             >
-              Linear
+              {PLAYER_TIMELINE_LINEAR}
             </button>
             <button
               type="button"
@@ -406,10 +428,10 @@ export function PlayerTimelineSection({
               style={
                 scale === "log" ? BUCKET_BUTTON_ACTIVE_STYLE : BUCKET_BUTTON_STYLE
               }
-              aria-label="Logarithmic Y-axis scale (shared across all 3 series)"
+              aria-label={PLAYER_TIMELINE_LOG_BUTTON_ARIA_LABEL}
               aria-pressed={scale === "log"}
             >
-              Log
+              {PLAYER_TIMELINE_LOG}
             </button>
           </div>
           {/* v0.10.0 plan 032: the TZ selector uses the
@@ -422,11 +444,11 @@ export function PlayerTimelineSection({
           <div
             style={{ display: "flex", alignItems: "center", gap: 4 }}
             role="group"
-            aria-label="Timeline timezone"
+            aria-label={PLAYER_TIMELINE_TIMEZONE_ARIA_LABEL}
           >
             <select
               data-testid="timezone-selector"
-              aria-label="Day-bucket timezone (region/city)"
+              aria-label={PLAYER_TIMELINE_TZ_SELECTOR_ARIA_LABEL}
               value={tz}
               onChange={changeTz}
               disabled={isLoading}
@@ -467,16 +489,17 @@ export function PlayerTimelineSection({
             !hasMore || isLoading ? BUTTON_DISABLED_STYLE : BUTTON_STYLE
           }
           aria-label={
-            hasMore ? "Load more timeline points" : "No more timeline points"
+            hasMore
+              ? PLAYER_TIMELINE_LOAD_MORE_ARIA_LABEL
+              : PLAYER_TIMELINE_NO_MORE_ARIA_LABEL
           }
-        >
-          {isLoading
-            ? "Loading\u2026"
+        >          {isLoading
+            ? PLAYER_TIMELINE_LOADING
             : hasMore
-              ? "Load more"
+              ? PLAYER_TIMELINE_LOAD_MORE
               : bucket === "day"
-                ? "All days loaded"
-                : "All fights loaded"}
+                ? PLAYER_TIMELINE_ALL_LOADED_DAYS
+                : PLAYER_TIMELINE_ALL_LOADED_FIGHTS}
         </button>
         {loadError && <span style={ERROR_STYLE}>{loadError}</span>}
       </div>

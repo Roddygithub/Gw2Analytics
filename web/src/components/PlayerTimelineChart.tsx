@@ -40,6 +40,8 @@
  * bounded by the route's ``limit <= 100``).
  */
 
+/* eslint-disable react-refresh/only-export-components */
+
 "use client";
 
 import { useMemo } from "react";

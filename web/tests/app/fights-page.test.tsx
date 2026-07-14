@@ -7,6 +7,7 @@ vi.mock("@/lib/api", () => ({
 
 import FightsPage from "@/app/fights/page";
 import { fetchFights } from "@/lib/api";
+import { UPSTREAM_ERROR_PREFIX } from "@/lib/copy/error-messages";
 
 // CI smoke only: this test invokes the Server Component as a plain
 // TypeScript async function, not inside Next.js's RSC runtime. It
@@ -40,7 +41,7 @@ describe("FightsPage", () => {
     const tree = await FightsPage();
     render(tree);
     expect(
-      screen.getByText(/Upstream error: 502: upstream gateway/),
+      screen.getByText(`${UPSTREAM_ERROR_PREFIX}502: upstream gateway`),
     ).toBeInTheDocument();
   });
 });

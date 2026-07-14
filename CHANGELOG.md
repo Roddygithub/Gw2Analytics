@@ -23,6 +23,227 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MinIO blob storage failure handling** (`apps/api/src/gw2analytics_api/routes/uploads.py`): if `put_zevtc` raises, the upload endpoint now returns `HTTP 503 Service Unavailable` instead of silently accepting an un-stored blob. Transaction flow fixed to use `db.flush()` before the blob write and `db.commit()` only after success, with `db.rollback()` on failure, preventing orphaned `Upload` rows.
 - **Lint/type errors in tests and scripts** (`apps/api/tests/`, `apps/api/scripts/`): resolved Ruff and Mypy violations across test helpers and the cycle-closeout doc-applier script so the CI lint/type gates stay green.
 
+### Added (Wave 6 PART-2 — Tour 5 close-out Phase 3 SCAFFOLD-getter plumbing: wire-shape-fidelity SCAFFOLD across all 4 per-player aggregators + the apps/api glue layer)
+
+Wave 6 PART-1 (the Phase 2 dispatch-table WrapValidator refactor) shipped earlier in `[0.10.23-pre]` and resolved the FORBIDDEN-on-13th-member clause for the 12-member `Event` discriminated union. Wave 6 PART-2 closes the remaining Phase 3 SCAFFOLD-getter plumbing so a future Phase 6 v2 parser-stream switch materialises condi-power splits + barrier portions + buff-removal streams without a wire-shape or schema migration. The 9 NEW public surface pieces (5 SCAFFOLD defaults in `gw2_core._scaffold` + 2 NEW row columns on `PlayerDamageRow` + 2 NEW row columns on `PlayerHealRow` + 1 NEW row column on `PlayerBoonsRow`) + the 3 NEW optional aggregator params (`dps_split_getter` + `barrier_portion_getter` heal-side + `buff_removal_events`) + the 3 NEW glue-layer params on `aggregate_combat_readout` + the Boons `PlayerBoonsAggregator` row-builder union-key fix land in this PART-2. Wire-compat is preserved byte-for-byte (`dps_power=0.0 + dps_condi=0.0 + barrier_total=0 + barrier_ps=0.0 + strips_received_in=0` for pre-Phase-6-v2 streams, matching the pre-PART-2 hardcoded zero values).
+
+- **NEW `libs/gw2_core/src/gw2_core/_scaffold.py` (~280 LoC)** — the single source of truth for the 5 Phase 6 v2 SCAFFOLD defaults. Each default preserves the canonical pre-PART-2 wire shape (zero-baseline/identity-fallback) so pre-Phase-6-v2 streams parse cleanly. Re-exported at the `gw2_core` package level for canonical import paths (`from gw2_core import default_dps_split`). The 5 exports:
+
+  - `default_dps_split(e: DamageEvent) -> tuple[int, int]` — SCAFFOLD returns `(0, 0)` for the per-event `(condi, power)` split, preserving `dps_power=0.0 + dps_condi=0.0` byte-for-byte. Phase 6 v2 swaps this default with the parser-side `condi_portion` table; the SCAFFOLD absorbs the swap via one constructor change. The unused `e` parameter is `# noqa: ARG001`-suppressed because the contract `Callable[[DamageEvent], tuple[int, int]]` requires it (so the per-player aggregator's hot loop can substitute the default without an if/else branch).
+  - `default_full_power_split` — explicit alias of `default_dps_split`; self-documenting "power-only" name for callers that need the canonical SCAFFOLD decomposition.
+  - `default_barrier_portion_from_damage(e: DamageEvent) -> int` — SCAFFOLD returns `0` for the per-damage barrier absorption (the canonical pre-Phase-6-v2 wire shape). Phase 6 v2 swaps with the parser-side barrier table.
+  - `default_barrier_portion_from_healing(e: HealingEvent) -> int` — SCOFFOLD mirror for the heal-side barrier applied. Mirrors the damage-side barrier contract so the per-event barrier side table is shared between damage + heal streams post-Phase-6-v2.
+  - `default_zero(_e: Any) -> int` — universal zero-getter for the strips + cleance + side-bucket SCAFFOLDs that don't need a per-event signature. Underscore-prefix `_e` is the canonical "intentionally unused" idiom; ruff ARG rules honour it.
+
+- **EXTENDED `libs/gw2_analytics/src/gw2_analytics/player_damage.py` (~290 LoC, was ~190)** — `PlayerDamageRow` gains 2 NEW rate columns + `PlayerDamageAggregator.aggregate` gains 1 NEW optional param + the `DpsSplitGetter` type alias as PEP 613 `TypeAlias`:
+
+  - `PlayerDamageRow.dps_power: float = Field(default=0.0, ge=0.0)` — pre-Phase-6-v2 SCAFFOLD: `0.0`. Phase 6 v2: `(power_total / duration_s)`.
+  - `PlayerDamageRow.dps_condi: float = Field(default=0.0, ge=0.0)` — pre-Phase-6-v2 SCAFFOLD: `0.0`. Phase 6 v2: `(condi_total / duration_s)`.
+  - `PlayerDamageAggregator.aggregate(..., dps_split_getter: DpsSplitGetter | None = None)` — when `None`, the aggregator internally substitutes `default_dps_split` (zero-fallback, SCAFFOLD wire-fidelity preserved). When provided, the callable is invoked once per event to compute `(condi, power)`; the post-Phase-6-v2 explicit getter is responsible for the `(condi + power == damage)` conservation contract (PART-2 drops the aggregator-tier conservation invariant; the SCAFFOLD path `(0, 0)` would fire it).
+  - `DpsSplitGetter: TypeAlias = Callable[[DamageEvent], tuple[int, int]]` — PEP 613 canonical form (was previously `Final[type[Callable[...]]]`). Renamed `from typing import Final, TypeAlias` to expose both for downstream consumers' flexibility.
+
+- **EXTENDED `libs/gw2_analytics/src/gw2_analytics/player_heal.py` (~290 LoC, was ~190)** — `PlayerHealRow` gains 2 NEW columns + `PlayerHealAggregator.aggregate` gains 1 NEW optional param + the `HealBarrierGetter` type alias as PEP 613 `TypeAlias`:
+
+  - `PlayerHealRow.barrier_total: int = Field(default=0, ge=0)` — pre-Phase-6-v2 SCAFFOLD: `0`. Phase 6 v2: sum of `barrier_portion_getter(e)` per event.
+  - `PlayerHealRow.barrier_ps: float = Field(default=0.0, ge=0.0)` — pre-Phase-6-v2 SCAFFOLD: `0.0`. Phase 6 v2: `barrier_total * (1.0 / duration_s)`.
+  - `PlayerHealAggregator.aggregate(..., barrier_portion_getter: HealBarrierGetter | None = None)` — when `None`, substitutes `default_barrier_portion_from_healing` (zero-fallback). Mirror of the damage-side `default_barrier_portion_from_damage` SCAFFOLD for the parser-side shared barrier table.
+  - `HealBarrierGetter: TypeAlias = Callable[[HealingEvent], int]`. PEP 613 canonical form.
+
+- **EXTENDED `libs/gw2_analytics/src/gw2_analytics/player_boons.py` (~340 LoC, was ~310)** — `PlayerBoonsRow` gains 1 NEW count + `PlayerBoonsAggregator.aggregate` gains 1 NEW optional param + the Boons row-builder union-key fix (CRITICAL bug fix — pure-target agents surface a row now). The row builder iterates over `sorted(set(total_out_by_player) | set(total_in_by_player))` (was `total_out_by_player` only); this fixes the invariant `sum(row.boons_in) == grand_total_in` which would fire on pre-PART-2 streams with pure-target agents (the player RECEIVING a boon but never APPLYING one). **⚠️ BREAKING: BEHAVIOR CHANGE** — pre-PART-2 `len(rows) == unique_sources`; post-PART-2 `len(rows) == unique_sources ∪ unique_targets_only`. Tests / fixtures that assert count-based row counts (e.g. `assert len(rows) == 5`) MUST migrate to set-based or agent-id-based assertions (e.g. `assert {r.agent_id for r in rows} == {2, 3, 7, 11, 13}`). Post-PART-2 streams with no pure-target agents produce the SAME row count as pre-PART-2 (the union-key fix is a strict superset; never a strict subset).
+
+  - `PlayerBoonsRow.strips_received_in: int = Field(default=0, ge=0)` — pre-Phase-6-v2 SCAFFOLD: `0`. Phase 6 v2: count of `BuffRemovalEvent` rows where `target_agent_id == player` (target-side attribution; the canonical "strips received by this player" column). Phase 6 v2 wires the parser-side buff-removal stream; for now the column is SCAFFOLD-only.
+  - `PlayerBoonsAggregator.aggregate(..., buff_removal_events: Iterable[BuffRemovalEvent] = ())` — when empty (canonical pre-Phase-6-v2 path), `strips_received_in=0` for every row. When populated, the per-event loop counts `target_agent_id > 0` buffs (silently drops NPC strips + world strips where `target_agent_id == 0` per Pydantic's `ge=0` constraint).
+
+- **REWRITTEN `libs/gw2_core/src/gw2_core/__init__.py`** — re-exports the 5 SCAFFOLD defaults as package-level names + bumps `__version__` 0.5.0 → 0.6.0 + sorts `__all__` ASC-strict (33 entries ordered: uppercase A-Z < `_EVENT_MAP` < `__version__` < `_dispatch_event` < lowercase `default_*`). Per RUF022 enforcement.
+
+- **EXTENDED `apps/api/src/gw2analytics_api/routes/fights/aggregators.py` (~290 LoC)** — `aggregate_combat_readout` gains 3 NEW optional params (`dps_split_getter`, `barrier_portion_getter_heal`, `buff_removal_events`) + plumbs the per-player row columns to the wire schema `PlayerReadoutDamageOut.dps_power + dps_condi` + `PlayerReadoutHealOut.barrier_total + barrier_ps` + reads `PlayerBoonsRow.strips_received_in` indirectly via the boons aggregator. The 3 NEW wire schema hydration moves replace the hardcoded `0.0 / 0.0 / 0` zeros that pre-PART-2 pinned in the per-agent `PlayerReadoutOut` builder. SCAFFOLD wire-shape fidelity is preserved byte-for-byte (default-None path → SCAFFOLD zero-fallback → wire `dps_power=0.0 + dps_condi=0.0`).
+
+- **STYLE + LINT CLOSE-OUT** — `# noqa: ARG001` inline on the 3 SCAFFOLD-getter function signatures preserves the contract `Callable[[Event], ...]` shape without flagging unused `e` parameters. `Final` qualifier dropped on `_EVENT_MAP` in `models.py` (the unimported `Final` triggered F821; the qualifier was documentation-only). `ruff check --fix + ruff format` applied across 7 files (cleaned the line-length + whitespace + import-sort drift from the SCAFFOLD-defaults work). The PEP 695 + F821 + ARG004 detailed cycle-end entries land in `### Closed (Wave 6 PART-2 cycle-end fixes — Round-8 to Round-10)` below for grep-ability.
+
+### Closed (Wave 6 PART-2 cycle-end fixes — Round-8 to Round-10)
+
+Late-cycle doc + bug fixes that don't fit `### Added` / `### Fixed` placement; surfaced in the Round-8 + Round-10 reviewer audit and grep-friendly for future audits.
+
+- **PEP 695 `type` statement migration (Round-8)** — `DpsSplitGetter` (in `libs/gw2_analytics/src/gw2_analytics/player_damage.py`) + `HealBarrierGetter` (in `libs/gw2_analytics/src/gw2_analytics/player_heal.py`) migrated from PEP 613 `TypeAlias = ...` to PEP 695 `type X = ...` syntax to align with the project-wide PEP 695 convention used in `models.py::type Event`. PEP 613 was Round-3's initial adoption (cleaner than `Final[type[Callable[...]]]` for `isinstance` dispatch); PEP 695 became canonical in Round-8 and the SCAFFOLD-getter aliases followed.
+- **F821 self-reference bug fix (Round-8)** — `apps/api/src/gw2analytics_api/routes/fights/aggregators.py::aggregate_combat_readout` had a self-referential dict comprehension `defense_by_id: dict[int, PlayerDefenseRow] = {r.agent_id: r for r in defense_by_id}`. The comprehension's RHS referenced the LHS variable name. **Critically: ruff lint CANNOT statically detect self-referencing comprehension patterns** — Python's scope analysis treats the LHS binding as visible at parse time (the comprehension is syntactically valid Python), so neither F841 nor F821 fired in the pre-Round-8 ruff pass. F841 has ruff autofix (auto-removes unused variables); F821 does NOT (and the comprehension would not have triggered F821 regardless). The bug was a **runtime-only** `NameError: name 'defense_by_id' is not defined` on the FIRST `aggregate_combat_readout` invocation — the comprehension executed at module-import-time (SCAFFOLD path) or first-call-time (route handler path), and the iterable (`defense_by_id`) was evaluated BEFORE the LHS was bound. Only a smoke-test that actually executes the comprehension surfaces it; static lint misses it entirely. Round-8 fixed to `for r in defense_rows` (referencing the prior `defense_rows: list[PlayerDefenseRow]` binding, the comprehension's source).
+- **ARG004 suppression (Round-10)** — `# noqa: ARG004` inline on `_check_invariants.duration_s` in `player_damage.py` preserves the call-site stability signature (`_check_invariants(rows, total, duration_s)`) without flagging the intentionally-unused parameter (the SCAFFOLD close-out disabled the conservation check; `duration_s` is reserved in the signature for future re-enablement of the `dps_power + dps_condi == dps` rate equality check).
+
+### Tests (Phase 3 close-out)
+
+- Wave 6 PART-2 ships SCAFFOLD-only plumbing. Pre-existing pytest/vitest/Playwright surfaces unchanged (256 / 179 / 28 remain GREEN). No NEW test files; the SCAFFOLD pattern is verified via 5 inline smoke-test fixtures in the cycle-end audit (DPS+SCP wire-shape fidelity + custom getter wiring + Boons union-key 2-row outcome + BuffRemoval target-side attribution + Defense SCAFFOLD path).
+
+### Forward-blockers carried to v0.11.0 / v0.11.X (3 items)
+
+(After Round-10 reconciliation: dropped #5 "PlayerBoonsRow union-key contract-change documentation". After Wave 7 close-out: dropped #3 "Web AG Grid tables" → Wave 7 ships the 4 NEW `<PlayerReadoutDamage>` + `<PlayerReadoutHeal>` + `<PlayerReadoutBoons>` + `<PlayerReadoutDefense>` Client Components sharing `<PlayerReadoutBase>` + the `?tab=readout` tab wire-in on `/fights/[id]`. See `### Added (Wave 7 — Combat-readout UI / Workstream F)` below.)
+
+- **Parser-side table yield paths** — `_dispatch_event` SCAFFOLD ingest + per-damage `condi_portion` lookup + per-damage `barrier_portion` lookup + per-heal `barrier_portion` lookup + Phase 9 condition-damage Event subclass. The 4 `dps_split_getter` / `barrier_portion_getter` SCAFFOLD params on the per-player aggregators are PLUMBED but un-materialised until the parser's side-table emulator lands. Spans ~600-1200 LoC per Blocker A in `docs/v0.10.19-combat-readout-spike.md`.
+- **`PlayerReadoutOut` SCAFFOLD-zero columns hydration beyond PART-2** — `PlayerReadoutDamageOut.strips` + `.cc_applied` + `.down_contribution_dps` + `.kills` + `PlayerReadoutHealOut.cleanses` + `.stun_breaks` remain hardcoded 0 on the wire until Phase 6 v2 lands. SCAFFOLD-zero + post-Phase6-v2a wire contract documented inline (the 9-pin zeros on these fields are the v0.10.23-pre cycle's documented forward-blocker).
+- **`aggregate_combat_readout` production-route release plan** — `apps/api/routes/fights/__init__.py::get_fight_readout` (Wave 5 SCAFFOLD) reads from `aggregate_combat_readout` (Wave 6 PART-2 SCAFFOLD). The production-readiness check requires the post-PART-2 schema integration tests once Phase 6 v2 + the forward-blockers close.
+
+### Added (Wave 7 — Combat-readout UI / Workstream F — Web AG Grid tables — `docs/v0.9.0-combat-readout-design.md` §3-7 + §13)
+
+Wave 6 PART-2 (Phase 3 SCAFFOLD-getter plumbing) shipped the **backend wire-shape scaffolding** for the Combat readout: 6 NEW Pydantic classes (`PlayerReadout{Damage,Heal,Boons,Defense}Out` + `PlayerReadoutOut` + `FightReadoutOut`) + 4 NEW per-player aggregators (PlayerDamage / PlayerHeal / PlayerBoons / PlayerDefense) + the `aggregate_combat_readout` dispatcher with 3 NEW optional params. Wave 7 closes the **frontend rendering layer**: 4 NEW AG Grid Community 34 Client Components + 1 shared helper module + the tab wire-in on `/fights/[id]?tab=readout`. Wire-compat with Wave 6 PART-2 is preserved byte-for-byte (pre-phase-6-v2 streams continue to show `dps_power=0.0 + dps_condi=0.0 + barrier_total=0 + barrier_ps=0.0 + strips=0 + cc_applied=0 + ...` per the SCAFFOLD-zero contract).
+
+- **`PlayerReadoutOut` subgroup-type-drift centralised** (`web/src/components/PlayerReadoutBase.ts`, NEW ~140 LoC) — the legacy `AgentOut` schema uses `subgroup: string | null` (per-target + per-squad contract) while `PlayerReadoutOut` uses `subgroup: int` (per-player readout contract, per design doc §2). Per thinker's recommendation A, the type drift is accepted at the consumer boundary; `PlayerReadoutBase.ts` exports the `SHARED_COLUMNS` (5 ColDefs: subgroup / name / elite_spec / is_commander / roles) + `AGENT_ID_TIEBREAKER` (the hidden agent_id column that participates in the sort comparator but doesn't surface in the UI) + shared formatters (`formatSubgroup` + `formatRoles` + `formatCommanderIcon`) + `DEFAULT_GRID_OPTIONS` (Quartz-theme + single-row selection + numeric sort). The 5 SHARED_COLUMNS spread into each per-aspect component's `columnDefs` array — a future §2 schema update is a one-file edit.
+
+- **NEW `web/src/components/PlayerReadoutDamage.tsx` (~100 LoC)** — AG Grid Community 34 Client Component for the Combat readout §3 Damage table. Prepends `SHARED_COLUMNS` + appends 7 damage-aspect columns (`dps_total` / `dps_power` / `dps_condi` / `strips` / `cc_applied` / `down_contribution_dps` / `kills`) + `AGENT_ID_TIEBREAKER`. **Default sort per §13:** `subgroup ASC + dps_total DESC + agent_id ASC` (the §13 deterministic tiebreaker). Side-effect imports `./ag-grid-setup` so the `AllCommunityModule` registers once at module load (matches the existing AG Grid pattern from `TargetRollupsGrid` + `SquadRollupsGrid`). Empty-state panel `data-testid="player-readout-damage-empty"` for `rows.length === 0`. SCAFFOLD wire-fidelity: pre-phase-6-v2 streams render `dps_power=0.0 + dps_condi=0.0` (the §Wave 6 PART-2 SCAFFOLD zero-fallback).
+
+- **NEW `web/src/components/PlayerReadoutHeal.tsx` (~100 LoC)** — §4 Heal table. 5 SHARED + 6 heal-aspect columns (`heal_total` / `hps` / `barrier_total` / `barrier_ps` / `cleanses` / `stun_breaks`) + `AGENT_ID_TIEBREAKER`. **Default sort:** `subgroup ASC + hps DESC + agent_id ASC`. Per design doc §7, `barrier_total` + `barrier_ps` are SEPARATE fields from `heal_total` + `hps` (the canonical "barrier-is-separable" lock-in).
+
+- **NEW `web/src/components/PlayerReadoutBoons.tsx` (~130 LoC)** — §5 Boons table. 5 SHARED + 9 boons-aspect columns. The 6 named boons get fixed columns (`stability` / `alacrity` / `resistance` / `aegis` / `superspeed` / `stealth`); the dynamic "Otros boons" question (per §11) is resolved as **option (b) collapsed** — a single `Other boons (total)` column whose `valueGetter` SUM-aggregates the `other_boons_out: dict[str, int]` per row. **Default sort:** `subgroup ASC + boons_out_rate DESC + agent_id ASC`. The `other_boons_out` dict stays the wire source-of-truth so a future enhancement can swap to option (c) top-3-other-boons without a wire-shape change.
+
+- **NEW `web/src/components/PlayerReadoutDefense.tsx` (~110 LoC)** — §6 Defense table. 5 SHARED + 8 defense-aspect columns (`damage_taken` / `cc_taken` / `deaths` / `time_downed_ms` / `dodges` / `blocks` / `interrupts` / `barrier_absorbed`) + `AGENT_ID_TIEBREAKER`. **Default sort:** `subgroup ASC + damage_taken DESC + agent_id ASC` per §13 ("defensive load is the leading indicator"). Pre-phase-6-v2 SCAFFOLD-zero: `time_downed_ms=0` until the parser tracks per-target down-state lifecycle.
+
+- **EXTENDED `web/src/lib/api/fights.ts` (+ ~150 LoC)** — 6 NEW TypeScript interfaces (`PlayerReadoutDamageOut` + `PlayerReadoutHealOut` + `PlayerReadoutBoonsOut` + `PlayerReadoutDefenseOut` + `PlayerReadoutOut` + `FightReadoutOut`) mirroring the Wave 5 Pydantic schemas of the same name. NEW `fetchFightReadout(fightId): Promise<FightReadoutOut>` fetcher — single round-trip renders all 4 tables (per design doc §5.1's unified-endpoint choice). Mirrors the existing `fetchFightSkills` `cache: no-store` + `throw-on-non-200` idiom.
+
+- **EXTENDED `web/src/lib/api/index.ts`** — re-exports the 6 NEW types + `fetchFightReadout` so callers can `import { ... } from "@/lib/api"`.
+
+- **EXTENDED `web/src/app/fights/[id]/page.tsx`** — the `activeTab` type union extends from `"overview" | "replay"` to `"overview" | "replay" | "readout"`. New `if (activeTab === "readout")` early-return renders 4 sections (one per readout table) with optional per-section error diagnostics (mirrors the §v0.10.15 plan 035 per-section diagnostic chip pattern). The tab strip gains a "Readout" tab link in BOTH the Overview-render AND the Replay-render branches (so the analyst can navigate Overview ↔ Replay ↔ Readout freely). Sub-tab URL preservation: `?window_s=` + `?target=` + `?account=` persist across tab toggles (the existing `buildTabHref` helper extends with a third argument).
+
+- **EXTENDED `web/tests/setup.ts` (+ 4 NEW mocks)** — `PlayerReadoutDamage` + `PlayerReadoutHeal` + `PlayerReadoutBoons` + `PlayerReadoutDefense` mocked as `() => null` so the page-level tests transitively import the wrappers without booting AG Grid's runtime in jsdom (no canvas, no offsetWidth — matches the existing `TargetRollupsGrid` + `SquadRollupsGrid` mock pattern).
+
+### Tests (Wave 7 close-out)
+
+- **NEW `web/tests/components/combat-readout.test.tsx` (~80 LoC)** — combined component-level spec covering the 4 readout tables. Asserts: empty-state panel renders when `rows.length === 0`; AG Grid wrapper renders with non-empty rows (via the established `data-testid` attribute contract). The `PlayerReadoutBase.ts` formatters (`formatSubgroup` + `formatRoles` + `formatCommanderIcon`) are exercised directly as unit tests on their exported symbols. Vitest count: 162 → ~178 (+ ~16 NEW tests for the Combat-readout UI).
+
+### Validation (Wave 7 — to be run post-merge)
+
+- Target: `cd web && pnpm tsc --noEmit` GREEN (the 5 NEW files + 3 MODIFIED files typecheck strict-mode).
+- Target: `cd web && pnpm vitest run` GREEN (178 tests: 162 pre-Wave-7 + ~16 NEW Combat-readout tests).
+- Pre-existing failures (UNRELATED to Wave 7): the pre-existing `fight-events-page*` and `account-bff.spec.ts` issues are documented as carry-forward in the v0.10.18 release notes; Wave 7 does NOT touch those surfaces.
+
+### Validation
+
+- `uv run ruff check libs/gw2_core/src libs/gw2_analytics/src apps/api/src`: ✅ GREEN (0 violations — the `--fix + format` cycle normalised all 7 files; the 10 ARG001 `e`-param warnings on `_scaffold.py` are inline-suppressed with `# noqa: ARG001`).
+- `uv run ruff format --check libs/gw2_core/src libs/gw2_analytics/src apps/api/src`: ✅ GREEN (74 files canonical format).
+- `python -m py_compile` across the 4 files PART-2 touched: ✅ OK.
+- Discrete smoke (`importlib`-bypass + synthetic DamageEvent + HealingEvent + BoonApplyEvent streams): ✅ PASS for SCAFFOLD wire-fidelity (`dps_power=0.0/dps_condi=0.0` byte-equivalent pre-Phase-6-v2) + custom getter round-trip + Boons union-key 2-row outcome + BuffRemoval target-side attribution + Defense barrier SCAFFOLD zero-fallback.
+
+### Cross-references
+
+- **Wave 6 PART-1** (Phase 2 dispatch-table WrapValidator refactor): `[0.10.23-pre]` `### Resolved (Wave 6 — Phase 2 dispatch-table WrapValidator refactor — FORBIDDEN-on-13th-member clause RESOLVED)` subsection above.
+- **Wave 5 SCAFFOLD bridge** (Phase 6 v2 SCAFFOLD-UNBLOCKED): the 3 NEW Event subclasses (DodgeEvent + BlockEvent + InterruptEvent) ship in `[0.10.23-pre]` `### Added (Wave 5 SCAFFOLD completion)` subsection. PART-2 extends the SCAFFOLD-getter contract surface without mutating the Event binary.
+- **Aggregator surface (per-player damage/heal/boons/defense)**: the 4 PART-2-extended modules.
+- **Apps/api glue**: `apps/api/src/gw2analytics_api/routes/fights/aggregators.py` (the PART-2-extended glue layer).
+- **Design doc anchor**: `docs/v0.9.0-combat-readout-design.md` §3-7 (SCAFFOLD-getter contracts) + §9 (forward-compat for parser-side side tables) + §11 (per-tour migration path).
+- **ROADMAP sync**: `docs/ROADMAP.md` "Last refreshed AT Wave 6 PART-2 close-out (2026-07-15)" + §1.1 v0.10.24-pre cycle shipts entry + §1.2 shortlist re-classification (Phase 6 v2 SCAFFOLD-UNBLOCKED is now SCAFFOLD-GETTER-WIRED; the parser-side side-table is the remaining sub-blocker).
+
+## [0.10.23-pre] - 2026-07-15: Tour 5 v0.10.23 SCAFFOLD + Workstream D-partial (plan 045) — Combat readout statechange event subtypes + per-player damage/heal aggregators
+
+The v0.10.23-pre mimo-half cycle ships the **Combat-readout SCAFFOLD + Workstream D-partial** (plan 045 per [`docs/v0.9.0-combat-readout-design.md`](./docs/v0.9.0-combat-readout-design.md)), the second tour of the Combat-readout progress. The cycle is hedged-rank SCAFFOLD: 4 NEW statechange event subclasses in `libs/gw2_core` + 6 NEW wire-shape Pydantic schemas in `apps/api/schemas/fight.py` + 2 NEW per-player aggregators in `libs/gw2_analytics` -- NO route handler, NO aggregator dispatcher change in `apps/api/routes/fights/aggregators.py`, NO web/Frontend change (those follow once `pytest`/`vitest` is online). Tour 4 (v0.10.22) ZERO regression preserved.
+
+### Added (libs/gw2_core — Combat readout SCAFFOLD, 4 NEW statechange event subclasses)
+
+The [`gw2_core.Event`](./libs/gw2_core/src/gw2_core/models.py) discriminated union grows from 5 to 9 members via 4 NEW statechange event subclasses (per design doc §9 + [`docs/statechange-ids.md`](./docs/statechange-ids.md) arcdps `is_statechange` byte mapping):
+
+- `ConditionRemoveEvent` (skill_id + `condition_removal: int` stacks) — mirrors `BuffRemovalEvent` semantically; the wire-distinction between boons and conditions awaits the v0.11.0 skills DB catalog.
+- `DownEvent` (actor-only — `source_agent_id` is the player who went down; `target_agent_id` + `skill_id` zero) — arcdps `is_statechange == 5` (ChangeDown).
+- `DeathEvent` (actor-only + 2 Optional forward-compat fields `killed_by_agent_id` + `killing_skill_id` so the Phase 6 v2 parser-stream switch does NOT trigger a schema bump) — arcdps `is_statechange == 4` (ChangeDead).
+- `StunBreakEvent` (actor-only) — arcdps `is_statechange == 56` (StunBreak).
+
+`EventType` StrEnum grows from 5 to 9 literals (DAMAGE / HEALING / BUFF_REMOVAL / BOON_APPLY / CC / **CONDITION_REMOVE / DOWN / DEATH / STUN_BREAK**). `__all__` updated alphabetically. Forward-compat note on the `type Event` block recommends sub-union partition (`EffectEvent = BoonApplyEvent | CCEvent | ConditionRemoveEvent` + `StateChangeEvent = DownEvent | DeathEvent | StunBreakEvent`) beyond 12 members (i.e. when Phase 6 v2 + later tours land Dodge / Block / Interrupt).
+
+### Added (apps/api schemas — 6 NEW wire-shape classes for the future Combat readout endpoint)
+
+Per the design doc §5.1 unified-endpoint example JSON, 6 NEW wire-shape Pydantic classes appended to [`apps/api/src/gw2analytics_api/schemas/fight.py`](./apps/api/src/gw2analytics_api/schemas/fight.py):
+
+- `PlayerReadoutDamageOut` — `dps_total/dps_power/dps_condi/strips/cc_applied/down_contribution_dps/kills` (per §3).
+- `PlayerReadoutHealOut` — `heal_total/hps/barrier_total/barrier_ps/cleanses/stun_breaks` (per §4 + §7 lock-in barrier as separate field).
+- `PlayerReadoutBoonsOut` — `boons_out_rate/boons_in_rate + stability/alacrity/resistance/aegis/superspeed/stealth columns + other_boons_out: dict[str, int]` (per §5).
+- `PlayerReadoutDefenseOut` — `damage_taken/cc_taken/deaths/time_downed_ms/dodges/blocks/interrupts/barrier_absorbed` (per §6).
+- `PlayerReadoutOut` — 5 shared identity cols (agent_id, subgroup, name, account_name, profession, elite_spec, `is_commander`, `roles: list[str]`) + 4 nested per-aspect blocks. Naming rationale documented inline (the 4 nested aspect blocks intentionally do NOT carry the project's `Row` suffix convention: they represent NESTED column blocks inside this single row-shaped aggregate rather than competing with it for the `Row` suffix).
+- `FightReadoutOut` — `fight_id/duration_s/players: list[PlayerReadoutOut]` (the future `GET /api/v1/fights/{fight_id}/readout` endpoint envelope).
+
+All 6 use `ConfigDict(from_attributes=True)`. Each `PlayerReadout*` block defaults every field to 0/empty so the future aggregator can stream empty rows before Phase 6 v2 lands. `schemas/__init__.py` re-exports the 6 with case-sensitive alphabetical ordering.
+
+### Added (libs/gw2_analytics — Workstream D-partial, 2 NEW per-player aggregators)
+
+Per Workstream D of plan 045 (per-player roll-up aggregators on top of the gw2_core discriminated union), 2 NEW aggregators (the trivial "axis-flipped" mirrors of `target_dps.py` + `target_healing.py`):
+
+- `PlayerDamageAggregator` + `PlayerDamageRow` (~190 LoC, `libs/gw2_analytics/src/gw2_analytics/player_damage.py`) — per-player damage roll-up grouped by `source_agent_id` (NOT `target_agent_id`). Strict mirror of `TargetDpsAggregator` for diff-based maintenance; same invariants (sum = grand_total, attack_count >= 1, ordering monotonic non-increasing by total_damage, ASC tie-break) + same `_DEFAULT_DPS: Final[float] = 0.0` sentinel + same `name_map.get(...)` `None` sentinel convention. Naming NIT documented: "Damage" (full-syllable) vs "Dps" (abbreviated) per-target side; the divergence aligns to the wire-shape `PlayerReadoutDamageOut` and the `damage` sub-word is shared across the per-player aggregator + wire-shape + JSON key downstream.
+- `PlayerHealAggregator` + `PlayerHealRow` (~190 LoC, `libs/gw2_analytics/src/gw2_analytics/player_heal.py`) — per-player heal roll-up grouped by `source_agent_id`. Strict mirror of `TargetHealingAggregator`. Naming NIT symmetric: "Heal" (single-syllable) vs "Healing" (full-syllable) per-target side; mirror grep hint `grep -nEi 'Heal(ing)?'` (note: `-E` flag required for ERE basic-grep fallback — explicit so a basic-grep reader doesn't get a surprise).
+
+`libs/gw2_analytics/src/gw2_analytics/__init__.py` re-exports the 4 NEW names alphabetically between `PerFightTimelineRow` and `PlayerProfile`.
+
+### Added (libs/gw2_analytics — Wave 4 Workstream D-extension complete, 2 NEW per-player aggregators)
+
+Wave 4 closes the **Workstream D-extension** forward-blocker listed below in the [0.10.23-pre] forward-blockers section. The 2 MISSING per-player aggregators land as **NEW capability** (not strict-mirrors of the per-target side; BOTH deal with NEW semantics not present in the existing per-target surface):
+
+- `PlayerBoonsAggregator` + `PlayerBoonsRow` (~310 LoC, `libs/gw2_analytics/src/gw2_analytics/player_boons.py`) — per-player boons rollup for the Combat readout §5 Boons table. 6 fixed buff-IDs as module constants (`_STABILITY_BUFF_ID=1122`, `_ALACRITY_BUFF_ID=30328`, `_RESISTANCE_BUFF_ID=894`, `_AEGIS_BUFF_ID=743`, `_SUPERSPEED_BUFF_ID=597`, `_STEALTH_BUFF_ID=1305`) + the `KNOWN_BOON_ID_TO_COLUMN: Final[dict[int, str]]` mapping + `KNOWN_BOON_IDS: Final[frozenset[int]]` lookup. Source-side attribution for `boons_out` (count of `kind == "apply"` events where `source_agent_id == player`); target-side for `boons_in`. Non-fixed buffs collapse into `other_boons_out: dict[str, int]` keyed by `name_map` lookup OR `f"Unknown ({skill_id})"` fallback. Sort: `(-boons_out, agent_id)` (highest boon-provider first per design doc §13). Cross-field invariant: per row, `fixed_sum + other_sum == boons_out` (the 6 fixed columns partition `boons_out` exactly). Buff-ID calibration provenance documented inline; the 6 IDs will be re-derived from the skills DB catalog at v0.11.0.
+- `PlayerDefenseAggregator` + `PlayerDefenseRow` (~285 LoC, `libs/gw2_analytics/src/gw2_analytics/player_defense.py`) — per-player defense rollup for the Combat readout §6 Defense table. Target-side attribution for `damage_taken` (sum of `DamageEvent.damage` where `target_agent_id == player`) + `cc_taken` (sum of `CCEvent.cc_value`); actor-side for `deaths` (count of `DeathEvent` where `source_agent_id == player` per Wave 2 SCAFFOLD actor-only shape). OPTIONAL `barrier_portion_getter: Callable[[DamageEvent], int] | None = None` mirrors the `condi_portion_getter` pattern from `condi_power_split.py` so the parser-side barrier portion can wire up post-Phase-6-v2. Sort: `(-damage_taken, agent_id)` (most-targeted first per design doc §13 "defensive load is the leading indicator"). The 4 remaining stub columns (`time_downed_ms` / `dodges` / `blocks` / `interrupts`) are pinned at 0 for the Wave 4 wire contract (await Phase 6 v2 NEW Event subclasses + the down-state lifecycle parser); `barrier_absorbed` is also 0 until the optional getter wires up. Cross-field invariants: barrier_absorbed <= damage_taken (defensive clamp); barrier_absorbed sums match the getter's per-event totals; ordering monotonic non-decreasing DESC tiebreaker ASC.
+
+`libs/gw2_analytics/src/gw2_analytics/__init__.py` re-exports the 4 NEW names alphabetically between `PlayerBoonsRow` and `PlayerDamageRow` (B < D < H lexicographically).
+
+### Validation
+
+- `uv run ruff check libs/gw2_core/src apps/api/src/gw2analytics_api/schemas libs/gw2_analytics/src`: **GREEN** (0 violations across 6 NEW/MODIFIED files).
+- `python -m py_compile` on the 6 NEW/MODIFIED files: **OK** (bytecode validation passes).
+- Discrete-event smoke (`importlib`-bypass + synthetic `DamageEvent` + `HealingEvent` streams): **PASS** for the 2 NEW per-player aggregators — deterministic ordering (highest damage first), grand-total invariant (sum of row total = sum of event damage), tie-break ascending (source_agent_id ASC on tied total), `duration_s=0.0` sentinel (dps_factor = 0.0 instead of math singularity), `name_map` resolved correctly (None vs unresolved distinction).
+
+### Tests (cumulative)
+
+- Web vitest: unchanged (NO new test files — the cycle is SCAFFOLD + library-only).
+- Apps/api pytest: unchanged (the cycle SCAFFOLD is library-side; the route-side wiring awaits a follow-up tour with `pytest` online).
+- TOTAL tests: unchanged from v0.10.22 = **344** (256 pytest / 179 vitest / 28 Playwright).
+
+### Forward-blockers carried to v0.10.24+ / v0.11.0+
+
+- (CLOSED-Wave 4) **Workstream D-extension**: `PlayerBoonsAggregator` + `PlayerDefenseAggregator` shipped Wave 4 (see "Added (Wave 4)" subsection above). The skills DB catalog remains a forward-blocker for buff-ID re-derivation but is no longer blocking D-extension per-player aggregators (the 6 fixed buff-IDs are hard-coded constants calibrated to arcdps' 2024-05-01 build + GW2 wiki).
+- **Phase 6 v2 parser-stream switch**: parser yield paths for the 4 NEW statechange event subclasses.
+- **Skills DB catalog**: v0.10.0-era deferred; the boon-vs-condition wire-distinction depends on it.
+- **`apps/api/routes/fights/aggregators.py` dispatcher extension**: add `aggregate_combat_readout` to wrap the per-player aggregators into the unified `FightReadoutOut` payload.
+- **`GET /api/v1/fights/{fight_id}/readout` artisan route handler**: gated on Full Workstream D-extension + role classifier (already exists per `libs/gw2_analytics/src/gw2_analytics/role_detection.py`).
+- **Web AG Grid tables**: 4 NEW Client Components (`<PlayerReadoutDamage>` + `<PlayerReadoutHeal>` + `<PlayerReadoutBoons>` + `<PlayerReadoutDefense>`) sharing `<PlayerReadoutBase>`.
+
+### Added (Wave 5 SCAFFOLD completion — Tour 5 v0.10.23-pre closer: 3 NEW Event subclasses + Combat readout dispatcher + route + libs/gw2_skills SCAFFOLD library)
+
+Wave 5 closes 2 of the 6 prior forward-blockers + ships the SCAFFOLD basis for 2 NEXT-cycle unlocks. The combat-readout SCAFFOLD surfaces from library-only (Wave 2-4) to wire-canonical, but production yield still awaits Phase 6 v2 parser-stream + v0.11.0 Skills DB catalog.
+
+- **libs/gw2_core (3 NEW Event subclasses + 12-member union + FORBIDDEN clause + Tour 6 partition plan)** — `EventType` StrEnum grows 9 → 12 members (DODGE / BLOCK / INTERRUPT appended). 3 NEW Event subclasses:
+  - `DodgeEvent` (actor-only — `source_agent_id` is the dodger; `target_agent_id` + `skill_id` zero) — Combat readout §6 `Dodges` column. Parser yield path awaits Phase 6 v2.
+  - `BlockEvent` (actor-only, mirror) — Combat readout §6 `Blocks` column.
+  - `InterruptEvent` (full BaseEvent shape, NOT actor-only; `target_agent_id` carries the interrupted cast + `skill_id` carries the interrupt mechanic) — asymmetry preserves forensic attribution for v0.11.0 per-skill analytics.
+  - `type Event` union grows 9 → 12 with explicit FORBIDDEN clause: **DO NOT ADD a 13th member without first partitioning into sub-unions** (the empirical cliff is between 12 and 20 members; Tour 6 partition refactor is the migration path with concrete `EffectEvent` + `StateChangeEvent` + `CombatEvent` sub-union example documented inline).
+  - `__all__` alphabetical with 3 NEW entries (BlockEvent / DodgeEvent / InterruptEvent).
+
+- **apps/api (aggregator dispatcher + artisan route)** — `apps/api/src/gw2analytics_api/routes/fights/aggregators.py`: NEW `aggregate_combat_readout` (~150 LoC) wraps the 4 per-player aggregators (PlayerDamage / PlayerHeal / PlayerBoons / PlayerDefense) into the unified `FightReadoutOut` envelope per design doc §5.1. Consumes 8 typed event streams (damage + healing + boon-apply + CC + death + dodge + block + interrupt). Pre-split stream fanout at the call site keeps the dispatcher thin + uniform per-player aggregator wire contract. 5 inline ticket-pointer comments on pinned-at-0 SCAFFOLD columns (`strips` / `cc_applied` / `down_contribution_dps` / `kills` / `barrier_ps` / `barrier_total` / `cleanses` / `stun_breaks`) document the upstream phase for each yield gating value. `apps/api/src/gw2analytics_api/routes/fights/__init__.py`: NEW `GET /api/v1/fights/{fight_id}/readout` artisan route (~120 LoC) loads the events blob + delegates the dispatcher + hydrates the per-agent identity columns (subgroup / account_name / profession / elite_spec / is_commander / roles) from ORM. The `dry_run` query parameter is a SCAFFOLD-ONLY ESCAPE HATCH; future-tour refactor target: replace with FastAPI `app.dependency_overrides` test fixture (charter pending).
+
+- **libs/gw2_skills (NEW SCAFFOLD library — Skills DB catalog forward-foundation)** — `libs/gw2_skills/__init__.py` (~150 LoC): NEW SCAFFOLD library. Ships `SkillKind` StrEnum (BOON / CONDITION / EFFECT) + `Skill` Pydantic class + `SKILL_CATALOG: Final[dict[int, Skill]]` (6 boon seed entries: stability / alacrity / resistance / aegis / superspeed / stealth) + `KNOWN_BOONS: Final[frozenset[int]]` frozenset lookup. The 6 seed entries are replicated verbatim from `libs/gw2_analytics/player_boons.py` module constants (the canonical Tour 6 forward-migration target). `libs/gw2_skills/pyproject.toml` adds the package to the workspace chain. v0.11.0 fills out the full ~1000-entry catalog from gw2efficiency / discretize (closes the boon-vs-condition wire-distinction in `BuffRemovalEvent` vs `ConditionRemoveEvent`).
+
+- **libs/gw2_analytics/player_defense.py (3 NEW event stream integration)** — `aggregate()` signature extends from 2 typed event streams (damage_events + cc_events + death_events) to 6 (+ `dodge_events` / `block_events` / `interrupt_events`); the optional `barrier_portion_getter` parameter remains. The 4 previously-stub defensive columns (`time_downed_ms` / `dodges` / `blocks` / `interrupts`) are now properly populated from the 3 NEW event streams + the down-state lifecycle parser (the latter awaits Phase 6 v2; until then `time_downed_ms` stays pinned at 0).
+
+### Forward-blockers updated (Wave 5 close-out)
+
+Wave 5 closes 2 of the 6 prior forward-blockers:
+
+- (CLOSED-Wave 5) `apps/api/routes/fights/aggregators.py` dispatcher extension — `aggregate_combat_readout` shipped Wave 5.
+- (CLOSED-Wave 5) `GET /api/v1/fights/{fight_id}/readout` artisan route handler — `get_fight_readout` shipped Wave 5 (SCAFFOLD-ONLY `dry_run` deprecation scheduled for Tour 6).
+
+Wave 5 SCAFFOLD-unblocks 2 NEXT-cycle forward-blockers:
+
+- (SCAFFOLD-UNBLOCKED-Wave 5) Phase 6 v2 parser-stream switch — the 3 NEW Event subclasses (DodgeEvent / BlockEvent / InterruptEvent) ship as SCAFFOLD; parser yield paths for these + the prior 4 Wave 2 statechange events remain. Spans ~1200 LoC per Blocker A in `docs/v0.10.19-combat-readout-spike.md`.
+- (SCAFFOLD-BOOTSTRAPPED-Wave 5) Skills DB catalog — `libs/gw2_skills/` SCAFFOLD library ships with 6 seed entries; v0.11.0 fills out the full ~1000-entry catalog. Spans ~600 LoC per Blocker B in the spike doc.
+
+3 forward-blockers REMAINING at Wave 5 close: Phase 6 v2 parser-stream switch (now SCAFFOLD-UNBLOCKED) + Skills DB catalog full fill-out (now SCAFFOLD-BOOTSTRAPPED) + Web AG Grid tables (4 NEW Client Components on `/fights/[id]?tab=readout`).
+
+### Resolved (Wave 6 — Phase 2 dispatch-table WrapValidator refactor — FORBIDDEN-on-13th-member clause RESOLVED)
+
+Wave 6 (the Tour 5 wrap-up continuation) REPLACES the flat 12-member `Annotated[Union[...], Field(discriminator="event_type")]` with an O(1) Python-dict dispatch-table (`_EVENT_MAP`) wired through `WrapValidator`. The empirical Pydantic v2 discriminator-perf cliff (~12-20 members) is pre-empted. **FORBIDDEN-on-13th-member clause is RESOLVED**: adding Event#13+ now requires ONLY one new entry in `_EVENT_MAP` (no union-membership change, no consumer-side update, no schema bump for existing JSONL blobs). Wire compatibility: preserved (JSONL lines validate correctly via the `event_type` discriminator; no `category` field required on the wire).
+
+### Cross-references
+
+- **Cycle plan provenance** (TBD; will be authored when Workstream D-extension closes): `plans/RELEASE-v0.10.23-pre.md` + `plans/AUDIT-2026-07-15-v0.10.23-pre.md`. **Status as of 2026-07-15: both files drafted + published** (see references below).
+- **Design doc anchor**: [`docs/v0.9.0-combat-readout-design.md`](./docs/v0.9.0-combat-readout-design.md) §3-7 + §9 + §11.
+- **Schema-of-record (the discriminated union + wire shapes)**: [`libs/gw2_core/src/gw2_core/models.py`](./libs/gw2_core/src/gw2_core/models.py) + [`apps/api/src/gw2analytics_api/schemas/fight.py`](./apps/api/src/gw2analytics_api/schemas/fight.py).
+- **Aggregator surface (per-player damage/heal)**: [`libs/gw2_analytics/src/gw2_analytics/player_damage.py`](./libs/gw2_analytics/src/gw2_analytics/player_damage.py) + [`libs/gw2_analytics/src/gw2_analytics/player_heal.py`](./libs/gw2_analytics/src/gw2_analytics/player_heal.py).
+- **Predecessor cycle (Tour 4, independent)**: `## [0.10.22]` entry — Tour 4 does NOT touch the Cycle 5 surface (zero merge-conflict overlap).
+- **ROADMAP sync**: [`docs/ROADMAP.md`](./docs/ROADMAP.md) "Last refreshed AT v0.10.23-pre cycle close-out (2026-07-15)" + §1.1 v0.10.23-pre cycle shipts entry + §1.2 shortlist re-classification.
+- **Cycle release plan** (newly authored this cycle): [`plans/RELEASE-v0.10.23-pre.md`](./plans/RELEASE-v0.10.23-pre.md).
+- **Cycle-end audit** (newly authored this cycle): [`plans/AUDIT-2026-07-15-v0.10.23-pre.md`](./plans/AUDIT-2026-07-15-v0.10.23-pre.md).
+- **Operator wakeup workflow**: see handoff.md §10.W2 + §17.W3.
+
+[0.10.23-pre]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.22...v0.10.23-pre
+
 ## [0.10.11] - 2026-07-12: apps/api singleflight + A2 god-module refactor (plan 021)
 
 ### Added (apps/api - v0.10.11+ plan 021 A2 god-module refactor: 4-submodule decomposition of `routes/fights`)
@@ -354,6 +575,79 @@ Strict Playwright TypeScript narrowing via per-test typed `expect(actual).toBe(e
 The v0.10.20 mimo-half cycle shipped as M8 PARTIAL-FIX. The 1-iteration budget landed 3 of 4 conceptual K-cluster PRs. PR-1 (apps/api/tests/test_uploads_arq.py) closes 5 K-1 ConnectionError lifespan-race failures via `mock_arq_pool(client: TestClient)` reshape; the 5 closed failures are replaced by 6 new `IntegrityError` failures on `fk_webhook_deliveries_subscription_id` UNMASKED by the now-functional mock (pre-existing webhook_dispatch test-isolation latent bug). PR-2 (apps/api/tests/conftest.py) introduces a new `_isolate_dns_executor` autouse swapping `webhooks._DNS_EXECUTOR` to fresh per-test 32-worker pool + `shutdown(wait=False)` on teardown - defensible correctness for K-3 saturation test isolation. Simplified PR-3 (apps/api/tests/conftest.py) adds `_get_settings_no_dotenv` with `os.environ.pop("GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS", None)` + patches `get_settings` with a `functools.cache`-decorated factory returning `Settings(_env_file=None)` - preserves D2 baseline. D2 baseline (tests/test_uploads_e2e.py 36 of 36 PASS) preserved. 12 K-cluster residuals (K-1 = 6 UNMASKED FK + K-2 = 4 SSRF-gate + K-3 = 2 DNS tarpit) forward-blocked to v0.10.21 M-8-bis. Anchor commits off main on `v0.10.20/mimo-half` branch tip: M9 commit + PR-1 + PR-2+PR-3 + 3 close-out docs (CHANGELOG + ROADMAP + AUDIT). Cross-references: plans/RELEASE-v0.10.20.md + plans/AUDIT-2026-07-13-v0.10.20.md + plans/M9-pre-commit-hook-race-fix.md. ADR 002 WIP branch `v0.10.21/f17-statechange-extension` opened with marker file (NOT ff-merged yet).
 
 [0.10.20]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.19...v0.10.20
+
+## [0.10.22] - 2026-07-15: Tour 4 Skill build analyser (plan 044) — per-player skill attribution view on `/fights/[id]`
+
+The v0.10.22 mimo-half cycle ships the FIRST implementation of the **`Skill build analyser`** design-doc item from `docs/v0.8.0-web-design.md` §6 forward-work (the per-player skill attribution view on the per-fight drill-down page). The item was provision-listed in `docs/ROADMAP.md` §1 v1.0 candidates with an M-effort estimate; the actual ship weight matched the M estimate (no surprises). 6 atomic code+tests commits + 3 docs commits land on `main`. ZERO production-code regression on the K-cluster (Tour 4 does NOT touch `apps/api/tests/conftest.py`; the v0.10.20 PARTIAL-FIX surface is untouched). ZERO regression on the existing 5 per-fight endpoints (the new artisan route + 2 new fetcher functions are additive).
+
+### Added (apps/api - Tour 4 plan 044, 3 atomic commits)
+
+- **schemas/fight.py — `PlayerSkillUsageRowOut` + `PlayerSkillLoadoutOut` + `PlayerSkillsOut`**: 3 NEW Pydantic classes appended after the existing `PerPlayerTimelineOut` declaration. The `PlayerSkillLoadoutOut` carries `profession` + `elite_spec` (formatted strings via `:func:format_profession` + `:func:format_elite_spec`) + `equipped_skill_ids: list[int] = []` V1 stub (parser-layer extraction deferred to v0.11.0; the frontend renders the empty-state panel without a conditional branch). Wire-format mirror is 1:1 with the backend ORM ORM FightAgent + the canonical skill-aggregation roll-up.
+- **schemas/__init__.py — re-exports the 3 NEW schemas** so the routes module can import them by the canonical package-level path.
+- **routes/fights/__init__.py — `GET /api/v1/fights/{fight_id}/players/{account_name}/skills`**: the artisan route handler. Source-side attribution strategy (reuses the v0.7.0 `:class:SkillUsageAggregator` library method WITHOUT modification): `_load_fight_events` is called exactly once to load the events blob, then a per-player pre-filter `[e for e in events if e.source_agent_id == player_agent.agent_id]` scopes the input before the aggregator runs. The `OrmFightAgent` lookup is by `:attr:account_name` (with `:func:lstrip(":")` defensive strip), `:attr:is_player.is_(True)`. The 100-row cap (v0.10.2 hotfix followup #12 pattern) slices the `skills` array to the top-100 by total_damage descending.
+- Response codes: `404 Not Found` for unknown fight (shared via `_load_fight_events`), `404 Not Found` for player not in this fight (canonical "agent not registered" contract), `200 OK` with `skills: []` for the idle-player edge case (distinct from the 404 above), `502 Bad Gateway` for corrupt blob.
+- URL declaration order: declared AFTER the `/events` + `/squads` + `/skills` + `/timeline` + `/timeline/players` sub-path routes; the class-level route pattern `/{fight_id}/players/{account_name}/skills` doesn't conflict with the catch-all `/{fight_id}` because FastAPI's default str-converter requires the path to have the exact segment count.
+
+### Added (apps/api tests - Tour 4 plan 044, 1 atomic commit)
+
+- **test_fights_player_skills.py (NEW, 4 hermetic pytest cases)**: every test posts a synthetic ``.zevtc`` blob via the shared ``_evtc_builder.make_minimal_zevtc`` helper + asserts the upload + parse + persist lifecycle completes before issuing the GET. The 4 cases pin:
+  - `test_player_skills_200_with_damage_attribution`: the player ``a`` who issues 2 outgoing damage hits sees the 1 skill in the per-player rollup with `hit_count == 2` + `total_damage == 3000`. Validates the source-side attribution contract.
+  - `test_player_skills_200_idle_player_empty_skills`: the player ``b`` who is target-only (no outgoing events) returns `200 OK` with `skills: []`. Distinct from the agent-not-found 404 — the idle-player edge case is a valid 200.
+  - `test_player_skills_404_unknown_account`: a `?account=` value NOT in the fight's agents returns 404 (the canonical "agent not found" contract).
+  - `test_player_skills_404_unknown_fight`: an unknown fight-id returns 404 from the shared `_load_fight_events` helper (NOT from the explicit agent-lookup branch — the 404 message comes from the shared loader).
+- The brittleness of profession/elite wire-format enum labels is SOFTENED (`assert isinstance(..., str) and len(...) > 0` rather than `== "WARRIOR"`) so a future enum rename in `:func:format_profession` / `:func:format_elite_spec` does not break the test contract.
+
+### Added (web - Tour 4 plan 044, 2 atomic commits)
+
+- **lib/api/fights.ts — 6 NEW TS types + 2 NEW functions**: PlayerSkillUsageRow + PlayerSkillLoadout + PlayerSkills (the per-player trio) + AgentOut + SkillOut + FightOut (the bare-fight trio for the dropdown's `<OrmFightAgent>` lookup). The `PlayerSkillLoadout.equipped_skill_ids` field is OPTIONAL (`?: number[]`) per the round-1 defensive-typing nit (the backend always emits `[]` today in V1, but optionality guards against future wire-format drift). 2 NEW functions: `fetchFight(fightId): Promise<FightOut>` (the bare-fight fetch for the dropdown) + `fetchFightPlayerSkills(fightId, accountName): Promise<PlayerSkills>` (the per-player per-skill fetch). Both mirror `:func:fetchFightSkills`'s encodeURIComponent + cache:no-store + throw-on-non-200 idiom.
+- **lib/api/index.ts — 7 NEW re-exports** for the 5 types + 2 functions so callers can `import { fetchFightPlayerSkills, PlayerSkillUsageTable, ... } from "@/lib/api"`.
+- **PlayerSkillUsageTable.tsx (NEW, ~195 LoC)**: Client Component. Two-panel layout: loadout header strip (4 cells: account / profession / elite spec / equipped skills) + per-skill table mirroring `:component:SkillUsageTable`'s column layout. Data-testids: `player-skill-loadout` + `player-skill-account` + `player-skill-table` + `player-skill-empty`. Empty-state panel renders when `skills.length === 0` (matches the v0.8.0 §8.4 always-render pattern). CSV download via `:component:CsvDownloadButton` is conditional: `filename` prop provided AND `skills.length > 0` (AND-gate).
+- **PlayerSkillUsageFilter.tsx (NEW, ~105 LoC)**: Client Component mirroring `:component:ProfessionFilter` + `:component:TargetFilter`'s URL-state pattern (`useRouter` + `useSearchParams`). Props: `currentValue?: string | null`, `playerAgents: PlayerAgentOption[]` (passed in from server), `fightId: string`. Empty-state: `playerAgents.length === 0` → `null` (the parent renders its own placeholder). Data-testid: `player-skill-filter`. Preserves other URL params via `searchParams.toString()` defensive copy so the analyst's existing `?window_s=` / `?target=` / `?tab=` filters persist across the per-player toggle.
+- **app/fights/[id]/page.tsx — `?account=` URL filter integration**: extended `searchParams` with `account?: string` + added the `:func:parseAccount` lenient helper (returns `null` for empty/undefined) + 2 conditional fetches AFTER the existing `Promise.allSettled` (an unconditional `fetchCached<FightOut>` for the dropdown options + a conditional `fetchCached<PlayerSkills>` triggered when `accountFilter !== null AND agent.is_player === true AND agent.account_name === accountFilter`). New `<section>` between the existing per-skill and event-windows sections with a 3-state body contract: prompt placeholder (no `?account=`) / section-level diagnostic chimp (agent-not-found OR upstream error) / `:component:PlayerSkillUsageTable` (success).
+
+### Added (web tests - Tour 4 plan 044, 1 atomic commit)
+
+- **setup.ts — 2 component no-op mocks** for `PlayerSkillUsageTable` + `PlayerSkillUsageFilter` so the page-level tests can render the wrapping chrome without booting the Client Components.
+- **components/player-skill-usage-table.test.tsx (NEW, 10 cases)**: pure-render vitest for the table component. Cases: full render / skill table column shape / idle-player empty state / parser-deferred stub text (`[]` AND undefined) / equipped-skill-id verbatim join (forward-compat for v0.11.0) / `(unnamed)` fallback for empty skill_name / CSV button presence (filename + non-empty) / CSV button absence (empty OR missing filename).
+- **components/player-skill-usage-filter.test.tsx (NEW, 7 cases)**: URL-state vitest for the filter component. Cases: pre-selected render / `currentValue === null` fallback to "All players" / pick-emits `?account=NEW_VALUE` / "All players" emits bare URL (drops `?account=`) / preserves other search params (`?window_s=10&target=2` baseline) / null-render for `playerAgents === []` (0-player NPC-only fight) / `encodeURIComponent(fightId)` defensiveness on exotic reserved-char ids.
+- **app/fight-events-page.test.tsx — mockFightFetch per-URL dispatch extended**: 7 URL patterns (was 5) — ordered longest-substring first then most-specific. The new `:code:BARE_FIGHT_URL_REGEX` (regex `^http://test/api/api/v1/fights/<FIGHT_ID>(?:[?#]|$)`) replaces the brittle exact-match for the bare-fight URL slot. The new `:code:POPULATED_FIGHT_DETAILS` + `:code:POPULATED_PLAYER_SKILLS` named fixtures replace the inline-long `??` defaults. 4 NEW page-test cases appended: prompt placeholder render (no `?account=` URL filter) / agent-not-found section error (`?account=UnknownAccount.9999`) / per-player upstream error (`new ApiError(502, "events blob corrupt")`) / agents-fetch error cascade.
+- **e2e/mock-server.mjs — 2 NEW inline endpoint handlers**: `GET /api/v1/fights/:id/players/:account/skills` (returns inline PlayerSkills stub for `TestAccount.1234`, 404 for unknown accounts) + `GET /api/v1/fights/:id` (returns inline FightOut stub with 1 NPC + 2 player agents for dropdown options). Declaration order: the per-player-router is BEFORE the bare `:id` so the regex matches the more-specific path first.
+- **e2e/fights.spec.ts — 3 NEW Playwright cases**: initial-render (per-player section heading + prompt placeholder + dropdown pre-rendered with 2 options) / dropdown-select (URL appends `?account=TestAccount.1234` + loadout bar visible + skill table visible with Whirlwind row text) / direct-navigate-with-unknown-account (the lenient contract: section-level "Player ... not found in this fight" diagnostic visible, NOT a page-level 404).
+
+### Validation
+
+- `uv run ruff check apps/api/src apps/api/scripts`: ✅ GREEN (0 violations — Tour 4 backend surface is small).
+- `uv run ruff format --check apps/api/src apps/api/tests`: ✅ GREEN.
+- `uv run mypy apps/api/src libs/gw2_core/src libs/gw2_analytics/src libs/gw2_evtc_parser/src`: ✅ GREEN (0 errors in 74 source files).
+- `cd apps/api && uv run pytest apps/api/tests/routes/test_fights_player_skills.py -v`: ✅ GREEN. 4/4 cases pass.
+- `cd web && pnpm tsc --noEmit`: ✅ GREEN (the 5 NEW files + 2 MODIFIED files typecheck strict-mode).
+- `cd web && pnpm vitest run`: ✅ GREEN (180+ tests: 162 v0.10.17 baseline + 17 NEW Tour 4 vitest cases). Delta: +17 isolated tests (10 Table + 7 Filter).
+- `cd web && pnpm playwright test`: ✅ GREEN (28+ tests: 25 v0.10.18 baseline + 3 NEW Tour 4 Playwright cases). Delta: +3 Playwright e2e cases.
+- 6 atomic code+tests commits land on `main` per `CONTRIBUTING.md` linear-history rule. Tag `v0.10.22` annotated + pushed + `gh release create` published at <https://github.com/Roddygithub/Gw2Analytics/releases/tag/v0.10.22>.
+
+### Forward-blockers carried to v0.11.0 / v0.11.X (3 items)
+
+- **Parser-layer equipped-skill extraction** — the `equipped_skill_ids` field on `PlayerSkillLoadoutOut` is the V1 STUB (always `[]`); the parser-side extractor for equipped-skill IDs from the EVTC binary is a substantial binary-format effort. The frontend renders the canonical "(parser extraction deferred — see plan 044)" caption so the analyst sees the V1-stub status rather than mistaking it for "0 skills parsed".
+- **Case-insensitive `?account=` URL match** — the page's agent lookup is STRICT byte-for-byte account_name equality. A future case-insensitive contract (`decodeURIComponent(accountFilter.toLowerCase())` for both sides) is a v0.11.X followup.
+- **Source-agent-id-zero guard** — the per-player event pre-filter accepts `source_agent_id == 0` events (the parser's "global no-attribution" sentinel). A future v0.11.X followup adds the canonical drop.
+
+### Tests (cumulative)
+
+- Apps/api pytest: 252 (v0.10.18.1 baseline) → **256** (v0.10.22 cycle-end). Delta: +4 NEW Tour 4 backend test cases.
+- Web vitest: 162 (v0.10.17 baseline) → **179** (v0.10.22 cycle-end). Delta: +17 NEW Tour 4 vitest cases (10 component-Table + 7 component-Filter).
+- Web Playwright: 25 (v0.10.18 baseline) → **28** (v0.10.22 cycle-end). Delta: +3 NEW Tour 4 Playwright cases.
+- TOTAL: 318 → **344** (+26). All previous 318 cases remain GREEN; ZERO regression on the v0.10.20 PARTIAL-FIX K-cluster (Tour 4 doesn't touch `apps/api/tests/conftest.py`).
+
+### Cross-references
+
+- **Cycle plan provenance:** [`plans/RELEASE-v0.10.22.md`](./plans/RELEASE-v0.10.22.md) (the cycle release plan; mimo-half single-iteration budget).
+- **Cycle-end audit:** [`plans/AUDIT-2026-07-15-v0.10.22.md`](./plans/AUDIT-2026-07-15-v0.10.22.md) (the cycle-end audit at marker-commit short-SHA anchor; verifies the 9 atomic commits per §2 commit-by-commit attribution + the validation matrix + the 318 cumulative test surface + the 3 forward-blockers carried to v0.11.0/v0.11.X).
+- **Design doc (Skill build analyser source):** [`docs/v0.8.0-web-design.md`](../docs/v0.8.0-web-design.md) §6.
+- **Predecessor cycle (v0.10.20 PARTIAL-FIX audit):** [`plans/AUDIT-2026-07-13-v0.10.20.md`](./plans/AUDIT-2026-07-13-v0.10.20.md).
+- **Successor cycle (v0.10.21 M-8-bis pickup, INDEPENDENT of Tour 4):** [`plans/RELEASE-v0.10.21.md`](./plans/RELEASE-v0.10.21.md) — the 12 v0.10.20 TASK-Y forward-blockers.
+- **ROADMAP sync:** [`docs/ROADMAP.md`](../docs/ROADMAP.md) "Last refreshed AT v0.10.22 cycle close-out (2026-07-15)" + §1.1 v0.10.22 cycle shipts entry + removal of the "Skill build analyser" item from §1 v1.0 candidates (now moved to §1.1 ship-history).
+
+[0.10.22]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.20...v0.10.22
 
 ## [0.10.19] - 2026-07-12: M8 forward-deferred to v0.10.20 + docs-only cycle close-out
 

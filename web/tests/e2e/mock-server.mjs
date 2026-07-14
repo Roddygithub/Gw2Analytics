@@ -122,15 +122,53 @@ const server = createServer(async (req, res) => {
   // GET; the original client-side page called POST. Both return
   // the same stub.
   if ((method === "GET" || method === "POST") && path === "/api/v1/account") {
-    return jsonResponse(
-      res,
-      200,
-      JSON.stringify({
-        world_id: 1001,
-        world_name: "Fixture World",
-        world_population: "Medium",
-      }),
-    );
+    const apiKey = process.env.GW2_API_KEY;
+    if (apiKey) {
+      try {
+        const accCtrl = new AbortController();
+        const accTimeout = setTimeout(() => accCtrl.abort(), 5_000);
+        const accRes = await fetch(
+          `https://api.guildwars2.com/v2/account?access_token=${encodeURIComponent(apiKey)}`,
+          { signal: accCtrl.signal },
+        );
+        clearTimeout(accTimeout);
+        if (!accRes.ok) {
+          throw new Error(`GW2 /account returned HTTP ${accRes.status}`);
+        }
+        const accData = await accRes.json();
+        const worldCtrl = new AbortController();
+        const worldTimeout = setTimeout(() => worldCtrl.abort(), 5_000);
+        const worldRes = await fetch(
+          `https://api.guildwars2.com/v2/worlds?id=${encodeURIComponent(String(accData.world))}`,
+          { signal: worldCtrl.signal },
+        );
+        clearTimeout(worldTimeout);
+        if (!worldRes.ok) {
+          throw new Error(`GW2 /worlds returned HTTP ${worldRes.status}`);
+        }
+        const worldData = await worldRes.json();
+        if (!worldData || typeof worldData.name !== "string") {
+          throw new Error("GW2 /worlds returned unexpected payload shape");
+        }
+        return jsonResponse(
+          res,
+          200,
+          JSON.stringify({
+            world_id: accData.world,
+            world_name: worldData.name,
+            world_population: worldData.population,
+          }),
+        );
+      } catch (err) {
+        console.warn(
+          `[mock-server] LIVE GW2 fetch failed -- falling back to stub: ${err && err.message ? err.message : err}`,
+        );
+        // Fall through to the deterministic stub below so the E2E suite
+        // and the analyst's screen remain stable even when the GW2 v2
+        // API is unreachable or the key is revoked.
+      }
+    }
+    return jsonResponse(res, 200, await loadFixture("account-stub.json"));
   }
 
   // POST /api/v1/uploads (v0.3.0-web) -- multipart form-data
@@ -247,6 +285,305 @@ const server = createServer(async (req, res) => {
       );
     }
 
+    // Combat readout (F17, per docs/v0.9.0-combat-readout-design.md
+    // §5.1) -- the unified endpoint returns the bound payload for
+    // all 4 per-player tables (Damage / Heal / Boons / Defense).
+    // SCAFFOLD-WIRE-AWARE STUB: columns populated from real
+    // events carry realistic numbers; SCAFFOLD-zero columns
+    // (dps_power, dps_condi, barrier_total, barrier_ps,
+    // time_downed_ms, dodges, blocks, interrupts) leave the
+    // documented pre-Phase-6-v2 wire zeros so the empty-state and
+    // the SCAFFOLD-zero contract are visible on the analyst's
+    // screen until Phase 6 v2 lands the parser-side side-tables.
+    // The 4 player rows mirror the canonical roster used by the
+    // bare ``/api/v1/fights/:id`` stub (top-of-fragment by squad)
+    // so a tab-toggle between Overview + Readout shows a
+    // consistent squad composition. The response matches the
+    // :class:`FightReadoutOut` Pydantic shape verbatim.
+    const readoutMatch = path.match(
+      /^\/api\/v1\/fights\/([^/]+)\/readout$/,
+    );
+    if (readoutMatch) {
+      const fightId = decodeURIComponent(readoutMatch[1]);
+      if (!KNOWN_FIGHTS.has(fightId)) {
+        return jsonResponse(
+          res,
+          404,
+          JSON.stringify({ error: "fight not found" }),
+        );
+      }
+      return jsonResponse(
+        res,
+        200,
+        JSON.stringify({
+          fight_id: fightId,
+          duration_s: 125.5,
+          players: [
+            {
+              agent_id: 1234,
+              subgroup: 1,
+              name: "Fighty McFight",
+              account_name: "TestAccount.1234",
+              profession: "Warrior",
+              elite_spec: "Berserker",
+              is_commander: true,
+              roles: ["DPS", "STRIP"],
+              damage: {
+                dps_total: 2450,
+                dps_power: 0,
+                dps_condi: 0,
+                strips: 18,
+                cc_applied: 312,
+                down_contribution_dps: 850,
+                kills: 2,
+              },
+              heal: {
+                heal_total: 180_000,
+                hps: 1440,
+                barrier_total: 0,
+                barrier_ps: 0,
+                cleanses: 4,
+                stun_breaks: 1,
+              },
+              boons: {
+                boons_out_rate: 0.6,
+                boons_in_rate: 12.4,
+                stability_out: 0,
+                alacrity_out: 0,
+                resistance_out: 8,
+                aegis_out: 12,
+                superspeed_out: 0,
+                stealth_out: 0,
+                other_boons_out: { might: 1240, fury: 84 },
+              },
+              defense: {
+                damage_taken: 58_300,
+                cc_taken: 4,
+                deaths: 0,
+                time_downed_ms: 0,
+                dodges: 0,
+                blocks: 0,
+                interrupts: 0,
+                barrier_absorbed: 0,
+              },
+            },
+            {
+              agent_id: 9999,
+              subgroup: 1,
+              name: "Slice McSlice",
+              account_name: "TestAccount.9999",
+              profession: "Thief",
+              elite_spec: "Daredevil",
+              is_commander: false,
+              roles: ["DPS"],
+              damage: {
+                dps_total: 3120,
+                dps_power: 0,
+                dps_condi: 0,
+                strips: 22,
+                cc_applied: 420,
+                down_contribution_dps: 1100,
+                kills: 4,
+              },
+              heal: {
+                heal_total: 25_000,
+                hps: 200,
+                barrier_total: 0,
+                barrier_ps: 0,
+                cleanses: 0,
+                stun_breaks: 0,
+              },
+              boons: {
+                boons_out_rate: 0.2,
+                boons_in_rate: 14.1,
+                stability_out: 0,
+                alacrity_out: 0,
+                resistance_out: 4,
+                aegis_out: 2,
+                superspeed_out: 220,
+                stealth_out: 240,
+                other_boons_out: { might: 950, fury: 60 },
+              },
+              defense: {
+                damage_taken: 47_200,
+                cc_taken: 6,
+                deaths: 1,
+                time_downed_ms: 0,
+                dodges: 0,
+                blocks: 0,
+                interrupts: 0,
+                barrier_absorbed: 0,
+              },
+            },
+            {
+              agent_id: 4040,
+              subgroup: 2,
+              name: "Bloomy McBloom",
+              account_name: "TestAccount.4040",
+              profession: "Necromancer",
+              elite_spec: "Reaper",
+              is_commander: false,
+              roles: ["DPS"],
+              damage: {
+                dps_total: 2210,
+                dps_power: 0,
+                dps_condi: 0,
+                strips: 12,
+                cc_applied: 180,
+                down_contribution_dps: 0,
+                kills: 1,
+              },
+              heal: {
+                heal_total: 60_000,
+                hps: 480,
+                barrier_total: 0,
+                barrier_ps: 0,
+                cleanses: 0,
+                stun_breaks: 0,
+              },
+              boons: {
+                boons_out_rate: 1.4,
+                boons_in_rate: 6.0,
+                stability_out: 12,
+                alacrity_out: 0,
+                resistance_out: 6,
+                aegis_out: 1,
+                superspeed_out: 0,
+                stealth_out: 0,
+                other_boons_out: { might: 720, fury: 90, "soul reaper": 8 },
+              },
+              defense: {
+                damage_taken: 38_500,
+                cc_taken: 3,
+                deaths: 0,
+                time_downed_ms: 0,
+                dodges: 0,
+                blocks: 0,
+                interrupts: 0,
+                barrier_absorbed: 0,
+              },
+            },
+            {
+              agent_id: 5678,
+              subgroup: 2,
+              name: "Heal Bot",
+              account_name: "TestAccount.5678",
+              profession: "Guardian",
+              elite_spec: "Firebrand",
+              is_commander: false,
+              roles: ["HEAL", "SUPPORT", "STRIP"],
+              damage: {
+                dps_total: 850,
+                dps_power: 0,
+                dps_condi: 0,
+                strips: 8,
+                cc_applied: 205,
+                down_contribution_dps: 120,
+                kills: 0,
+              },
+              heal: {
+                heal_total: 1_200_000,
+                hps: 9600,
+                barrier_total: 0,
+                barrier_ps: 0,
+                cleanses: 125,
+                stun_breaks: 8,
+              },
+              boons: {
+                boons_out_rate: 4.2,
+                boons_in_rate: 18.7,
+                stability_out: 480,
+                alacrity_out: 24,
+                resistance_out: 18,
+                aegis_out: 86,
+                superspeed_out: 0,
+                stealth_out: 0,
+                other_boons_out: { might: 560, fury: 120, quickness: 200 },
+              },
+              defense: {
+                damage_taken: 21_000,
+                cc_taken: 2,
+                deaths: 0,
+                time_downed_ms: 0,
+                dodges: 0,
+                blocks: 0,
+                interrupts: 0,
+                barrier_absorbed: 0,
+              },
+            },
+          ],
+        }),
+      );
+    }
+
+    // Tour 4 v0.10.13 plan 044: per-player skill roll-up +
+    // loadout attribution on ``/fights/[id]?account=...``. Two
+    // NEW endpoints:
+    //
+    // - ``GET /api/v1/fights/:id/players/:account/skills``
+    //   returns the ``PlayerSkills`` payload (per-player per-skill
+    //   attribution + loadout header). A 1-row pixel-fits-everything
+    //   stub for ``TestAccount.1234`` so the Playwright spec
+    //   can exercise the happy-path dropdown selection. Unknown
+    //   accounts 404 per the backend's canonical contract.
+    //
+    // - ``GET /api/v1/fights/:id`` (bare, after all the
+    //   sub-path handlers ABOVE this block) returns a minimal
+    //   ``FightOut`` with the agents list. The agents list is
+    //   the ONLY field the per-player dropdown consults from
+    //   this endpoint -- the dropdown filters for ``is_player
+    //   === true && account_name !== null`` and renders a
+    //   label ``"{name} ({account_name})"`` for each. One
+    //   NPC + two player agents so the dropdown has multiple
+    //   options on the Playwright spec.
+    //
+    // Declaration order: the bare ``:id`` catch-all MUST be
+    // the LAST ``/api/v1/fights/`` route in this function so
+    // it doesn't consume the more-specific ``:id/events`` +
+    // ``:id/squads`` + ``:id/skills`` + ``:id/timeline`` +
+    // ``:id/players/:account/skills`` handlers above.
+    const playerSkillsMatch = path.match(
+      /^\/api\/v1\/fights\/([^/]+)\/players\/([^/]+)\/skills$/,
+    );
+    if (playerSkillsMatch) {
+      const fightId = decodeURIComponent(playerSkillsMatch[1]);
+      const accountName = decodeURIComponent(playerSkillsMatch[2]);
+      if (!KNOWN_FIGHTS.has(fightId)) {
+        return jsonResponse(res, 404, JSON.stringify({ error: "fight not found" }));
+      }
+      if (accountName !== "TestAccount.1234") {
+        return jsonResponse(
+          res,
+          404,
+          JSON.stringify({ error: "player not found in fight" }),
+        );
+      }
+      return jsonResponse(
+        res,
+        200,
+        JSON.stringify({
+          fight_id: fightId,
+          account_name: accountName,
+          agent_id: 1234,
+          loadout: {
+            profession: "Warrior",
+            elite_spec: "Berserker",
+            equipped_skill_ids: [],
+          },
+          skills: [
+            {
+              skill_id: 100,
+              skill_name: "Whirlwind",
+              hit_count: 2,
+              total_damage: 3000,
+              total_healing: 0,
+              total_buff_removal: 0,
+            },
+          ],
+        }),
+      );
+    }
+
     if (path === "/api/v1/players") {
       const body = await loadFixture("players-list.json");
       return jsonResponse(res, 200, body);
@@ -310,6 +647,66 @@ const server = createServer(async (req, res) => {
       }
       const body = await loadFixture("player-timeline.json");
       return jsonResponse(res, 200, body);
+    }
+
+    // Tour 4: ``GET /api/v1/fights/:id`` bare-identifier fetch
+    // for the per-player dropdown. Declared AFTER every other
+    // ``/api/v1/fights/`` sub-path handler ABOVE so the regex
+    // collapses into the catch-all freely without consuming
+    // the more-specific routes. The agents stub has 1 NPC
+    // (``is_player: false``) + 2 player agents
+    // (``TestAccount.1234`` + ``TestAccount.5678``) so the
+    // dropdown's pre-filter (``is_player === true &&
+    // account_name !== null``) leaves 2 options on the
+    // Playwright spec.
+    const fightBareMatch = path.match(/^\/api\/v1\/fights\/([^/]+)$/);
+    if (fightBareMatch) {
+      const fightId = decodeURIComponent(fightBareMatch[1]);
+      if (!KNOWN_FIGHTS.has(fightId)) {
+        return jsonResponse(res, 404, JSON.stringify({ error: "fight not found" }));
+      }
+      return jsonResponse(
+        res,
+        200,
+        JSON.stringify({
+          id: fightId,
+          build_version: "20250714-123456",
+          encounter_id: 1,
+          agent_count: 3,
+          started_at: "2026-07-14T12:00:00Z",
+          game_type: 4,
+          agents: [
+            {
+              agent_id: 9001,
+              name: "World Boss",
+              profession: "None",
+              elite_spec: "None",
+              is_player: false,
+              account_name: null,
+              subgroup: null,
+            },
+            {
+              agent_id: 1234,
+              name: "Fighty McFight",
+              profession: "Warrior",
+              elite_spec: "Berserker",
+              is_player: true,
+              account_name: "TestAccount.1234",
+              subgroup: "1",
+            },
+            {
+              agent_id: 5678,
+              name: "Heal Bot",
+              profession: "Guardian",
+              elite_spec: "Firebrand",
+              is_player: true,
+              account_name: "TestAccount.5678",
+              subgroup: "2",
+            },
+          ],
+          skills: [],
+        }),
+      );
     }
 
     // /api/v1/players/:name  (:path converter lets the name

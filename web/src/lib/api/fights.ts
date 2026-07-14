@@ -31,6 +31,32 @@ export interface TargetBuffRemovalRow {
   name: string | null;
 }
 
+export interface AgentOut {
+  agent_id: number;
+  name: string;
+  profession: string;
+  elite_spec: string;
+  is_player: boolean;
+  account_name: string | null;
+  subgroup: string | null;
+}
+
+export interface SkillOut {
+  id: number;
+  name: string;
+}
+
+export interface FightOut {
+  id: string;
+  build_version: string;
+  encounter_id: number;
+  agent_count: number;
+  started_at: string;
+  game_type: number;
+  agents: AgentOut[];
+  skills: SkillOut[];
+}
+
 export interface EventBucket {
   start_ms: number;
   end_ms: number;
@@ -78,6 +104,32 @@ export interface FightSkills {
   skills: SkillUsageRow[];
 }
 
+export interface PlayerSkillUsageRow {
+  skill_id: number;
+  skill_name: string;
+  hit_count: number;
+  total_damage: number;
+  total_healing: number;
+  total_buff_removal: number;
+}
+
+export interface PlayerSkillLoadout {
+  profession: string;
+  elite_spec: string;
+  /** Optional: parser-layer equipped-skill extraction is deferred to v0.11.0;
+   * the backend always emits ``[]`` today (the V1 stub) but optionality
+   * keeps the contract forward-compat with future wire-format changes. */
+  equipped_skill_ids?: number[];
+}
+
+export interface PlayerSkills {
+  fight_id: string;
+  account_name: string;
+  agent_id: number;
+  loadout: PlayerSkillLoadout;
+  skills: PlayerSkillUsageRow[];
+}
+
 export interface PerFightTimelinePoint {
   window_start_ms: number;
   window_end_ms: number;
@@ -112,6 +164,96 @@ export interface FightPlayerTimeline {
   window_s: number;
   duration_s: number;
   series: PerPlayerTimelineSeries[];
+}
+
+// ============================================================================
+// Tour 6 Wave 7 (Workstream F): Combat-readout wire-shape types.
+//
+// Mirrors apps/api/src/gw2analytics_api/schemas/fight.py :: PlayerReadout{Damage,Heal,Boons,Defense}Out + PlayerReadoutOut + FightReadoutOut.
+//
+// Note on the `subgroup` type drift: the existing AgentOut schema uses
+// `subgroup: string | null` (the legacy per-target contract) while
+// PlayerReadoutOut uses `subgroup: int` (the per-player readout contract).
+// Per thinker's recommendation A, we ACCEPT the type drift at the
+// consumer boundary rather than coerce AgentOut to int — the existing
+// TargetRollupsGrid + SquadRollupsGrid depend on string-typed subgroups
+// (their `subgroup` column is a string label), so changing AgentOut
+// would break their rendering. The Readout grid maps int -> `Sub N`
+// label inline.
+// ============================================================================
+
+export interface PlayerReadoutDamageOut {
+  dps_total: number;
+  dps_power: number;
+  dps_condi: number;
+  strips: number;
+  cc_applied: number;
+  down_contribution_dps: number;
+  kills: number;
+}
+
+export interface PlayerReadoutHealOut {
+  heal_total: number;
+  hps: number;
+  barrier_total: number;
+  barrier_ps: number;
+  cleanses: number;
+  stun_breaks: number;
+}
+
+export interface PlayerReadoutBoonsOut {
+  boons_out_rate: number;
+  boons_in_rate: number;
+  stability_out: number;
+  alacrity_out: number;
+  resistance_out: number;
+  aegis_out: number;
+  superspeed_out: number;
+  stealth_out: number;
+  other_boons_out: Record<string, number>;
+}
+
+export interface PlayerReadoutDefenseOut {
+  damage_taken: number;
+  cc_taken: number;
+  deaths: number;
+  time_downed_ms: number;
+  dodges: number;
+  blocks: number;
+  interrupts: number;
+  barrier_absorbed: number;
+}
+
+export interface PlayerReadoutOut {
+  agent_id: number;
+  subgroup: number;
+  name: string;
+  account_name: string;
+  profession: string;
+  elite_spec: string;
+  is_commander: boolean;
+  roles: string[];
+  damage: PlayerReadoutDamageOut;
+  heal: PlayerReadoutHealOut;
+  boons: PlayerReadoutBoonsOut;
+  defense: PlayerReadoutDefenseOut;
+}
+
+export interface FightReadoutOut {
+  fight_id: string;
+  duration_s: number;
+  players: PlayerReadoutOut[];
+}
+
+export async function fetchFightReadout(
+  fightId: string,
+): Promise<FightReadoutOut> {
+  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/readout`;
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as FightReadoutOut;
 }
 
 export async function fetchFights(): Promise<FightRow[]> {
@@ -174,6 +316,32 @@ export async function fetchFightSkills(
     throw new ApiError(resp.status, await resp.text());
   }
   return (await resp.json()) as FightSkills;
+}
+
+export async function fetchFight(fightId: string): Promise<FightOut> {
+  // Tour 4 v0.10.13 plan 044: backend ``GET /api/v1/fights/{id}``
+  // (the existing ::func::``get_fight`` route handler) returns the
+  // full :class::``OrmFight`` row + the embedded :class::``OrmFightAgent``
+  // row list required for the per-player dropdown. The page wires
+  // this into the ``?account=`` URL search-param filter contract.
+  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}`;
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as FightOut;
+}
+
+export async function fetchFightPlayerSkills(
+  fightId: string,
+  accountName: string,
+): Promise<PlayerSkills> {
+  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/players/${encodeURIComponent(accountName)}/skills`;
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as PlayerSkills;
 }
 
 export async function fetchFightTimeline(

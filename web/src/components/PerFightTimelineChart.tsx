@@ -50,6 +50,8 @@
  *   collapses to a flat baseline at y=0.
  */
 
+/* eslint-disable react-refresh/only-export-components */
+
 "use client";
 
 import { useMemo } from "react";

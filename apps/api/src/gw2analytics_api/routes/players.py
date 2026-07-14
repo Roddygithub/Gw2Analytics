@@ -487,9 +487,10 @@ def get_player_timeline(
     # materialised-view coverage (post-v0.8.4 deployments), the
     # slow-path is dormant and the SQL path is the full
     # contribution set.
+    bare_account_name = account_name.lstrip(":")
     pairs = get_account_contributions_from_sql(
         db,
-        account_name=account_name,
+        account_name=bare_account_name,
         limit=10**6,  # unbounded; bounded by account's fight count
         offset=0,
     )
@@ -506,7 +507,7 @@ def get_player_timeline(
     # :func:`_load_slow_path_contributions` for the dispatch
     # contract.
     slow_contributions, slow_started_at = _load_slow_path_contributions(
-        db, account_name=account_name
+        db, account_name=bare_account_name
     )
     own_contributions.extend(slow_contributions)
     fight_id_to_started.update(slow_started_at)
@@ -521,6 +522,9 @@ def get_player_timeline(
 
     if not own_contributions:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "player not found")
+    # The response echoes the canonical bare account_name, not
+    # any colon-prefixed form the caller may have supplied.
+    account_name = bare_account_name
     # v0.8.9: parse the ``?tz=`` string into a :class:`ZoneInfo`
     # AFTER the 404 check so an unknown account still returns
     # 404 (not 422). ``ZoneInfoNotFoundError`` is the canonical
@@ -664,8 +668,8 @@ def get_player(
 ) -> PlayerProfileOut:
     """Return the full profile + per-fight breakdown for one account.
 
-    ``account_name`` is the URL-decoded arcdps account name (e.g.
-    ``:account.1234``). The ``:path`` converter lets the value
+    ``account_name`` is the URL-decoded canonical account name (e.g.
+    ``account.1234``). The ``:path`` converter lets the value
     contain ``/`` characters that would otherwise terminate the
     path match; FastAPI decodes the URL-encoded form before
     handing the string to the handler. The route raises
@@ -686,9 +690,10 @@ def get_player(
     # ``(FightContribution, started_at)`` tuple shape; the
     # merge step builds the ``fight_id_to_started`` dict from
     # both sources.
+    bare_account_name = account_name.lstrip(":")
     pairs = get_account_contributions_from_sql(
         db,
-        account_name=account_name,
+        account_name=bare_account_name,
         limit=10**6,  # unbounded; bounded by account's fight count
         offset=0,
     )
@@ -699,13 +704,16 @@ def get_player(
     # ``get_player_timeline``; the merge is identical (extend
     # contributions, update started_at map).
     slow_contributions, slow_started_at = _load_slow_path_contributions(
-        db, account_name=account_name
+        db, account_name=bare_account_name
     )
     own_contributions.extend(slow_contributions)
     fight_id_to_started.update(slow_started_at)
 
     if not own_contributions:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "player not found")
+    # The response echoes the canonical bare account_name, not
+    # any colon-prefixed form the caller may have supplied.
+    account_name = bare_account_name
     # The cross-fight profile: first contribution's identity
     # (the SQL sort order ensures the first SQL row is the most
     # recent; the slow-path merge may have re-ordered the

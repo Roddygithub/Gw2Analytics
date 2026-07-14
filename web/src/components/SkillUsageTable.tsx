@@ -32,6 +32,15 @@
 
 import type { SkillUsageRow } from "@/lib/api";
 import type { CsvColumn } from "@/lib/csv";
+import {
+  SKILL_USAGE_TABLE_COLUMN_HIT_COUNT,
+  SKILL_USAGE_TABLE_COLUMN_SKILL_ID,
+  SKILL_USAGE_TABLE_COLUMN_SKILL_NAME,
+  SKILL_USAGE_TABLE_COLUMN_TOTAL_DAMAGE,
+  SKILL_USAGE_TABLE_COLUMN_TOTAL_HEALING,
+  SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP,
+  SKILL_USAGE_TABLE_EMPTY_STATE,
+} from "@/lib/copy/skill-usage-table";
 import { CsvDownloadButton } from "./CsvDownloadButton";
 
 /**
@@ -42,12 +51,12 @@ import { CsvDownloadButton } from "./CsvDownloadButton";
  * official description on the wiki.
  */
 const CSV_COLUMNS: CsvColumn<SkillUsageRow>[] = [
-  { field: "skill_id", headerName: "Skill id" },
-  { field: "skill_name", headerName: "Skill name" },
-  { field: "hit_count", headerName: "Hit count" },
-  { field: "total_damage", headerName: "Total damage" },
-  { field: "total_healing", headerName: "Total healing" },
-  { field: "total_buff_removal", headerName: "Total strip" },
+  { field: "skill_id",    headerName: SKILL_USAGE_TABLE_COLUMN_SKILL_ID },
+  { field: "skill_name",    headerName: SKILL_USAGE_TABLE_COLUMN_SKILL_NAME },
+  { field: "hit_count",    headerName: SKILL_USAGE_TABLE_COLUMN_HIT_COUNT },
+  { field: "total_damage",    headerName: SKILL_USAGE_TABLE_COLUMN_TOTAL_DAMAGE },
+  { field: "total_healing",    headerName: SKILL_USAGE_TABLE_COLUMN_TOTAL_HEALING },
+  { field: "total_buff_removal",    headerName: SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP },
 ];
 
 const TABLE_STYLE: React.CSSProperties = {
@@ -98,7 +107,7 @@ export function SkillUsageTable({
   filename?: string;
 }) {
   if (rows.length === 0) {
-    return <div style={EMPTY_STYLE}>No skill roll-up rows.</div>;
+    return <div style={EMPTY_STYLE}>{SKILL_USAGE_TABLE_EMPTY_STATE}</div>;
   }
 
   return (
@@ -111,12 +120,12 @@ export function SkillUsageTable({
       <table style={TABLE_STYLE}>
       <thead>
         <tr>
-          <th style={TH_STYLE}>Skill id</th>
-          <th style={TH_STYLE}>Skill name</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>Hit count</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>Total damage</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>Total healing</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>Total strip</th>
+          <th style={TH_STYLE}>{SKILL_USAGE_TABLE_COLUMN_SKILL_ID}</th>
+          <th style={TH_STYLE}>{SKILL_USAGE_TABLE_COLUMN_SKILL_NAME}</th>
+          <th style={{ ...TH_STYLE, textAlign: "right" }}>{SKILL_USAGE_TABLE_COLUMN_HIT_COUNT}</th>
+          <th style={{ ...TH_STYLE, textAlign: "right" }}>{SKILL_USAGE_TABLE_COLUMN_TOTAL_DAMAGE}</th>
+          <th style={{ ...TH_STYLE, textAlign: "right" }}>{SKILL_USAGE_TABLE_COLUMN_TOTAL_HEALING}</th>
+          <th style={{ ...TH_STYLE, textAlign: "right" }}>{SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP}</th>
         </tr>
       </thead>
       <tbody>

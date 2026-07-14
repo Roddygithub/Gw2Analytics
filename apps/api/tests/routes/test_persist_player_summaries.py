@@ -25,8 +25,8 @@ _D = 100_000  # base source agent id
 def _seed_and_call(
     events: Sequence[DamageEvent | HealingEvent | BuffRemovalEvent],
     *,
-    account_name_a: str = ":synth.100",
-    account_name_b: str | None = ":synth.101",
+    account_name_a: str = "synth.100",
+    account_name_b: str | None = "synth.101",
     name_a: str = "PlayerA",
 ) -> str:
     """Seed a fight + 2 agents + call _persist_player_summaries. Returns fight_id."""
