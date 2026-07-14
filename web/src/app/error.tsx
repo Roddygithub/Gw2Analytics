@@ -13,7 +13,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { FIGHTS_GRID_LINK_ROOT } from "@/lib/copy/error-messages";
+import { FIGHTS_GRID_LINK_ROOT, TRY_AGAIN_BUTTON_LABEL } from "@/lib/copy/error-messages";
 
 const PANEL_STYLE: React.CSSProperties = {
   padding: "32px",
@@ -115,7 +115,7 @@ export default function GlobalError({
           style={PRIMARY_BTN_STYLE}
           data-testid="global-error-retry"
         >
-          Try again
+          {TRY_AGAIN_BUTTON_LABEL}
         </button>
         <Link href="/" style={SECONDARY_BTN_STYLE}>
           Back to landing

@@ -130,6 +130,12 @@ export const FIGHTS_GRID_BROWSE_FIGHT_PAGE = "← Browse fights grid";
  */
 export const UPSTREAM_ERROR_PREFIX = "Upstream error: ";
 
+/** Retry button text. Used in BOTH `web/src/app/error.tsx`
+ *  (root global error boundary) AND `web/src/app/fights/[id]/error.tsx`
+ *  (per-fight error boundary). The two surfaces share the same affordance
+ *  copy; centralising here keeps the retry-action text in lockstep. */
+export const TRY_AGAIN_BUTTON_LABEL = "Try again";
+
 // ===========================================================================
 // AG Grid column headers (FightsGrid — the read-only fights-list table)
 // ===========================================================================
@@ -222,3 +228,30 @@ export const PLAYER_TIMELINE_BUCKET_PER_FIGHT_ARIA_LABEL = "Per-fight bucketing"
 
 /** Bucket-toggle button `aria-label` (Per-day). */
 export const PLAYER_TIMELINE_BUCKET_PER_DAY_ARIA_LABEL = "Per-day bucketing";
+
+/** Toggle group `aria-label` for the controls row (bucket + scale + TZ). */
+export const PLAYER_TIMELINE_CONTROLS_ARIA_LABEL = "Timeline controls";
+
+/** Bucket-toggle group `aria-label` (parent of the Per-fight / Per-day buttons). */
+export const PLAYER_TIMELINE_BUCKETING_ARIA_LABEL = "Timeline bucketing";
+
+/** Scale-toggle group `aria-label` (parent of the Linear / Log buttons). */
+export const PLAYER_TIMELINE_Y_AXIS_SCALE_ARIA_LABEL = "Timeline Y-axis scale";
+
+/** Scale-toggle button text (Linear; per-series normalised 0-100%). */
+export const PLAYER_TIMELINE_LINEAR = "Linear";
+
+/** Scale-toggle button `aria-label` (Linear; full text describes the visual + behaviour). */
+export const PLAYER_TIMELINE_LINEAR_BUTTON_ARIA_LABEL = "Linear Y-axis scale (per-series normalised)";
+
+/** Scale-toggle button text (Log; shared log Y-axis across the 3 series). */
+export const PLAYER_TIMELINE_LOG = "Log";
+
+/** Scale-toggle button `aria-label` (Log; full text). */
+export const PLAYER_TIMELINE_LOG_BUTTON_ARIA_LABEL = "Logarithmic Y-axis scale (shared across all 3 series)";
+
+/** TZ-toggle group `aria-label` (parent of the timezone <select>). */
+export const PLAYER_TIMELINE_TIMEZONE_ARIA_LABEL = "Timeline timezone";
+
+/** TZ selector `aria-label` (Day-bucket region/city picker). */
+export const PLAYER_TIMELINE_TZ_SELECTOR_ARIA_LABEL = "Day-bucket timezone (region/city)";

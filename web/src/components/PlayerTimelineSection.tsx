@@ -50,12 +50,21 @@ import {
   PLAYER_TIMELINE_BUCKET_PER_DAY_ARIA_LABEL,
   PLAYER_TIMELINE_BUCKET_PER_FIGHT,
   PLAYER_TIMELINE_BUCKET_PER_FIGHT_ARIA_LABEL,
+  PLAYER_TIMELINE_BUCKETING_ARIA_LABEL,
+  PLAYER_TIMELINE_CONTROLS_ARIA_LABEL,
   PLAYER_TIMELINE_HEADING,
+  PLAYER_TIMELINE_LINEAR,
+  PLAYER_TIMELINE_LINEAR_BUTTON_ARIA_LABEL,
   PLAYER_TIMELINE_LOAD_MORE,
   PLAYER_TIMELINE_LOAD_MORE_ARIA_LABEL,
   PLAYER_TIMELINE_LOADING,
+  PLAYER_TIMELINE_LOG,
+  PLAYER_TIMELINE_LOG_BUTTON_ARIA_LABEL,
   PLAYER_TIMELINE_NO_MORE_ARIA_LABEL,
   PLAYER_TIMELINE_SECTION_ARIA_LABEL,
+  PLAYER_TIMELINE_TIMEZONE_ARIA_LABEL,
+  PLAYER_TIMELINE_TZ_SELECTOR_ARIA_LABEL,
+  PLAYER_TIMELINE_Y_AXIS_SCALE_ARIA_LABEL,
 } from "@/lib/copy/error-messages";
 
 const BUTTON_STYLE: React.CSSProperties = {
@@ -331,8 +340,7 @@ export function PlayerTimelineSection({
 
   return (
     <section
-      style={{ display: "flex", flexDirection: "column", gap: 12 }}
-      aria-label={PLAYER_TIMELINE_SECTION_ARIA_LABEL}
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}          aria-label={PLAYER_TIMELINE_SECTION_ARIA_LABEL}
     >
       <div
         style={{
@@ -347,7 +355,7 @@ export function PlayerTimelineSection({
         <div
           style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}
           role="group"
-          aria-label="Timeline controls"
+          aria-label={PLAYER_TIMELINE_CONTROLS_ARIA_LABEL}
         >
           <span style={CAPTION_STYLE}>
             Showing {timeline.points.length} of {timeline.total} {unit}
@@ -356,7 +364,7 @@ export function PlayerTimelineSection({
           <div
             style={{ display: "flex", alignItems: "center", gap: 4 }}
             role="group"
-            aria-label="Timeline bucketing"
+            aria-label={PLAYER_TIMELINE_BUCKETING_ARIA_LABEL}
           >
             <button
               type="button"
@@ -399,7 +407,7 @@ export function PlayerTimelineSection({
           <div
             style={{ display: "flex", alignItems: "center", gap: 4 }}
             role="group"
-            aria-label="Timeline Y-axis scale"
+            aria-label={PLAYER_TIMELINE_Y_AXIS_SCALE_ARIA_LABEL}
           >
             <button
               type="button"
@@ -409,10 +417,10 @@ export function PlayerTimelineSection({
                   ? BUCKET_BUTTON_ACTIVE_STYLE
                   : BUCKET_BUTTON_STYLE
               }
-              aria-label="Linear Y-axis scale (per-series normalised)"
+              aria-label={PLAYER_TIMELINE_LINEAR_BUTTON_ARIA_LABEL}
               aria-pressed={scale === "linear"}
             >
-              Linear
+              {PLAYER_TIMELINE_LINEAR}
             </button>
             <button
               type="button"
@@ -420,10 +428,10 @@ export function PlayerTimelineSection({
               style={
                 scale === "log" ? BUCKET_BUTTON_ACTIVE_STYLE : BUCKET_BUTTON_STYLE
               }
-              aria-label="Logarithmic Y-axis scale (shared across all 3 series)"
+              aria-label={PLAYER_TIMELINE_LOG_BUTTON_ARIA_LABEL}
               aria-pressed={scale === "log"}
             >
-              Log
+              {PLAYER_TIMELINE_LOG}
             </button>
           </div>
           {/* v0.10.0 plan 032: the TZ selector uses the
@@ -436,11 +444,11 @@ export function PlayerTimelineSection({
           <div
             style={{ display: "flex", alignItems: "center", gap: 4 }}
             role="group"
-            aria-label="Timeline timezone"
+            aria-label={PLAYER_TIMELINE_TIMEZONE_ARIA_LABEL}
           >
             <select
               data-testid="timezone-selector"
-              aria-label="Day-bucket timezone (region/city)"
+              aria-label={PLAYER_TIMELINE_TZ_SELECTOR_ARIA_LABEL}
               value={tz}
               onChange={changeTz}
               disabled={isLoading}
