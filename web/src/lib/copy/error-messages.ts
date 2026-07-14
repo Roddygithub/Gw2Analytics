@@ -129,3 +129,51 @@ export const FIGHTS_GRID_BROWSE_FIGHT_PAGE = "← Browse fights grid";
  * (`fight-events-page.test.tsx` + `fights-page.test.tsx`).
  */
 export const UPSTREAM_ERROR_PREFIX = "Upstream error: ";
+
+// ===========================================================================
+// AG Grid column headers (FightsGrid — the read-only fights-list table)
+// ===========================================================================
+
+/** Column header for the AG Grid `#` column. */
+export const FIGHTS_GRID_COLUMN_FIGHT_ID = "Fight ID";
+
+/** Column header for the AG Grid `Encounter` column. */
+export const FIGHTS_GRID_COLUMN_ENCOUNTER = "Encounter";
+
+/** Column header for the AG Grid `Agents` column (count of players). */
+export const FIGHTS_GRID_COLUMN_AGENTS = "Agents";
+
+/** Column header for the AG Grid `Build` column (player build composition). */
+export const FIGHTS_GRID_COLUMN_BUILD = "Build";
+
+/** Column header for the AG Grid start-time column. The `(UTC)` suffix is
+ *  intentional and shown verbatim in the rendered UI. */
+export const FIGHTS_GRID_COLUMN_STARTED_UTC = "Started (UTC)";
+
+/** Column header for the AG Grid `Game type` column (raid / fractal / strike / wvw). */
+export const FIGHTS_GRID_COLUMN_GAME_TYPE = "Game type";
+
+// ===========================================================================
+// SkillUsageTable — column headers + empty-state fallback
+// ===========================================================================
+
+/** Column header for the `id` column (numeric GW2 skill id). */
+export const SKILL_USAGE_TABLE_COLUMN_SKILL_ID = "Skill id";
+
+/** Column header for the `name` column (resolved skill name from skills DB). */
+export const SKILL_USAGE_TABLE_COLUMN_SKILL_NAME = "Skill name";
+
+/** Column header for the `hits` column. */
+export const SKILL_USAGE_TABLE_COLUMN_HIT_COUNT = "Hit count";
+
+/** Column header for the `damage` column. */
+export const SKILL_USAGE_TABLE_COLUMN_TOTAL_DAMAGE = "Total damage";
+
+/** Column header for the `healing` column. */
+export const SKILL_USAGE_TABLE_COLUMN_TOTAL_HEALING = "Total healing";
+
+/** Column header for the `strip` column (boon-strip aggregates). */
+export const SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP = "Total strip";
+
+/** Empty-state row fallback when the per-fight skill roll-up stream is empty. */
+export const SKILL_USAGE_TABLE_EMPTY_STATE = "No skill roll-up rows.";
