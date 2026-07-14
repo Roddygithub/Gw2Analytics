@@ -25,6 +25,18 @@ export type {
   PerPlayerTimelinePoint,
   PerPlayerTimelineSeries,
   FightPlayerTimeline,
+  PlayerSkillUsageRow,
+  PlayerSkillLoadout,
+  PlayerSkills,
+  AgentOut,
+  SkillOut,
+  FightOut,
+  PlayerReadoutDamageOut,
+  PlayerReadoutHealOut,
+  PlayerReadoutBoonsOut,
+  PlayerReadoutDefenseOut,
+  PlayerReadoutOut,
+  FightReadoutOut,
 } from "./fights";
 export {
   fetchFights,
@@ -33,6 +45,8 @@ export {
   fetchFightSkills,
   fetchFightTimeline,
   fetchFightPlayerTimeline,
+  fetchFightPlayerSkills,
+  fetchFightReadout,
 } from "./fights";
 
 export type {

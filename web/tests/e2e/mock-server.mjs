@@ -247,6 +247,74 @@ const server = createServer(async (req, res) => {
       );
     }
 
+    // Tour 4 v0.10.13 plan 044: per-player skill roll-up +
+    // loadout attribution on ``/fights/[id]?account=...``. Two
+    // NEW endpoints:
+    //
+    // - ``GET /api/v1/fights/:id/players/:account/skills``
+    //   returns the ``PlayerSkills`` payload (per-player per-skill
+    //   attribution + loadout header). A 1-row pixel-fits-everything
+    //   stub for ``TestAccount.1234`` so the Playwright spec
+    //   can exercise the happy-path dropdown selection. Unknown
+    //   accounts 404 per the backend's canonical contract.
+    //
+    // - ``GET /api/v1/fights/:id`` (bare, after all the
+    //   sub-path handlers ABOVE this block) returns a minimal
+    //   ``FightOut`` with the agents list. The agents list is
+    //   the ONLY field the per-player dropdown consults from
+    //   this endpoint -- the dropdown filters for ``is_player
+    //   === true && account_name !== null`` and renders a
+    //   label ``"{name} ({account_name})"`` for each. One
+    //   NPC + two player agents so the dropdown has multiple
+    //   options on the Playwright spec.
+    //
+    // Declaration order: the bare ``:id`` catch-all MUST be
+    // the LAST ``/api/v1/fights/`` route in this function so
+    // it doesn't consume the more-specific ``:id/events`` +
+    // ``:id/squads`` + ``:id/skills`` + ``:id/timeline`` +
+    // ``:id/players/:account/skills`` handlers above.
+    const playerSkillsMatch = path.match(
+      /^\/api\/v1\/fights\/([^/]+)\/players\/([^/]+)\/skills$/,
+    );
+    if (playerSkillsMatch) {
+      const fightId = decodeURIComponent(playerSkillsMatch[1]);
+      const accountName = decodeURIComponent(playerSkillsMatch[2]);
+      if (!KNOWN_FIGHTS.has(fightId)) {
+        return jsonResponse(res, 404, JSON.stringify({ error: "fight not found" }));
+      }
+      if (accountName !== "TestAccount.1234") {
+        return jsonResponse(
+          res,
+          404,
+          JSON.stringify({ error: "player not found in fight" }),
+        );
+      }
+      return jsonResponse(
+        res,
+        200,
+        JSON.stringify({
+          fight_id: fightId,
+          account_name: accountName,
+          agent_id: 1234,
+          loadout: {
+            profession: "Warrior",
+            elite_spec: "Berserker",
+            equipped_skill_ids: [],
+          },
+          skills: [
+            {
+              skill_id: 100,
+              skill_name: "Whirlwind",
+              hit_count: 2,
+              total_damage: 3000,
+              total_healing: 0,
+              total_buff_removal: 0,
+            },
+          ],
+        }),
+      );
+    }
+
     if (path === "/api/v1/players") {
       const body = await loadFixture("players-list.json");
       return jsonResponse(res, 200, body);
@@ -310,6 +378,66 @@ const server = createServer(async (req, res) => {
       }
       const body = await loadFixture("player-timeline.json");
       return jsonResponse(res, 200, body);
+    }
+
+    // Tour 4: ``GET /api/v1/fights/:id`` bare-identifier fetch
+    // for the per-player dropdown. Declared AFTER every other
+    // ``/api/v1/fights/`` sub-path handler ABOVE so the regex
+    // collapses into the catch-all freely without consuming
+    // the more-specific routes. The agents stub has 1 NPC
+    // (``is_player: false``) + 2 player agents
+    // (``TestAccount.1234`` + ``TestAccount.5678``) so the
+    // dropdown's pre-filter (``is_player === true &&
+    // account_name !== null``) leaves 2 options on the
+    // Playwright spec.
+    const fightBareMatch = path.match(/^\/api\/v1\/fights\/([^/]+)$/);
+    if (fightBareMatch) {
+      const fightId = decodeURIComponent(fightBareMatch[1]);
+      if (!KNOWN_FIGHTS.has(fightId)) {
+        return jsonResponse(res, 404, JSON.stringify({ error: "fight not found" }));
+      }
+      return jsonResponse(
+        res,
+        200,
+        JSON.stringify({
+          id: fightId,
+          build_version: "20250714-123456",
+          encounter_id: 1,
+          agent_count: 3,
+          started_at: "2026-07-14T12:00:00Z",
+          game_type: 4,
+          agents: [
+            {
+              agent_id: 9001,
+              name: "World Boss",
+              profession: "None",
+              elite_spec: "None",
+              is_player: false,
+              account_name: null,
+              subgroup: null,
+            },
+            {
+              agent_id: 1234,
+              name: "Fighty McFight",
+              profession: "Warrior",
+              elite_spec: "Berserker",
+              is_player: true,
+              account_name: "TestAccount.1234",
+              subgroup: "1",
+            },
+            {
+              agent_id: 5678,
+              name: "Heal Bot",
+              profession: "Guardian",
+              elite_spec: "Firebrand",
+              is_player: true,
+              account_name: "TestAccount.5678",
+              subgroup: "2",
+            },
+          ],
+          skills: [],
+        }),
+      );
     }
 
     // /api/v1/players/:name  (:path converter lets the name

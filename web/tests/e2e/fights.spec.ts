@@ -84,4 +84,97 @@ test.describe("/fights/[id] (v0.7.1)", () => {
       page.getByText(/Upstream error: 404: .*fight not found/),
     ).toBeVisible();
   });
+
+  // -------------------------------------------------------------------------
+  // Tour 4 v0.10.13 plan 044 Playwright coverage: the per-player
+  // skill attribution section on ``/fights/[id]``. The mock-server
+  // exposes 2 NEW inline stub endpoints (see ``tests/e2e/mock-server.mjs``
+  // for the Tour 4 additions).
+  // -------------------------------------------------------------------------
+
+  test("renders the per-player section heading + the 'Pick a player' prompt on first load (no ?account= URL filter)", async ({
+    page,
+  }) => {
+    await page.goto("/fights/fixture-fight-001");
+    // The per-player section heading is the 8th <h2> in the
+    // OVERVIEW render and has a stable name. The mock-server
+    // returns the canonical 2-player FightOut stub so the
+    // dropdown is pre-rendered with the 2 selectable options.
+    await expect(
+      page.getByRole("heading", {
+        name: /Per-player \(SkillUsage attribution\)/,
+      }),
+    ).toBeVisible();
+    // The ``player-skill-prompt`` testid pins the empty-state
+    // prompt (the "Pick a player" hint) for screenshot
+    // scripting.
+    await expect(
+      page.locator('[data-testid="player-skill-prompt"]'),
+    ).toBeVisible();
+    await expect(page.getByText(/Pick a player/i)).toBeVisible();
+    // The player-skill-filter dropdown is pre-rendered (the
+    // mock-server's FightOut stub has 2 player agents).
+    await expect(
+      page.locator('[data-testid="player-skill-filter"]'),
+    ).toBeVisible();
+  });
+
+  test("selecting a player from the dropdown appends ?account=NEW_VALUE to the URL + reveals the loadout bar", async ({
+    page,
+  }) => {
+    await page.goto("/fights/fixture-fight-001");
+    // The dropdown is pre-rendered with the 2 mock-server
+    // inline-stub players. Click the dropdown open + select
+    // ``TestAccount.1234`` (the known player in the inline
+    // playerSkillsMatch stub).
+    await page
+      .locator('[data-testid="player-skill-filter"]')
+      .selectOption("TestAccount.1234");
+    // The URL gains the ``?account=`` query param with the
+    // selected value. The fight-id is appended for
+    // shareability (analyst can bookmark the per-player view
+    // for a specific account).
+    await expect(page).toHaveURL(
+      /\/fights\/fixture-fight-001[?&]account=TestAccount\.1234/,
+    );
+    // The loadout bar testid ``player-skill-loadout`` becomes
+    // visible once the per-player skill fetch resolves.
+    await expect(
+      page.locator('[data-testid="player-skill-loadout"]'),
+    ).toBeVisible();
+    // The skill table testid becomes visible (the mock-server
+    // returns 1 skill row for the per-player stub).
+    await expect(
+      page.locator('[data-testid="player-skill-table"]'),
+    ).toBeVisible();
+    // The "Whirlwind" skill row text is present (1 skill row
+    // from the inline stub). The skill-usage table is now
+    // visible to the analyst.
+    await expect(page.getByText("Whirlwind")).toBeVisible();
+  });
+
+  test("direct navigation to a ?account=UNKNOWN_VALUE surfaces the section-level 'Player ... not found in this fight' diagnostic", async ({
+    page,
+  }) => {
+    // Navigating directly to ``?account=UnknownAccount.0000``
+    // (a value NOT in the mock-server's agent list, NOT in
+    // the playerSkillsMatch handle) exercises the lenient
+    // contract: the page surfaces a SECTION-level diagnostic
+    // chimp (``player-skill-error``), not a page-level 404.
+    // The agents fetch resolves (mock-server inline stub
+    // returns the canonical 2-agent FightOut), but the
+    // agent.matched-the-account-name check fails.
+    await page.goto(
+      "/fights/fixture-fight-001?account=UnknownAccount.0000",
+    );
+    await expect(
+      page.locator('[data-testid="player-skill-error"]'),
+    ).toBeVisible();
+    await expect(page.getByText(/not found in this fight/i)).toBeVisible();
+    // The prompt placeholder is NOT shown when an account is
+    // set (per the canonical 3-state body contract).
+    await expect(
+      page.locator('[data-testid="player-skill-prompt"]'),
+    ).toHaveCount(0);
+  });
 });

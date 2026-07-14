@@ -81,8 +81,14 @@ import {
 import { EventWindowsTable } from "@/components/EventWindowsTable";
 import { EventWindowsChart } from "@/components/EventWindowsChart";
 import { SkillUsageTable } from "@/components/SkillUsageTable";
+import { PlayerSkillUsageTable } from "@/components/PlayerSkillUsageTable";
+import { PlayerSkillUsageFilter } from "@/components/PlayerSkillUsageFilter";
 import { PerFightTimelineSection } from "@/components/PerFightTimelineSection";
 import { ReplayPlayer } from "@/components/ReplayPlayer";
+import { PlayerReadoutDamage } from "@/components/PlayerReadoutDamage";
+import { PlayerReadoutHeal } from "@/components/PlayerReadoutHeal";
+import { PlayerReadoutBoons } from "@/components/PlayerReadoutBoons";
+import { PlayerReadoutDefense } from "@/components/PlayerReadoutDefense";
 import { fetchReplayTimeline } from "@/lib/replayFetcher";
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
 import { TargetFilter } from "@/components/TargetFilter";
@@ -107,15 +113,15 @@ function parseWindowS(raw: string | undefined): number {
 }
 
 /**
- * Build the href for the page-level tab strip. The Replay tab is
- * a URL-encoded alternate view of the SAME page (no client-side
- * router required) so the href preserves the current
- * ``window_s`` and ``target`` params (so the analyst keeps
- * their drill-down context) and toggles the ``tab=`` param.
+ * Build the href for the page-level tab strip. The Replay +
+ * Readout tabs are URL-encoded alternate views of the SAME page
+ * (no client-side router required) so the href preserves the
+ * current ``window_s`` and ``target`` params (so the analyst
+ * keeps their drill-down context) and toggles the ``tab=`` param.
  *
  * Why a plain ``<a>`` tag (vs ``<Link>``)
  * ======================================
- * The tab stripes are pure GET navigation between two query-param
+ * The tab stripes are pure GET navigation between three query-param
  * variants of the same pathname. ``next/link`` adds client-side
  * prefetching for ``prefetch={true}`` (the default) but for
  * tab strips on a per-fight drilldown the prefetch benefit is
@@ -129,10 +135,11 @@ function buildTabHref(
   fightId: string,
   windowS: number,
   targetFilter: number | null,
-  activeTab: "overview" | "replay",
+  activeTab: "overview" | "replay" | "readout",
 ): string {
   const qs = new URLSearchParams();
   if (activeTab === "replay") qs.set("tab", "replay");
+  if (activeTab === "readout") qs.set("tab", "readout");
   if (windowS !== 5) qs.set("window_s", String(windowS));
   if (targetFilter !== null) qs.set("target", String(targetFilter));
   const qsStr = qs.toString();
@@ -155,6 +162,29 @@ function parseTarget(raw: string | undefined): number | null {
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 0) return null;
   return n;
+}
+
+/**
+ * Parse the URL ``?account=`` query param into a typed account
+ * name (the wire-format value the player-section dropdown
+ * filters on). ``null`` means "no player selected" (the
+ * default; the per-player section renders the prompt
+ * placeholder). A non-string / empty value falls back to
+ * ``null`` so an analyst mistyping lands on the unfiltered case
+ * -- the gateway returns 404 for genuinely-unknown values and
+ * the section renders the upstream error message.
+ *
+ * URL-state leniency
+ * ==================
+ * Mirrors the project's lenient URL-handling convention: invalid
+ * values fall back to the null/unfiltered default rather than
+ * triggering a 4xx. The strict 404 contract is the gateway's
+ * responsibility (the section surfaces gateway errors verbatim
+ * via :func::``formatApiError``).
+ */
+function parseAccount(raw: string | undefined): string | null {
+  if (raw === undefined || raw === "") return null;
+  return raw;
 }
 
 // Column specs are built once at module-load time, not inside the
@@ -210,6 +240,7 @@ export default async function FightEventsPage({
     window_s?: string;
     target?: string;
     tab?: string;
+    account?: string;
   }>;
 }) {
   // Next.js 15+ delivers both route params AND search params as
@@ -227,10 +258,15 @@ export default async function FightEventsPage({
   // to exactly one of two values so an analyst typing
   // ``?tab=foo`` falls back to Overview rather than triggering a
   // error path.
-  const { id } = await params;  const { window_s: window_s_raw, target: target_raw, tab: tab_raw,
+  const { id } = await params;  const {
+    window_s: window_s_raw,
+    target: target_raw,
+    tab: tab_raw,
+    account: account_raw,
   } = await searchParams;
   const windowS = parseWindowS(window_s_raw);
   const targetFilter = parseTarget(target_raw);
+  const accountFilter = parseAccount(account_raw);
   // v0.10.17 D1 round-2 fix: case-insensitive tab match. An
   // analyst typing ``?tab=Replay`` or ``?tab=REPLAY`` is
   // legitimate variation (hand-typed URL + URL bookmark
@@ -239,8 +275,16 @@ export default async function FightEventsPage({
   // sees the Overview render but their URL says Replay). The
   // match is also null-safe (``tab_raw`` may be ``undefined``
   // when the URL has no ``?tab=``).
-  const activeTab: "overview" | "replay" =
-    (tab_raw ?? "").toLowerCase() === "replay" ? "replay" : "overview";
+  // Tour 6 Wave 7: extended to a 3-way ``tab=overview|replay|readout``
+  // routing (the new Readout tab surfaces the Combat readout §3-6
+  // 4-table roll-up per docs/v0.9.0-combat-readout-design.md §9
+  // Workstream F).
+  const activeTab: "overview" | "replay" | "readout" = (() => {
+    const t = (tab_raw ?? "").toLowerCase();
+    if (t === "replay") return "replay";
+    if (t === "readout") return "readout";
+    return "overview";
+  })();
 
   let summary: FightEventsSummaryRow | null = null;
   let squads: import("@/lib/api").FightSquads | null = null;
@@ -306,6 +350,61 @@ export default async function FightEventsPage({
     playerTimeline = results[4].value;
   } else {
     sectionErrors.playerTimeline = formatApiError(results[4].reason);
+  }
+
+  // Tour 4 v0.10.13 plan 044 (Skill build analyser): per-player
+  // skill attribution. Two SEPARATE fetches AFTER the existing
+  // ``Promise.allSettled`` because the players filter is
+  // conditional on whether ``?account=`` is set in the URL:
+  //   - the agents fetch is UNCONDITIONAL (the dropdown options
+  //     are always available so a 0-selection state still shows
+  //     the meaningful "Pick a player" prompt);
+  //   - the per-player skills fetch is CONDITIONAL on
+  //     ``accountFilter !== null`` AND on the agent row
+  //     resolving to ``is_player === true && account_name !==
+  //     null`` (NPCs / sentinel accounts are silently excluded).
+  // Both go through :func::``fetchCached`` -- the agents
+  // response is keyed on the fight id alone and TTL-cached for
+  // 60s; the per-player fetch is keyed on the (fight_id,
+  // account_name) tuple so concurrent analyst navigations
+  // between players stay cache-warm.
+  let fightDetails: import("@/lib/api").FightOut | null = null;
+  let fightDetailsError: string | null = null;
+  try {
+    fightDetails = await fetchCached<import("@/lib/api").FightOut>(`${base}`);
+  } catch (err) {
+    fightDetailsError = formatApiError(err);
+  }
+  let accountSkills: import("@/lib/api").PlayerSkills | null = null;
+  let accountSkillsError: string | null = null;
+  if (accountFilter !== null && fightDetails !== null) {
+    const agent = fightDetails.agents.find(
+      (a) =>
+        a.is_player === true && a.account_name === accountFilter,
+    );
+    if (agent === undefined) {
+      // The URL points at an account that isn't in this
+      // fight's agents list (NPC-only fights have
+      // ``account_name=null`` agents; mistyped URLs land here).
+      // Same lenient contract as ``parseTarget``: surface a
+      // section-level diagnostic chimp rather than a
+      // page-level 404.
+      accountSkillsError = `Player "${accountFilter}" not found in this fight.`;
+    } else {
+      try {
+        accountSkills =
+          await fetchCached<import("@/lib/api").PlayerSkills>(
+            `${base}/players/${encodeURIComponent(accountFilter)}/skills`,
+          );
+      } catch (err) {
+        accountSkillsError = formatApiError(err);
+      }
+    }
+  } else if (accountFilter !== null && fightDetails === null) {
+    // Agents fetch failed before we could validate the
+    // account; the agents fetch error is the root cause for
+    // the per-player section too. Surface it.
+    accountSkillsError = fightDetailsError ?? "Failed to load fight details.";
   }
 
   if (fetchError || !summary) {
@@ -404,6 +503,157 @@ export default async function FightEventsPage({
   // LRU ``/timeline`` cache stays warm for a tab toggle (and
   // the per-section error map above still feeds the diagnostic
   // chimp on the Replay tab's empty-state path).
+  // Tour 6 Wave 7 (Workstream F): Combat-readout tab. The
+  // ``tab=readout`` URL fragment renders ONLY the 4 Combat-readout
+  // tables (per docs/v0.9.0-combat-readout-design.md §3-6) so the
+  // analyst can focus on the per-aspect roll-up without the
+  // per-target + per-skill + per-fight timeline noise. SCAFFOLD-time:
+  // the live ``fetchFightReadout`` payload wires in once the v0.11.0
+  // forward-blocker (apps/api ``GET /api/v1/fights/{id}/readout``
+  // route handler) lands; pre-routehandler renders surface the
+  // SCAFFOLD-zero contract inline so the empty-state panels
+  // document the gap.
+  if (activeTab === "readout") {
+    return (
+      <main
+        style={{
+          padding: "32px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "24px",
+        }}
+      >
+        <header
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <h1 style={{ fontSize: 28, marginBottom: 4 }}>
+              Fight {summary.fight_id}
+            </h1>
+            <p style={{ opacity: 0.7 }}>
+              Combat readout: per-player Damage / Heal / Boons / Defense
+              (Tour 6 Wave 7 Workstream F).
+            </p>
+          </div>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+            data-testid="page-tab-strip"
+          >
+            <a
+              href={buildTabHref(id, windowS, targetFilter, "overview")}
+              data-testid="page-tab-overview"
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                fontSize: 13,
+                textDecoration: "none",
+                color: "var(--foreground)",
+                background: "var(--surface)",
+                fontFamily:
+                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+              }}
+            >
+              Overview
+            </a>
+            <a
+              href={buildTabHref(id, windowS, targetFilter, "replay")}
+              data-testid="page-tab-replay"
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                fontSize: 13,
+                textDecoration: "none",
+                color: "var(--foreground)",
+                background: "var(--surface)",
+                fontFamily:
+                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+              }}
+            >
+              Replay
+            </a>
+            <a
+              href={buildTabHref(id, windowS, targetFilter, "readout")}
+              data-testid="page-tab-readout"
+              data-active="true"
+              aria-current="page"
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--accent)",
+                borderRadius: 4,
+                fontSize: 13,
+                textDecoration: "none",
+                color: "var(--accent-foreground, #fff)",
+                background: "var(--accent)",
+                fontFamily:
+                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+              }}
+            >
+              Readout
+            </a>
+          </div>
+        </header>
+
+        <p
+          data-testid="readout-tab-scaffold"
+          style={{
+            padding: "12px 16px",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            color: "var(--foreground)",
+            opacity: 0.85,
+            fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+            fontSize: 13,
+          }}
+        >
+          Combat readout SCAFFOLD UI · The 4 tables here render with empty
+          rows until the backend <code>fetchFightReadout</code> route (v0.11.0
+          forward-blocker) lands. Wave 7 ships the AG Grid schema + tab
+          routing so the route can hydrate the grid without a UI change.
+        </p>
+
+        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Damage</h2>
+          <PlayerReadoutDamage
+            rows={[]}
+            // Wire-up note: the live ``fetchFightReadout``
+            // payload hydrates this row set once the v0.11.0
+            // apps/api route handler lands. SCAFFOLD-time the
+            // component renders its built-in empty-state panel
+            // so the analyst sees the SCAFFOLD-zero contract
+            // inline.
+          />
+        </section>
+
+        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Heal</h2>
+          <PlayerReadoutHeal rows={[]} />
+        </section>
+
+        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Boons</h2>
+          <PlayerReadoutBoons rows={[]} />
+        </section>
+
+        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Defense</h2>
+          <PlayerReadoutDefense rows={[]} />
+        </section>
+      </main>
+    );
+  }
   if (activeTab === "replay") {
     return (
       <main
@@ -584,6 +834,23 @@ export default async function FightEventsPage({
             >
               Replay
             </a>
+            <a
+              href={buildTabHref(id, windowS, targetFilter, "readout")}
+              data-testid="page-tab-readout"
+              style={{
+                padding: "6px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                fontSize: 13,
+                textDecoration: "none",
+                color: "var(--foreground)",
+                background: "var(--surface)",
+                fontFamily:
+                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+              }}
+            >
+              Readout
+            </a>
           </div>
         </div>
       </header>
@@ -645,6 +912,68 @@ export default async function FightEventsPage({
           </p>
         )}
         <SkillUsageTable rows={skills?.skills ?? []} filename={`${id}-skills.csv`} />
+      </section>
+
+      {/* Tour 4 v0.10.13 plan 044: per-player skill attribution.
+          Sits BETWEEN the existing per-skill section and the
+          event-windows section. The dropdown is filtered to
+          ``is_player === true && account_name !== null`` agents
+          upstream (in the fetch block above) so the page only
+          passes player-shaped entries to the Client Component
+          filter. The body renders ONE of three states:
+          - no player selected: prompt placeholder
+          - fetch error: section-level diagnostic chimp
+          - accountSkills resolved: the
+            :component::``PlayerSkillUsageTable`` (with the
+            loadout header strip + the per-skill table +
+            optional CSV download). */}
+      <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600 }}>
+          Per-player (SkillUsage attribution)
+        </h2>
+        {fightDetails === null ? (
+          <p
+            data-testid="player-skill-agents-error"
+            style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
+          >
+            Failed to load player list: {fightDetailsError}
+          </p>
+        ) : (
+          <PlayerSkillUsageFilter
+            currentValue={accountFilter}
+            playerAgents={fightDetails.agents
+              .filter(
+                (a) =>
+                  a.is_player === true && a.account_name !== null,
+              )
+              .map((a) => ({
+                account_name: a.account_name as string,
+                label: `${a.name} (${a.account_name})`,
+              }))}
+            fightId={id}
+          />
+        )}
+        {accountFilter !== null && accountSkillsError !== null ? (
+          <p
+            data-testid="player-skill-error"
+            style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
+          >
+            Failed to load per-player skills: {accountSkillsError}
+          </p>
+        ) : null}
+        {accountFilter === null ? (
+          <p
+            data-testid="player-skill-prompt"
+            style={{ opacity: 0.7, fontSize: 14, margin: 0 }}
+          >
+            Pick a player from the dropdown to see per-player skill attribution.
+          </p>
+        ) : accountSkills === null ? null : (
+          <PlayerSkillUsageTable
+            playerSkills={accountSkills}
+            filename={`${id}-player-skills-${accountSkills.account_name.replace(/\./g, "_")}.csv`}
+          />
+        )}
       </section>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
