@@ -21,9 +21,13 @@ set -euo pipefail
 # --------------------------------------------------------------------------
 
 readonly SSD_DEV=/dev/sdb1
-readonly SSD_MNT=/run/media/roddy/Raspberry-P
+readonly SSD_MNT="/run/media/${USER}/Raspberry-P"
 readonly SSD_UUID=1E18-2168
-readonly SSD_FSTAB_LINE="UUID=${SSD_UUID}  ${SSD_MNT}  exfat  defaults,nofail,noatime,uid=1000,gid=1000,umask=0022  0  0"
+# umask=0022 → mode 0644 (user:rw, group:r, world:r) — acceptable for a single-user
+# desktop where the drive holds personal photos + backups. If the host runs a
+# multi-user system, tighten to umask=0077 (mode 0600, owner-only). The
+# nofail flag is mandatory: keeps boot working even when the SSD is unplugged.
+readonly SSD_FSTAB_LINE="UUID=${SSD_UUID}  ${SSD_MNT}  exfat  defaults,nofail,noatime,uid=${UID},gid=1000,umask=0022  0  0"
 
 MODE_PR=1
 for arg in "$@"; do
@@ -96,9 +100,16 @@ else
   echo "  + appended: $SSD_FSTAB_LINE"
 fi
 
-# Verify the new entry parses (mount -a will not actually remount if the
-# SSD is currently mounted, but it WILL validate the syntax).
-sudo mount -a -v 2>&1 | grep -E "$SSD_UUID|$SSD_MNT" || true
+# Verify the new entry parses. Process stderr + stdout separately so we
+# can distinguish "line parsed cleanly" (mount reports it) from a real
+# fstab-syntax error. The SSD line will be parenthesized in the verbose
+# output as `(UUID=1E18-2168)` if mounted, or simply reported if remounted.
+MOUNT_OUT=$(sudo mount -a -v 2>&1) || MOUNT_RC=$?
+MOUNT_RC=${MOUNT_RC:-0}
+echo "$MOUNT_OUT" | grep -E "$SSD_UUID|$SSD_MNT" || true
+if [ "$MOUNT_RC" -ne 0 ]; then
+  echo "  ! mount -a exited non-zero ($MOUNT_RC) -- fstab line may be malformed. Check:sudo mount -a -v 2>&1 | grep -B2 -A2 "error""
+fi
 
 # --------------------------------------------------------------------------
 # STEP 3 -- findmnt verification
@@ -119,7 +130,9 @@ findmnt "$SSD_MNT" 2>&1 || echo "  (device not currently mounted -- plug it in t
 
 if [ "$MODE_PR" -eq 1 ]; then
   echo "[4/4] gh auth + PR creation"
-  if gh auth status >/dev/null 2>&1; then
+  if ! [ -t 0 ] || ! [ -t 1 ]; then
+    echo "  ! gh auth login requires a TTY. Re-run from an interactive shell, or run with --no-pr if you only need smart + fstab."
+  elif gh auth status >/dev/null 2>&1; then
     echo "  + gh CLI is already authenticated -- skipping login"
   else
     echo "  + gh auth login (device-flow)"
