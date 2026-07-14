@@ -7,7 +7,7 @@
 
 > **Cross-references:** [`docs/ROADMAP.md`](../docs/ROADMAP.md) (F17 cycle topology) + [`docs/v0.9.0-combat-readout-design.md`](../docs/v0.9.0-combat-readout-design.md) (§3-6 the 4 tablet contracts that consume the role column).
 
-> Status: **DRAFT** — pending spike re-validation + corpus availability sign-off.
+> Status: **C.1 + C.3 DELIVERED** — `libs/gw2_analytics/src/gw2_analytics/role_detection.py` (v1 lite, full 7-role classifier: HEAL / DPS / STRIP / SUPPORT / CC / TANK / BOONS) + `libs/gw2_analytics/tests/test_role_detection.py` (C.3 hermetic tests). Open items: **C.2 offline calibration** (L calendar time, gated on N≥20 historical zevtc corpus across M=4 archetypes: raid / fractal / strike / wvw). Next fork point: refine v2 thresholds after corpus calibration; promote this plan to "DONE" status when C.2 lands. (Discovered during v0.10.22 autonomous cycle that the v1 lite was already merged; this plan retroactively documents the implementation, the spike's "not yet implemented" claim is now stale.)
 
 ## §0 Scope + ownership
 
