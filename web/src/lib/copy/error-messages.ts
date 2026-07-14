@@ -177,3 +177,48 @@ export const SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP = "Total strip";
 
 /** Empty-state row fallback when the per-fight skill roll-up stream is empty. */
 export const SKILL_USAGE_TABLE_EMPTY_STATE = "No skill roll-up rows.";
+
+// ===========================================================================
+// PlayerTimelineSection — section heading + most-clicked controls
+// ===========================================================================
+
+/** Section-level aria-label for the <section aria-label> wrapper of
+ *  ``PlayerTimelineSection``. The "Per-account" prefix signals the per-account
+ *  horizontal scope single-player UX (vs CrossAccountTimelineSection which
+ *  reuses the same name in its own wrapper). */
+export const PLAYER_TIMELINE_SECTION_ARIA_LABEL = "Per-account historical timeline";
+
+/** Section-level <h2> heading text. Rendered at the top-left of the section. */
+export const PLAYER_TIMELINE_HEADING = "Historical timeline";
+
+/** Bucket toggle button text (Per-fight bucketing). Maps the engine's
+ *  ``"fight"`` state value to the analyst-facing display string. */
+export const PLAYER_TIMELINE_BUCKET_PER_FIGHT = "Per fight";
+
+/** Bucket toggle button text (Per-day bucketing). Maps the engine's
+ *  ``"day"`` state value to the analyst-facing display string. */
+export const PLAYER_TIMELINE_BUCKET_PER_DAY = "Per day";
+
+/** Load-more button primary action text. Rendered when `hasMore=true`. */
+export const PLAYER_TIMELINE_LOAD_MORE = "Load more";
+
+/** Load-more button `aria-label` when `hasMore=true`. */
+export const PLAYER_TIMELINE_LOAD_MORE_ARIA_LABEL = "Load more timeline points";
+
+/** Load-more button `aria-label` when `hasMore=false` (terminal state). */
+export const PLAYER_TIMELINE_NO_MORE_ARIA_LABEL = "No more timeline points";
+
+/** Button text rendered mid-fetch (during the `isLoading` toggle). */
+export const PLAYER_TIMELINE_LOADING = "Loading\u2026";
+
+/** Terminal state text when `bucket="day"` and no more pages. */
+export const PLAYER_TIMELINE_ALL_LOADED_DAYS = "All days loaded";
+
+/** Terminal state text when `bucket="fight"` (the default) and no more pages. */
+export const PLAYER_TIMELINE_ALL_LOADED_FIGHTS = "All fights loaded";
+
+/** Bucket-toggle button `aria-label` (Per-fight). */
+export const PLAYER_TIMELINE_BUCKET_PER_FIGHT_ARIA_LABEL = "Per-fight bucketing";
+
+/** Bucket-toggle button `aria-label` (Per-day). */
+export const PLAYER_TIMELINE_BUCKET_PER_DAY_ARIA_LABEL = "Per-day bucketing";
