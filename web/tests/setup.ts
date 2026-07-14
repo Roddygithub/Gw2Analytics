@@ -7,6 +7,12 @@ import "@testing-library/jest-dom/vitest";
  * storage file is configured. Provide a minimal in-memory store so
  * components that read/write ``window.localStorage`` do not pollute
  * stderr, without suppressing other Node.js warnings.
+ *
+ * Note: we intentionally do NOT dispatch ``storage`` events on
+ * ``setItem``/``removeItem``. Real browsers only fire ``storage``
+ * events for changes in *other* documents (cross-tab); same-document
+ * writes do not fire the event. Tests that need cross-tab semantics
+ * can use ``dispatchStorageEvent`` below.
  */
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -35,6 +41,32 @@ Object.defineProperty(window, "localStorage", {
 beforeEach(() => {
   localStorageMock.clear();
 });
+
+/**
+ * Simulate a cross-tab ``storage`` event. Use this in tests when
+ * code under test listens to ``window.addEventListener("storage", ...)".
+ * Same-document writes do not fire this event in real browsers.
+ */
+export function dispatchStorageEvent(
+  key: string,
+  newValue: string | null,
+  oldValue: string | null = null,
+) {
+  // Simulate the cross-tab observable state: the current tab's
+  // localStorage now reflects the value from the other tab.
+  if (newValue === null) {
+    localStorageMock.removeItem(key);
+  } else {
+    localStorageMock.setItem(key, newValue);
+  }
+  window.dispatchEvent(
+    new StorageEvent("storage", {
+      key,
+      oldValue,
+      newValue: newValue === null ? null : String(newValue),
+    }),
+  );
+}
 
 /**
  * ``@/components/FightsGrid`` is the AG Grid client wrapper. The
