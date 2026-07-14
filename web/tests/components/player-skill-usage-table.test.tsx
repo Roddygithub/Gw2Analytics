@@ -28,10 +28,22 @@
  */
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { PlayerSkillUsageTable } from "@/components/PlayerSkillUsageTable";
 import type { PlayerSkills } from "@/lib/api/fights";
+
+/**
+ * ``tests/setup.ts`` mocks ``@/components/PlayerSkillUsageTable`` as a
+ * no-op ``() => null`` so the page-level Server Component tests can
+ * render the wrapper without coupling to the table's HTML shape.
+ * The component-level test in THIS file needs the real implementation
+ * (it asserts on the loadout strip + skill table + empty-state panel
+ * + CSV button visibility). ``vi.unmock`` is hoisted by vitest's
+ * transformer to the same module-init boundary as ``vi.mock``, so the
+ * unmock takes effect before the import above.
+ */
+vi.unmock("@/components/PlayerSkillUsageTable");
 
 // HERMETIC FIXTURE: a populated per-player payload (3 skill rows
 // for one player in one fight). Mirrors the canonical wire shape

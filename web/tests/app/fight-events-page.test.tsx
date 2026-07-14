@@ -578,10 +578,16 @@ describe("FightEventsPage", () => {
     // ``player-skill-agents-error`` testid; the per-player
     // section chip carries ``player-skill-error`` (the latter
     // is the user-facing one because it explains the per-player
-    // section's failure mode).
+    // section's failure mode). We scope the text-content
+    // assertion to the agents-error chip (NOT a document-wide
+    // ``getByText``) because the same upstream error string
+    // cascades to the per-player chip too -- a document-wide
+    // query would throw ``getMultipleElementsFoundError``.
     expect(
       screen.getByTestId("player-skill-agents-error"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/fight unavailable/i)).toBeInTheDocument();
+    expect(
+      screen.getByTestId("player-skill-agents-error"),
+    ).toHaveTextContent(/fight unavailable/i);
   });
 });

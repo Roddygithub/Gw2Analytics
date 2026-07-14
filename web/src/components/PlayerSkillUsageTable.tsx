@@ -205,8 +205,8 @@ export function PlayerSkillUsageTable({
               <tr key={r.skill_id}>
                 <td style={TD_STYLE}>{r.skill_id}</td>
                 <td style={TD_STYLE}>{r.skill_name || "(unnamed)"}</td>
-                <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.hit_count}</td>
-                <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.total_damage}</td>
+                <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.hit_count.toLocaleString("en-US")}</td>
+                <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.total_damage.toLocaleString("en-US")}</td>
                 <td
                   style={{
                     ...TD_STYLE,
@@ -214,9 +214,9 @@ export function PlayerSkillUsageTable({
                     color: "var(--accent)",
                   }}
                 >
-                  {r.total_healing}
+                  {r.total_healing.toLocaleString("en-US")}
                 </td>
-                <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.total_buff_removal}</td>
+                <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.total_buff_removal.toLocaleString("en-US")}</td>
               </tr>
             ))}
           </tbody>

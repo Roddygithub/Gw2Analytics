@@ -35,6 +35,23 @@ vi.mock("ag-grid-react", () => ({
   },
 }));
 
+/**
+ * ``tests/setup.ts`` mocks all 4 ``PlayerReadout*`` Client Components
+ * (Damage / Heal / Boons / Defense) as no-op ``() => null`` so the
+ * page-level Server Component tests can render the wrapper without
+ * booting AG Grid's full runtime in jsdom (no canvas, no offsetWidth).
+ * The component-level test in THIS file needs the real implementations:
+ * the empty-state panels (rendered when ``rows`` is empty) + the AG
+ * Grid wrappers (which the per-test ``vi.mock("ag-grid-react", ...)``
+ * stub above captures props from). ``vi.unmock`` is hoisted by
+ * vitest's transformer to the same module-init boundary as
+ * ``vi.mock``.
+ */
+vi.unmock("@/components/PlayerReadoutDamage");
+vi.unmock("@/components/PlayerReadoutHeal");
+vi.unmock("@/components/PlayerReadoutBoons");
+vi.unmock("@/components/PlayerReadoutDefense");
+
 import {
   formatSubgroup,
   formatRoles,
