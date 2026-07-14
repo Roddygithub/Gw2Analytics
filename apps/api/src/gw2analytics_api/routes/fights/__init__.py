@@ -92,13 +92,25 @@ from sqlalchemy.orm import Session, selectinload
 from gw2_analytics.event_window import EventWindowAggregator
 from gw2_analytics.per_fight_timeline import PerFightTimelineAggregator
 from gw2_analytics.per_player_timeline import PerPlayerTimelineAggregator
-from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
+from gw2_core import (
+    BlockEvent,
+    BoonApplyEvent,
+    BuffRemovalEvent,
+    CCEvent,
+    DamageEvent,
+    DeathEvent,
+    DodgeEvent,
+    Event,
+    HealingEvent,
+    InterruptEvent,
+)
 from gw2analytics_api._event_dispatch import build_event_iterator
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightAgent
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession
 from gw2analytics_api.routes.fights.aggregators import (
     _aggregate_per_target_rollup,
+    aggregate_combat_readout,
     aggregate_skill_usage,
     aggregate_squad_rollup,
 )
@@ -114,6 +126,7 @@ from gw2analytics_api.schemas import (
     EventBucketOut,
     FightEventsSummaryOut,
     FightOut,
+    FightReadoutOut,
     FightSkillsOut,
     FightsPageOut,
     FightSquadsOut,
@@ -121,6 +134,9 @@ from gw2analytics_api.schemas import (
     PerFightTimelinePointOut,
     PerPlayerTimelineOut,
     PerPlayerTimelineSeriesOut,
+    PlayerSkillLoadoutOut,
+    PlayerSkillsOut,
+    PlayerSkillUsageRowOut,
     SkillOut,
     SkillUsageRowOut,
     SquadRollupRowOut,
@@ -698,6 +714,322 @@ def get_fight_skills(
         # preserves the top-N signal (ordered by total_damage
         # descending) while bounding the payload.
         skills=[SkillUsageRowOut.model_validate(r.model_dump()) for r in skill_rows[:100]],
+    )
+
+
+# ---------------------------------------------------------------------------
+# v0.10.13 plan 044 Tour 4: per-player skill roll-up + loadout
+# (Skill build analyser per docs/v0.8.0-web-design.md §6 future work).
+#
+# Declaration order matters: same defensive guard as the other
+# sub-path routes (timeline variants) -- declared AFTER the
+# ``/{fight_id}`` catch-all ``get_fight`` ABOVE because the URL
+# template has 4 segments which can't be confused with the
+# 2-segment catch-all regardless of segment ordering. Listed here
+# after ``get_fight_skills`` so the per-fight drill-down surface
+# in the file follows the topological order: events -> squads ->
+# skills -> per-player-skills (each can be fetched in parallel
+# via ``Promise.allSettled`` from the frontend, but the file's
+# ordering is analyst-readable: broadest first, deepest last).
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{fight_id}/players/{account_name}/skills",
+    response_model=PlayerSkillsOut,
+)
+def get_fight_player_skills(
+    fight_id: str,
+    account_name: str,
+    db: Session = Depends(get_session),  # noqa: B008
+) -> PlayerSkillsOut:
+    """Return the per-player skill roll-up + loadout for one fight (Tour 4 plan 044).
+
+    Source-side attribution (reuses the v0.7.0
+    :class:`gw2_analytics.skill_usage.SkillUsageAggregator` without
+    modification): the full events blob is loaded exactly once
+    via :func:`_load_fight_events` (same shared helper as the
+    per-target trio + squads + skills endpoints), then pre-filtered
+    to events whose ``source_agent_id == player_agent.agent_id``
+    before passing to the aggregator. The aggregator's external
+    contract is unchanged (the pre-filter is a thin list
+    comprehension, NOT a Behaviour change to the upstream
+    Aggregation class).
+
+    The player's ``OrmFightAgent`` row is resolved via
+    ``account_name`` (the wire-format value passed by the
+    frontend, with the optional leading ``:`` stripped -- arcdps
+    prefixes the value with ``:`` in the EVTC binary, but the
+    ORM layers past the parser strip the prefix so queries on
+    the canonical ``account_name`` field use the bare form).
+
+    The 0-skills + 0-loadout edge case: the player's agent row
+    is found but the parsed event stream contains no
+    events with ``source_agent_id == player_agent.agent_id``
+    (a player who was present-but-idle throughout the fight).
+    The route returns ``200 OK`` with ``skills: []`` -- the
+    empty-state panel on the frontend renders the "no skill
+    activity" hint. This is distinguishable from \"player not
+    found in fight\" which returns ``404``.
+
+    The equipped-skill stub: ``equipped_skill_ids`` is an
+    empty list in V1 because the parser does NOT yet extract
+    equipped-skill IDs from the EVTC binary (a separate
+    parser-layer ticket, deferred to v0.11.0 -- the
+    :mod:`libs.gw2_evtc_parser` extractor for equipped-skill
+    bytes has not landed). The field is intentionally present
+    (NOT omitted) so the frontend can render the empty-state
+    panel without a conditional branch.
+
+    Response codes:
+    - ``404 Not Found``: player (``account_name``) is NOT in
+      this fight (the ``OrmFightAgent`` lookup returns
+      ``None``). Distinct from the 0-skills \"idle player\"
+      case which returns ``200 OK`` with ``skills: []``.
+    - ``404 Not Found``: fight id is unknown OR the events
+      blob is missing (the shared :func:`_load_fight_events`
+      helper raises with the canonical pre-Phase-7 OR
+      post-Phase-7-with-zero-events contract).
+    - ``502 Bad Gateway``: events blob is present but corrupt
+      (the shared :func:`_load_fight_events` helper raises
+      with the gzip-decompression-failure OR non-JSON payload
+      contract).
+    """
+    # Resolve the player's agent row by ``account_name``. The
+    # optional leading ``:`` is stripped defensively (the
+    # :class:`gw2_core.Agent` model describes the value as
+    # \"always prefixed with ':' in arcdps\" but the ORM layer
+    # past the parser strips the prefix so the canonical
+    # ``account_name`` field stores the bare form -- the
+    # ``lstrip`` tolerates either form for forward-compat).
+    player_agent = db.execute(
+        select(OrmFightAgent).where(
+            OrmFightAgent.fight_id == fight_id,
+            OrmFightAgent.account_name == account_name.lstrip(":"),
+            OrmFightAgent.is_player.is_(True),
+        )
+    ).scalar_one_or_none()
+    if player_agent is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "player not found in fight",
+        )
+
+    # Shared helper handles the blob load + decompress + event
+    # split + 404 / 502 error contract (same pattern as the
+    # per-target trio + squads + skills + aggregated timeline
+    # endpoints -- :func:`_load_fight_events` is the single
+    # source of truth for the canonical 404 / 502 contract).
+    events = _load_fight_events(db, fight_id)
+
+    # Pre-filter the event stream to events whose
+    # ``source_agent_id`` matches the player's agent id. This
+    # is the B2 (pre-filter upstream) attribution strategy from
+    # Tour 4's design matrix: the
+    # :class:`gw2_analytics.skill_usage.SkillUsageAggregator`
+    # sees a smaller event iterable but its contract is
+    # unchanged -- the per-skill aggregation logic stays in
+    # the library, the API-side filter scopes the input. The
+    # pet / minion events that the player invoked would
+    # carry a DIFFERENT ``source_agent_id`` (the minion agent)
+    # and are silently dropped at this filter (a v0.11.0
+    # follow-on will track pets via ``master_agent_id`` and
+    # fold them back into the player's rollup via a separate
+    # helper -- NOT in scope for Tour 4).
+    player_events: list[Event] = [e for e in events if e.source_agent_id == player_agent.agent_id]
+
+    # Build the skill_id -> skill_name map for the per-skill
+    # aggregator (same pattern as :func:`get_fight_skills`).
+    skill_id_to_name_map = skill_id_to_name(db, fight_id)
+
+    # Reuse the canonical :class:`gw2_analytics.skill_usage.SkillUsageAggregator`
+    # via the API-side wrapper
+    # :func:`aggregate_skill_usage` imported at the top of
+    # this module. The wrapper's external contract is
+    # unchanged; the pre-filtered event list is the only
+    # different input.
+    skill_rows = aggregate_skill_usage(player_events, skill_id_to_name_map)
+
+    return PlayerSkillsOut(
+        fight_id=fight_id,
+        account_name=account_name,
+        agent_id=player_agent.agent_id,
+        loadout=PlayerSkillLoadoutOut(
+            profession=format_profession(player_agent.profession),
+            elite_spec=format_elite_spec(player_agent.elite_spec),
+            # V1 stub: parser-layer equipped-skill extraction
+            # deferred to v0.11.0 (NOT in scope for Tour 4 --
+            # the parser work is a substantial binary-format
+            # effort). The empty-list default lets the
+            # frontend render the empty-state panel without a
+            # conditional branch.
+            equipped_skill_ids=[],
+        ),
+        # v0.10.2 hotfix followup #12: same 100-row cap as
+        # :func:`get_fight_skills` (the per-skill roll-up
+        # groups by skill_id which the v0.10.3 parser bug
+        # can produce garbage values for). The cap preserves
+        # the top-N analyst signal while bounding the
+        # payload.
+        skills=[PlayerSkillUsageRowOut.model_validate(r.model_dump()) for r in skill_rows[:100]],
+    )
+
+
+# ---------------------------------------------------------------------------
+# v0.10.23-pre Wave 5: Combat-readout unified endpoint (plan 045 §5.1)
+#
+# Declaration order: this 3-segment route is declared AFTER the
+# 4-segment ``/{fight_id}/players/{account_name}/skills`` (Tour 4)
+# because the URL templates have different segment counts so they
+# cannot collide. The Wave 5 endpoint is the unified
+# ``GET /api/v1/fights/{fight_id}/readout`` per design doc §5.1 --
+# the single round-trip returns the full Combat-readout envelope
+# (FightReadoutOut with one PlayerReadoutOut per agent). The route
+# is the SCAFFOLD shell; the per-aspect block contents are the
+# 4 per-player aggregators' outputs (PlayerDamage / PlayerHeal /
+# PlayerBoons / PlayerDefense) composed by the
+# ``aggregate_combat_readout`` dispatcher.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{fight_id}/readout",
+    response_model=FightReadoutOut,
+)
+def get_fight_readout(
+    fight_id: str,
+    dry_run: bool = Query(
+        False,
+        description=(
+            "(SCAFFOLD-ONLY ESCAPE HATCH; future-tour refactor target: "
+            "If True, exercise ``aggregate_combat_readout`` against an "
+            "EMPTY events stream (returns the empty-schema envelope -- "
+            "0-player ``players: []`` -- with ``duration_s=0.0``). "
+            "Useful for hermetic route testing without docker compose "
+            "/ MinIO / Postgres. Production GET requests set "
+            "``dry_run=False``."
+            "**WARNING**: the ``?dry_run=`` query param is a "
+            "SCAFFOLD anti-pattern on a production endpoint (the "
+            "reviewer flagged this in Round 14) — Wave 6 refactor "
+            "must switch this to a FastAPI "
+            "``app.dependency_overrides[get_session] = ...`` test "
+            "fixture pattern so the production route is bare-bones "
+            "(only the real database path; the empty-state path "
+            "closes over the dependency-override contract for "
+            "tests)."
+        ),
+    ),
+    db: Session = Depends(get_session),  # noqa: B008
+) -> FightReadoutOut:
+    """Return the full Combat-readout envelope for one fight (plan 045 §5.1).
+
+    Wave 5 SCAFFOLD + Workstream D-extension bridge. Unified endpoint
+    per design doc §5.1 (``GET /api/v1/fights/{fight_id}/readout``)
+    returning the :class:`FightReadoutOut` envelope containing one
+    :class:`PlayerReadoutOut` per player agent. The route delegates
+    to :func:`aggregate_combat_readout` (the dispatcher in
+    :mod:`gw2analytics_api.routes.fights.aggregators`) which wraps
+    the 4 per-player aggregators (PlayerDamage / PlayerHeal /
+    PlayerBoons / PlayerDefense).
+
+    The 8 input streams are split from the canonical heterogeneous
+    ``Iterable[Event]`` via ``isinstance`` at the call site
+    (parallel to the per-target trio dispatch in
+    ``apps/api/routes/fights/aggregators.py::_aggregate_per_target_rollup``).
+
+    Response codes match the v0.10.13 per-fight timeline contract:
+
+    - ``404 Not Found``: fight id is unknown OR the events blob
+      is missing (the shared :func:`_load_fight_events` helper
+      raises the canonical pre-Phase 7 OR post-Phase-7-with-zero-events
+      contract).
+    - ``422 Unprocessable Entity``: ``dry_run`` is non-boolean
+      (handled by FastAPI before this handler runs).
+    - ``502 Bad Gateway``: events blob is present but corrupt.
+    - ``200 OK``: ``FightReadoutOut`` envelope, even when
+      ``players: []`` (a 0-player NPC-only fight).
+
+    The dry_run escape hatch: when ``dry_run=True``, the route
+    short-circuits the blob load + event-split + agent-load
+    pipeline and invokes ``aggregate_combat_readout`` against
+    empty streams. The result is a valid envelope with 0 players
+    + ``duration_s=0.0`` -- the canonical empty-state. This
+    path is INTENDED for hermetic route-testing on dev hosts
+    WITHOUT docker compose; production callers SHOULD set
+    ``dry_run=False`` (the default).
+    """
+    if dry_run:
+        # Hermetic empty-state path. No blob load, no DB queries,
+        # no upstream calls. Returns the valid empty envelope.
+        return aggregate_combat_readout(
+            damage_events=(),
+            healing_events=(),
+            boon_apply_events=(),
+            cc_events=(),
+            death_events=(),
+            dodge_events=(),
+            block_events=(),
+            interrupt_events=(),
+            skill_id_to_name_map={},
+            agent_id_to_name_map={},
+            duration_s=0.0,
+            fight_id=fight_id,
+        )
+
+    # Production path -- shared helper handles the blob load +
+    # decompress + event-split + 404 / 502 error contract.
+    events = _load_fight_events(db, fight_id)
+
+    # Load the fight's agent rows for the player-name
+    # denormalisation (`agent_id_to_name_map`). A single small
+    # query on the fight's agent table; pre-load pattern
+    # mirrors `get_fight_player_timeline` so a future
+    # `selectinload` migration is mechanical.
+    agents: list[OrmFightAgent] = list(
+        db.execute(
+            select(OrmFightAgent).where(OrmFightAgent.fight_id == fight_id),
+        )
+        .scalars()
+        .all()
+    )
+    agent_id_to_name_map: dict[int, str | None] = {a.agent_id: a.name for a in agents}
+
+    # The per-skill name map for the Boons `other_boons_out`
+    # bucket (the per-player Boons aggregator reads it via the
+    # `name_map` parameter to resolve skill_id -> string).
+    skill_id_to_name_map = skill_id_to_name(db, fight_id)
+
+    # Compute the duration sentinel from the events stream (the
+    # same contract the per-target trio + per-fight timeline
+    # endpoints use -- V1.3 EVTC header does not carry a
+    # wall-clock duration scalar).
+    duration_s = max(e.time_ms for e in events) / 1000.0
+
+    # Split the heterogeneous stream into 8 single-typed inputs
+    # via `isinstance` at the call site. Mirrors the
+    # `_aggregate_per_target_rollup` shape for consistency.
+    damage_events = [e for e in events if isinstance(e, DamageEvent)]
+    healing_events = [e for e in events if isinstance(e, HealingEvent)]
+    boon_apply_events = [e for e in events if isinstance(e, BoonApplyEvent)]
+    cc_events = [e for e in events if isinstance(e, CCEvent)]
+    death_events = [e for e in events if isinstance(e, DeathEvent)]
+    dodge_events = [e for e in events if isinstance(e, DodgeEvent)]
+    block_events = [e for e in events if isinstance(e, BlockEvent)]
+    interrupt_events = [e for e in events if isinstance(e, InterruptEvent)]
+
+    return aggregate_combat_readout(
+        damage_events=damage_events,
+        healing_events=healing_events,
+        boon_apply_events=boon_apply_events,
+        cc_events=cc_events,
+        death_events=death_events,
+        dodge_events=dodge_events,
+        block_events=block_events,
+        interrupt_events=interrupt_events,
+        skill_id_to_name_map=skill_id_to_name_map,
+        agent_id_to_name_map=agent_id_to_name_map,
+        duration_s=duration_s,
+        fight_id=fight_id,
     )
 
 
