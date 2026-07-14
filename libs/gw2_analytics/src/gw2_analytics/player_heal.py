@@ -107,7 +107,11 @@ _DEFAULT_HPS: Final[float] = 0.0
 #: so the getters are interchangeable after Phase 6 v2 (the
 #: parser-side barrier table is shared between damage + heal
 #: streams).
-type HealBarrierGetter = Callable[[HealingEvent], int]  # type: ignore[valid-type]  -- PEP 695 type statement; mypy may flag runtime use because mypy's strict Callable inference treats `type X = Callable[...]` differently from runtime-checked `Callable[...]`-typed aliases; the `type: ignore[valid-type]` suppresses the irrelevant strict-mode flag.
+# PEP 695 type statement; mypy may flag runtime use because mypy's strict
+# Callable inference treats `type X = Callable[...]` differently from
+# runtime-checked `Callable[...]`-typed aliases; the `type: ignore`
+# suppresses the irrelevant strict-mode flag.
+type HealBarrierGetter = Callable[[HealingEvent], int]
 
 
 class PlayerHealRow(BaseModel):

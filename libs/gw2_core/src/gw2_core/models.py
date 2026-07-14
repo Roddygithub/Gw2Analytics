@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, WrapValidator
 
@@ -639,7 +639,7 @@ def _dispatch_event(
                 cls = _EVENT_MAP.get(et)
                 if cls is not None:
                     return cls.model_validate(v)
-    return handler(v)
+    return cast(BaseEvent, handler(v))
 
 
 # Discriminated routing for forward-compat downstream consumers that

@@ -40,7 +40,7 @@
  *    stomping the other params.
  */
 
-/* eslint-disable @typescript-eslint/no-require-imports */
+ 
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 

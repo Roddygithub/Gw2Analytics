@@ -23,7 +23,11 @@ from gw2analytics_api.routes import players as players_module
 
 
 def _event_line(event: Event) -> bytes:
-    return EVENT_TYPE_ADAPTER.dump_json(event).replace(b"\n", b"") + b"\n"
+    # Serialize the concrete subclass, not the ``Event`` adapter:
+    # ``WrapValidator`` only intercepts *validation*; the adapter's
+    # ``dump_json`` sees the annotated ``BaseEvent`` root and drops
+    # the subclass-specific fields (``event_type``, ``damage``, ...).
+    return event.model_dump_json().encode("utf-8") + b"\n"
 
 
 def test_canonical_adapter_is_single_instance_apps_api_wide() -> None:

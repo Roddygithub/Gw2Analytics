@@ -135,7 +135,7 @@ def _sweep_once(
         # that's silently broken.
         pending_after = session.execute(
             select(func.count()).select_from(Upload).where(Upload.status == "pending")
-        ).scalar_one()  # type: ignore[no-untyped-call]
+        ).scalar_one()
         UPLOADS_PENDING_COUNT.set(int(pending_after))
 
         return rowcount

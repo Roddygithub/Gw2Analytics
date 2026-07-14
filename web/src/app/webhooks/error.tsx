@@ -12,7 +12,7 @@ export default function WebhooksError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // eslint-disable-next-line no-console
+     
     console.error("Webhooks page error:", error);
   }, [error]);
 

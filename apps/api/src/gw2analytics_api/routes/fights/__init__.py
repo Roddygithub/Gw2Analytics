@@ -802,12 +802,22 @@ def get_fight_player_skills(
     # past the parser strips the prefix so the canonical
     # ``account_name`` field stores the bare form -- the
     # ``lstrip`` tolerates either form for forward-compat).
+    #
+    # Because the parser currently persists the raw account string
+    # (including the leading ``:`` when present), the lookup must
+    # match either the bare or colon-prefixed form. Using ``IN``
+    # keeps the query simple and index-friendly on the fight_id
+    # side of the composite predicate.
+    bare_account_name = account_name.lstrip(":")
+    colon_account_name = ":" + bare_account_name
     player_agent = db.execute(
-        select(OrmFightAgent).where(
+        select(OrmFightAgent)
+        .where(
             OrmFightAgent.fight_id == fight_id,
-            OrmFightAgent.account_name == account_name.lstrip(":"),
+            OrmFightAgent.account_name.in_([bare_account_name, colon_account_name]),
             OrmFightAgent.is_player.is_(True),
         )
+        .limit(1)
     ).scalar_one_or_none()
     if player_agent is None:
         raise HTTPException(
@@ -997,7 +1007,7 @@ def get_fight_readout(
     # The per-skill name map for the Boons `other_boons_out`
     # bucket (the per-player Boons aggregator reads it via the
     # `name_map` parameter to resolve skill_id -> string).
-    skill_id_to_name_map = skill_id_to_name(db, fight_id)
+    skill_id_to_name_map: dict[int, str | None] = dict(skill_id_to_name(db, fight_id))
 
     # Compute the duration sentinel from the events stream (the
     # same contract the per-target trio + per-fight timeline

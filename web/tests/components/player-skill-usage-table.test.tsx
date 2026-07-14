@@ -27,7 +27,7 @@
  * dispatch.
  */
 
-/* eslint-disable @typescript-eslint/no-require-imports */
+ 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { PlayerSkillUsageTable } from "@/components/PlayerSkillUsageTable";

@@ -15,10 +15,14 @@ Metric inventory (plan 017 spec):
 - arq_job_retry_delay_seconds: Histogram — delay before retry (labels: queue, attempt)
 
 Plan 017 close-out (addition):
-- health_drift_count: Gauge — `OrmFightPlayerSummary` drift (set by /api/v1/health/summary)
-- uploads_pending_count: Gauge — uploads currently in `pending` status (set by stuck_upload_sweeper)
-- stuck_sweeper_iteration_duration_seconds: Histogram — sweep-iteration wallclock (set by lifespan_stuck_upload_sweeper)
-- stuck_sweeper_marked_failed_total: Counter — uploads promoted `pending` → `failed` by the sweeper (set by _sweep_once)
+- health_drift_count: Gauge — `OrmFightPlayerSummary` drift
+  (set by /api/v1/health/summary)
+- uploads_pending_count: Gauge — uploads currently in `pending` status
+  (set by stuck_upload_sweeper)
+- stuck_sweeper_iteration_duration_seconds: Histogram — sweep-iteration wallclock
+  (set by lifespan_stuck_upload_sweeper)
+- stuck_sweeper_marked_failed_total: Counter — uploads promoted `pending` → `failed`
+  by the sweeper (set by _sweep_once)
 """
 
 from __future__ import annotations
@@ -127,9 +131,13 @@ STUCK_SWEEPER_ITERATION_DURATION = Histogram(
 #: before/after a sweeper run to confirm the sweeper picked up
 #: stale rows (a non-delta means the sweeper is broken OR there
 #: were no stale rows to pick up — log correlation needed).
+_STUCK_SWEEPER_MARKED_FAILED_HELP = (
+    "Total uploads promoted pending to failed by the "
+    "stuck-upload sweeper"
+)
 STUCK_SWEEPER_MARKED_FAILED = Counter(
     "stuck_sweeper_marked_failed_total",
-    "Total uploads promoted pending → failed by the stuck-upload sweeper",
+    _STUCK_SWEEPER_MARKED_FAILED_HELP,
 )
 
 __all__ = [

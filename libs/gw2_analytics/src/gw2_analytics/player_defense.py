@@ -229,36 +229,36 @@ class PlayerDefenseAggregator:
         interrupts_by_player: dict[int, int] = defaultdict(int)
         grand_damage_total = 0
 
-        for e in damage_events:
-            damage_by_player[e.target_agent_id] += e.damage
-            grand_damage_total += e.damage
+        for de in damage_events:
+            damage_by_player[de.target_agent_id] += de.damage
+            grand_damage_total += de.damage
             if barrier_portion_getter is not None:
                 # Mirror the ``condi_portion_getter`` contract:
                 # caller-side responsibility for the side-table
                 # validation (negative / overflow clamping). The
                 # aggregator stays free of cross-source metadata.
-                barrier_by_player[e.target_agent_id] += barrier_portion_getter(e)
+                barrier_by_player[de.target_agent_id] += barrier_portion_getter(de)
 
-        for e in cc_events:
-            cc_by_player[e.target_agent_id] += e.cc_value
+        for ce in cc_events:
+            cc_by_player[ce.target_agent_id] += ce.cc_value
 
-        for e in death_events:
+        for dthe in death_events:
             # :class:`~gw2_core.DeathEvent` uses actor-only shape:
             # the dying player is ``source_agent_id``. Death
             # attribution is per-player (the player died), NOT
             # source-side "killed by" (that's a different column
             # which would parse from ``killed_by_agent_id`` if
             # present; not surfaced for v0.10.23).
-            deaths_by_player[e.source_agent_id] += 1
+            deaths_by_player[dthe.source_agent_id] += 1
 
-        for e in dodge_events:
-            dodges_by_player[e.source_agent_id] += 1
+        for doe in dodge_events:
+            dodges_by_player[doe.source_agent_id] += 1
 
-        for e in block_events:
-            blocks_by_player[e.source_agent_id] += 1
+        for be in block_events:
+            blocks_by_player[be.source_agent_id] += 1
 
-        for e in interrupt_events:
-            interrupts_by_player[e.source_agent_id] += 1
+        for ie in interrupt_events:
+            interrupts_by_player[ie.source_agent_id] += 1
 
         # Build the row set from the union of every observed
         # agent_id across all six streams. An NPC that received

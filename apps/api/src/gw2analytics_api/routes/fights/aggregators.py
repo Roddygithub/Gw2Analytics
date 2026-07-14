@@ -372,8 +372,12 @@ def aggregate_combat_readout(
     # appear in only some aspects get zero-defaults on the
     # missing aspects (the schema's ``Field(default=0)`` and
     # ``Field(default_factory=dict)`` carry the empty-state).
-    damage_by_id: dict[int, PlayerDamageRow] = {r.agent_id: r for r in damage_rows}
-    heal_by_id: dict[int, PlayerHealRow] = {r.agent_id: r for r in heal_rows}
+    damage_by_id: dict[int, PlayerDamageRow] = {
+        r.source_agent_id: r for r in damage_rows
+    }
+    heal_by_id: dict[int, PlayerHealRow] = {
+        r.source_agent_id: r for r in heal_rows
+    }
     boons_by_id: dict[int, PlayerBoonsRow] = {r.agent_id: r for r in boons_rows}
     defense_by_id: dict[int, PlayerDefenseRow] = {r.agent_id: r for r in defense_rows}
     # The union of all observed agent_ids in any aspect --
@@ -413,7 +417,7 @@ def aggregate_combat_readout(
                 kills=0,  # awaits DeathEvent + DPS stream cross-walk (Phase 9 v2).
             ),
             heal=PlayerReadoutHealOut(
-                heal_total=heal_by_id[agent_id].heal_total,
+                heal_total=heal_by_id[agent_id].total_healing,
                 hps=heal_by_id[agent_id].hps,
                 # Phase 3 SCAFFOLD: heal-side barrier columns driven
                 # from the per-player row. Pre-Phase-6-v2 wireshape:

@@ -225,10 +225,21 @@ def upgrade() -> None:
     # + index would have been created by SQLAlchemy autogenerate --
     # the migration's pre-check + ADD CONSTRAINT sequence is the
     # in-place equivalent for already-deployed databases.
-    op.create_unique_constraint(
-        "uploads_sha256_key",
-        "uploads",
-        ["sha256"],
+    # Idempotent unique-constraint creation: the underlying
+    # PostgreSQL index may already exist from a prior partial
+    # migration / ORM drift, so guard the ADD CONSTRAINT with a
+    # pg_class existence check.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_class WHERE relname = 'uploads_sha256_key'
+            ) THEN
+                ALTER TABLE uploads ADD CONSTRAINT uploads_sha256_key UNIQUE (sha256);
+            END IF;
+        END $$;
+        """
     )
 
     # --- C. condi/power columns on fight_player_summaries ---

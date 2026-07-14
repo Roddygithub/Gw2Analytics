@@ -200,22 +200,20 @@ export default function UploadPage() {
   // ``state.step === "parse"`` + the envelope id (stable across
   // ticks).
   const envelopeIdRef = useRef<string | null>(null);
+  const envelopeId = state.step === "parse" ? state.envelope.id : null;
   useEffect(() => {
-    if (state.step === "parse") {
-      envelopeIdRef.current = state.envelope.id;
-    } else {
-      envelopeIdRef.current = null;
-    }
-  }, [state.step, state.step === "parse" ? state.envelope.id : null]);
+    envelopeIdRef.current = envelopeId;
+  }, [envelopeId]);
 
   // POST effect -- fires once on every transition into step="upload".
   // The reducer holds the ``error`` field; this effect translates
   // the awaited promise into either upload-success or upload-error.
+  const uploadFile = state.step === "upload" ? state.file : null;
   useEffect(() => {
-    if (state.step !== "upload") {
+    if (uploadFile === null) {
       return;
     }
-    const file = state.file;
+    const file = uploadFile;
     let cancelled = false;
     (async () => {
       try {
@@ -234,7 +232,7 @@ export default function UploadPage() {
     return () => {
       cancelled = true;
     };
-  }, [state.step, state.step === "upload" ? state.file : null]);
+  }, [uploadFile]);
 
   // Poll effect -- fires on every transition into step="parse".
   // Cleanup aborts the in-flight interval + the cancellation flag

@@ -33,6 +33,7 @@ keeps the configured reference intact across the context boundary.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Generator
 from contextlib import contextmanager
 from itertools import cycle
 from unittest.mock import MagicMock, patch
@@ -40,6 +41,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from prometheus_client import REGISTRY
 from sqlalchemy.engine import Result
+from sqlalchemy.orm import Session
+
+from gw2analytics_api.routes.health import get_health_summary
+from gw2analytics_api.workers.stuck_upload_sweeper import (
+    _sweep_once,
+    lifespan_stuck_upload_sweeper,
+)
 
 
 def _sample_value(metric_name: str) -> float:
@@ -63,7 +71,6 @@ def test_health_drift_count_set_after_route_call() -> None:
             "drift_pct": 5.0,
             "status": "drift",
         }
-        from gw2analytics_api.routes.health import get_health_summary
 
         get_health_summary(db=MagicMock())
 
@@ -85,7 +92,6 @@ def test_health_drift_count_set_to_zero_on_clean_database() -> None:
             "drift_pct": 0.0,
             "status": "ok",
         }
-        from gw2analytics_api.routes.health import get_health_summary
 
         get_health_summary(db=MagicMock())
 
@@ -101,8 +107,6 @@ def test_sweep_once_updates_pending_gauge_and_failure_counter() -> None:
     of :func:`_sweep_once` — a ``MagicMock`` factory alone would lose
     the side-effect config to ``__enter__()``'s default mock rebind.
     """
-    from gw2analytics_api.workers.stuck_upload_sweeper import _sweep_once
-
     session = MagicMock()
     update_result = MagicMock(spec=Result, rowcount=2)
     count_result = MagicMock(spec=Result)
@@ -113,12 +117,15 @@ def test_sweep_once_updates_pending_gauge_and_failure_counter() -> None:
     session.execute.side_effect = cycle([update_result, count_result])
 
     @contextmanager
-    def fake_session_factory():
+    def fake_session_factory() -> Generator[Session, None, None]:
         yield session
 
     marked_before = _sample_value("stuck_sweeper_marked_failed_total")
 
-    _sweep_once(session_factory=fake_session_factory, threshold_s=300)
+    _sweep_once(
+        session_factory=fake_session_factory,  # type: ignore[arg-type]
+        threshold_s=300,
+    )
 
     marked_after = _sample_value("stuck_sweeper_marked_failed_total")
     pending_after = _sample_value("uploads_pending_count")
@@ -142,10 +149,6 @@ async def test_stuck_sweeper_iteration_duration_observed() -> None:
     ``.execute.side_effect`` intact across the lifespan's
     ``with session_factory() as session:`` block.
     """
-    from gw2analytics_api.workers.stuck_upload_sweeper import (
-        lifespan_stuck_upload_sweeper,
-    )
-
     session = MagicMock()
     update_result = MagicMock(spec=Result, rowcount=0)
     count_result = MagicMock(spec=Result)
@@ -153,7 +156,7 @@ async def test_stuck_sweeper_iteration_duration_observed() -> None:
     session.execute.side_effect = cycle([update_result, count_result])
 
     @contextmanager
-    def fake_session_factory():
+    def fake_session_factory() -> Generator[Session, None, None]:
         yield session
 
     before_count = _sample_value("stuck_sweeper_iteration_duration_seconds_count")
@@ -167,11 +170,13 @@ async def test_stuck_sweeper_iteration_duration_observed() -> None:
         if sleep_call_count >= 1:
             raise asyncio.CancelledError
 
-    with patch("gw2analytics_api.workers.stuck_upload_sweeper.asyncio.sleep", fake_sleep):
-        with pytest.raises(asyncio.CancelledError):
-            await lifespan_stuck_upload_sweeper(
-                session_factory=fake_session_factory,
-            )
+    with (
+        patch("gw2analytics_api.workers.stuck_upload_sweeper.asyncio.sleep", fake_sleep),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await lifespan_stuck_upload_sweeper(
+            session_factory=fake_session_factory,  # type: ignore[arg-type]
+        )
 
     after_count = _sample_value("stuck_sweeper_iteration_duration_seconds_count")
     after_sum = _sample_value("stuck_sweeper_iteration_duration_seconds_sum")
