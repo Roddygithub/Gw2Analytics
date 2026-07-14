@@ -102,3 +102,30 @@ export const COMBAT_READOUT_LOADING = "Loading combat readout\u2026";
  */
 export const PER_PLAYER_PROMPT_PLACEHOLDER =
   "Pick a player from the dropdown to see per-player skill attribution.";
+
+/**
+ * Text content of the `<Link>` rendered by the **root** error.tsx
+ * (`web/src/app/error.tsx`). Lower-case ("the fights grid") — mid-sentence
+ * flow: "...head back to the fights grid". No trailing space; the JSX
+ * sibling `{" "}` adds the trailing separator. 691a306 convention.
+ */
+export const FIGHTS_GRID_LINK_ROOT = "the fights grid";
+
+/**
+ * Text content of the `<Link>` rendered by the **per-fight** error.tsx
+ * (`web/src/app/fights/[id]/error.tsx`). Includes the `←` glyph and a
+ * leading space; no trailing space — the JSX `<Link>` is the last child
+ * node and a suffix " " (if any) lives in JSX. 691a306 convention.
+ */
+export const FIGHTS_GRID_BROWSE_FIGHT_PAGE = "← Browse fights grid";
+
+/**
+ * Format prefix that the API layer prepends to every `ApiError`'s
+ * rendered copy. Used by `formatApiError` in
+ * `web/src/lib/api/errors.ts` to build the user-facing string
+ * `"Upstream error: <status>: <message>"`. Traling space IS intentional
+ * (it separates prefix from `err.status`); do NOT drop without
+ * updating the JSX interpolation site. Backs 2 vitest assertions
+ * (`fight-events-page.test.tsx` + `fights-page.test.tsx`).
+ */
+export const UPSTREAM_ERROR_PREFIX = "Upstream error: ";

@@ -23,6 +23,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { FIGHTS_GRID_BROWSE_FIGHT_PAGE } from "@/lib/copy/error-messages";
 
 const PANEL_STYLE: React.CSSProperties = {
   marginTop: "32px",
@@ -99,7 +100,7 @@ export default function FightError({
           Try again
         </button>
         <Link href="/fights" style={LINK_STYLE}>
-          ← Browse fights grid
+          {FIGHTS_GRID_BROWSE_FIGHT_PAGE}
         </Link>
       </div>
     </section>

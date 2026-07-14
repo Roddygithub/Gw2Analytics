@@ -13,6 +13,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { FIGHTS_GRID_LINK_ROOT } from "@/lib/copy/error-messages";
 
 const PANEL_STYLE: React.CSSProperties = {
   padding: "32px",
@@ -99,7 +100,7 @@ export default function GlobalError({
         Alembic schema-drift guard triggering). Retry below; the dataset
         is still browsable from{" "}
         <Link href="/fights" style={INLINE_LINK_STYLE}>
-          the fights grid
+          {FIGHTS_GRID_LINK_ROOT}
         </Link>{" "}
         or{" "}
         <Link href="/players" style={INLINE_LINK_STYLE}>

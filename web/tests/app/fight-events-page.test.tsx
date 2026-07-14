@@ -55,6 +55,7 @@ vi.mock("@/lib/fetchCached", async (importActual) => {
 import FightEventsPage from "@/app/fights/[id]/page";
 import { fetchCached } from "@/lib/fetchCached";
 import { ApiError } from "@/lib/api/errors";
+import { UPSTREAM_ERROR_PREFIX } from "@/lib/copy/error-messages";
 import {
   FAILED_TO_LOAD_PLAYER_LIST,
   FAILED_TO_LOAD_PER_PLAYER_SKILLS,
@@ -358,7 +359,7 @@ describe("FightEventsPage", () => {
       screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Upstream error: 404: 404: fight not found/),
+      screen.getByText(`${UPSTREAM_ERROR_PREFIX}404: 404: fight not found`),
     ).toBeInTheDocument();
   });
 
