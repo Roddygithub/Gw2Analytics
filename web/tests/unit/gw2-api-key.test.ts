@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * Network health-check for the optional ``GW2_API_KEY`` env var.
@@ -6,26 +8,34 @@ import { describe, it, expect } from "vitest";
  * When ``GW2_API_KEY`` is set (typically in ``web/.env.local``), the
  * mock-server's ``/api/v1/account`` route does a live fetch against
  * Guild Wars 2 v2 to surface real account + world data instead of
- * the deterministic stub. This Vitest module is the offline-replace-
- * ment of that live fetch: it hits the same upstream ArenaNet
+ * the deterministic stub. This Vitest module is the offline
+ * replacement of that live fetch: it hits the same upstream ArenaNet
  * ``/v2/tokeninfo`` endpoint the real-account fetch uses, so a
  * broken or revoked key fails fast + the analyst knows the
  * mock-server's auto-detect mode is silently falling back to the
  * stub.
  *
  * Skip semantics: when ``GW2_API_KEY`` is unset (CI sans secret,
- * offline dev loop), the entire suite is skipped via vitest's
- * ``skipIf``. No network call. No flakiness.
+ * offline dev loop), the network-health-check describe block is
+ * skipped via vitest's ``skipIf``. No network call. No flakiness.
  *
- * Permissions contract: the user-provided key belongs to
- * ``CounterPicker`` (per ArenaNet's /tokeninfo payload). We assert
- * the three scopes we use anywhere in the project (progression,
- * guilds, builds), but the assertion is LOOSE (every scope
- * listed as a substring) so a future key with more scopes is OK.
+ * Single-source-of-truth: the offline-stub-shape describe block
+ * reads the canonical ``web/tests/e2e/fixtures/account-stub.json``
+ * fixture file (the SAME file mock-server.mjs's stub branch
+ * returns via ``loadFixture("account-stub.json")``). Drift between
+ * the mock-server stub response and the test's offline-shape
+ * assertion is impossible by construction.
  */
 
 const HAS_KEY = Boolean(process.env.GW2_API_KEY);
 const KEY = process.env.GW2_API_KEY ?? "";
+const STUB_FIXTURE_PATH = join(
+  __dirname,
+  "..",
+  "e2e",
+  "fixtures",
+  "account-stub.json",
+);
 
 interface TokenInfo {
   id: string;
@@ -86,17 +96,27 @@ describe.skipIf(!HAS_KEY)("GW2_API_KEY live health-check", () => {
   });
 });
 
-describe("GW2_API_KEY offline contract (always runs)", () => {
-  it("the mock-server stub branch returns the deterministic fixture shape", async () => {
-    // We re-import the stub shape statically so we never depend on the
-    // live API for this assertion; it must always pass.
-    const stubShape = {
-      world_id: 1001,
-      world_name: "Fixture World",
-      world_population: "Medium",
+describe("account-stub.json fixture (always runs)", () => {
+  it("the canonical fixture file exists at the canonical path", () => {
+    const raw = readFileSync(STUB_FIXTURE_PATH);
+    expect(raw.length).toBeGreaterThan(0);
+  });
+
+  it("the canonical fixture parses as JSON + has the expected fields", () => {
+    const stub = JSON.parse(readFileSync(STUB_FIXTURE_PATH, "utf8")) as {
+      world_id: number;
+      world_name: string;
+      world_population: string;
     };
-    expect(stubShape.world_id).toBe(1001);
-    expect(stubShape.world_name).toBe("Fixture World");
-    expect(stubShape.world_population).toBe("Medium");
+    expect(stub.world_id).toBe(1001);
+    expect(stub.world_name).toBe("Fixture World");
+    expect(stub.world_population).toBe("Medium");
+  });
+
+  it("the canonical fixture shape matches the AccountEnrichedOut schema keys", () => {
+    const stub = JSON.parse(readFileSync(STUB_FIXTURE_PATH, "utf8")) as Record<string, unknown>;
+    expect(Object.keys(stub).sort()).toEqual(
+      ["world_id", "world_name", "world_population"].sort(),
+    );
   });
 });
