@@ -77,18 +77,22 @@ web/tests/e2e/.visual-regression-output/
 /screenshots/
 web/screenshots/
 
-# v0.10.23-pre release transfer artefacts (operator-facing only --
-# placed at the project root for the analyst's local-session use;
-# never committed). Force-add a copy to the repo via
-# ``git add -f <file>`` if the project wants to keep one:
-#   - PUSH_INSTRUCTIONS.md: 1-shot manual gh pr create recipe
-#     (one-time use during the wave6/7 release window).
-#   - handoff.md: detailed v0.10.22 night-mode status doc
-#     (operator-facing handoff; could be promoted to docs/
-#     once the release window closes).
-#   - v0.10.23-pre.bundle: git bundle for offline transfer
-#     (4.2 MB binary; never committed -- git bundles are
-#     first-class transfer artefacts, not project assets).
-/PUSH_INSTRUCTIONS.md
-/handoff.md
-/v0.10.23-pre.bundle
+# Per-release operator-facing transfer artefacts (placed at the
+# project root for the analyst's local-session use during each
+# release window; never committed). Force-add a specific file via
+# ``git add -f <file>`` if a future maintainer wants to keep one
+# as a project asset:
+#   - PUSH_INSTRUCTIONS*.md: 1-shot manual ``gh pr create``
+#     recipe (per-release; one-time use during each wave's
+#     release window).
+#   - handoff*.md: per-release v0.10.x night-mode status doc
+#     (operator-facing handoff; each release window may have its
+#     own numbered handoff).
+#   - v*-pre.bundle: per-release git bundle for offline
+#     transfer (binary; never committed -- git bundles are
+#     first-class transfer artefacts, not project assets). The
+#     ``-pre`` suffix matches the canonical v0.10.x
+#     pre-release naming convention (vMAJOR.MINOR.PATCH-pre).
+/PUSH_INSTRUCTIONS*.md
+/handoff*.md
+/v*-pre.bundle
