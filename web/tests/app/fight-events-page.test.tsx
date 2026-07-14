@@ -58,6 +58,7 @@ import { ApiError } from "@/lib/api/errors";
 import {
   FAILED_TO_LOAD_PLAYER_LIST,
   FAILED_TO_LOAD_PER_PLAYER_SKILLS,
+  PER_PLAYER_PROMPT_PLACEHOLDER,
 } from "@/lib/copy/error-messages";
 import type {
   FightEventsSummaryRow,
@@ -501,7 +502,7 @@ describe("FightEventsPage", () => {
     // canonical ``player-skill-prompt`` testid so the
     // screenshot-script can locate it without a label query.
     expect(screen.getByTestId("player-skill-prompt")).toBeInTheDocument();
-    expect(screen.getByText(/Pick a player/i)).toBeInTheDocument();
+    expect(screen.getByText(PER_PLAYER_PROMPT_PLACEHOLDER)).toBeInTheDocument();
   });
 
   it("renders the section-level error chip when ?account= points at an account NOT in the fight's agents", async () => {

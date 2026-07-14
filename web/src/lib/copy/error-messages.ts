@@ -72,3 +72,33 @@ export const FAILED_TO_LOAD_PER_PLAYER_SKILLS =
  * above so the test can import all three from one place.
  */
 export const FAILED_TO_LOAD_FIGHT_DETAILS = "Failed to load fight details.";
+
+/**
+ * JSX prefix for the readout-tab-status error branch -- when
+ * ``readoutError !== null`` (the ``GET /api/v1/fights/{id}/readout``
+ * call throws). Reads "``Combat-readout fetch failed: <error>``".
+ * NO trailing space (matches the 691a306 convention for the
+ * error-prefix exports; the literal space is added at the
+ * call site via JSX: ``<>{COMBAT_READOUT_FETCH_FAILED} {readoutError}</>``).
+ */
+export const COMBAT_READOUT_FETCH_FAILED = "Combat-readout fetch failed:";
+
+/**
+ * Standalone JSX text for the readout-tab-status loading branch --
+ * when ``readoutData === null`` (the fetch is in-flight, no
+ * upstream error). Terminal ellipsis (U+2026 horizontal ellipsis,
+ * NOT three U+002E dots) to match the analyst-facing "loading"
+ * convention. Read "``Loading combat readout…``".
+ */
+export const COMBAT_READOUT_LOADING = "Loading combat readout\u2026";
+
+/**
+ * Standalone JSX text for the per-player-section prompt placeholder
+ * -- when ``accountFilter === null`` AND no account has been picked
+ * from the dropdown. Reads
+ * "``Pick a player from the dropdown to see per-player skill
+ * attribution.``" (terminal period). Sits in a low-opacity
+ * ``<p>`` to signal the empty-state to the analyst.
+ */
+export const PER_PLAYER_PROMPT_PLACEHOLDER =
+  "Pick a player from the dropdown to see per-player skill attribution.";

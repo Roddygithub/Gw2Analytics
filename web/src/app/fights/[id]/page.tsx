@@ -97,6 +97,9 @@ import {
   FAILED_TO_LOAD_PLAYER_LIST,
   FAILED_TO_LOAD_PER_PLAYER_SKILLS,
   FAILED_TO_LOAD_FIGHT_DETAILS,
+  COMBAT_READOUT_FETCH_FAILED,
+  COMBAT_READOUT_LOADING,
+  PER_PLAYER_PROMPT_PLACEHOLDER,
 } from "@/lib/copy/error-messages";
 
 export const dynamic = "force-dynamic";
@@ -655,9 +658,9 @@ export default async function FightEventsPage({
           }}
         >
           {readoutError !== null ? (
-            <>Combat-readout fetch failed: {readoutError}</>
+            <>{COMBAT_READOUT_FETCH_FAILED} {readoutError}</>
           ) : readoutData === null ? (
-            <>Loading combat readout…</>
+            <>{COMBAT_READOUT_LOADING}</>
           ) : (
             <>
               Combat readout loaded · {readoutData.players.length} players ·
@@ -1010,7 +1013,7 @@ export default async function FightEventsPage({
             data-testid="player-skill-prompt"
             style={{ opacity: 0.7, fontSize: 14, margin: 0 }}
           >
-            Pick a player from the dropdown to see per-player skill attribution.
+            {PER_PLAYER_PROMPT_PLACEHOLDER}
           </p>
         ) : accountSkills === null ? null : (
           <PlayerSkillUsageTable
