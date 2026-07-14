@@ -590,4 +590,82 @@ describe("FightEventsPage", () => {
       screen.getByTestId("player-skill-agents-error"),
     ).toHaveTextContent(/fight unavailable/i);
   });
+
+  // -------------------------------------------------------------------------
+  // v0.10.18 regression-locking test: the dual-banner cascade
+  // contract. When the bare ``/fights/:id`` (agents-list) fetch
+  // throws 502, the page.tsx cascades the upstream error into
+  // BOTH chips: ``player-skill-agents-error`` (the agents-
+  // dropdown diagnostic) AND ``player-skill-error`` (the
+  // per-player-section diagnostic). The same substring "fight
+  // unavailable" appears in 2 places. The pre-fix test used
+  // ``screen.getByText(/fight unavailable/i)`` which threw
+  // ``getMultipleElementsFoundError`` -- the fix scopes
+  // assertions to the specific testid. This regression test
+  // pins:
+  //   1. BOTH chips are present
+  //   2. BOTH chips carry the upstream error substring
+  //   3. the per-player chip carries the canonical
+  //      "Failed to load per-player skills:" prefix that
+  //      distinguishes it from the agents-dropdown chip
+  //   4. exactly 2 elements match the cascade substring
+  //      (forbids a 3rd duplicate chip -- the original bug
+  //      class)
+  //   5. the prompt placeholder is hidden when accountFilter
+  //      is set (preserves the 3-state body contract)
+  // -------------------------------------------------------------------------
+  it("locks the dual-banner cascade contract on agents-fetch 502 (regression)", async () => {
+    mockFightFetch({
+      events: POPULATED_PAYLOAD,
+      fightDetails: new ApiError(502, "fight unavailable"),
+    });
+    const tree = await FightEventsPage({
+      params: Promise.resolve({ id: FIGHT_ID }),
+      searchParams: Promise.resolve({ account: "TestAccount.1234" }),
+    });
+    render(tree);
+    // BOTH chips are present.
+    expect(
+      screen.getByTestId("player-skill-agents-error"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("player-skill-error")).toBeInTheDocument();
+    // BOTH chips cascade the upstream error substring. Testid-
+    // scoped (NOT `screen.getByText` which would throw
+    // MultipleElementsFoundError on the 2-match case).
+    expect(
+      screen.getByTestId("player-skill-agents-error"),
+    ).toHaveTextContent(/fight unavailable/i);
+    expect(
+      screen.getByTestId("player-skill-error"),
+    ).toHaveTextContent(/fight unavailable/i);
+    // The per-player chip carries the canonical user-facing
+    // prefix "Failed to load per-player skills:" that
+    // distinguishes it from the agents-dropdown chip
+    // ("Failed to load player list:"). Locks down the
+    // cascade-wrapping semantics so a future refactor can't
+    // accidentally strip the prefix and surface the raw
+    // upstream error (which would be confusing -- the analyst
+    // can't tell which fetch failed).
+    expect(
+      screen.getByTestId("player-skill-error"),
+    ).toHaveTextContent(/Failed to load per-player skills:/);
+    expect(
+      screen.getByTestId("player-skill-agents-error"),
+    ).toHaveTextContent(/Failed to load player list:/);
+    // Exactly 2 elements match the cascade substring -- forbids
+    // a 3rd duplicate chip. RTL counts matches by element (1
+    // match per `<p>` containing the substring), so 2 chips
+    // yields 2 matches. A future refactor that adds a 3rd
+    // warning banner reusing the upstream text would explode
+    // this assertion -- which is the original bug class
+    // (cascading error string missing the per-section scoping).
+    expect(screen.getAllByText(/fight unavailable/i)).toHaveLength(2);
+    // Prompt placeholder hidden when accountFilter is set
+    // (preserves the canonical 3-state body contract: prompt /
+    // error / table, with the prompt suppressed on the URL-
+    // filtered path).
+    expect(
+      screen.queryByTestId("player-skill-prompt"),
+    ).not.toBeInTheDocument();
+  });
 });
