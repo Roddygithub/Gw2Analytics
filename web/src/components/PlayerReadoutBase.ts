@@ -128,8 +128,11 @@ export const SHARED_COLUMNS: ColDef<PlayerReadoutOut>[] = [
  * participates in the sort comparator so ties break
  * deterministically.
  *
- * THIRD sort index appended in each component's ``initialState``:
- * { colId: "agent_id", sort: "asc", sortIndex: 2 }.
+ * THIRD sort entry appended in each component's ``initialState``
+ * array (per design doc §13). AG Grid Community v34 uses
+ * ARRAY-ORDER for multi-column-sort priority; no ``sortIndex``
+ * field is carried in ``ColDef<TData, any>``. Entry order:
+ * ``[subgroup ASC, <aspect> DESC, agent_id ASC]``.
  */
 export const AGENT_ID_TIEBREAKER: ColDef<PlayerReadoutOut> = {
   field: "agent_id",
@@ -139,24 +142,34 @@ export const AGENT_ID_TIEBREAKER: ColDef<PlayerReadoutOut> = {
 };
 
 /**
- * Default grid options shared across all 4 readout tables. The
- * dark-theme Quartz preset matches the existing
- * ``TargetRollupsGrid`` / ``SquadRollupsGrid` instances on the
- * /fights/[id] page for visual cohesion.
+ * AG Grid-level props shared across all 4 readout tables. These
+ * props live DIRECTLY on ``<AgGridReact>`` — NOT under
+ * ``defaultColDef`` — because AG Grid Community v34's
+ * ``ColDef<TData>`` type forbids ``theme`` / ``rowSelection``
+ * there (those are AgGridReact-level props, not column-level).
+ *
+ * Each per-aspect component spreads this into its
+ * ``<AgGridReact>`` so the constants live in one place. The
+ * numeric-sort comparator (``comparator: (a, b) => (Number(a ?? 0) - Number(b ?? 0)) || 0``)
+ * lives inline on each component's ``defaultColDef={{ comparator: (a, b) => (Number(a ?? 0) - Number(b ?? 0)) || 0 }}``
+ * because AG Grid Community v34’s ColDef d.ts does not
+ * include a sortNumeric flag (only the canonical comparator
+ * callback) — numeric sort must be encoded as an explicit
+ * comparator function rather than the deprecated boolean flag.
+ *
+ * Visual cohesion: the ``legacy`` theme matches the existing
+ * ``TargetRollupsGrid`` / ``SquadRollupsGrid`` instances on
+ * the /fights/[id] page.
  */
-export const DEFAULT_GRID_OPTIONS = {
-  // The Quartz theme is bundled with ag-grid-community 34 (the
-  // ``themeQuartz`` named export from ``"ag-grid-community"``).
-  // Setting ``theme`` here applies it to all grids; AG Grid
-  // resolves the named theme at render-time so this is hot-reload
-  // safe (a theme swap doesn't trigger a per-row re-render).
+export const AG_GRID_PROPS = {
+  // "legacy" is the built-in theme shipped with
+  // ag-grid-community 34. AG Grid resolves the named theme at
+  // render time so this is hot-reload safe (theme swap doesn't
+  // trigger a per-row re-render).
   theme: "legacy" as const,
   // Single-row selection (clicking a row selects it for the
   // future drill-in detail panel; v0.10.23 SCAFFOLD doesn't
   // wire a drill-in yet).
   rowSelection: { mode: "singleRow" } as const,
-  // Numeric sort comparator for ranks (DPS / HPS / etc.). The
-  // default string comparator would mis-sort ``1000`` before
-  /// ``999`` so we override.
-  sortNumeric: true,
 } as const;
+

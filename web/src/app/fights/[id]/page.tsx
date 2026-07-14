@@ -67,6 +67,7 @@ import {
   type TargetBuffRemovalRow,
   type FightEventsSummaryRow,
   type FightPlayerTimeline,
+  type FightReadoutOut,
   type FightTimeline,
   type SquadRollupRow,
 } from "@/lib/api";
@@ -407,6 +408,36 @@ export default async function FightEventsPage({
     accountSkillsError = fightDetailsError ?? "Failed to load fight details.";
   }
 
+  // Tour 6 v0.11.0-prep: Combat-readout payload fetch for the
+  // ?tab=readout path. Conditional fetch so the /readout
+  // network round-trip only fires when the analyst lands on
+  // the readout tab -- the Overview + Replay tabs skip it
+  // entirely (the SCAFFOLD-state hardcoded rows={[]} on the
+  // Wave 7 save was the right shape before the backend route
+  // landed; now the round-trip is cheap (cached blob fetch +
+  // O(player-count) compute) so the conditional-on-tab is
+  // sufficient). Wires the live PlayerReadoutOut rows into
+  // the 4 PlayerReadout{Damage,Heal,Boons,Defense} components
+  // that previously rendered with rows={[]} per the Wave 7
+  // SCAFFOLD contract (see CHANGELOG v0.10.23-pre). SCAFFOLD-
+  // ZERO honesty: dps_power + dps_condi + barrier_total +
+  // barrier_ps + time_downed_ms + dodges + blocks + interrupts
+  // stay at 0 by design -- those columns await the Phase 6 v2
+  // parser-stream switch (per docs/v0.10.19-combat-readout-
+  // spike.md Blocker A) + the Skills DB catalog full fill-out
+  // (Blocker B). The downstream cells render the in-grid zero
+  // + the status banner below names which columns are SCAFFOLD-
+  // zero so the analyst reads the contract inline.
+  let readoutData: FightReadoutOut | null = null;
+  let readoutError: string | null = null;
+  if (activeTab === "readout") {
+    try {
+      readoutData = await fetchCached<FightReadoutOut>(`${base}/readout`);
+    } catch (err) {
+      readoutError = formatApiError(err);
+    }
+  }
+
   if (fetchError || !summary) {
     return (
       <main style={{ padding: "32px" }}>
@@ -607,49 +638,57 @@ export default async function FightEventsPage({
         </header>
 
         <p
-          data-testid="readout-tab-scaffold"
+          data-testid="readout-tab-status"
           style={{
             padding: "12px 16px",
-            border: "1px solid var(--border)",
+            border: readoutError ? "1px solid var(--accent)" : "1px solid var(--border)",
             borderRadius: 4,
-            color: "var(--foreground)",
-            opacity: 0.85,
+            color: readoutError ? "var(--accent)" : "var(--foreground)",
+            opacity: 0.9,
             fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
             fontSize: 13,
           }}
         >
-          Combat readout SCAFFOLD UI · The 4 tables here render with empty
-          rows until the backend <code>fetchFightReadout</code> route (v0.11.0
-          forward-blocker) lands. Wave 7 ships the AG Grid schema + tab
-          routing so the route can hydrate the grid without a UI change.
+          {readoutError !== null ? (
+            <>Combat-readout fetch failed: {readoutError}</>
+          ) : readoutData === null ? (
+            <>Loading combat readout…</>
+          ) : (
+            <>
+              Combat readout loaded · {readoutData.players.length} players ·
+              duration {readoutData.duration_s.toFixed(1)} s. SCAFFOLD-zero
+              columns <code>dps_power</code> + <code>dps_condi</code> +
+              <code> heal.barrier_total</code> + <code>heal.barrier_ps</code> +
+              <code> defense.time_downed_ms</code> +{" "}
+              <code>defense.dodges</code> + <code>defense.blocks</code> +
+              <code> defense.interrupts</code> stay at 0 until Phase 6 v2
+              lands the parser-side barrier-portion + condi-split +
+              statechange event subclasses (per{" "}
+              <code>docs/v0.10.19-combat-readout-spike.md</code> Blocker A + B).
+              Every other column shown below is wired to real per-event data
+              from the upstream blob.
+            </>
+          )}
         </p>
 
         <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <h2 style={{ fontSize: 18, fontWeight: 600 }}>Damage</h2>
-          <PlayerReadoutDamage
-            rows={[]}
-            // Wire-up note: the live ``fetchFightReadout``
-            // payload hydrates this row set once the v0.11.0
-            // apps/api route handler lands. SCAFFOLD-time the
-            // component renders its built-in empty-state panel
-            // so the analyst sees the SCAFFOLD-zero contract
-            // inline.
-          />
+          <PlayerReadoutDamage rows={readoutData?.players ?? []} />
         </section>
 
         <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <h2 style={{ fontSize: 18, fontWeight: 600 }}>Heal</h2>
-          <PlayerReadoutHeal rows={[]} />
+          <PlayerReadoutHeal rows={readoutData?.players ?? []} />
         </section>
 
         <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <h2 style={{ fontSize: 18, fontWeight: 600 }}>Boons</h2>
-          <PlayerReadoutBoons rows={[]} />
+          <PlayerReadoutBoons rows={readoutData?.players ?? []} />
         </section>
 
         <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <h2 style={{ fontSize: 18, fontWeight: 600 }}>Defense</h2>
-          <PlayerReadoutDefense rows={[]} />
+          <PlayerReadoutDefense rows={readoutData?.players ?? []} />
         </section>
       </main>
     );

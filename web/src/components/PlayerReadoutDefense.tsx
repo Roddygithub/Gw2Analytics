@@ -26,7 +26,11 @@
  * the SCAFFOLD-zero contract leaves it at ``0`` until that
  * lands. The Wave 6 PART-2 wire-shape keeps the column on the
  * grid so a future phase-6-v2 stream automatically picks up the
- * real value without a UI change.
+ * real value without a UI change. ``dodges`` + ``blocks`` +
+ * ``interrupts`` await the statechange event subclasses
+ * (DodgeEvent / BlockEvent / InterruptEvent) which the
+ * Wave 5 SCAFFOLD shipped but whose parser yield paths remain
+ * Phase 6 v2 work.
  */
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef, SortModelItem } from "ag-grid-community";
@@ -36,7 +40,7 @@ import type { PlayerReadoutOut } from "@/lib/api";
 import "./ag-grid-setup";
 import {
   AGENT_ID_TIEBREAKER,
-  DEFAULT_GRID_OPTIONS,
+  AG_GRID_PROPS,
   SHARED_COLUMNS,
 } from "./PlayerReadoutBase";
 
@@ -53,11 +57,12 @@ const DEFENSE_COLUMNS: ColDef<PlayerReadoutOut>[] = [
 
 // Default sort per design doc §13: subgroup ASC + damage_taken DESC
 // + agent_id ASC tiebreaker ("defensive load is the leading
-// indicator").
+// indicator"). Array order = sort priority (AG Grid v34
+// ``SortModelItem`` does NOT carry ``sortIndex``).
 const DEFENSE_DEFAULT_SORT: SortModelItem[] = [
-  { colId: "subgroup", sort: "asc", sortIndex: 0 },
-  { colId: "defense.damage_taken", sort: "desc", sortIndex: 1 },
-  { colId: "agent_id", sort: "asc", sortIndex: 2 },
+  { colId: "subgroup", sort: "asc" },
+  { colId: "defense.damage_taken", sort: "desc" },
+  { colId: "agent_id", sort: "asc" },
 ];
 
 export function PlayerReadoutDefense({
@@ -91,7 +96,8 @@ export function PlayerReadoutDefense({
       <AgGridReact<PlayerReadoutOut>
         rowData={rows}
         columnDefs={[...SHARED_COLUMNS, ...DEFENSE_COLUMNS, AGENT_ID_TIEBREAKER]}
-        defaultColDef={DEFAULT_GRID_OPTIONS}
+        defaultColDef={{ comparator: (a, b) => (Number(a ?? 0) - Number(b ?? 0)) || 0 }}
+        {...AG_GRID_PROPS}
         initialState={{ sort: { sortModel: DEFENSE_DEFAULT_SORT } }}
         getRowId={(params) => String(params.data.agent_id)}
       />

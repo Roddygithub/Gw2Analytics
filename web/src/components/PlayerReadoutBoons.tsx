@@ -7,7 +7,125 @@
  * AG Grid Community 34 Client Component for per-player boon
  * output / intake. Renders the 9 boons-aspect columns
  * (``boons_out_rate`` / ``boons_in_rate`` + the 6 fixed boon
- * columns ``stability_out`` / ``alacrity_out`` /\n * ``resistance_out`` / ``aegis_out`` / ``superspeed_out`` /\n * ``stealth_out`` + an ``other_boons_total`` cell that\n * SUM-aggregates the ``other_boons_out: dict[str, int]``\n * per row) PREPENDED with the 5 SHARED_COLUMNS.
+ * columns ``stability_out`` / ``alacrity_out`` /
+ * ``resistance_out`` / ``aegis_out`` / ``superspeed_out`` /
+ * ``stealth_out`` + an ``other_boons_total`` cell that
+ * SUM-aggregates the ``other_boons_out: dict[str, int]``
+ * per row) PREPENDED with the 5 SHARED_COLUMNS.
  *
- * \u00a711 open-question resolution
- * =============\n * The design doc \u00a711 listed "Autres boons" rendering as open\n * (a) dynamic columns, (b) collapsed tooltip cell, (c) top-3\n * other boons. Per thinker's recommendation H + the project's\n * "compact-grid" precedent (SkillsTable omits dynamic columns),\n * we ship option (b) collapsed: a single "Other boons (total)"\n * column whose value is sum-of-dict-values. A future enhancement\n * can swap to option (c) without a wire-shape change (the\n * ``other_boons_out`` dict stays the source-of-truth).\n *\n * Default sort per design doc \u00a713:\n * 1. ``subgroup`` ASC\n * 2. ``boons_out_rate`` DESC (top boon provider of each squad first)\n * 3. ``agent_id`` ASC tie-breaker\n */\nimport { AgGridReact } from "ag-grid-react\";\nimport type { ColDef, SortModelItem } from \"ag-grid-community\";\n\nimport type { PlayerReadoutOut } from \"@/lib/api\";\n\nimport \"./ag-grid-setup\";\nimport {\n  AGENT_ID_TIEBREAKER,\n  DEFAULT_GRID_OPTIONS,\n  SHARED_COLUMNS,\n} from \"./PlayerReadoutBase\";\n\n/**\n * Sum all values in the ``other_boons_out`` dict for one row.\n * Renders zero when the dict is empty or undefined (the pre-\n * phase-6-v2 SCAFFOLD zero-fallback case).\n */\nfunction sumOtherBoons(\n  dict: Record<string, number> | undefined | null,\n): number {\n  if (!dict) return 0;\n  let total = 0;\n  for (const key of Object.keys(dict)) {\n    const value = dict[key];\n    if (typeof value === \"number\" && Number.isFinite(value)) {\n      total += value;\n    }\n  }\n  return total;\n}\n\nconst BOONS_COLUMNS: ColDef<PlayerReadoutOut>[] = [\n  { field: \"boons.boons_out_rate\", headerName: \"Boons out/s\", width: 130 },\n  { field: \"boons.boons_in_rate\", headerName: \"Boons in/s\", width: 130 },\n  { field: \"boons.stability_out\", headerName: \"Stabilit\u00e9\", width: 100 },\n  { field: \"boons.alacrity_out\", headerName: \"C\u00e9l\u00e9rit\u00e9\", width: 100 },\n  { field: \"boons.resistance_out\", headerName: \"R\u00e9sistance\", width: 100 },\n  { field: \"boons.aegis_out\", headerName: \"\u00c9gide\", width: 100 },\n  { field: \"boons.superspeed_out\", headerName: \"Superspeed\", width: 110 },\n  { field: \"boons.stealth_out\", headerName: \"Stealth\", width: 100 },\n  {\n    // Dynamic \"other_boons_total\" cell: SUM of all values in\n    // boons.other_boons_out dict per row. Avoids the dynamic-\n    // column complexity (per \u00a711) while preserving the wire\n    // source-of-truth.\n    headerName: \"Other boons (total)\",\n    width: 160,\n    valueGetter: (params) =>\n      sumOtherBoons(params.data?.boons.other_boons_out),\n  },\n];\n\n// Default sort per design doc \u00a713: subgroup ASC + boons_out_rate\n// DESC + agent_id ASC tiebreaker.\nconst BOONS_DEFAULT_SORT: SortModelItem[] = [\n  { colId: \"subgroup\", sort: \"asc\", sortIndex: 0 },\n  { colId: \"boons.boons_out_rate\", sort: \"desc\", sortIndex: 1 },\n  { colId: \"agent_id\", sort: \"asc\", sortIndex: 2 },\n];\n\nexport function PlayerReadoutBoons({\n  rows,\n}: {\n  rows: PlayerReadoutOut[];\n}) {\n  if (rows.length === 0) {\n    return (\n      <div\n        data-testid=\"player-readout-boons-empty\"\n        style={{\n          padding: \"12px 16px\",\n          border: \"1px solid var(--border)\",\n          borderRadius: 4,\n          color: \"var(--foreground)\",\n          opacity: 0.7,\n          fontFamily: \"var(--font-geist-sans), Arial, Helvetica, sans-serif\",\n        }}\n      >\n        No player rows in this readout.\n      </div>\n    );\n  }\n\n  return (\n    <div\n      data-testid=\"player-readout-boons\"\n      style={{ width: \"100%\" }}\n    >\n      <AgGridReact<PlayerReadoutOut>\n        rowData={rows}\n        columnDefs={[...SHARED_COLUMNS, ...BOONS_COLUMNS, AGENT_ID_TIEBREAKER]}\n        defaultColDef={DEFAULT_GRID_OPTIONS}\n        initialState={{ sort: { sortModel: BOONS_DEFAULT_SORT } }}\n        getRowId={(params) => String(params.data.agent_id)}\n      />\n    </div>\n  );\n}\n
+ * §11 open-question resolution
+ * ============================
+ * The design doc §11 listed "Autres boons" rendering as open
+ * (a) dynamic columns, (b) collapsed tooltip cell, (c) top-3
+ * other boons. Per thinker's recommendation H + the project's
+ * "compact-grid" precedent (SkillsTable omits dynamic columns),
+ * we ship option (b) collapsed: a single "Other boons (total)"
+ * column whose value is sum-of-dict-values. A future enhancement
+ * can swap to option (c) without a wire-shape change (the
+ * ``other_boons_out`` dict stays the source-of-truth).
+ *
+ * Default sort per design doc §13:
+ * 1. ``subgroup`` ASC
+ * 2. ``boons_out_rate`` DESC (top boon provider of each squad first)
+ * 3. ``agent_id`` ASC tie-breaker
+ */
+import { AgGridReact } from "ag-grid-react";
+import type { ColDef, SortModelItem } from "ag-grid-community";
+
+import type { PlayerReadoutOut } from "@/lib/api";
+
+import "./ag-grid-setup";
+import {
+  AGENT_ID_TIEBREAKER,
+  AG_GRID_PROPS,
+  SHARED_COLUMNS,
+} from "./PlayerReadoutBase";
+
+/**
+ * Sum all values in the ``other_boons_out`` dict for one row.
+ * Renders zero when the dict is empty or undefined (the pre-
+ * phase-6-v2 SCAFFOLD zero-fallback case).
+ */
+function sumOtherBoons(
+  dict: Record<string, number> | undefined | null,
+): number {
+  if (!dict) return 0;
+  let total = 0;
+  for (const key of Object.keys(dict)) {
+    const value = dict[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      total += value;
+    }
+  }
+  return total;
+}
+
+const BOONS_COLUMNS: ColDef<PlayerReadoutOut>[] = [
+  { field: "boons.boons_out_rate", headerName: "Boons out/s", width: 130 },
+  { field: "boons.boons_in_rate", headerName: "Boons in/s", width: 130 },
+  { field: "boons.stability_out", headerName: "Stabilité", width: 100 },
+  { field: "boons.alacrity_out", headerName: "Célérité", width: 100 },
+  { field: "boons.resistance_out", headerName: "Résistance", width: 100 },
+  { field: "boons.aegis_out", headerName: "Égide", width: 100 },
+  { field: "boons.superspeed_out", headerName: "Superspeed", width: 110 },
+  { field: "boons.stealth_out", headerName: "Stealth", width: 100 },
+  {
+    // Dynamic "other_boons_total" cell: SUM of all values in
+    // boons.other_boons_out dict per row. Avoids the dynamic-
+    // column complexity (per §11) while preserving the wire
+    // source-of-truth.
+    headerName: "Other boons (total)",
+    width: 160,
+    valueGetter: (params) =>
+      sumOtherBoons(params.data?.boons.other_boons_out),
+  },
+];
+
+// Default sort per design doc §13: subgroup ASC + boons_out_rate
+// DESC + agent_id ASC tiebreaker. Array order = sort priority (AG
+// Grid v34 ``SortModelItem`` does NOT carry ``sortIndex``).
+const BOONS_DEFAULT_SORT: SortModelItem[] = [
+  { colId: "subgroup", sort: "asc" },
+  { colId: "boons.boons_out_rate", sort: "desc" },
+  { colId: "agent_id", sort: "asc" },
+];
+
+export function PlayerReadoutBoons({
+  rows,
+}: {
+  rows: PlayerReadoutOut[];
+}) {
+  if (rows.length === 0) {
+    return (
+      <div
+        data-testid="player-readout-boons-empty"
+        style={{
+          padding: "12px 16px",
+          border: "1px solid var(--border)",
+          borderRadius: 4,
+          color: "var(--foreground)",
+          opacity: 0.7,
+          fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+        }}
+      >
+        No player rows in this readout.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-testid="player-readout-boons"
+      style={{ width: "100%" }}
+    >
+      <AgGridReact<PlayerReadoutOut>
+        rowData={rows}
+        columnDefs={[...SHARED_COLUMNS, ...BOONS_COLUMNS, AGENT_ID_TIEBREAKER]}
+        defaultColDef={{ comparator: (a, b) => (Number(a ?? 0) - Number(b ?? 0)) || 0 }}
+        {...AG_GRID_PROPS}
+        initialState={{ sort: { sortModel: BOONS_DEFAULT_SORT } }}
+        getRowId={(params) => String(params.data.agent_id)}
+      />
+    </div>
+  );
+}

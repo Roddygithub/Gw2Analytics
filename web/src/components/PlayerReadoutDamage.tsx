@@ -15,7 +15,10 @@
  * 1. ``subgroup`` ASC (squad-first grouping)
  * 2. ``dps_total`` DESC (top-damage-dealer of each squad first)
  * 3. ``agent_id`` ASC (final deterministic tie-breaker; the
- *    column is hidden by default but participates in sort)
+ *    column is hidden by default but participates in sort
+ *    priority via array order — AG Grid Community v34
+ *    ``SortModelItem`` omits ``sortIndex`` and interprets array
+ *    order as the sort priority).
  *
  * The component is a thin wrapper around ``AgGridReact`` -- the
  * SCAFFOLD-getter plumbing we wired in Wave 6 PART-2 makes the
@@ -27,14 +30,12 @@
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef, SortModelItem } from "ag-grid-community";
 
-import type {
-  PlayerReadoutOut,
-} from "@/lib/api";
+import type { PlayerReadoutOut } from "@/lib/api";
 
 import "./ag-grid-setup";
 import {
   AGENT_ID_TIEBREAKER,
-  DEFAULT_GRID_OPTIONS,
+  AG_GRID_PROPS,
   SHARED_COLUMNS,
 } from "./PlayerReadoutBase";
 
@@ -53,11 +54,13 @@ const DAMAGE_COLUMNS: ColDef<PlayerReadoutOut>[] = [
 ];
 
 // Default sort per design doc §13: subgroup ASC + dps_total DESC +
-// agent_id ASC tiebreaker.
+// agent_id ASC tiebreaker. Array order is the sort priority (AG Grid
+// Community v34's SortModelItem does NOT carry `sortIndex`; the
+// multi-column sort priority is the array index).
 const DAMAGE_DEFAULT_SORT: SortModelItem[] = [
-  { colId: "subgroup", sort: "asc", sortIndex: 0 },
-  { colId: "damage.dps_total", sort: "desc", sortIndex: 1 },
-  { colId: "agent_id", sort: "asc", sortIndex: 2 },
+  { colId: "subgroup", sort: "asc" },
+  { colId: "damage.dps_total", sort: "desc" },
+  { colId: "agent_id", sort: "asc" },
 ];
 
 export function PlayerReadoutDamage({
@@ -91,7 +94,8 @@ export function PlayerReadoutDamage({
       <AgGridReact<PlayerReadoutOut>
         rowData={rows}
         columnDefs={[...SHARED_COLUMNS, ...DAMAGE_COLUMNS, AGENT_ID_TIEBREAKER]}
-        defaultColDef={DEFAULT_GRID_OPTIONS}
+        defaultColDef={{ comparator: (a, b) => (Number(a ?? 0) - Number(b ?? 0)) || 0 }}
+        {...AG_GRID_PROPS}
         initialState={{ sort: { sortModel: DAMAGE_DEFAULT_SORT } }}
         getRowId={(params) => String(params.data.agent_id)}
       />

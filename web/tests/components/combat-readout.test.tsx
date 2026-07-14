@@ -35,7 +35,11 @@ vi.mock("ag-grid-react", () => ({
   },
 }));
 
-import { PlayerReadoutBase } from "@/components/PlayerReadoutBase";
+import {
+  formatSubgroup,
+  formatRoles,
+  formatCommanderIcon,
+} from "@/components/PlayerReadoutBase";
 import { PlayerReadoutDamage } from "@/components/PlayerReadoutDamage";
 import { PlayerReadoutHeal } from "@/components/PlayerReadoutHeal";
 import { PlayerReadoutBoons } from "@/components/PlayerReadoutBoons";
@@ -101,28 +105,28 @@ function buildRow(extra: Partial<PlayerReadoutOut> = {}): PlayerReadoutOut {
 
 describe("PlayerReadoutBase formatters", () => {
   it("formatSubgroup maps int to 'Sub N' label", () => {
-    expect(PlayerReadoutBase.formatSubgroup(1)).toBe("Sub 1");
-    expect(PlayerReadoutBase.formatSubgroup(2)).toBe("Sub 2");
-    expect(PlayerReadoutBase.formatSubgroup(0)).toBe("(no squad)");
+    expect(formatSubgroup(1)).toBe("Sub 1");
+    expect(formatSubgroup(2)).toBe("Sub 2");
+    expect(formatSubgroup(0)).toBe("(no squad)");
   });
 
   it("formatSubgroup tolerates null + string shapes (subgroup type drift)", () => {
-    expect(PlayerReadoutBase.formatSubgroup(null)).toBe("(no squad)");
-    expect(PlayerReadoutBase.formatSubgroup(undefined)).toBe("(no squad)");
-    expect(PlayerReadoutBase.formatSubgroup("Sub 1")).toBe("Sub 1");
-    expect(PlayerReadoutBase.formatSubgroup("")).toBe("(no squad)");
+    expect(formatSubgroup(null)).toBe("(no squad)");
+    expect(formatSubgroup(undefined)).toBe("(no squad)");
+    expect(formatSubgroup("Sub 1")).toBe("Sub 1");
+    expect(formatSubgroup("")).toBe("(no squad)");
   });
 
   it("formatRoles renders multi-role as slash-delimited chip list", () => {
-    expect(PlayerReadoutBase.formatRoles(["DPS", "STRIP"])).toBe("DPS/STRIP");
-    expect(PlayerReadoutBase.formatRoles(["HEAL"])).toBe("HEAL");
-    expect(PlayerReadoutBase.formatRoles([])).toBe("");
-    expect(PlayerReadoutBase.formatRoles(null)).toBe("");
+    expect(formatRoles(["DPS", "STRIP"])).toBe("DPS/STRIP");
+    expect(formatRoles(["HEAL"])).toBe("HEAL");
+    expect(formatRoles([])).toBe("");
+    expect(formatRoles(null)).toBe("");
   });
 
   it("formatCommanderIcon returns crown for true commander", () => {
-    expect(PlayerReadoutBase.formatCommanderIcon(true)).toBe("★");
-    expect(PlayerReadoutBase.formatCommanderIcon(false)).toBe("");
+    expect(formatCommanderIcon(true)).toBe("★");
+    expect(formatCommanderIcon(false)).toBe("");
   });
 });
 
@@ -147,9 +151,9 @@ describe("PlayerReadoutDamage", () => {
     expect(props.rowData).toBe(1);
     // Default sort per design doc §13.
     expect(props.sortModel).toEqual([
-      { colId: "subgroup", sort: "asc", sortIndex: 0 },
-      { colId: "damage.dps_total", sort: "desc", sortIndex: 1 },
-      { colId: "agent_id", sort: "asc", sortIndex: 2 },
+      { colId: "subgroup", sort: "asc" },
+      { colId: "damage.dps_total", sort: "desc" },
+      { colId: "agent_id", sort: "asc" }
     ]);
   });
 });
@@ -172,9 +176,9 @@ describe("PlayerReadoutHeal", () => {
     const props = JSON.parse(mock!.getAttribute("data-props") ?? "{}");
     expect(props.columnDefs).toBe(12);
     expect(props.sortModel).toEqual([
-      { colId: "subgroup", sort: "asc", sortIndex: 0 },
-      { colId: "heal.hps", sort: "desc", sortIndex: 1 },
-      { colId: "agent_id", sort: "asc", sortIndex: 2 },
+      { colId: "subgroup", sort: "asc" },
+      { colId: "heal.hps", sort: "desc" },
+      { colId: "agent_id", sort: "asc" }
     ]);
   });
 });
@@ -201,9 +205,9 @@ describe("PlayerReadoutBoons", () => {
     // 5 + 9 + 1 = 15.
     expect(props.columnDefs).toBe(15);
     expect(props.sortModel).toEqual([
-      { colId: "subgroup", sort: "asc", sortIndex: 0 },
-      { colId: "boons.boons_out_rate", sort: "desc", sortIndex: 1 },
-      { colId: "agent_id", sort: "asc", sortIndex: 2 },
+      { colId: "subgroup", sort: "asc" },
+      { colId: "boons.boons_out_rate", sort: "desc" },
+      { colId: "agent_id", sort: "asc" }
     ]);
   });
 });
@@ -227,9 +231,9 @@ describe("PlayerReadoutDefense", () => {
     // 5 SHARED + 8 defense + 1 tiebreaker = 14.
     expect(props.columnDefs).toBe(14);
     expect(props.sortModel).toEqual([
-      { colId: "subgroup", sort: "asc", sortIndex: 0 },
-      { colId: "defense.damage_taken", sort: "desc", sortIndex: 1 },
-      { colId: "agent_id", sort: "asc", sortIndex: 2 },
+      { colId: "subgroup", sort: "asc" },
+      { colId: "defense.damage_taken", sort: "desc" },
+      { colId: "agent_id", sort: "asc" }
     ]);
   });
 });

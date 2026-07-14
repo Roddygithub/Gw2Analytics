@@ -29,7 +29,7 @@ import type { PlayerReadoutOut } from "@/lib/api";
 import "./ag-grid-setup";
 import {
   AGENT_ID_TIEBREAKER,
-  DEFAULT_GRID_OPTIONS,
+  AG_GRID_PROPS,
   SHARED_COLUMNS,
 } from "./PlayerReadoutBase";
 
@@ -42,12 +42,13 @@ const HEAL_COLUMNS: ColDef<PlayerReadoutOut>[] = [
   { field: "heal.stun_breaks", headerName: "Breakstunt", width: 110 },
 ];
 
-// Default sort per design doc §13: subgroup ASC + hps DESC +
-// agent_id ASC tiebreaker.
+// Default sort per design doc §13: subgroup ASC + hps DESC + agent_id
+// ASC tiebreaker. Array order = sort priority (AG Grid v34
+// ``SortModelItem`` does NOT carry ``sortIndex``).
 const HEAL_DEFAULT_SORT: SortModelItem[] = [
-  { colId: "subgroup", sort: "asc", sortIndex: 0 },
-  { colId: "heal.hps", sort: "desc", sortIndex: 1 },
-  { colId: "agent_id", sort: "asc", sortIndex: 2 },
+  { colId: "subgroup", sort: "asc" },
+  { colId: "heal.hps", sort: "desc" },
+  { colId: "agent_id", sort: "asc" },
 ];
 
 export function PlayerReadoutHeal({ rows }: { rows: PlayerReadoutOut[] }) {
@@ -77,7 +78,8 @@ export function PlayerReadoutHeal({ rows }: { rows: PlayerReadoutOut[] }) {
       <AgGridReact<PlayerReadoutOut>
         rowData={rows}
         columnDefs={[...SHARED_COLUMNS, ...HEAL_COLUMNS, AGENT_ID_TIEBREAKER]}
-        defaultColDef={DEFAULT_GRID_OPTIONS}
+        defaultColDef={{ comparator: (a, b) => (Number(a ?? 0) - Number(b ?? 0)) || 0 }}
+        {...AG_GRID_PROPS}
         initialState={{ sort: { sortModel: HEAL_DEFAULT_SORT } }}
         getRowId={(params) => String(params.data.agent_id)}
       />

@@ -1,6 +1,7 @@
 packages: []
 allowBuilds:
   esbuild: false
+  sharp: set this to true or false
 ignoreScripts: false
 verify-deps-before-run: true
 

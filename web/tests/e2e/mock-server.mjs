@@ -247,6 +247,237 @@ const server = createServer(async (req, res) => {
       );
     }
 
+    // Combat readout (F17, per docs/v0.9.0-combat-readout-design.md
+    // §5.1) -- the unified endpoint returns the bound payload for
+    // all 4 per-player tables (Damage / Heal / Boons / Defense).
+    // SCAFFOLD-WIRE-AWARE STUB: columns populated from real
+    // events carry realistic numbers; SCAFFOLD-zero columns
+    // (dps_power, dps_condi, barrier_total, barrier_ps,
+    // time_downed_ms, dodges, blocks, interrupts) leave the
+    // documented pre-Phase-6-v2 wire zeros so the empty-state and
+    // the SCAFFOLD-zero contract are visible on the analyst's
+    // screen until Phase 6 v2 lands the parser-side side-tables.
+    // The 4 player rows mirror the canonical roster used by the
+    // bare ``/api/v1/fights/:id`` stub (top-of-fragment by squad)
+    // so a tab-toggle between Overview + Readout shows a
+    // consistent squad composition. The response matches the
+    // :class:`FightReadoutOut` Pydantic shape verbatim.
+    const readoutMatch = path.match(
+      /^\/api\/v1\/fights\/([^/]+)\/readout$/,
+    );
+    if (readoutMatch) {
+      const fightId = decodeURIComponent(readoutMatch[1]);
+      if (!KNOWN_FIGHTS.has(fightId)) {
+        return jsonResponse(
+          res,
+          404,
+          JSON.stringify({ error: "fight not found" }),
+        );
+      }
+      return jsonResponse(
+        res,
+        200,
+        JSON.stringify({
+          fight_id: fightId,
+          duration_s: 125.5,
+          players: [
+            {
+              agent_id: 1234,
+              subgroup: 1,
+              name: "Fighty McFight",
+              account_name: "TestAccount.1234",
+              profession: "Warrior",
+              elite_spec: "Berserker",
+              is_commander: true,
+              roles: ["DPS", "STRIP"],
+              damage: {
+                dps_total: 2450,
+                dps_power: 0,
+                dps_condi: 0,
+                strips: 18,
+                cc_applied: 312,
+                down_contribution_dps: 850,
+                kills: 2,
+              },
+              heal: {
+                heal_total: 180_000,
+                hps: 1440,
+                barrier_total: 0,
+                barrier_ps: 0,
+                cleanses: 4,
+                stun_breaks: 1,
+              },
+              boons: {
+                boons_out_rate: 0.6,
+                boons_in_rate: 12.4,
+                stability_out: 0,
+                alacrity_out: 0,
+                resistance_out: 8,
+                aegis_out: 12,
+                superspeed_out: 0,
+                stealth_out: 0,
+                other_boons_out: { might: 1240, fury: 84 },
+              },
+              defense: {
+                damage_taken: 58_300,
+                cc_taken: 4,
+                deaths: 0,
+                time_downed_ms: 0,
+                dodges: 0,
+                blocks: 0,
+                interrupts: 0,
+                barrier_absorbed: 0,
+              },
+            },
+            {
+              agent_id: 9999,
+              subgroup: 1,
+              name: "Slice McSlice",
+              account_name: "TestAccount.9999",
+              profession: "Thief",
+              elite_spec: "Daredevil",
+              is_commander: false,
+              roles: ["DPS"],
+              damage: {
+                dps_total: 3120,
+                dps_power: 0,
+                dps_condi: 0,
+                strips: 22,
+                cc_applied: 420,
+                down_contribution_dps: 1100,
+                kills: 4,
+              },
+              heal: {
+                heal_total: 25_000,
+                hps: 200,
+                barrier_total: 0,
+                barrier_ps: 0,
+                cleanses: 0,
+                stun_breaks: 0,
+              },
+              boons: {
+                boons_out_rate: 0.2,
+                boons_in_rate: 14.1,
+                stability_out: 0,
+                alacrity_out: 0,
+                resistance_out: 4,
+                aegis_out: 2,
+                superspeed_out: 220,
+                stealth_out: 240,
+                other_boons_out: { might: 950, fury: 60 },
+              },
+              defense: {
+                damage_taken: 47_200,
+                cc_taken: 6,
+                deaths: 1,
+                time_downed_ms: 0,
+                dodges: 0,
+                blocks: 0,
+                interrupts: 0,
+                barrier_absorbed: 0,
+              },
+            },
+            {
+              agent_id: 4040,
+              subgroup: 2,
+              name: "Bloomy McBloom",
+              account_name: "TestAccount.4040",
+              profession: "Necromancer",
+              elite_spec: "Reaper",
+              is_commander: false,
+              roles: ["DPS"],
+              damage: {
+                dps_total: 2210,
+                dps_power: 0,
+                dps_condi: 0,
+                strips: 12,
+                cc_applied: 180,
+                down_contribution_dps: 0,
+                kills: 1,
+              },
+              heal: {
+                heal_total: 60_000,
+                hps: 480,
+                barrier_total: 0,
+                barrier_ps: 0,
+                cleanses: 0,
+                stun_breaks: 0,
+              },
+              boons: {
+                boons_out_rate: 1.4,
+                boons_in_rate: 6.0,
+                stability_out: 12,
+                alacrity_out: 0,
+                resistance_out: 6,
+                aegis_out: 1,
+                superspeed_out: 0,
+                stealth_out: 0,
+                other_boons_out: { might: 720, fury: 90, "soul reaper": 8 },
+              },
+              defense: {
+                damage_taken: 38_500,
+                cc_taken: 3,
+                deaths: 0,
+                time_downed_ms: 0,
+                dodges: 0,
+                blocks: 0,
+                interrupts: 0,
+                barrier_absorbed: 0,
+              },
+            },
+            {
+              agent_id: 5678,
+              subgroup: 2,
+              name: "Heal Bot",
+              account_name: "TestAccount.5678",
+              profession: "Guardian",
+              elite_spec: "Firebrand",
+              is_commander: false,
+              roles: ["HEAL", "SUPPORT", "STRIP"],
+              damage: {
+                dps_total: 850,
+                dps_power: 0,
+                dps_condi: 0,
+                strips: 8,
+                cc_applied: 205,
+                down_contribution_dps: 120,
+                kills: 0,
+              },
+              heal: {
+                heal_total: 1_200_000,
+                hps: 9600,
+                barrier_total: 0,
+                barrier_ps: 0,
+                cleanses: 125,
+                stun_breaks: 8,
+              },
+              boons: {
+                boons_out_rate: 4.2,
+                boons_in_rate: 18.7,
+                stability_out: 480,
+                alacrity_out: 24,
+                resistance_out: 18,
+                aegis_out: 86,
+                superspeed_out: 0,
+                stealth_out: 0,
+                other_boons_out: { might: 560, fury: 120, quickness: 200 },
+              },
+              defense: {
+                damage_taken: 21_000,
+                cc_taken: 2,
+                deaths: 0,
+                time_downed_ms: 0,
+                dodges: 0,
+                blocks: 0,
+                interrupts: 0,
+                barrier_absorbed: 0,
+              },
+            },
+          ],
+        }),
+      );
+    }
+
     // Tour 4 v0.10.13 plan 044: per-player skill roll-up +
     // loadout attribution on ``/fights/[id]?account=...``. Two
     // NEW endpoints:
