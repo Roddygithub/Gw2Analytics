@@ -78,6 +78,11 @@ function isStringEntry(entry: [string, unknown]): entry is [string, string] {
  * are still inline-literal). Without the identifier-OR-value matching,
  * the test would fail the moment a sweep completes (the literal value
  * disappears from source in favour of the imported identifier).
+ *
+ * v0.10.22-night-mode: KNOWN_CONSTANTS captures every string export as
+ * {name, value} so the linkage invariant can assert identifier-OR-value
+ * matching. The single-module form below will follow the sub-module
+ * split as a ruff-surface-level refactor.
  */
 const KNOWN_CONSTANTS: Array<{ name: string; value: string }> = Object.entries(
   errorMessages,
@@ -156,23 +161,70 @@ describe("copy-module centraliSation invariant", () => {
     // Inline UI patterns to scan. Each pattern's FIRST capture group is the
     // candidate string.
     //
-    // NOTE: The `<button>TEXT</button>` pattern is INTENTIONALLY OMITTED.
-    // A naive implementation regex would fail when a button's opening tag
-    // spans multiple lines AND has an `onClick={() => ...}` arrow function
-    // attribute -- the `=>` operator is misinterpreted as the opening tag's
-    // closing `>`, causing the regex to slurp attribute content as if it
-    // were button text. The aria-label + placeholder patterns are
-    // sufficient for the analyst-facing-string centraliSation invariant
-    // (button-text is captured indirectly by the click-handler labels on
-    // the centraliSed buttons in the curated scope).
+    // v0.10.22-night-mode expansion: 3 new patterns appended across the
+    // existing aria-label + placeholder workhorses as forward-coverage for
+    // common UI affordances that didn't exist when the 22-export
+    // kitchen-sink landed:
+    //   - title="TEXT" -- browser-tooltip text (single-line attr).
+    //   - alt="TEXT"   -- image alt-text accessibility affordance.
+    //   - <button>TEXT</button> (single-line, no attrs) -- the SAFER scoped
+    //     pattern that locks down the most common inline-text-only button
+    //     case while avoiding the multi-line `[^>]*` awakens-the-slurp
+    //     bug documented in commit bd7c5ce's cycle history.
+    //
+    // The aria-label + placeholder patterns remain the workhorses for the
+    // currently-curated scope (each onClick button pairs with an aria-label
+    // attr that captures the analyst-facing-string centralisation).
     const INLINE_PATTERNS: Array<{ pattern: RegExp; source: string }> = [
       {
-        source: "aria-label=\\\"TEXT\\\"",
+        source: "aria-label=\"TEXT\"",
         pattern: /aria-label="([^"]{2,})"/g,
       },
       {
-        source: "placeholder=\\\"TEXT\\\"",
+        // Browser-tooltip text. Single-line attribute (no multi-line
+        // opening-tag slurp bug like the <button> pattern below).
+        // Forward-coverage for any future hover-tooltip centralisation.
+        source: "title=\"TEXT\"",
+        pattern: /title="([^"]{2,})"/g,
+      },
+      {
+        // Image alt-text accessibility affordance. Single-line
+        // attribute. Our codebase has zero <img> in the curated scope
+        // today, so current match count is 0 -- this is forward-
+        // coverage for any future imagery-aria-label centralisation.
+        source: "alt=\"TEXT\"",
+        pattern: /alt="([^"]{2,})"/g,
+      },
+      {
+        source: "placeholder=\"TEXT\"",
         pattern: /placeholder="([^"]{2,})"/g,
+      },
+      {
+        // SAFER scoped <button> pattern: requires the opening tag to be
+        // the literal `<button>` with NO attributes on the opening tag.
+        // The strict scope eliminates the multi-line `[^>]*` awakens-the-
+        // slurp bug (the prior naive pattern matched the FIRST `>` it
+        // found, which lands inside `=>` in `onClick={() => ...}` arrow-
+        // function attributes; the regex then treats subsequent attribute
+        // content as button text, producing false positives in the
+        // multi-line structure that this sanctioned pattern explicitly
+        // excludes).
+        //
+        // Multi-line button structures with attrs + arrow-fns are
+        // expected to centralise via `aria-label` (covered by the first
+        // pattern) or via the explicit constant identifier (covered by
+        // the linkage invariant). Body must start with an uppercase
+        // letter (UI labels are sentence-cased in this project) and be
+        // <=40 chars.
+        //
+        // Note: ellipsis (U+2026 / `…`) IS in the allowed character class
+        // for forward-compatibility with future `<button>Loading…</button>`
+        // literals. The one current U+2026 user, the `Loading…` token, is
+        // imported by identifier (`PLAYER_TIMELINE_LOADING`) and never
+        // inlined as a literal -- but the class is widened so a future
+        // literal-ellipsis button is covered by the scanner too.
+        source: "<button>TEXT</button> (single-line, no attrs)",
+        pattern: /<button>\s*([A-Z][A-Za-z0-9 ,.!?:'?\u2026-]{0,40})\s*<\/button>/g,
       },
     ];
 
@@ -205,9 +257,11 @@ describe("copy-module centraliSation invariant", () => {
       }
     }
 
-    // Strict assertion: 0 residues. The surface-scanner now scans
-    // aria-label + placeholder patterns (button-text pattern is
-    // intentionally omitted — see the INLINE_PATTERNS comment).
+    // Strict assertion: 0 residues. The surface-scanner now scans 5
+    // forward-coverage patterns: aria-label + placeholder (workhorses)
+    // + title + alt + SAFER <button> (forward-coverage expansions).
+    // Multi-line <button onClick={() => ...}>TEXT</button> structures
+    // remain uncovered by design -- see the SAFER pattern comment above.
     expect(
       residues,
       `Surface-scanner found inline UI strings outside @/lib/copy/error-messages:\n${residues
