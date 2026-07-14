@@ -25,6 +25,7 @@ import * as errorMessages from "@/lib/copy/error-messages";
 import * as fightsGrid from "@/lib/copy/fights-grid";
 import * as skillUsageTable from "@/lib/copy/skill-usage-table";
 import * as playerTimeline from "@/lib/copy/player-timeline";
+import * as crossAccountTimeline from "@/lib/copy/cross-account-timeline";
 
 /**
  * Walk the web/src tree (excluding node_modules + tests) and return every
@@ -93,6 +94,7 @@ const SUBMODULES = [
   fightsGrid,
   skillUsageTable,
   playerTimeline,
+  crossAccountTimeline,
 ] as const;
 
 const KNOWN_CONSTANTS: Array<{ name: string; value: string }> = SUBMODULES.flatMap(
