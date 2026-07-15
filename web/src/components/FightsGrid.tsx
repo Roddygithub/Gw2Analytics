@@ -25,9 +25,6 @@ import {
   type ColDef,
   type ICellRendererParams,
 } from "ag-grid-community";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
-
 import type { FightRow } from "@/lib/api";
 import {
   FIGHTS_GRID_COLUMN_AGENTS,
@@ -44,9 +41,7 @@ import {
 // ``/fights/[id]`` page's TargetRollupsGrid to ship without
 // re-registering the module on its own -- the module graph
 // guarantees a single evaluation of the import side-effect.
-import "./ag-grid-setup";
-
-const GRID_THEME = "ag-theme-quartz-dark";
+import { appGridTheme } from "./ag-grid-setup";
 
 export function FightsGrid({ rows }: { rows: FightRow[] }) {
   const columnDefs = useMemo<ColDef<FightRow>[]>(
@@ -123,16 +118,15 @@ export function FightsGrid({ rows }: { rows: FightRow[] }) {
   );
 
   return (
-    <div
-      className={GRID_THEME}
-      style={{ height: 600, width: "100%" }}
-    >
+    <div style={{ height: 600, width: "100%" }}>
       <AgGridReact<FightRow>
+        theme={appGridTheme}
         rowData={rows}
         columnDefs={columnDefs}
         defaultColDef={defaultColDef}
         pagination
         paginationPageSize={25}
+        paginationPageSizeSelector={false}
         animateRows
       />
     </div>

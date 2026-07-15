@@ -12,11 +12,31 @@
  * wouldn't have been registered. Centralising the registration
  * here removes that ordering hazard.
  *
- * NOTE: keep this file SIDE-EFFECT ONLY. No exported symbols --
- * any consumer that needs an AG Grid type should import from
- * ``ag-grid-community`` directly so the import is type-only and
- * tree-shakable.
+ * NOTE: this file registers AG Grid modules as a side effect AND
+ * exports the centralized ``appGridTheme`` used by every grid
+ * component. Consumers should import ``appGridTheme`` from here so
+ * the theme object is evaluated once and reused across the module
+ * graph.
  */
-import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
+import { AllCommunityModule, ModuleRegistry, themeQuartz } from "ag-grid-community";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
+
+/**
+ * Centralised AG Grid 34+ theme using the new Theming API.
+ *
+ * The legacy ``ag-theme-quartz-dark`` CSS class + the
+ * ``ag-grid-community/styles/ag-theme-quartz.css`` import are
+ * replaced by a single ``themeQuartz.withParams`` object passed
+ * to each ``<AgGridReact>`` via the ``theme`` prop. This removes
+ * the console warning about mixing legacy CSS with the Theming
+ * API and keeps the grid's colour tokens in sync with the rest of
+ * the application.
+ */
+export const appGridTheme = themeQuartz.withParams({
+  backgroundColor: "#050914",
+  foregroundColor: "#ffffff",
+  accentColor: "#ff8c2a",
+  chromeBackgroundColor: "#161b22",
+  borderColor: "#1f2733",
+});

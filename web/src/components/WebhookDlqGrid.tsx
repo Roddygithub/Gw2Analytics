@@ -4,16 +4,11 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AgGridReact } from "ag-grid-react";
 import { type ColDef, type ICellRendererParams } from "ag-grid-community";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
-
 import type { WebhookDlqRow } from "@/lib/api";
 import { replayDlq } from "@/lib/api";
 
-import "./ag-grid-setup";
+import { appGridTheme } from "./ag-grid-setup";
 import styles from "./WebhookDlqGrid.module.css";
-
-const GRID_THEME = "ag-theme-quartz-dark";
 
 function formatDate(iso: string | null): string {
   if (!iso) {
@@ -117,13 +112,15 @@ export function WebhookDlqGrid({ rows }: { rows: WebhookDlqRow[] }) {
   }
 
   return (
-    <div className={GRID_THEME} style={{ height: 600, width: "100%" }}>
+    <div style={{ height: 600, width: "100%" }}>
       <AgGridReact<WebhookDlqRow>
+        theme={appGridTheme}
         rowData={rows}
         columnDefs={columnDefs}
         defaultColDef={defaultColDef}
         pagination
         paginationPageSize={25}
+        paginationPageSizeSelector={false}
         animateRows
       />
     </div>

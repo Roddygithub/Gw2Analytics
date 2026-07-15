@@ -33,15 +33,11 @@ import {
   type ValueFormatterParams,
   type ICellRendererParams,
 } from "ag-grid-community";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
-
-import "./ag-grid-setup";
+import { appGridTheme } from "./ag-grid-setup";
 import type { PlayerListRow } from "@/lib/api";
 import type { CsvColumn } from "@/lib/csv";
 import { CsvDownloadButton } from "./CsvDownloadButton";
 
-const GRID_THEME = "ag-theme-quartz-dark";
 const GRID_HEIGHT_PX = 480;
 
 /**
@@ -171,16 +167,15 @@ export function PlayersGrid({
           <CsvDownloadButton rows={rows} columns={CSV_COLUMNS} filename={filename} />
         </div>
       ) : null}
-      <div
-        className={GRID_THEME}
-        style={{ height: GRID_HEIGHT_PX, width: "100%" }}
-      >
+      <div style={{ height: GRID_HEIGHT_PX, width: "100%" }}>
         <AgGridReact<PlayerListRow>
+          theme={appGridTheme}
           rowData={rows}
           columnDefs={colDefs}
           defaultColDef={defaultColDef}
           pagination
           paginationPageSize={25}
+          paginationPageSizeSelector={false}
           animateRows
         />
       </div>

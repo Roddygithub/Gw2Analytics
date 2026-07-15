@@ -10,6 +10,7 @@
     "test": "vitest",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:ci": "CI=true playwright test --project=chromium",
     "test:e2e:headed": "playwright test --headed",
     "screenshots": "node scripts/screenshots.mjs",
     "generate:api": "uv run python scripts/dump_openapi.py > openapi.json && pnpm exec openapi-typescript openapi.json -o ./src/lib/api/schema.d.ts && rm openapi.json",

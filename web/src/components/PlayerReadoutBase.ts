@@ -31,6 +31,7 @@ import type {
 } from "ag-grid-community";
 
 import type { PlayerReadoutOut } from "@/lib/api";
+import { appGridTheme } from "./ag-grid-setup";
 
 /**
  * Format the warp-reported integer subgroup (``1`` -> ``"Sub 1"``,
@@ -162,11 +163,10 @@ export const AGENT_ID_TIEBREAKER: ColDef<PlayerReadoutOut> = {
  * the /fights/[id] page.
  */
 export const AG_GRID_PROPS = {
-  // "legacy" is the built-in theme shipped with
-  // ag-grid-community 34. AG Grid resolves the named theme at
-  // render time so this is hot-reload safe (theme swap doesn't
-  // trigger a per-row re-render).
-  theme: "legacy" as const,
+  // Centralised dark Quartz theme from ./ag-grid-setup.
+  // Using the theme object removes the legacy CSS warning and
+  // keeps the grid's colour tokens in sync with the app.
+  theme: appGridTheme,
   // Single-row selection (clicking a row selects it for the
   // future drill-in detail panel; v0.10.23 SCAFFOLD doesn't
   // wire a drill-in yet).

@@ -34,7 +34,6 @@ import type { ColDef, SortModelItem } from "ag-grid-community";
 
 import type { PlayerReadoutOut } from "@/lib/api";
 
-import "./ag-grid-setup";
 import {
   AGENT_ID_TIEBREAKER,
   AG_GRID_PROPS,

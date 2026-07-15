@@ -45,13 +45,9 @@ import {
   type ColDef,
   type ValueFormatterParams,
 } from "ag-grid-community";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
-
-import "./ag-grid-setup";
+import { appGridTheme } from "./ag-grid-setup";
 import { CsvDownloadButton } from "./CsvDownloadButton";
 
-const GRID_THEME = "ag-theme-quartz-dark";
 const GRID_HEIGHT_PX = 320;
 
 export interface TargetRollupColumn<TRow> {
@@ -166,11 +162,9 @@ export function TargetRollupsGrid<TRow extends { target_agent_id: number }>({
           <CsvDownloadButton rows={rows} columns={columns} filename={filename} />
         </div>
       ) : null}
-      <div
-        className={GRID_THEME}
-        style={{ height: GRID_HEIGHT_PX, width: "100%" }}
-      >
+      <div style={{ height: GRID_HEIGHT_PX, width: "100%" }}>
         <AgGridReact<TRow>
+          theme={appGridTheme}
           rowData={rows}
           columnDefs={colDefs}
           defaultColDef={defaultColDef}
