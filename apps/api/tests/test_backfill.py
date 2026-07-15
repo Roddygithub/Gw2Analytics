@@ -387,4 +387,3 @@ def test_backfill_skips_npc_only_fights() -> None:
         assert rows_after == []
     finally:
         session.close()
-
