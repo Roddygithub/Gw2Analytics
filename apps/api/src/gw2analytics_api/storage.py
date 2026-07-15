@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 from functools import cache
+from urllib.parse import urlparse
 
 from minio import Minio
 from minio.error import S3Error
@@ -16,15 +17,36 @@ from minio.error import S3Error
 from gw2analytics_api.config import get_settings
 
 
+def _parse_minio_endpoint(endpoint: str, default_secure: bool) -> tuple[str, bool]:
+    """Extract ``host:port`` and ``secure`` flag from an S3 endpoint string.
+
+    The MinIO client expects ``endpoint`` as ``host:port`` without scheme
+    or path. ``S3_ENDPOINT`` may be supplied as a full URL (e.g.
+    ``http://localhost:9000`` from docker-compose / .env.example), or as
+    a bare ``host:port``. When a scheme is present, the netloc is used and
+    ``secure`` is derived from the scheme; otherwise the raw string is kept
+    and ``default_secure`` is returned.
+    """
+    # ``urlparse("localhost:9000")`` misidentifies ``localhost`` as the
+    # scheme and ``9000`` as the path. Only treat the value as a URL when
+    # it explicitly starts with a scheme.
+    if endpoint.startswith(("http://", "https://")):
+        parsed = urlparse(endpoint)
+        return parsed.netloc, parsed.scheme == "https"
+    # Bare ``host:port`` form (no scheme). Keep the original string.
+    return endpoint, default_secure
+
+
 @cache
 def get_minio() -> Minio:
     """Return the process-wide MinIO client."""
     s = get_settings()
+    endpoint, secure = _parse_minio_endpoint(s.minio_endpoint, s.minio_secure)
     return Minio(
-        s.minio_endpoint,
+        endpoint,
         access_key=s.minio_access_key,
         secret_key=s.minio_secret_key,
-        secure=s.minio_secure,
+        secure=secure,
     )
 
 

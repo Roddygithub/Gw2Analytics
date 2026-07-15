@@ -97,3 +97,22 @@ dev-stack-status: ## Show API + web status
 	@echo
 	@echo "=== web (Next.js :3000) ==="
 	@./scripts/dev-web-bg.sh --status
+
+# ----------------------------------------------------------------------------
+# CI helpers
+# ----------------------------------------------------------------------------
+
+.PHONY: ci-status
+ci-status: ## Show the latest GitHub Actions CI run status
+	@gh run list --limit 5 2>/dev/null || echo "Install and authenticate the GitHub CLI (gh) to view CI status: https://cli.github.com/"
+
+.PHONY: ci-open
+ci-open: ## Open the GitHub Actions CI page in the browser
+	@remote=$$(git remote get-url origin 2>/dev/null | sed -E 's/.*github\.com[:\/]([^/]+\/[^/]+)(\.git)?$$/\1/'); \
+	if [ -z "$$remote" ]; then \
+	  echo "Could not derive GitHub repo from git remote 'origin'."; \
+	  exit 1; \
+	fi; \
+	url="https://github.com/$$remote/actions/workflows/ci.yml"; \
+	echo "Opening $$url"; \
+	xdg-open "$$url" 2>/dev/null || open "$$url" 2>/dev/null || echo "Open the URL manually in your browser: $$url"
