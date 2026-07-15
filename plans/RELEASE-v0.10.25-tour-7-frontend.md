@@ -32,6 +32,15 @@ The Tour 6 v0.10.24-pre F17 plan status note flagged W.5 (`<PlayerReadoutBoons>`
 - **If W.5.A is Option (b)**: W.5 is DONE (option b is the canonical §11 fallback per the F17 §4 risk #3); the cycle continues.
 - **If W.5.A is Option (c)**: the cycle ships Option (c) as W.5 extension -- bounded to a single component-level commit introducing the `formatBoonsTopN(dict) -> \`Boon1: count / Boon2: count / Boon3: count\`` cell renderer. Option (c) is a smaller scope than the F17 §2 XL rating assumes (the F17 §2 XL rating covers Option (a); Option (c) is M-effort).
 - **If W.5.A is None of the above (pre-design-doc primitive)**: the audit pass is expanded to write the canonical helper; cycle budget absorbs this expansion.
+| Option | F17 §2 effort rating | Bin §2 scope-rating refinement | LoC-budget per §2 sub-block |
+|---|---|---|---|
+| (a) dynamic columns expanding per Aanas payload | XL (per F17 §2 W.5 verbatim) | XL unchanged | ~2500 LoC |
+| (b) collapsed tooltip cell summing the dict | XL (per F17 §2 W.5 verbatim) | M-effort refinement -- this is the §11 fallback pattern (F17 §4 risk #3) | ~75 LoC |
+| (c) top-3 other boons ranked cells | XL (per F17 §2 W.5 verbatim) | M-effort refinement -- the `formatBoonsTopN` helper is bounded | ~150 LoC |
+| None-of-the-above (pre-design-doc primitive) | XL (per F17 §2 W.5 verbatim) | bounded expansion -- needs landing | ~150 LoC (with design-doc companion update) |
+
+The 4-option matrix above REPLACES the original F17 §2 single-XL rating for W.5 with option-specific scope lids. The cycle budget absorbs each option per its refinement; the original XL rating is overstated for options (b) / (c) / (None-of-the-above) which are bounded format-helper implementations rather than the per-Column AG Grid dynamic expansion that is the canonical XL scope.
+
 
 The audit pass is a single read + comment-only commit. The cycle planning budget absorbs the W.5.A pass + (Option (c) | None of the above) extension as a bounded M-effort scope lift.
 
