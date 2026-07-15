@@ -80,8 +80,11 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     await expect(
       page.getByRole("heading", { name: "Fight unknown-fight-999" }),
     ).toBeVisible();
+    // fetchCached throws a plain Error with the shape
+    // ``<status>: <json body>`` rather than an typed ApiError,
+    // so the rendered text is the raw 404 body.
     await expect(
-      page.getByText(/Upstream error: 404: .*fight not found/),
+      page.getByText(/404: .*fight not found/),
     ).toBeVisible();
   });
 

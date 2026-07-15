@@ -24,6 +24,7 @@
  */
 
 import { expect, test } from "@playwright/test";
+import { CROSS_ACCOUNT_TIMELINE_CHIPS_ARIA_LABEL } from "@/lib/copy/cross-account-timeline";
 
 test.describe("/players/compare (v0.10.0 plan 032)", () => {
   test("renders the cross-account chart with 2 accounts", async ({ page }) => {
@@ -36,8 +37,13 @@ test.describe("/players/compare (v0.10.0 plan 032)", () => {
       page.getByRole("heading", { name: "Compare accounts" }),
     ).toBeVisible();
     // The two account chips (last-seen char-name, falling back to account_name).
-    await expect(page.getByText("Test Char")).toBeVisible();
-    await expect(page.getByText("Other Char")).toBeVisible();
+    // Scope to the chip list so the chart's axis/tooltip text
+    // doesn't collide with the assertion.
+    const chipList = page.locator(
+      `[role="list"][aria-label="${CROSS_ACCOUNT_TIMELINE_CHIPS_ARIA_LABEL}"]`,
+    );
+    await expect(chipList.getByText("Test Char")).toBeVisible();
+    await expect(chipList.getByText("Other Char")).toBeVisible();
     // The chart caption should reference the default metric (Damage).
     await expect(page.getByText(/Damage trend/)).toBeVisible();
     // The chart SVG must be present.

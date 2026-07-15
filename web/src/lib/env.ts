@@ -47,7 +47,16 @@ const RAW_API_BASE_URL = process.env.API_BASE_URL?.trim();
  */
 function _resolveApiBaseUrl(): string {
   const raw = RAW_API_BASE_URL;
-  if (process.env.NODE_ENV === "production") {
+  // Guard: this module is sometimes imported transitively by
+  // Client Components (e.g. via ``@/lib/api``). Next.js bundles
+  // those imports for the browser, where ``process.env.API_BASE_URL``
+  // is undefined unless it is prefixed with ``NEXT_PUBLIC_``. The
+  // server-side fetchers still read the env var at runtime, so the
+  // production assertion only needs to run on the server. Skipping
+  // the throw on the client prevents hydration crashes while keeping
+  // the fail-fast behaviour for server boot / SSR.
+  const isServer = typeof window === "undefined";
+  if (process.env.NODE_ENV === "production" && isServer) {
     if (!raw) {
       throw new Error(
         "API_BASE_URL is required in production. Set it " +

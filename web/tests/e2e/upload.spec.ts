@@ -41,10 +41,11 @@ test.describe("/upload (v0.5.0-web combat log uploader)", () => {
     // File input (the page uses ``data-testid="file-input"``)
     await expect(page.getByTestId("file-input")).toBeAttached();
 
-    // Submit button (the page uses ``data-testid="submit"``;
-    // disabled by default because no file is selected)
-    await expect(page.getByTestId("submit")).toBeAttached();
-    await expect(page.getByTestId("submit")).toBeDisabled();
+    // Submit button (the page uses ``data-testid="next"``
+    // on the Pick step; disabled by default because no file
+    // is selected)
+    await expect(page.getByTestId("next")).toBeAttached();
+    await expect(page.getByTestId("next")).toBeDisabled();
 
     // No uncaught exceptions during page load. (We use
     // ``pageerror`` rather than ``console.error`` because the

@@ -278,7 +278,11 @@ jobs:
       # chromium project via route-intercepted mock responses.
       - name: Playwright E2E tests
         working-directory: web
-        run: pnpm exec playwright test
+        # Run only the chromium project here. The visual-regression
+        # project is executed in a separate PR-only step below so
+        # pushes to main don't pay the screenshot cost, and so the
+        # default E2E step doesn't fail on stale baselines.
+        run: pnpm exec playwright test --project=chromium
 
       # Upload the Playwright HTML report on failure so the
       # post-mortem is in the GitHub Actions artifacts tab.
