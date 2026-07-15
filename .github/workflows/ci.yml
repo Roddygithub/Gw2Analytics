@@ -122,12 +122,12 @@ jobs:
       # fights). See ``apps/api/ci_health_gate.py`` for the
       # detailed design notes.
       # ----------------------------------------------------------------
-      - name: Health probe baseline (v0.8.7)
-        run: uv run python -m gw2analytics_api.scripts.health_gate --save-baseline /tmp/health_baseline.json
-
       - name: Run database migrations
         working-directory: apps/api
         run: uv run alembic upgrade head
+
+      - name: Health probe baseline (v0.8.7)
+        run: uv run python -m gw2analytics_api.scripts.health_gate --save-baseline /tmp/health_baseline.json
 
       - name: Pytest
         run: uv run pytest --tb=line -q
