@@ -24,13 +24,16 @@ This cycle ships the F17 W.1-W.12 sub-blocks (per the F17 §2 + spike §3.4) aga
 
 ### W.5 dynamic-column audit (the only carry-over from Tour 6's unblock-event note)
 
-The Tour 6 v0.10.24-pre F17 plan status note flagged W.5 (`<PlayerReadoutBoons>` + dynamic 'Autres boons' column expansion per design doc §11 Q3) as `PENDING VERIFICATION` — the file exists but the per-row dynamic-column logic needs a Tour 7 audit pass before the W.5 acceptance criterion is confirmed. Tour 7 starts by auditing the W.5 component:
+The Tour 6 v0.10.24-pre F17 plan status note flagged W.5 (`<PlayerReadoutBoons>` + dynamic `Autres boons` column expansion per design doc §11 Q3) as `PENDING VERIFICATION` — the file exists but the per-row dynamic-column logic needs a Tour 7 audit pass before the W.5 acceptance criterion is confirmed. Tour 7 starts by auditing the W.5 component:
 
-- **Audit task W.5.A**: read `web/src/components/PlayerReadoutBoons.tsx`, confirm whether the dynamic-column expansion is implemented per design doc §11 Q3 (a) or whether the file ships a static-only fallback per design doc §11 Q3 (b/c); document the answer in a Tour 7 commit
-- **If W.5.A is positive (dynamic columns ship)**: W.5 is DONE; no follow-up code needed
-- **If W.5.A is negative (static-only ships)**: W.5 ships in the cycle as part of an extension commit; the §11 design lock provides a fallback pattern (a "Top 3 other boons" cell)
+- **Audit task W.5.A**: read `web/src/components/PlayerReadoutBoons.tsx`, document which Option the implementation follows per design doc §11 Q3 closed questions -- (a) dynamic columns expanding per Aanas payload, (b) collapsed tooltip cell summing the dict, (c) top-3 other boons ranked cells. Document the audit answer in a Tour 7 comment-only commit.
 
-The audit pass is a single read + comment-only commit, not a scope lift. The cycle planning budget absorbs this audit task under W.5.
+- **If W.5.A is Option (a)**: W.5 is DONE (no follow-up code); the cycle continues.
+- **If W.5.A is Option (b)**: W.5 is DONE (option b is the canonical §11 fallback per the F17 §4 risk #3); the cycle continues.
+- **If W.5.A is Option (c)**: the cycle ships Option (c) as W.5 extension -- bounded to a single component-level commit introducing the `formatBoonsTopN(dict) -> \`Boon1: count / Boon2: count / Boon3: count\`` cell renderer. Option (c) is a smaller scope than the F17 §2 XL rating assumes (the F17 §2 XL rating covers Option (a); Option (c) is M-effort).
+- **If W.5.A is None of the above (pre-design-doc primitive)**: the audit pass is expanded to write the canonical helper; cycle budget absorbs this expansion.
+
+The audit pass is a single read + comment-only commit. The cycle planning budget absorbs the W.5.A pass + (Option (c) | None of the above) extension as a bounded M-effort scope lift.
 
 ## §2 Cycle-execution checklist (operator handoff)
 

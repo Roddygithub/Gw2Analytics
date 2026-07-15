@@ -85,11 +85,14 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
 [ ] Step 15: B.7 — 5+ hermetic tests for the catalog fixture (canonical 500-skill subset).
 [ ] Step 16: A.7 — update docs/v0.10.11-phase-9-conditions.md + docs/ROADMAP.md §1.1
              cycle shipts (Phase 9 step 4-STEPS).
-[ ] Step 17: F17 §5 fan-out (the per-column 3-edit pattern) —
-             8 small commits (1 per unlocked column) that prune the SCAFFOLD-zero entries
-             in web/src/app/fights/[id]/page.tsx +
-             flip valueGetter from () => 0 to (params) => params.data.<path> +
-             add Playwright specs.
+[ ] Step 17: OpenAPI regeneration -- re-run the apps/api openapi dump +
+             regenerate web/src/lib/api/schema.d.ts + reconcile the manual
+             # noqa: wire-followup marker (consume it; the regenerated schema
+             should match the manual edit). This is the BackEnd-ready signal the
+             F17 cycle pulls from. The 8 per-column fan-out WEB commits
+             (page.tsx + PlayerReadout*.tsx valueGetter + Playwright spec per
+             the WAVE-8 §5 3-edit contract) are FOR The F17 CYCLE, not WAVE-8.
+
 [ ] Step 18: Ruff + mypy + pytest + vitest + tsc + Playwright all green
 [ ] Step 19: git push origin feat/wave-8-parser-side
 [ ] Step 20: gh release create v0.11.0 (NOT pre-release — full stable)
