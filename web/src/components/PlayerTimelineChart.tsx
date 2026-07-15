@@ -46,9 +46,9 @@
 
 import { useMemo } from "react";
 import type { PlayerTimelinePoint } from "@/lib/api";
-import { TimelineChart, type TimelineChartPoint } from "@/components/TimelineChart";
+import { TimelineChart, type TimelineChartPoint, type TimelineScale } from "@/components/TimelineChart";
 
-export { buildTimelineLayout, formatLogTick } from "@/components/TimelineChart";
+export { buildTimelineLayout, formatLogTick, type TimelineScale } from "@/components/TimelineChart";
 
 /**
  * Explicit ``"en-US"`` locale (NOT ``undefined``) so the
@@ -71,8 +71,6 @@ const X_AXIS_DAY_LABEL_FORMAT = new Intl.DateTimeFormat("en-US", {
   day: "2-digit",
   timeZone: "UTC",
 });
-
-export type TimelineScale = "linear" | "log";
 
 export function PlayerTimelineChart({
   points,

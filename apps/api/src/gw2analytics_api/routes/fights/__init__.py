@@ -82,10 +82,8 @@ Endpoints (registered via ``app.include_router(router)`` in main)
 from __future__ import annotations
 
 import logging
-from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from minio.error import S3Error
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -105,7 +103,6 @@ from gw2_core import (
     InterruptEvent,
     StunBreakEvent,
 )
-from gw2analytics_api._event_dispatch import build_event_iterator
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightAgent
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession

@@ -44,7 +44,7 @@ import { appGridTheme } from "./ag-grid-setup";
  * because the AG Grid Community renderer may invoke it during a
  * hot-reload before the column is bound.
  */
-export function formatSubgroup(value: unknown): string {
+function formatSubgroup(value: unknown): string {
   if (value === null || value === undefined) return "(no squad)";
   if (typeof value === "number" && Number.isFinite(value)) {
     return value === 0 ? "(no squad)" : `Sub ${value}`;
@@ -60,7 +60,7 @@ export function formatSubgroup(value: unknown): string {
  * design doc §3.1; the slash-delimited rendering is the canonical
  * compact form for a 100-px AG Grid cell.
  */
-export function formatRoles(roles: string[] | undefined | null): string {
+function formatRoles(roles: string[] | undefined | null): string {
   if (!roles || roles.length === 0) return "";
   return roles.join("/");
 }
@@ -74,9 +74,11 @@ export function formatRoles(roles: string[] | undefined | null): string {
  * The crown glyph is the canonical "commander" marker from the
  * design doc §2 row, mirroring arcdps / Elite Insights.
  */
-export function formatCommanderIcon(isCommander: unknown): string {
+function formatCommanderIcon(isCommander: unknown): string {
   return isCommander === true ? "★" : "";
 }
+
+export { formatSubgroup, formatRoles, formatCommanderIcon };
 
 /**
  * The 5 SHARED_COLUMNS that prepend every per-aspect table per
@@ -172,4 +174,3 @@ export const AG_GRID_PROPS = {
   // wire a drill-in yet).
   rowSelection: { mode: "singleRow" } as const,
 } as const;
-

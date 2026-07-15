@@ -96,3 +96,4 @@ web/screenshots/
 /PUSH_INSTRUCTIONS*.md
 /handoff*.md
 /v*-pre.bundle
+.aider*

@@ -167,7 +167,7 @@ const SECTION_STYLE: React.CSSProperties = {
 // Public types
 // ---------------------------------------------------------------------------
 
-export type PerPlayerMetric = "damage" | "healing" | "strip";
+type PerPlayerMetric = "damage" | "healing" | "strip";
 
 /**
  * Format a bucket's ``window_start_ms`` as a ``M:SS`` label.
@@ -247,7 +247,7 @@ function getMetricTotal(
  * color-index mapping (so the chart legend is stable
  * across re-renders).
  */
-export function selectTopNByMetric(
+function selectTopNByMetric(
   series: PerPlayerTimelineSeries[],
   metric: PerPlayerMetric,
   n: number,

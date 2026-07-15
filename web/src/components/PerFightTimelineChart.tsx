@@ -56,11 +56,9 @@
 
 import { useMemo } from "react";
 import type { PerFightTimelinePoint } from "@/lib/api";
-import { TimelineChart, type TimelineChartPoint } from "@/components/TimelineChart";
+import { TimelineChart, type TimelineChartPoint, type TimelineScale } from "@/components/TimelineChart";
 
 export { buildTimelineLayout as buildPerFightTimelineLayout, formatLogTick as formatPerFightLogTick } from "@/components/TimelineChart";
-
-export type TimelineScale = "linear" | "log";
 
 /**
  * Format a bucket's ``window_start_ms`` as a ``M:SS`` label.

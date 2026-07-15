@@ -24,6 +24,4 @@ packages = ["src/gw2_evtc_parser"]
 package = true
 
 [dependency-groups]
-dev = [
-    "pytest>=8.3",
-]
+dev = []

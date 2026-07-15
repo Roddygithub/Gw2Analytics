@@ -106,24 +106,6 @@ ignore = [
 "apps/api/alembic/versions/**" = ["ALL"]
 # Empty __init__.py re-exports are fine.
 "**/__init__.py" = ["F401"]
-# v0.10.5 dep-cycle: CHANGELOG-insert helpers under scripts/ paste
-# raw multi-line CHANGELOG sections as triple-quoted Python strings.
-# These strings routinely exceed 100 chars on a single physical
-# line (128-1453 chars in current section-rewriter helpers), AND
-# contain arbitrary unicode characters (e.g. × in the rationale
-# text — flagged by RUF001) AND use list-concat for regex line
-# rewrites (flagged by RUF005). Suppress E501 + RUF only so CI
-# stays green without weakening the line-length rule or
-# ruff-specific rules across the rest of the monorepo.
-# I001 (isort) and F401 (unused imports) still apply.
-#
-# LIFETIME NOTE: the lifetime of this carve-out is tied to the
-# lifetime of the scripts/ directory. Do NOT remove this entry
-# without also removing scripts/ in its entirety. If a future
-# contributor proposes restoring E501 + RUF enforcement here,
-# the proposal MUST also include a rewrite of all scripts/*.py
-# to use only ASCII-safe, ≤100-char lines.
-"scripts/**/*.py" = ["E501", "RUF"]
 
 [tool.ruff.lint.isort]
 known-first-party = [

@@ -83,18 +83,7 @@ from gw2analytics_api.database import get_sessionmaker
 logger = logging.getLogger(__name__)
 
 
-def _alembic_cfg_path() -> str:
-    """Locate ``alembic.ini`` relative to this module.
-
-    This module lives at
-    ``apps/api/src/gw2analytics_api/schema_guard.py``; the
-    alembic config lives at ``apps/api/alembic.ini``. The
-    path is computed at call time from ``__file__`` so the
-    helper is robust to the current working directory
-    (operators sometimes run ``uv run alembic`` from the repo
-    root, not from ``apps/api/``).
-    """
-    return str(Path(__file__).parent.parent.parent / "alembic.ini")
+_ALEMBIC_CFG = str(Path(__file__).parent.parent.parent / "alembic.ini")
 
 
 def check_schema_drift() -> None:
@@ -148,7 +137,7 @@ def check_schema_drift() -> None:
         )
         return
 
-    cfg = AlembicConfig(_alembic_cfg_path())
+    cfg = AlembicConfig(_ALEMBIC_CFG)
     # v0.10.10 plan 030: override the ``script_location`` from
     # the ``alembic.ini`` (which is RELATIVE = ``alembic``) to
     # an ABSOLUTE path derived from the .ini's location. The
@@ -160,7 +149,7 @@ def check_schema_drift() -> None:
     # (the .ini lives at ``apps/api/alembic.ini``; the
     # migrations live at ``apps/api/alembic/`` -- sibling
     # directories; one ``..`` from the .ini's parent path).
-    config_dir = Path(_alembic_cfg_path()).parent  # apps/api/
+    config_dir = Path(_ALEMBIC_CFG).parent  # apps/api/
     cfg.set_main_option("script_location", str(config_dir / "alembic"))
     head = ScriptDirectory.from_config(cfg).get_current_head()
     with get_sessionmaker()() as db:

@@ -55,11 +55,7 @@ class Settings(BaseSettings):
     minio_access_key: str = Field(validation_alias="S3_ACCESS_KEY")
     minio_secret_key: str = Field(validation_alias="S3_SECRET_KEY")
     minio_bucket: str = Field(validation_alias="S3_BUCKET")
-    # ``minio_secure`` and ``parser_version`` keep their previous
-    # defaults: unrelated to credentials and unlikely to need per-env
-    # overrides in the current scope.
     minio_secure: bool = False
-    parser_version: str = "0.5.0"
     # ``cors_allowed_origins`` defaults to the local Next.js frontend
     # (``http://localhost:3000``) so a production deployment that
     # forgets to set ``CORS_ALLOWED_ORIGINS`` does not silently

@@ -6,7 +6,6 @@ from typing import Final
 
 from sqlalchemy.orm import Session
 
-from gw2_core import EliteSpec, Profession
 from gw2_core import Fight as DomainFight
 from gw2analytics_api.models import (
     OrmFight,
@@ -18,14 +17,6 @@ from gw2analytics_api.models import (
 logger = logging.getLogger(__name__)
 
 MAX_NAME_LEN: Final[int] = 128
-
-
-def _prof_id(p: Profession) -> int:
-    return int(p.value)
-
-
-def _elite_id(e: EliteSpec) -> int:
-    return int(e.value)
 
 
 def _sanitize_name(name: str | None, max_length: int = MAX_NAME_LEN) -> str:
@@ -91,8 +82,8 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
                 fight_id=cf.id,
                 agent_id=agent_id_int,
                 name=_sanitize_name(agent.name),
-                profession=_prof_id(agent.profession),
-                elite_spec=_elite_id(agent.elite),
+                profession=int(agent.profession.value),
+                elite_spec=int(agent.elite.value),
                 is_player=agent.is_player,
                 account_name=(
                     None

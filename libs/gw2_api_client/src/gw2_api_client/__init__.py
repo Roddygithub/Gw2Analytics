@@ -17,12 +17,7 @@ and are imported by consumers unconditionally.
 from __future__ import annotations
 
 from gw2_api_client.client import AsyncGuildWars2Client, GuildWars2Client
-from gw2_api_client.exceptions import (
-    GuildWars2ClientError,
-    GuildWars2HttpError,
-    GuildWars2RateLimitError,
-    MissingApiKeyError,
-)
+from gw2_api_client.exceptions import GuildWars2ClientError
 
 __version__ = "0.1.0"
 
@@ -30,8 +25,5 @@ __all__ = [
     "AsyncGuildWars2Client",
     "GuildWars2Client",
     "GuildWars2ClientError",
-    "GuildWars2HttpError",
-    "GuildWars2RateLimitError",
-    "MissingApiKeyError",
     "__version__",
 ]

@@ -59,9 +59,9 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
  * component's render doesn't re-allocate the array on every
  * change event.
  */
-export const WINDOW_S_PRESETS: readonly number[] = [1, 5, 30, 60, 300] as const;
+const WINDOW_S_PRESETS: readonly number[] = [1, 5, 30, 60, 300] as const;
 
-export interface WindowSizeSelectorProps {
+interface WindowSizeSelectorProps {
   /** Current window_s value (must be one of ``WINDOW_S_PRESETS``). */
   current: number;
   /** Fight id (used as a fallback if ``usePathname`` returns null). */

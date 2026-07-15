@@ -494,5 +494,3 @@ export function CrossAccountTimelineChart({
     </div>
   );
 }
-
-export { ACCOUNT_COLORS, formatLogTick as formatCrossAccountLogTick };

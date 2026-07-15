@@ -41,21 +41,6 @@ def _reset_counters() -> None:
     _skipped_unresolvable_heals = 0
 
 
-def get_sidecar_load_attempts() -> int:
-    """Return the number of sidecar load attempts since reset."""
-    return _sidecar_load_attempts
-
-
-def get_sidecar_load_failures() -> int:
-    """Return the number of sidecar load failures since reset."""
-    return _sidecar_load_failures
-
-
-def get_skipped_unresolvable_heals() -> int:
-    """Return the number of skipped unresolvable heals since reset."""
-    return _skipped_unresolvable_heals
-
-
 def probe(zevtc_path: Path | str) -> dict[str, Any] | None:
     """Probe for an arcdps_healing_stats sidecar for the given .zevtc.
 
@@ -207,9 +192,6 @@ def merge_sidecar_into_summary(
 
 __all__ = [
     "SIDECAR_SUFFIXES",
-    "get_sidecar_load_attempts",
-    "get_sidecar_load_failures",
-    "get_skipped_unresolvable_heals",
     "merge_sidecar_into_summary",
     "probe",
 ]

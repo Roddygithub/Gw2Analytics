@@ -16,7 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response as FastAPIResponse
 from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
 from prometheus_client import generate_latest
-from sqlalchemy.orm import Session
 
 # v0.10.8 plan 140 plan 140 Fix-E: switched from module-local binding to
 # live attribute lookup. The module-local binding (``from ... import
@@ -43,18 +42,6 @@ from gw2analytics_api.workers.stuck_upload_sweeper import lifespan_stuck_upload_
 from gw2analytics_api.workers.webhook_scheduler import lifespan_scheduler
 
 logger = logging.getLogger(__name__)
-
-
-def _open_session() -> Session:
-    """Open a fresh SQLAlchemy `Session` for one scheduler poll iteration.
-
-    `get_sessionmaker` returns the cached `sessionmaker[Session]` factory;
-    calling this helper invokes `sessionmaker()` which yields a new
-    `Session` instance. Defined as a NAMED function (vs inline lambda) so
-    ruff does not flag `PLW0108 unnecessary-lambda` and so mypy sees a
-    fully-typed ``Callable[[], Session]`` shape.
-    """
-    return get_sessionmaker()()
 
 
 @asynccontextmanager
@@ -144,11 +131,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         )
 
     # Step 3: webhook retry+DLQ scheduler (v0.9.1, unchanged).
-    scheduler_task = asyncio.create_task(lifespan_scheduler(_open_session))
+    scheduler_task = asyncio.create_task(lifespan_scheduler(get_sessionmaker()))
     # v0.10.12 plan 014: stuck-upload sweeper (marks stale pending
     # uploads as failed when the arq worker dies mid-parse).
     sweeper_task = asyncio.create_task(
-        lifespan_stuck_upload_sweeper(_open_session),
+        lifespan_stuck_upload_sweeper(get_sessionmaker()),
     )
     try:
         yield
