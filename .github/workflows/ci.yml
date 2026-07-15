@@ -84,7 +84,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Sync workspace dependencies (frozen lock)
-        run: uv sync --frozen
+        run: uv sync --frozen --all-packages
 
       - name: Ruff check
         run: uv run ruff check --output-format=concise
@@ -338,6 +338,19 @@ jobs:
     name: ARQ worker integration
     runs-on: ubuntu-latest
     services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gw2analytics
+          POSTGRES_PASSWORD: gw2analytics
+          POSTGRES_DB: gw2analytics
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gw2analytics"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
       redis:
         image: redis:7-alpine
         ports:
@@ -361,12 +374,12 @@ jobs:
         run: uv python install 3.12
 
       - name: Sync workspace dependencies (frozen lock)
-        run: uv sync --frozen
+        run: uv sync --frozen --all-packages
 
       - name: ARQ worker integration tests
         working-directory: apps/api
         run: uv run pytest tests/test_parser_worker.py tests/test_uploads_arq.py -v
         env:
-          SECRETS_KEK: "ci-test-kek-000000000000000000000000000000"
+          SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
           ARQ_REDIS_HOST: localhost
           ARQ_REDIS_PORT: 6379

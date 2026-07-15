@@ -23,6 +23,7 @@ dev = [
     "respx>=0.21",
     "time-machine>=3.2.0",
     "pytest-cov>=6.0",
+    "pip-audit>=2.7",
 ]
 
 [tool.uv.workspace]
