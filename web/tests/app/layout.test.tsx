@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 
 import RootLayout, { metadata } from "@/app/layout";
 
@@ -10,21 +11,37 @@ import RootLayout, { metadata } from "@/app/layout";
  * without affecting other tests.
  */
 function withSuppressedHydrationWarning<T>(fn: () => T): T {
-  const originalConsoleError = console.error;
-  console.error = (...args: unknown[]) => {
-    const message = typeof args[0] === "string" ? args[0] : "";
-    if (
-      message.includes("<html> cannot be a child of") ||
-      message.includes("<body> cannot be a child of")
-    ) {
-      return;
+  const shouldSuppress = (...args: unknown[]) =>
+    args.some((arg) => {
+      if (typeof arg !== "string") return false;
+      return (
+        arg.includes("<html> cannot be a child of") ||
+        arg.includes("<body> cannot be a child of") ||
+        arg.includes("In HTML, <html>") ||
+        arg.includes("In HTML, <body>") ||
+        arg.includes("This will cause a hydration error")
+      );
+    });
+
+  const originalError = console.error;
+  const originalWarn = console.warn;
+
+  const errorSpy = vi.spyOn(console, "error").mockImplementation((...args) => {
+    if (!shouldSuppress(...args)) {
+      originalError(...args);
     }
-    originalConsoleError(...args);
-  };
+  });
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation((...args) => {
+    if (!shouldSuppress(...args)) {
+      originalWarn(...args);
+    }
+  });
+
   try {
     return fn();
   } finally {
-    console.error = originalConsoleError;
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
   }
 }
 
