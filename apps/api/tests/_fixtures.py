@@ -217,6 +217,35 @@ def post_minimal_fight(
     return wait_for_upload_completion(upload_id)
 
 
+def post_npc_only_fight() -> str:
+    """POST a fight containing only NPC agents.
+
+    Returns the persisted ``fight_id``. The fixture is used by
+    tests that exercise the backfill's "no player agents" skip
+    path: the parser marks every agent as ``is_player=False``
+    and ``account_name=None``, so ``run_backfill`` should count
+    the fight as ``skipped`` and write no summary rows.
+    """
+    suffix = _uuid.uuid4().hex[:8]
+    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    blob = make_minimal_zevtc(
+        [
+            (base_id_a, 99, 99, f"NPC Mob A {suffix}", False),
+            (base_id_b, 99, 99, f"NPC Mob B {suffix}", False),
+        ],
+        build=build,
+    )
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("npc_only.zevtc", blob, "application/octet-stream")},
+    )
+    assert resp.status_code == 201, resp.text
+    upload_id = resp.json()["id"]
+    return wait_for_upload_completion(upload_id)
+
+
 def wait_for_upload_completion(upload_id: str) -> str:
     """Poll the upload status until the background parser flips
     ``status`` to ``"completed"``, then return the persisted

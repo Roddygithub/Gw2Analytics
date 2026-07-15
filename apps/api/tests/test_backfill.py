@@ -37,6 +37,7 @@ import uuid as _uuid
 from _fixtures import (
     make_cbtevent,
     post_minimal_fight,
+    post_npc_only_fight,
 )
 from sqlalchemy import delete, select, update
 
@@ -346,4 +347,44 @@ def test_backfill_is_idempotent() -> None:
     finally:
         session.close()
 
+
+def test_backfill_skips_npc_only_fights() -> None:
+    """v0.8.5: ``run_backfill`` skips NPC-only fights (no player agents).
+
+    NPC-only fights cannot contribute to a player profile (the
+    cross-fight join is keyed on ``account_name``), so writing
+    summary rows for them would inflate the table without
+    serving any route. The script counts them as ``skipped``
+    and writes zero rows.
+    """
+    fight_id = post_npc_only_fight()
+
+    session = get_sessionmaker()()
+    try:
+        # Sanity: the parser wrote no summary rows for NPC agents.
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id),
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == []
+
+        backfilled, skipped, failed = run_backfill(session, fight_id=fight_id)
+        assert failed == 0
+        assert backfilled == 0
+        assert skipped == 1
+
+        # No summary rows should have been written.
+        rows_after = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id),
+            )
+            .scalars()
+            .all()
+        )
+        assert rows_after == []
+    finally:
+        session.close()
 
