@@ -98,8 +98,7 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
              (the canonical 3-edit per-column editing pattern: page.tsx SCAFFOLD-zero
              prune + PlayerReadout*.tsx valueGetter flip + Playwright spec). The F17
              plan §3 is the operator's single source-of-truth for the per-column
-             pattern; the Tour 7 release plan §2 step 7-9 schedules the commit
-             sequence.
+             pattern.
 
 [ ] Step 18: Ruff + mypy + pytest + vitest + tsc + Playwright all green
 [ ] Step 19: git push origin feat/wave-8-parser-side
