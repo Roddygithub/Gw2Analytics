@@ -59,6 +59,13 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      // Exclude the visual-regression spec from the default
+      // project; it has its own dedicated project below and is
+      // only run in PRs. Without this exclusion, the chromium
+      // project would also execute visual-regression.spec.ts
+      // because the project-level grep only filters *within* the
+      // visual-regression project, not across projects.
+      grepInvert: /visual regression/,
       use: { ...devices["Desktop Chrome"] },
     },
     // v0.8.9 plan/003: a second project that ONLY runs the
