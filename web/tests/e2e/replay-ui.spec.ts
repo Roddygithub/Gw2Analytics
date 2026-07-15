@@ -108,7 +108,22 @@ test.describe("Replay UI (v0.10.18 D3)", () => {
   }) => {
     const errors: string[] = [];
     page.on("console", (msg) => {
-      if (msg.type() === "error") errors.push(msg.text());
+      if (msg.type() === "error") {
+        const text = msg.text();
+        // React 19's development build logs a benign "eval() is not
+        // supported in this environment" warning when running against
+        // the Next.js dev server in Playwright. The same test runs
+        // against a production build in CI and does not emit this
+        // warning. Filter it out so the assertion only catches real
+        // application errors.
+        if (
+          text.includes("eval() is not supported in this environment") ||
+          text.includes("React requires eval() in development mode")
+        ) {
+          return;
+        }
+        errors.push(text);
+      }
     });
     await page.goto(REPLAY_URL);
     const playPause = page.locator('[data-testid="replay-play-pause"]');
