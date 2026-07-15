@@ -1459,6 +1459,17 @@ export interface components {
          *     scaffold primes the field for the future Phase C
          *     feature where the parser writes the flag).
          */
+        // # noqa: wire-followup-2026-07-15
+        // The `account_name: string | null` widening on PlayerReadoutOut is
+        // a MANUAL edit promoted alongside the v0.10.24-pre backend close-out
+        // (closing the lossy truthy `or ""` flag from the code review on
+        // commit bef9063). The Python Pydantic schema was updated
+        // in lockstep in apps/api/src/gw2analytics_api/schemas/fight.py
+        // (PlayerReadoutOut.account_name: str | None). If a future OpenAPI
+        // regeneration overwrites this hand-edit, reconcile against
+        // the Python schema (the Python is the source-of-truth; the TS
+        // is the auto-gen consumer). See CHANGELOG.md [0.10.24-pre]
+        // Wire-contract followup sub-bullet for the migration history.
         PlayerReadoutOut: {
             /** Account Name */
             account_name: string | null;

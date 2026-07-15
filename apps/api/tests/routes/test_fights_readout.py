@@ -290,3 +290,67 @@ def test_readout_aggregator_stun_break_events_wired() -> None:
     assert a_readout.name == f"W {a}"
     assert a_readout.is_commander is True
     assert a_readout.account_name == f"synth.{a}"
+
+
+def test_readout_aggregator_account_name_none_passthrough() -> None:
+    """Tour 6 v0.10.24-pre followup wire-contract: ``account_name=None`` flows as ``None``.
+
+    Closes the code-reviewer #2 gap on commit 1aebf96: the lossy truthy
+    ``or ""`` collapse was removed in the wire-contract followup but
+    the test suite had no coverage for the absent-account shape. This
+    test seeds :class:`AgentIdentity` with ``account_name=None``,
+    runs :func:`aggregate_combat_readout`, and asserts the per-row
+    ``PlayerReadoutOut.account_name`` is ``None`` (NOT ``""`` -- the
+    pre-followup collapse silently dropped the distinction).
+
+    Without this test, a regression that reintroduces the truthy
+    ``or ""`` coerce would PASS the 6 existing tests (which all
+    fixture non-null account_names) and only the live wire contract
+    would reveal the silent-failure mode. This test pins the
+    post-widening contract.
+    """
+    a = 400_002
+    heal_skill = 4_500_002
+    heal_event = HealingEvent(
+        time_ms=1_000, source_agent_id=a, target_agent_id=a + 1, skill_id=heal_skill, healing=500,
+    )
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a,
+            name=f"W {a}",
+            subgroup=0,
+            account_name=None,  # the canonical absent-account path
+            profession="PROF(2)",
+            elite_spec="ELITE(18)",
+            is_player=True,
+            is_commander=False,
+        ),
+    }
+    out = aggregate_combat_readout(
+        damage_events=(),
+        healing_events=[heal_event],
+        boon_apply_events=(),
+        cc_events=(),
+        death_events=(),
+        dodge_events=(),
+        block_events=(),
+        interrupt_events=(),
+        stun_break_events=(),
+        skill_id_to_name_map={},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=5.0,
+        fight_id="abc",
+    )
+    assert isinstance(out.players, list)
+    assert len(out.players) == 1
+    a_readout = out.players[0]
+    # The wire preserves the None-vs-empty-string distinction.
+    assert a_readout.account_name is None
+    # The OTHER identity columns still hydrate correctly.
+    assert a_readout.name == f"W {a}"
+    assert a_readout.profession == "PROF(2)"
+    assert a_readout.elite_spec == "ELITE(18)"
+    assert a_readout.is_commander is False
+    # The pre-followup coerce of None to "" would have triggered
+    # ``assert a_readout.account_name == ""`` (the lossy sentinel);
+    # the post-followup None preservation is what this test pins.

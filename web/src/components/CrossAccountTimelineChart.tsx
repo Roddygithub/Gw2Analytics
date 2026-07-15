@@ -443,7 +443,7 @@ export function CrossAccountTimelineChart({
             const segments = buildPolylineSegments(a.values, xFor, yFor);
             return segments.map((d, i) => (
               <path
-                key={`${a.account_name}-${i}`}
+                key={`${a.account_name ?? a.name ?? `acc:${i}`}-${i}`}
                 d={d}
                 fill="none"
                 stroke={a.color}
@@ -459,7 +459,7 @@ export function CrossAccountTimelineChart({
               if (v === null) return null;
               return (
                 <circle
-                  key={`${a.account_name}-dot-${i}`}
+                  key={`${a.account_name ?? a.name ?? `acc:${i}`}-dot-${i}`}
                   cx={xFor(i)}
                   cy={yFor(v)}
                   r={POINT_RADIUS_PX}
