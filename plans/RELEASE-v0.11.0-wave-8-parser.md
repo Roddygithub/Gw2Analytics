@@ -93,6 +93,13 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
              (page.tsx + PlayerReadout*.tsx valueGetter + Playwright spec per
              the WAVE-8 §5 3-edit contract) are FOR The F17 CYCLE, not WAVE-8.
 
+             Cross-link: the WEB fan-out commits (F17 §5 3-edit per-column pattern)
+             land in the SUBSEQUENT [Tour 7 v0.10.25 release plan](./RELEASE-v0.10.25-tour-7-frontend.md)
+             §2 step 7-8 (page integration) + the parent [F17 plan](./F17-frontend-rollout.md) §3
+             migration-impact contract. Operator cross-refs both files: this WAVE-8 step
+             from the Tour 7 cycle-execution checklist, + Tour 7's F17 §5 3-edit pattern
+             back to this WAVE-8 step for the BACKEND confidence signal.
+
 [ ] Step 18: Ruff + mypy + pytest + vitest + tsc + Playwright all green
 [ ] Step 19: git push origin feat/wave-8-parser-side
 [ ] Step 20: gh release create v0.11.0 (NOT pre-release — full stable)
