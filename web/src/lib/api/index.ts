@@ -40,6 +40,7 @@ export type {
 } from "./fights";
 export {
   fetchFights,
+  fetchFight,
   fetchFightEvents,
   fetchFightSquads,
   fetchFightSkills,
