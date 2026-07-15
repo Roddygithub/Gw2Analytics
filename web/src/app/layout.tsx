@@ -1,7 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Logo } from "@/components/Logo";
 import { PlayerSearchBar } from "@/components/PlayerSearchBar";
 import { API_BASE_URL } from "@/lib/env";
 import "./globals.css";
@@ -37,6 +39,14 @@ export const metadata: Metadata = {
   title: "GW2Analytics",
   description:
     "Independent WvW combat analytics for Guild Wars 2. Local .zevtc parsing, world enrichment, multi-fight rollups.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", type: "image/x-icon" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({
@@ -67,24 +77,35 @@ export default function RootLayout({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "12px 32px",
-            background: "var(--surface)",
-            borderBottom: "1px solid var(--border)",
+            padding: "16px 32px",
+            background: "color-mix(in srgb, var(--background) 70%, transparent)",
+            backdropFilter: "blur(12px)",
+            borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
             gap: 16,
             flexWrap: "wrap",
           }}
         >
-          <a
+          <Link
             href="/"
             style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: "var(--accent)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
               textDecoration: "none",
             }}
           >
-            GW2Analytics
-          </a>
+            <Logo size={28} />
+            <span
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: "var(--foreground)",
+                letterSpacing: "0.05em",
+              }}
+            >
+              GW2<span style={{ color: "var(--accent)" }}>Analytics</span>
+            </span>
+          </Link>
           {/* v0.10.0 plan 032: secondary nav links between
               the brand and the search bar. ``/players`` and
               ``/players/compare`` are the 2 most common
@@ -100,28 +121,26 @@ export default function RootLayout({
             }}
             aria-label="Primary"
           >
-            <a
+            <Link
               href="/players"
               style={{
                 fontSize: 13,
-                color: "var(--foreground)",
-                opacity: 0.85,
+                color: "var(--link)",
                 textDecoration: "none",
               }}
             >
               Players
-            </a>
-            <a
+            </Link>
+            <Link
               href="/players/compare"
               style={{
                 fontSize: 13,
-                color: "var(--foreground)",
-                opacity: 0.85,
+                color: "var(--link)",
                 textDecoration: "none",
               }}
             >
               Compare
-            </a>
+            </Link>
           </nav>
           <PlayerSearchBar />
         </header>

@@ -129,6 +129,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fights/{fight_id}/players/{account_name}/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fight Player Skills
+         * @description Return the per-player skill roll-up + loadout for one fight (Tour 4 plan 044).
+         *
+         *     Source-side attribution (reuses the v0.7.0
+         *     :class:`gw2_analytics.skill_usage.SkillUsageAggregator` without
+         *     modification): the full events blob is loaded exactly once
+         *     via :func:`_load_fight_events` (same shared helper as the
+         *     per-target trio + squads + skills endpoints), then pre-filtered
+         *     to events whose ``source_agent_id == player_agent.agent_id``
+         *     before passing to the aggregator. The aggregator's external
+         *     contract is unchanged (the pre-filter is a thin list
+         *     comprehension, NOT a Behaviour change to the upstream
+         *     Aggregation class).
+         *
+         *     The player's ``OrmFightAgent`` row is resolved via
+         *     ``account_name`` (the wire-format value passed by the
+         *     frontend, with the optional leading ``:`` stripped -- arcdps
+         *     prefixes the value with ``:`` in the EVTC binary, but the
+         *     ORM layers past the parser strip the prefix so queries on
+         *     the canonical ``account_name`` field use the bare form).
+         *
+         *     The 0-skills + 0-loadout edge case: the player's agent row
+         *     is found but the parsed event stream contains no
+         *     events with ``source_agent_id == player_agent.agent_id``
+         *     (a player who was present-but-idle throughout the fight).
+         *     The route returns ``200 OK`` with ``skills: []`` -- the
+         *     empty-state panel on the frontend renders the "no skill
+         *     activity" hint. This is distinguishable from "player not
+         *     found in fight" which returns ``404``.
+         *
+         *     The equipped-skill stub: ``equipped_skill_ids`` is an
+         *     empty list in V1 because the parser does NOT yet extract
+         *     equipped-skill IDs from the EVTC binary (a separate
+         *     parser-layer ticket, deferred to v0.11.0 -- the
+         *     :mod:`libs.gw2_evtc_parser` extractor for equipped-skill
+         *     bytes has not landed). The field is intentionally present
+         *     (NOT omitted) so the frontend can render the empty-state
+         *     panel without a conditional branch.
+         *
+         *     Response codes:
+         *     - ``404 Not Found``: player (``account_name``) is NOT in
+         *       this fight (the ``OrmFightAgent`` lookup returns
+         *       ``None``). Distinct from the 0-skills "idle player"
+         *       case which returns ``200 OK`` with ``skills: []``.
+         *     - ``404 Not Found``: fight id is unknown OR the events
+         *       blob is missing (the shared :func:`_load_fight_events`
+         *       helper raises with the canonical pre-Phase-7 OR
+         *       post-Phase-7-with-zero-events contract).
+         *     - ``502 Bad Gateway``: events blob is present but corrupt
+         *       (the shared :func:`_load_fight_events` helper raises
+         *       with the gzip-decompression-failure OR non-JSON payload
+         *       contract).
+         */
+        get: operations["get_fight_player_skills_api_v1_fights__fight_id__players__account_name__skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fights/{fight_id}/readout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fight Readout
+         * @description Return the full Combat-readout envelope for one fight (plan 045 §5.1).
+         *
+         *     Wave 5 SCAFFOLD + Workstream D-extension bridge. Unified endpoint
+         *     per design doc §5.1 (``GET /api/v1/fights/{fight_id}/readout``)
+         *     returning the :class:`FightReadoutOut` envelope containing one
+         *     :class:`PlayerReadoutOut` per player agent. The route delegates
+         *     to :func:`aggregate_combat_readout` (the dispatcher in
+         *     :mod:`gw2analytics_api.routes.fights.aggregators`) which wraps
+         *     the 4 per-player aggregators (PlayerDamage / PlayerHeal /
+         *     PlayerBoons / PlayerDefense).
+         *
+         *     The 8 input streams are split from the canonical heterogeneous
+         *     ``Iterable[Event]`` via ``isinstance`` at the call site
+         *     (parallel to the per-target trio dispatch in
+         *     ``apps/api/routes/fights/aggregators.py::_aggregate_per_target_rollup``).
+         *
+         *     Response codes match the v0.10.13 per-fight timeline contract:
+         *
+         *     - ``404 Not Found``: fight id is unknown OR the events blob
+         *       is missing (the shared :func:`_load_fight_events` helper
+         *       raises the canonical pre-Phase 7 OR post-Phase-7-with-zero-events
+         *       contract).
+         *     - ``422 Unprocessable Entity``: ``dry_run`` is non-boolean
+         *       (handled by FastAPI before this handler runs).
+         *     - ``502 Bad Gateway``: events blob is present but corrupt.
+         *     - ``200 OK``: ``FightReadoutOut`` envelope, even when
+         *       ``players: []`` (a 0-player NPC-only fight).
+         *
+         *     The dry_run escape hatch: when ``dry_run=True``, the route
+         *     short-circuits the blob load + event-split + agent-load
+         *     pipeline and invokes ``aggregate_combat_readout`` against
+         *     empty streams. The result is a valid envelope with 0 players
+         *     + ``duration_s=0.0`` -- the canonical empty-state. This
+         *     path is INTENDED for hermetic route-testing on dev hosts
+         *     WITHOUT docker compose; production callers SHOULD set
+         *     ``dry_run=False`` (the default).
+         */
+        get: operations["get_fight_readout_api_v1_fights__fight_id__readout_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/fights/{fight_id}/skills": {
         parameters: {
             query?: never;
@@ -358,6 +483,14 @@ export interface paths {
          *     it is safe to poll from a monitoring system at a high
          *     cadence (the query plan uses the ``fights`` PK index
          *     + the ``fight_player_summaries`` PK index).
+         *
+         *     Plan 017 close-out: also sets the ``HEALTH_DRIFT_COUNT``
+         *     Prometheus gauge on every probe call so the
+         *     ``GET /api/v1/metrics`` endpoint exposes the drift
+         *     number for operator-side alerting on any non-zero
+         *     value. The gauge is a single-process, in-memory
+         *     accumulator (no DB round-trip beyond what
+         *     :func:`summary_drift` already does).
          */
         get: operations["get_health_summary_api_v1_health_summary_get"];
         put?: never;
@@ -444,8 +577,8 @@ export interface paths {
          * Get Player
          * @description Return the full profile + per-fight breakdown for one account.
          *
-         *     ``account_name`` is the URL-decoded arcdps account name (e.g.
-         *     ``:account.1234``). The ``:path`` converter lets the value
+         *     ``account_name`` is the URL-decoded canonical account name (e.g.
+         *     ``account.1234``). The ``:path`` converter lets the value
          *     contain ``/`` characters that would otherwise terminate the
          *     path match; FastAPI decodes the URL-encoded form before
          *     handing the string to the handler. The route raises
@@ -852,6 +985,32 @@ export interface components {
              */
             started_at: string;
         };
+        /**
+         * FightReadoutOut
+         * @description The full Combat-readout payload for one fight.
+         *
+         *     Tour 5 v0.10.23 plan 045: the wire shape for
+         *     ``GET /api/v1/fights/{fight_id}/readout`` (per
+         *     design doc §5.1's "unified endpoint" choice: a single
+         *     round-trip renders all 4 tables). v0.10.23 ships the
+         *     wire shape only — the route handler + statechange
+         *     aggregators await the Phase 6 v2 parser-stream switch
+         *     (separate from this tour).
+         */
+        FightReadoutOut: {
+            /**
+             * Duration S
+             * @default 0
+             */
+            duration_s: number;
+            /** Fight Id */
+            fight_id: string;
+            /**
+             * Players
+             * @default []
+             */
+            players: components["schemas"]["PlayerReadoutOut"][];
+        };
         /** FightSkillsOut */
         FightSkillsOut: {
             /** Fight Id */
@@ -882,8 +1041,8 @@ export interface components {
          *     schema-typing gap identified by Phase C's architect verdict:
          *     the pre-PR-3.2 handler returned a naked ``list[FightOut]``
          *     which is technically valid for ``response_model=`` but
-         *     loses the pagination cursor (``limit``, ``offset``) on
-         *     the wire. A frontend operator page cannot render "Showing
+         *     loses the pagination cursor (``limit``, ``offset``) on the
+         *     wire. A frontend operator page cannot render "Showing
          *     50 of N fights" without either (A) a second round-trip
          *     asking for the same set + a ``COUNT(*)`` query or (B)
          *     reading the cursor back from the request that produced
@@ -894,8 +1053,8 @@ export interface components {
          *     a second round-trip.
          *
          *     Field semantics mirror the handler's ``Query`` params
-         *     (``limit`` clamped to ``[1, 500]``; ``offset`` clamped
-         *     to ``[0, ∞)``). The defaults match the handler so a
+         *     (``limit`` clamped to ``[1, 500]``; ``offset`` clamped to
+         *     ``[0, ∞)``). The defaults match the handler so a
          *     frontend that consumes a hard-coded call site gets the
          *     same out-of-the-box behaviour. ``total_count`` is
          *     deliberately NOT in this wrapper: adding it would force
@@ -1059,6 +1218,404 @@ export interface components {
             total_damage: number;
             /** Total Healing */
             total_healing: number;
+        };
+        /**
+         * PlayerReadoutBoonsOut
+         * @description One player's boons rollup column block.
+         *
+         *     Tour 5 v0.10.23 plan 045: Combat readout ``Boons`` table
+         *     (per §5 of the design doc). The 6 named boons get fixed
+         *     columns; the remaining ~34 GW2 boons collapse into
+         *     ``other_boons_out`` (a free-form name → count mapping;
+         *     default empty dict so the frontend renders the empty-state
+         *     column without a conditional branch).
+         */
+        PlayerReadoutBoonsOut: {
+            /**
+             * Aegis Out
+             * @default 0
+             */
+            aegis_out: number;
+            /**
+             * Alacrity Out
+             * @default 0
+             */
+            alacrity_out: number;
+            /**
+             * Boons In Rate
+             * @default 0
+             */
+            boons_in_rate: number;
+            /**
+             * Boons Out Rate
+             * @default 0
+             */
+            boons_out_rate: number;
+            /**
+             * Other Boons Out
+             * @default {}
+             */
+            other_boons_out: {
+                [key: string]: number;
+            };
+            /**
+             * Resistance Out
+             * @default 0
+             */
+            resistance_out: number;
+            /**
+             * Stability Out
+             * @default 0
+             */
+            stability_out: number;
+            /**
+             * Stealth Out
+             * @default 0
+             */
+            stealth_out: number;
+            /**
+             * Superspeed Out
+             * @default 0
+             */
+            superspeed_out: number;
+        };
+        /**
+         * PlayerReadoutDamageOut
+         * @description One player's damage rollup column block.
+         *
+         *     Tour 5 v0.10.23 plan 045: Combat readout ``Damage`` table
+         *     (per ``docs/v0.9.0-combat-readout-design.md`` §3). Same
+         *     wire-shape contract as the JSON example in §5.1: total
+         *     DPS + power/condi split + strips-on-DPS-row + cc-applied
+         *     + down-contribution-dps + kills. Defaults leave every
+         *     field zero so the parser can stream empty player rows
+         *     before Phase 6 v2 lands the statechange events (the
+         *     stips/cc/down/kills columns require a Phase 6 v2
+         *     statechange parser extension that is NOT part of v0.10.23).
+         */
+        PlayerReadoutDamageOut: {
+            /**
+             * Cc Applied
+             * @default 0
+             */
+            cc_applied: number;
+            /**
+             * Down Contribution Dps
+             * @default 0
+             */
+            down_contribution_dps: number;
+            /**
+             * Dps Condi
+             * @default 0
+             */
+            dps_condi: number;
+            /**
+             * Dps Power
+             * @default 0
+             */
+            dps_power: number;
+            /**
+             * Dps Total
+             * @default 0
+             */
+            dps_total: number;
+            /**
+             * Kills
+             * @default 0
+             */
+            kills: number;
+            /**
+             * Strips
+             * @default 0
+             */
+            strips: number;
+        };
+        /**
+         * PlayerReadoutDefenseOut
+         * @description One player's defense rollup column block.
+         *
+         *     Tour 5 v0.10.23 plan 045: Combat readout ``Defense``
+         *     table (per §6 of the design doc). The ``time_downed_ms``
+         *     column requires the parser to track the ``downed`` state
+         *     per target across events (Phase 6 v2 work); the v0.10.23
+         *     scaffold leaves it at 0 by default.
+         */
+        PlayerReadoutDefenseOut: {
+            /**
+             * Barrier Absorbed
+             * @default 0
+             */
+            barrier_absorbed: number;
+            /**
+             * Blocks
+             * @default 0
+             */
+            blocks: number;
+            /**
+             * Cc Taken
+             * @default 0
+             */
+            cc_taken: number;
+            /**
+             * Damage Taken
+             * @default 0
+             */
+            damage_taken: number;
+            /**
+             * Deaths
+             * @default 0
+             */
+            deaths: number;
+            /**
+             * Dodges
+             * @default 0
+             */
+            dodges: number;
+            /**
+             * Interrupts
+             * @default 0
+             */
+            interrupts: number;
+            /**
+             * Time Downed Ms
+             * @default 0
+             */
+            time_downed_ms: number;
+        };
+        /**
+         * PlayerReadoutHealOut
+         * @description One player's heal rollup column block.
+         *
+         *     Tour 5 v0.10.23 plan 045: Combat readout ``Heal`` table
+         *     (per §4 of the design doc). The heal+barrier split is
+         *     Pydantic-mandatory per §7 of the design doc (barrier
+         *     MUST be a separate field from heal). ``stun_breaks``
+         *     is the per-fight count of :class:`StunBreakEvent` rows
+         *     where this player is ``source_agent_id``.
+         */
+        PlayerReadoutHealOut: {
+            /**
+             * Barrier Ps
+             * @default 0
+             */
+            barrier_ps: number;
+            /**
+             * Barrier Total
+             * @default 0
+             */
+            barrier_total: number;
+            /**
+             * Cleanses
+             * @default 0
+             */
+            cleanses: number;
+            /**
+             * Heal Total
+             * @default 0
+             */
+            heal_total: number;
+            /**
+             * Hps
+             * @default 0
+             */
+            hps: number;
+            /**
+             * Stun Breaks
+             * @default 0
+             */
+            stun_breaks: number;
+        };
+        /**
+         * PlayerReadoutOut
+         * @description One player's full Combat-readout row.
+         *
+         *     Tour 5 v0.10.23 plan 045: the 5 shared identity columns
+         *     (per design doc §2: subgroup, name, elite_spec,
+         *     is_commander, roles) PLUS the 4 nested per-aspect
+         *     rollup column blocks (Damage / Heal / Boons / Defense).
+         *     Mirrors the §5.1 JSON example one-for-one.
+         *
+         *     **Naming note (the convention-break):** the 4 nested
+         *     aspect blocks (``PlayerReadoutDamageOut`` /
+         *     ``PlayerReadoutHealOut`` / ``PlayerReadoutBoonsOut`` /
+         *     ``PlayerReadoutDefenseOut``) intentionally do NOT carry
+         *     the project's ``Row`` suffix convention (cf.
+         *     :class:`SkillUsageRowOut` / :class:`TargetDpsRowOut`
+         *     / :class:`SquadRollupRowOut`): they represent NESTED
+         *     column BLOCKS inside this single row-shaped aggregate,
+         *     not FLAT per-target / per-skill aggregation rows. This
+         *     class itself (``PlayerReadoutOut``) plays the role of
+         *     the ``row`` in any future flat-aggregation surface, so
+         *     the 4 nested aspect blocks nest INSIDE the row rather
+         *     than competing with it for the ``Row`` suffix.
+         *
+         *     ``roles`` is a backend-computed ``list[str]`` (the role
+         *     classifier module is the ``gw2_analytics``
+         *     PlayerRoleClassifier workspace owner; v0.10.23 ships
+         *     the wire shape only — the classifier + its
+         *     threshold-calibration is a follow-up cycle).
+         *     ``is_commander`` defaults False (the commando-flag is
+         *     ONLY rendered when the ORM exposes it; the v0.10.23
+         *     scaffold primes the field for the future Phase C
+         *     feature where the parser writes the flag).
+         */
+        PlayerReadoutOut: {
+            /** Account Name */
+            account_name: string;
+            /** Agent Id */
+            agent_id: number;
+            /**
+             * @default {
+             *       "aegis_out": 0,
+             *       "alacrity_out": 0,
+             *       "boons_in_rate": 0,
+             *       "boons_out_rate": 0,
+             *       "other_boons_out": {},
+             *       "resistance_out": 0,
+             *       "stability_out": 0,
+             *       "stealth_out": 0,
+             *       "superspeed_out": 0
+             *     }
+             */
+            boons: components["schemas"]["PlayerReadoutBoonsOut"];
+            /**
+             * @default {
+             *       "cc_applied": 0,
+             *       "down_contribution_dps": 0,
+             *       "dps_condi": 0,
+             *       "dps_power": 0,
+             *       "dps_total": 0,
+             *       "kills": 0,
+             *       "strips": 0
+             *     }
+             */
+            damage: components["schemas"]["PlayerReadoutDamageOut"];
+            /**
+             * @default {
+             *       "barrier_absorbed": 0,
+             *       "blocks": 0,
+             *       "cc_taken": 0,
+             *       "damage_taken": 0,
+             *       "deaths": 0,
+             *       "dodges": 0,
+             *       "interrupts": 0,
+             *       "time_downed_ms": 0
+             *     }
+             */
+            defense: components["schemas"]["PlayerReadoutDefenseOut"];
+            /** Elite Spec */
+            elite_spec: string;
+            /**
+             * @default {
+             *       "barrier_ps": 0,
+             *       "barrier_total": 0,
+             *       "cleanses": 0,
+             *       "heal_total": 0,
+             *       "hps": 0,
+             *       "stun_breaks": 0
+             *     }
+             */
+            heal: components["schemas"]["PlayerReadoutHealOut"];
+            /**
+             * Is Commander
+             * @default false
+             */
+            is_commander: boolean;
+            /** Name */
+            name: string;
+            /** Profession */
+            profession: string;
+            /**
+             * Roles
+             * @default []
+             */
+            roles: string[];
+            /** Subgroup */
+            subgroup: number;
+        };
+        /**
+         * PlayerSkillLoadoutOut
+         * @description One player's loadout info at fight start.
+         *
+         *     Tour 4 v0.10.13 plan 044: Skill build analyser. The wire
+         *     format matches :class:`AgentOut`'s ``profession`` +
+         *     ``elite_spec`` conventions (numeric enum values converted
+         *     via ``format_profession`` + ``format_elite_spec`` from
+         *     :mod:`gw2analytics_api.route_helpers`).
+         *
+         *     ``equipped_skill_ids`` is the V1 STUB -- the parser does
+         *     NOT yet extract equipped-skill IDs from the EVTC binary
+         *     (a separate parser-layer ticket, deferred to v0.11.0). The
+         *     field is intentionally an empty list (NOT omitted) so the
+         *     frontend can render the empty-state panel without a
+         *     conditional branch.
+         */
+        PlayerSkillLoadoutOut: {
+            /** Elite Spec */
+            elite_spec: string;
+            /**
+             * Equipped Skill Ids
+             * @default []
+             */
+            equipped_skill_ids: number[];
+            /** Profession */
+            profession: string;
+        };
+        /**
+         * PlayerSkillUsageRowOut
+         * @description One row of a per-player per-skill roll-up.
+         *
+         *     Tour 4 v0.10.13 plan 044: Skill build analyser. Same shape
+         *     as :class:`SkillUsageRowOut` (the per-fight roll-up) but
+         *     source-attributed to a specific player's agent. The frontend
+         *     uses this when the analyst picks a player on the per-fight
+         *     drill-down page (``PlayerSkillUsageFilter`` dropdown,
+         *     mirroring the v0.10.3 ``PerPlayerTimeline`` UX pattern).
+         */
+        PlayerSkillUsageRowOut: {
+            /** Hit Count */
+            hit_count: number;
+            /** Skill Id */
+            skill_id: number;
+            /** Skill Name */
+            skill_name: string;
+            /** Total Buff Removal */
+            total_buff_removal: number;
+            /** Total Damage */
+            total_damage: number;
+            /** Total Healing */
+            total_healing: number;
+        };
+        /**
+         * PlayerSkillsOut
+         * @description Per-player skill roll-up + loadout for one fight.
+         *
+         *     Tour 4 v0.10.13 plan 044: Skill build analyser. Equivalent
+         *     to :class:`FightSkillsOut` but with source-side attribution
+         *     (every skill rolled up IS the player's own) + the player's
+         *     loadout pre-pended for the per-player UI.
+         *
+         *     A 0-player-attribution fight (the agent row resolves but
+         *     the parsed event stream contains no events with
+         *     ``source_agent_id == player_agent.agent_id``) returns
+         *     ``200 OK`` with ``skills: []`` -- NOT 404. The 0-skills
+         *     state is distinguishable from "player not found in fight"
+         *     which returns 404 (see the endpoint docstring on
+         *     :func:`get_fight_player_skills`).
+         */
+        PlayerSkillsOut: {
+            /** Account Name */
+            account_name: string;
+            /** Agent Id */
+            agent_id: number;
+            /** Fight Id */
+            fight_id: string;
+            loadout: components["schemas"]["PlayerSkillLoadoutOut"];
+            /**
+             * Skills
+             * @default []
+             */
+            skills: components["schemas"]["PlayerSkillUsageRowOut"][];
         };
         /** PlayerTimelineOut */
         PlayerTimelineOut: {
@@ -1468,6 +2025,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FightEventsSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fight_player_skills_api_v1_fights__fight_id__players__account_name__skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fight_id: string;
+                account_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerSkillsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fight_readout_api_v1_fights__fight_id__readout_get: {
+        parameters: {
+            query?: {
+                /** @description (SCAFFOLD-ONLY ESCAPE HATCH; future-tour refactor target: If True, exercise ``aggregate_combat_readout`` against an EMPTY events stream (returns the empty-schema envelope -- 0-player ``players: []`` -- with ``duration_s=0.0``). Useful for hermetic route testing without docker compose / MinIO / Postgres. Production GET requests set ``dry_run=False``.**WARNING**: the ``?dry_run=`` query param is a SCAFFOLD anti-pattern on a production endpoint (the reviewer flagged this in Round 14) — Wave 6 refactor must switch this to a FastAPI ``app.dependency_overrides[get_session] = ...`` test fixture pattern so the production route is bare-bones (only the real database path; the empty-state path closes over the dependency-override contract for tests). */
+                dry_run?: boolean;
+            };
+            header?: never;
+            path: {
+                fight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FightReadoutOut"];
                 };
             };
             /** @description Validation Error */

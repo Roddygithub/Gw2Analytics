@@ -1,9 +1,12 @@
 :root {
-  --background: #0e1116;
-  --foreground: #e6edf3;
-  --accent: #d4a64a;
-  --border: #1f2733;
-  --surface: #161b22;
+  /* GW2Mists-inspired dark palette */
+  --background: #050914;
+  --foreground: #ffffff;
+  --accent: #ff8c2a;
+  --border: rgba(255, 255, 255, 0.1);
+  --surface: #ffffff08;
+  --button: #070b14;
+  --link: rgba(255, 255, 255, 0.38);
   --error: #ff6e6e;
 }
 
@@ -36,22 +39,11 @@ body {
 }
 
 a {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: none;
-  transition: opacity 0.15s ease-in-out;
+  transition: color 0.15s ease-in-out;
 }
 
 a:hover {
-  opacity: 0.85;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --background: #f6f8fa;
-    --foreground: #0e1116;
-    --accent: #8a6d2c;
-    --border: #d0d7de;
-    --surface: #ffffff;
-    --error: #ff6e6e;
-  }
+  color: var(--accent);
 }

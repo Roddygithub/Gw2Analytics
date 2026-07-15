@@ -46,19 +46,19 @@ dev-web-attach: ## Attach to the pnpm dev tmux session (Ctrl-b d to detach)
 # ----------------------------------------------------------------------------
 
 .PHONY: dev-api-bg
-dev-api-bg: ## Start FastAPI uvicorn dev server in tmux (idempotent)
+dev-api-bg: ## Start FastAPI uvicorn + Arq worker dev servers in tmux
 	@./scripts/dev-api-bg.sh
 
 .PHONY: dev-api-status
-dev-api-status: ## Check uvicorn + :8000 health
+dev-api-status: ## Check uvicorn (API), Arq (worker) + :8000 health
 	@./scripts/dev-api-bg.sh --status
 
 .PHONY: dev-api-stop
-dev-api-stop: ## Kill the uvicorn tmux session
+dev-api-stop: ## Kill the uvicorn and worker tmux sessions
 	@./scripts/dev-api-bg.sh --stop
 
 .PHONY: dev-api-tail
-dev-api-tail: ## Tail the uvicorn log
+dev-api-tail: ## Tail the logs
 	@./scripts/dev-api-bg.sh --tail
 
 .PHONY: dev-api-restart
@@ -69,12 +69,16 @@ dev-api-restart: ## Recycle uvicorn (e.g. after .env change)
 dev-api-attach: ## Attach to the uvicorn tmux session (Ctrl-b d to detach)
 	@./scripts/dev-api-bg.sh --attach
 
+.PHONY: dev-api-attach-worker
+dev-api-attach-worker: ## Attach to the arq worker tmux session (Ctrl-b d to detach)
+	@./scripts/dev-api-bg.sh --attach-worker
+
 # ----------------------------------------------------------------------------
 # Stack-level operations
 # ----------------------------------------------------------------------------
 
 .PHONY: dev-stack-up
-dev-stack-up: dev-api-bg dev-web-bg ## Start full dev stack (API + web in tmux)
+dev-stack-up: dev-api-bg dev-web-bg ## Start full dev stack (API + worker + web in tmux)
 	@echo
 	@echo "=== stack status ==="
 	@./scripts/dev-api-bg.sh --status
@@ -88,7 +92,7 @@ dev-stack-down: dev-api-stop dev-web-stop ## Stop the full dev stack
 
 .PHONY: dev-stack-status
 dev-stack-status: ## Show API + web status
-	@echo "=== api (FastAPI :8000) ==="
+	@echo "=== api (FastAPI :8000 + Arq) ==="
 	@./scripts/dev-api-bg.sh --status
 	@echo
 	@echo "=== web (Next.js :3000) ==="

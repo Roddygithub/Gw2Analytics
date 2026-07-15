@@ -20,8 +20,10 @@
 set -euo pipefail
 
 SESSION="api-dev"
+WORKER_SESSION="arq-worker"
 PORT=8000
 LOG="/tmp/uvicorn-dev.log"
+WORKER_LOG="/tmp/arq-worker-dev.log"
 API_DIR="apps/api"
 
 # Repo root = parent of this script's directory
@@ -30,6 +32,38 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 API_PATH="${REPO_ROOT}/${API_DIR}"
 
 cmd="${1:-start}"
+
+# --- helpers ------------------------------------------------------------------
+
+# Build a small wrapper script that exports the shared dev env vars and
+# then execs the provided command, tee-ing output to the given log file.
+# The wrapper self-deletes via `rm -f "$0"` after exporting env vars,
+# so the caller does not need to (and must not) remove it.
+build_wrapper() {
+  local command="$1"
+  local log_file="$2"
+  local prefix="$3"
+
+  local wrapper
+  wrapper=$(mktemp "/tmp/${prefix}-wrapper.XXXXXX.sh")
+
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+# Preserve the parent shell's PATH so uv/uvicorn/arq resolve inside tmux.
+export PATH=$(printf '%q' "$PATH")
+export DATABASE_URL=$(printf '%q' "$DATABASE_URL")
+export S3_ENDPOINT=$(printf '%q' "$S3_ENDPOINT")
+export S3_ACCESS_KEY=$(printf '%q' "$S3_ACCESS_KEY")
+export S3_SECRET_KEY=$(printf '%q' "$S3_SECRET_KEY")
+export S3_BUCKET=$(printf '%q' "$S3_BUCKET")
+export SECRETS_KEK=$(printf '%q' "$SECRETS_KEK")
+export ALLOW_INREQUEST_PARSE_FALLBACK=$(printf '%q' "$ALLOW_INREQUEST_PARSE_FALLBACK")
+rm -f "\$0"
+exec ${command} 2>&1 | tee ${log_file}
+EOF
+  chmod +x "$wrapper"
+  echo "$wrapper"
+}
 
 # --- subcommand dispatch ------------------------------------------------------
 
@@ -40,6 +74,12 @@ if [[ "$cmd" == "--status" || "$cmd" == "status" ]]; then
     echo "  (running)"
   else
     echo "  (no tmux session named '$SESSION')"
+  fi
+  if tmux has-session -t "$WORKER_SESSION" 2>/dev/null; then
+    tmux ls | grep -E "^${WORKER_SESSION}:" || true
+    echo "  (worker running)"
+  else
+    echo "  (no tmux session named '$WORKER_SESSION')"
   fi
   echo
   echo "=== port :$PORT ==="
@@ -64,17 +104,32 @@ if [[ "$cmd" == "--stop" || "$cmd" == "stop" ]]; then
   else
     echo "no tmux session '$SESSION' to kill"
   fi
-  # Belt-and-suspenders: also kill any orphaned uvicorn processes
+  if tmux has-session -t "$WORKER_SESSION" 2>/dev/null; then
+    tmux kill-session -t "$WORKER_SESSION"
+    echo "killed tmux session '$WORKER_SESSION'"
+  else
+    echo "no tmux session '$WORKER_SESSION' to kill"
+  fi
+  # Belt-and-suspenders: also kill any orphaned processes
   pkill -9 -f "uvicorn gw2analytics_api" 2>/dev/null || true
+  pkill -9 -f "arq gw2analytics_api.workers" 2>/dev/null || true
   exit 0
 fi
 
 if [[ "$cmd" == "--tail" || "$cmd" == "tail" ]]; then
-  exec tail -f "$LOG"
+  exec tail -f "$LOG" "$WORKER_LOG"
+fi
+
+if [[ "$cmd" == "--tail-worker" || "$cmd" == "tail-worker" ]]; then
+  exec tail -f "$WORKER_LOG"
 fi
 
 if [[ "$cmd" == "--attach" || "$cmd" == "attach" ]]; then
   exec tmux attach -t "$SESSION"
+fi
+
+if [[ "$cmd" == "--attach-worker" || "$cmd" == "attach-worker" ]]; then
+  exec tmux attach -t "$WORKER_SESSION"
 fi
 
 if [[ "$cmd" == "--restart" || "$cmd" == "restart" ]]; then
@@ -91,8 +146,9 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
   exit 0
 fi
 
-# Kill any orphaned uvicorn processes (in case tmux was killed ungracefully)
+# Kill any orphaned processes (in case tmux was killed ungracefully)
 pkill -9 -f "uvicorn gw2analytics_api" 2>/dev/null || true
+pkill -9 -f "arq gw2analytics_api.workers" 2>/dev/null || true
 sleep 1
 
 # Load .env from the repo root if present (uvicorn reads it via pydantic-settings,
@@ -139,22 +195,7 @@ cd "$API_PATH"
 # metacharacters break the tmux command string. The wrapper exports the
 # resolved env vars directly and then execs uvicorn, so the process
 # tree is clean and tmux only sees a single executable argument.
-WRAPPER=$(mktemp /tmp/api-dev-wrapper.XXXXXX.sh)
-cat > "$WRAPPER" <<EOF
-#!/usr/bin/env bash
-# Preserve the parent shell's PATH so uv/uvicorn resolve inside tmux.
-export PATH=$(printf '%q' "$PATH")
-export DATABASE_URL=$(printf '%q' "$DATABASE_URL")
-export S3_ENDPOINT=$(printf '%q' "$S3_ENDPOINT")
-export S3_ACCESS_KEY=$(printf '%q' "$S3_ACCESS_KEY")
-export S3_SECRET_KEY=$(printf '%q' "$S3_SECRET_KEY")
-export S3_BUCKET=$(printf '%q' "$S3_BUCKET")
-export SECRETS_KEK=$(printf '%q' "$SECRETS_KEK")
-export ALLOW_INREQUEST_PARSE_FALLBACK=$(printf '%q' "$ALLOW_INREQUEST_PARSE_FALLBACK")
-rm -f "\$0"
-exec uv run uvicorn gw2analytics_api.main:app --host 0.0.0.0 --port ${PORT} 2>&1 | tee ${LOG}
-EOF
-chmod +x "$WRAPPER"
+WRAPPER=$(build_wrapper "uv run uvicorn gw2analytics_api.main:app --host 0.0.0.0 --port ${PORT}" "$LOG" "api-dev")
 
 # Run the wrapper through bash explicitly so it works even if /tmp is
 # mounted noexec (the file still needs read permission, not execute).
@@ -173,13 +214,35 @@ for i in $(seq 1 90); do
 done
 
 if [[ "$ready" -ne 1 ]]; then
+  rm -f "$WRAPPER"
   echo "ERROR: uvicorn did not become ready within 90s. Tail of $LOG:"
   tail -30 "$LOG" || true
   exit 1
 fi
 
+# Start the Arq parser worker alongside the API. In dev mode the upload
+# endpoint can fall back to in-request parsing, but the worker is the
+# preferred path and keeps the API responsive under load.
+echo "starting arq worker in tmux session '$WORKER_SESSION' (logs: $WORKER_LOG) ..."
+WORKER_WRAPPER=$(build_wrapper "uv run arq gw2analytics_api.workers.parser_settings.WorkerSettings" "$WORKER_LOG" "arq-dev")
+
+tmux new-session -d -s "$WORKER_SESSION" "bash \"$WORKER_WRAPPER\""
+
+# Briefly wait for the worker tmux session to materialise and warn if it
+# did not. We consider the worker healthy when its tmux session exists
+# and the log shows the arq startup line.
+sleep 2
+if ! tmux has-session -t "$WORKER_SESSION" 2>/dev/null; then
+  rm -f "$WORKER_WRAPPER"
+  echo
+  echo "WARNING: arq worker tmux session '$WORKER_SESSION' did not start."
+  echo "         Check $WORKER_LOG for details."
+  echo "uvicorn is up in tmux session '$SESSION'."
+else
+  echo
+  echo "uvicorn + arq worker are up in tmux sessions '$SESSION' and '$WORKER_SESSION'."
+fi
 echo
-echo "uvicorn is up in tmux session '$SESSION'."
 echo "  URLs:"
 echo "    http://127.0.0.1:${PORT}/"
 echo "    http://127.0.0.1:${PORT}/docs       (OpenAPI)"
@@ -188,5 +251,5 @@ echo "  Commands:"
 echo "    $0 --status  # check health"
 echo "    $0 --tail    # tail the log"
 echo "    $0 --attach  # attach (Ctrl-b d to detach)"
-echo "    $0 --stop    # kill the session"
+echo "    $0 --stop    # kill the sessions"
 echo "    $0 --restart # recycle (e.g. after .env change)"
