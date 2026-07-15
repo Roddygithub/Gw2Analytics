@@ -2,11 +2,9 @@
 
 Senior-advisor audit (post-R1-R4 batch, 2026-07-10). Each plan is self-contained for an executor with zero context from this session. Status is updated by the executor.
 
-## Open plans (ordered by priority / leverage)
+## Open plans
 
-| # | Slug | Priority | Impact | Effort | Confidence |
-|---|---|---|---|---|---|
-| 028 | `[players-sql-aggregations](#plan-028--v01010-sql-aggregations-on-ormfightplayersummary-for-apiv1players--apiv1playersaccount_name--apiv1playersaccount_nametimeline-eliminates-full-db-ram-load)` | **P2** | HIGH (perf/scaling) | L | 1.0 |
+All advisor plans are currently **closed**. The archive below keeps the historical specs for provenance.
 
 ## Closed plans
 
@@ -18,17 +16,16 @@ Senior-advisor audit (post-R1-R4 batch, 2026-07-10). Each plan is self-contained
 | 004 | `[cleanup-stale-audit-plans](./archive/004-cleanup-stale-audit-plans.md)` | **P4** | Low (DX: reduce navigation noise) | XS | **closed** |
 | 026 | `[webhook-dns-executor-do-max-workers](./archive/026-webhook-dns-executor-do-max-workers.md)` | **P1** | HIGH (security DoS) | XS | **closed** |
 | 027 | `[event-iterator-streaming-gzip](./archive/027-event-iterator-streaming-gzip.md)` | **P1** | HIGH (perf/OOM) | XS | **closed** |
+| 028 | `[players-sql-aggregations](./archive/028-players-sql-aggregations.md)` | **P2** | HIGH (perf/scaling) | L | **closed** |
 | 029 | `[blob-cache-thundering-herd-latch](./archive/029-blob-cache-thundering-herd-latch.md)` | **P2** | MED-HIGH (perf) | S | **closed** |
 | 030 | `[schema-guard-alembic-script-location](./archive/030-schema-guard-alembic-script-location.md)` | **P3** | MED (dx) | XS | **closed** |
 | 031 | `[schema-guard-fresh-db-handling](./archive/031-schema-guard-fresh-db-handling.md)` | **P4** | LOW-MED (dx) | XS | **closed** |
 
 > **Note:** the numeric gap 005-025 reflects plans shipped and archived over the v0.9.4 + v0.9.5 + v0.9.6 + v0.10.9 cycles. Their index links live in `plans/README.md` (the 24 plans covered by [`plans/AUDIT-2026-07-10-79c4501.md`](plans/AUDIT-2026-07-10-79c4501.md) + [`plans/AUDIT-2026-07-11-f0249ef.md`](plans/AUDIT-2026-07-11-f0249ef.md)).
 
-## Dependency graph (open plans only)
+## Dependency graph
 
-- **P2 (028)** — SQL aggregations for `/players/*` are the only remaining open plan. It is independent of all closed plans.
-
-There are NO inter-plan dependencies. The remaining work is the SQL-aggregation refactor.
+All advisor plans are closed. No open dependencies remain.
 
 ## v0.10.10 cycle (026-031) — closed
 
@@ -41,6 +38,17 @@ The 026-031 cycle shipped and its plans are now archived above. The historical n
 3. **029** (blob cache thundering-herd latch) — S effort, pairs naturally with 027 for the canonical /fights/{id} page-load perf story.
 4. **028** (players SQL aggregations) — L effort, the biggest refactor. Independent.
 5. **030 + 031** (schema_guard adjustments) — XS effort each. Land together for review convenience.
+
+### Status (v0.10.10, working diff at `f0249ef`)
+
+| Plan | Finding | Category | Impact | Effort | Confidence | Status |
+|------|---------|----------|--------|--------|------------|--------|
+| 026  | `_DNS_EXECUTOR.max_workers=1` thread-starvation DoS on `/api/v1/webhooks` POST | security, perf | HIGH | XS | 1.0 | **closed** |
+| 027  | `build_event_iterator` materialises full gzip via `decompress + splitlines` (defeats the docstring's "no upfront cost" claim) | perf, correctness | HIGH | XS | 1.0 | **closed** |
+| 028  | `routes/players.py` 3 endpoints load the FULL `OrmFight` table + agents + skills per request (scales linearly with dataset) | tech_debt, perf | HIGH | L | 1.0 | **closed** |
+| 029  | `_cached_get_events` thundering herd: 4 parallel `/fights/{id}/*` fetches trigger 4 independent MinIO GETs (concurrent stampede defeats the cache) | perf | MED-HIGH | S | 1.0 | **closed** |
+| 030  | `schema_guard.py` Alembic `script_location` resolution relies on operator CWD (crashes on `uvicorn` from repo root, the README quickstart pattern) | dx, correctness | MED | XS | 1.0 | **closed** |
+| 031  | `schema_guard.py` crashes with opaque `psycopg.errors.UndefinedTable` on a fresh DB before migrations (masked behind a Postgres-outage-like traceback) | dx | LOW-MED | XS | 1.0 | **closed** |
 
 ## Discarded scope (intent: avoid re-auditing in the next cycle)
 
