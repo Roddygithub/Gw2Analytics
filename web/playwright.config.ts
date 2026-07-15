@@ -94,7 +94,7 @@ export default defineConfig({
       // ``pnpm run dev`` for the fast-iteration loop
       // (HMR + source maps + TS error overlay).
       command: isCI
-        ? "pnpm run build && pnpm run start -- -p 3000"
+        ? "pnpm run build && PORT=3000 pnpm run start"
         : "pnpm run dev",
       port: 3000,
       reuseExistingServer: !isCI,
