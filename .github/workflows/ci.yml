@@ -216,7 +216,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Web unit tests (vitest)
         working-directory: web
-        run: pnpm exec vitest run --reporter=verbose
+        run: pnpm exec vitest run --coverage --reporter=verbose
 
       # ----------------------------------------------------------------
       # Security vulnerability audit (v0.10.x plan 009)

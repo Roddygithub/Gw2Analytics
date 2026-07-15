@@ -38,5 +38,26 @@ export default defineConfig({
     // imports. The page / layout tests rely on these (the
     // jsdom-simulated React tree mounts via ``describe`` blocks).
     globals: true,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "text-summary"],
+      // Exclude generated OpenAPI client code and test harness files
+      // from coverage thresholds. The schema file is auto-generated
+      // from the FastAPI spec; the API wrapper modules are thin
+      // fetch() callers that are better covered by E2E tests.
+      exclude: [
+        "src/lib/api/**",
+        "tests/**",
+        "*.config.{js,ts}",
+        ".next/**",
+      ],
+      thresholds: {
+        // Baseline measured on 2026-07-15 with src/lib/api excluded.
+        // Raise these incrementally as component coverage improves.
+        lines: 65,
+        branches: 80,
+        functions: 70,
+      },
+    },
   },
 });
