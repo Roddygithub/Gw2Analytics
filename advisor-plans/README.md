@@ -2,39 +2,48 @@
 
 Senior-advisor audit (post-R1-R4 batch, 2026-07-10). Each plan is self-contained for an executor with zero context from this session. Status is updated by the executor.
 
-## Plans (ordered by priority / leverage)
+## Open plans (ordered by priority / leverage)
 
-| # | Slug | Priority | Impact | Effort | Confidence | Status |
-|---|---|---|---|---|---|---|
-| 001 | `[api-tests-player-compare](#plan-001--add-api-test-coverage-for-routesplayer_comparepy)` | **P1** | High (used API surface) | M | 1.0 | open |
-| 002 | `[fix-typing-any-leakage-analytics](#plan-002--fix-typing-any-leak-in-cross_account_timelinepy)` | **P2** | Medium (strips mypy --strict bypass) | XS | 1.0 | open |
-| 003 | `[bootstrap-core-domain-tests](#plan-003--bootstrap-unit-tests-for-libsgw2_coretes)` | **P3** | High (dependency-stability base) | M | 0.9 | open |
-| 004 | `[cleanup-stale-audit-plans](#plan-004--archive-stale-plans-in-plansdir)` | **P4** | Low (DX: reduce navigation noise) | XS | 1.0 | open |
-| 026 | `[webhook-dns-executor-do-max-workers](#plan-026--v01010-webhook-dns-executor-dos-fix-max_workers1--bounded-concurrency)` | **P1** | HIGH (security DoS) | XS | 1.0 | open |
-| 027 | `[event-iterator-streaming-gzip](#plan-027--v01010-stream-_event_dispatchbuild_event_iterator-via-gzipgzipfile-eliminates-the-gzipdecompress--splitlines-memory-peak)` | **P1** | HIGH (perf/OOM) | XS | 1.0 | open |
-| 028 | `[players-sql-aggregations](#plan-028--v01010-sql-aggregations-on-ormfightplayersummary-for-apiv1players--apiv1playersaccount_name--apiv1playersaccount_nametimeline-eliminates-full-db-ram-load)` | **P2** | HIGH (perf/scaling) | L | 1.0 | open |
-| 029 | `[blob-cache-thundering-herd-latch](#plan-029--v01010-_cached_get_events-thundering-herd-latch-serialize-concurrent-minio-gets-for-the-same-blob_uri)` | **P2** | MED-HIGH (perf) | S | 1.0 | open |
-| 030 | `[schema-guard-alembic-script-location](#plan-030--v01010-schema_guardcheck_schema_drift-must-set-absolute-script_location-on-alembicconfig-closes-the-cwd-dependent-alembic-resolution-bug)` | **P3** | MED (dx) | XS | 1.0 | open |
-| 031 | `[schema-guard-fresh-db-handling](#plan-031--v01010-schema_guardcheck_schema_drift-must-catch-undefinedtable-on-a-fresh-db-graceful-startup-before-migrations)` | **P4** | LOW-MED (dx) | XS | 1.0 | open |
+| # | Slug | Priority | Impact | Effort | Confidence |
+|---|---|---|---|---|---|
+| 001 | `[api-tests-player-compare](#plan-001--add-api-test-coverage-for-routesplayer_comparepy)` | **P1** | High (used API surface) | M | 1.0 |
+| 003 | `[bootstrap-core-domain-tests](#plan-003--bootstrap-unit-tests-for-libsgw2_coretes)` | **P3** | High (dependency-stability base) | M | 0.9 |
+| 004 | `[cleanup-stale-audit-plans](#plan-004--archive-stale-plans-in-plansdir)` | **P4** | Low (DX: reduce navigation noise) | XS | 1.0 |
+| 028 | `[players-sql-aggregations](#plan-028--v01010-sql-aggregations-on-ormfightplayersummary-for-apiv1players--apiv1playersaccount_name--apiv1playersaccount_nametimeline-eliminates-full-db-ram-load)` | **P2** | HIGH (perf/scaling) | L | 1.0 |
+
+## Closed plans
+
+| # | Slug | Priority | Impact | Effort | Status |
+|---|---|---|---|---|---|
+| 002 | `[fix-typing-any-leakage-analytics](./archive/002-fix-typing-any-leakage-analytics.md)` | **P2** | Medium (strips mypy --strict bypass) | XS | **closed** |
+| 026 | `[webhook-dns-executor-do-max-workers](./archive/026-webhook-dns-executor-do-max-workers.md)` | **P1** | HIGH (security DoS) | XS | **closed** |
+| 027 | `[event-iterator-streaming-gzip](./archive/027-event-iterator-streaming-gzip.md)` | **P1** | HIGH (perf/OOM) | XS | **closed** |
+| 029 | `[blob-cache-thundering-herd-latch](./archive/029-blob-cache-thundering-herd-latch.md)` | **P2** | MED-HIGH (perf) | S | **closed** |
+| 030 | `[schema-guard-alembic-script-location](./archive/030-schema-guard-alembic-script-location.md)` | **P3** | MED (dx) | XS | **closed** |
+| 031 | `[schema-guard-fresh-db-handling](./archive/031-schema-guard-fresh-db-handling.md)` | **P4** | LOW-MED (dx) | XS | **closed** |
 
 > **Note:** the numeric gap 005-025 reflects plans shipped and archived over the v0.9.4 + v0.9.5 + v0.9.6 + v0.10.9 cycles. Their index links live in `plans/README.md` (the 24 plans covered by [`plans/AUDIT-2026-07-10-79c4501.md`](plans/AUDIT-2026-07-10-79c4501.md) + [`plans/AUDIT-2026-07-11-f0249ef.md`](plans/AUDIT-2026-07-11-f0249ef.md)).
 
-## Dependency graph
+## Dependency graph (open plans only)
 
-- **P1 (001, 026, 027)** MUST be first-class. The route surface (001) + the security DoS (026) + the OOM read-path (027) are blocking-class.
-- **P2 (002, 028, 029)** independent and can run in parallel with P1 if executors are isolated.
-- **P3 (003, 030)** are dependency-stability + a single DX defect. Land before P3 here (analytics typing cleanup).
-- **P4 (004, 031)** are cheap DX. Run last.
+- **P1 (001)** — route-surface test coverage for `/api/v1/players/compare` is blocking-class.
+- **P2 (028)** — SQL aggregations for `/players/*` are independent and can run in parallel with 001.
+- **P3 (003)** — dependency-stability base for `libs/gw2_core` tests.
+- **P4 (004)** — cheap DX cleanup (archive stale plans).
 
-Within the **v0.10.10 cycle (026-031)** the order is:
+There are NO inter-plan dependencies across the open plans. Recommended order is by leverage (blocking test coverage > perf/scaling > dependency stability > DX cleanup).
+
+## v0.10.10 cycle (026-031) — closed
+
+The 026-031 cycle shipped and its plans are now archived above. The historical notes below are kept for provenance.
+
+### Historical execution order (v0.10.10)
 
 1. **026** (webhook DNS executor DoS) — XS effort, the highest-leverage single fix.
 2. **027** (event iterator streaming gzip) — XS effort, the second highest-leverage.
 3. **029** (blob cache thundering-herd latch) — S effort, pairs naturally with 027 for the canonical /fights/{id} page-load perf story.
 4. **028** (players SQL aggregations) — L effort, the biggest refactor. Independent.
 5. **030 + 031** (schema_guard adjustments) — XS effort each. Land together for review convenience.
-
-There are NO inter-plan dependencies across 026-031. All 6 are independent and could ship in any order. The recommended order is by leverage (security > perf > perf > perf > dx/dx).
 
 ## Discarded scope (intent: avoid re-auditing in the next cycle)
 
@@ -61,12 +70,12 @@ These came up in Phase 2 but were vetted out:
 
 | Plan | Finding | Category | Impact | Effort | Confidence | Status |
 |------|---------|----------|--------|--------|------------|--------|
-| 026  | `_DNS_EXECUTOR.max_workers=1` thread-starvation DoS on `/api/v1/webhooks` POST | security, perf | HIGH | XS | 1.0 | open |
-| 027  | `build_event_iterator` materialises full gzip via `decompress + splitlines` (defeats the docstring's "no upfront cost" claim) | perf, correctness | HIGH | XS | 1.0 | open |
+| 026  | `_DNS_EXECUTOR.max_workers=1` thread-starvation DoS on `/api/v1/webhooks` POST | security, perf | HIGH | XS | 1.0 | **closed** |
+| 027  | `build_event_iterator` materialises full gzip via `decompress + splitlines` (defeats the docstring's "no upfront cost" claim) | perf, correctness | HIGH | XS | 1.0 | **closed** |
 | 028  | `routes/players.py` 3 endpoints load the FULL `OrmFight` table + agents + skills per request (scales linearly with dataset) | tech_debt, perf | HIGH | L | 1.0 | open |
-| 029  | `_cached_get_events` thundering herd: 4 parallel `/fights/{id}/*` fetches trigger 4 independent MinIO GETs (concurrent stampede defeats the cache) | perf | MED-HIGH | S | 1.0 | open |
-| 030  | `schema_guard.py` Alembic `script_location` resolution relies on operator CWD (crashes on `uvicorn` from repo root, the README quickstart pattern) | dx, correctness | MED | XS | 1.0 | open |
-| 031  | `schema_guard.py` crashes with opaque `psycopg.errors.UndefinedTable` on a fresh DB before migrations (masked behind a Postgres-outage-like traceback) | dx | LOW-MED | XS | 1.0 | open |
+| 029  | `_cached_get_events` thundering herd: 4 parallel `/fights/{id}/*` fetches trigger 4 independent MinIO GETs (concurrent stampede defeats the cache) | perf | MED-HIGH | S | 1.0 | **closed** |
+| 030  | `schema_guard.py` Alembic `script_location` resolution relies on operator CWD (crashes on `uvicorn` from repo root, the README quickstart pattern) | dx, correctness | MED | XS | 1.0 | **closed** |
+| 031  | `schema_guard.py` crashes with opaque `psycopg.errors.UndefinedTable` on a fresh DB before migrations (masked behind a Postgres-outage-like traceback) | dx | LOW-MED | XS | 1.0 | **closed** |
 
 ### Recommended execution order (v0.10.10)
 
