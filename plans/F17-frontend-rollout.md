@@ -5,8 +5,10 @@
 > - **Spike:** [`docs/v0.10.19-combat-readout-spike.md`](../docs/v0.10.19-combat-readout-spike.md) — scopes F17 execution sizes (W.1-W.12 frontend implementation sub-blocks).
 > - **Design:** [`docs/v0.9.0-combat-readout-design.md`](../docs/v0.9.0-combat-readout-design.md) — canonical table attributes, default sorting, and UI heuristics.
 
-> **Status:** Plan (post-v0.10.19 spike; post Wave 8 backend scope; pre v0.10.22 cycle authorisation).
-> **Branch target:** a fresh `feat/f17-frontend-rollout` branch on cycle authorisation (lands AFTER the Wave 8 backend reaches DONE).
+> **Status:** Plan (post-v0.10.19 spike; post Tour 6 v0.10.24-pre wire-contract unlock; pre v0.10.25 cycle authorisation).
+> **Branch target:** a fresh `feat/f17-frontend-rollout` branch on cycle authorisation (lands AFTER the Wave 8 backend reaches DONE; Tour 6 unlocked the v0.10.25 frontend-window lock).
+
+> **Tour 6 v0.10.24-pre unblock event (2026-07-15):** the Combat-readout wire contract is now SHIPPED on `GET /api/v1/fights/{fight_id}/readout`. The 5 shared identity columns (per design doc §2) + the `heal.stun_breaks` column are LIVE end-to-end, so the readout envelope no longer surfaces NIT placeholders for those 6 cells. The F17 frontend rollout can begin on the v0.10.25 cycle — orphaned SCAFFOLD-zero list shrinks to the 8 cells the existing WAVE-8 §1 mapping scopes (the upstream parser-stream + Skills DB catalog handle those). Sub-block status: W.2 (`<PlayerReadoutBase>`) + W.3-W.6 (the 4 `<PlayerReadout{Damage,Heal,Boons,Defense}.tsx>` AG Grid tables) already exist in `web/src/components/` per the Tour 6 close-out review — remaining work is W.1 (Tango Medium icon acquisition) + W.7-W.12 (`/fights/[id]` page integration + TanStack Query wiring + per-section error chips + vitest component tests + Playwright e2e + visual regression baseline). The `v0.10.25 v0.10.21-cycle matrix` (per §1) shifts: Wave 8 cascades into F17 with 2 cycles of latency instead of the originally-projected 4.
 
 ## §0 Scope + ownership
 
