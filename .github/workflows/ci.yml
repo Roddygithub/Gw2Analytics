@@ -45,6 +45,14 @@ jobs:
     name: Lint + test (Python 3.12 + web)
     runs-on: ubuntu-latest
 
+    env:
+      DATABASE_URL: "postgresql+psycopg://gw2analytics:gw2analytics@localhost:5432/gw2analytics"
+      S3_ENDPOINT: "localhost:9000"
+      S3_ACCESS_KEY: "gw2analytics"
+      S3_SECRET_KEY: "gw2analytics-secret"
+      S3_BUCKET: "gw2analytics"
+      SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+
     # The Postgres service runs the same docker-compose dev image the
     # local developer brings up via ``docker compose up -d
     # gw2a-postgres``. Credentials match ``[tool.pytest_env]`` in the
@@ -116,6 +124,10 @@ jobs:
       # ----------------------------------------------------------------
       - name: Health probe baseline (v0.8.7)
         run: uv run python -m gw2analytics_api.scripts.health_gate --save-baseline /tmp/health_baseline.json
+
+      - name: Run database migrations
+        working-directory: apps/api
+        run: uv run alembic upgrade head
 
       - name: Pytest
         run: uv run pytest --tb=line -q
@@ -337,6 +349,17 @@ jobs:
   arq-integration:
     name: ARQ worker integration
     runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: "postgresql+psycopg://gw2analytics:gw2analytics@localhost:5432/gw2analytics"
+      S3_ENDPOINT: "localhost:9000"
+      S3_ACCESS_KEY: "gw2analytics"
+      S3_SECRET_KEY: "gw2analytics-secret"
+      S3_BUCKET: "gw2analytics"
+      SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+      ARQ_REDIS_HOST: localhost
+      ARQ_REDIS_PORT: 6379
+
     services:
       postgres:
         image: postgres:16-alpine
@@ -376,10 +399,10 @@ jobs:
       - name: Sync workspace dependencies (frozen lock)
         run: uv sync --frozen --all-packages
 
+      - name: Run database migrations
+        working-directory: apps/api
+        run: uv run alembic upgrade head
+
       - name: ARQ worker integration tests
         working-directory: apps/api
         run: uv run pytest tests/test_parser_worker.py tests/test_uploads_arq.py -v
-        env:
-          SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
-          ARQ_REDIS_HOST: localhost
-          ARQ_REDIS_PORT: 6379
