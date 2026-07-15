@@ -6,16 +6,16 @@ Senior-advisor audit (post-R1-R4 batch, 2026-07-10). Each plan is self-contained
 
 | # | Slug | Priority | Impact | Effort | Confidence |
 |---|---|---|---|---|---|
-| 001 | `[api-tests-player-compare](#plan-001--add-api-test-coverage-for-routesplayer_comparepy)` | **P1** | High (used API surface) | M | 1.0 |
-| 003 | `[bootstrap-core-domain-tests](#plan-003--bootstrap-unit-tests-for-libsgw2_coretes)` | **P3** | High (dependency-stability base) | M | 0.9 |
-| 004 | `[cleanup-stale-audit-plans](#plan-004--archive-stale-plans-in-plansdir)` | **P4** | Low (DX: reduce navigation noise) | XS | 1.0 |
 | 028 | `[players-sql-aggregations](#plan-028--v01010-sql-aggregations-on-ormfightplayersummary-for-apiv1players--apiv1playersaccount_name--apiv1playersaccount_nametimeline-eliminates-full-db-ram-load)` | **P2** | HIGH (perf/scaling) | L | 1.0 |
 
 ## Closed plans
 
 | # | Slug | Priority | Impact | Effort | Status |
 |---|---|---|---|---|---|
+| 001 | `[api-tests-player-compare](./archive/001-api-tests-player-compare.md)` | **P1** | High (used API surface) | M | **closed** |
 | 002 | `[fix-typing-any-leakage-analytics](./archive/002-fix-typing-any-leakage-analytics.md)` | **P2** | Medium (strips mypy --strict bypass) | XS | **closed** |
+| 003 | `[bootstrap-core-domain-tests](./archive/003-bootstrap-core-domain-tests.md)` | **P3** | High (dependency-stability base) | M | **closed** |
+| 004 | `[cleanup-stale-audit-plans](./archive/004-cleanup-stale-audit-plans.md)` | **P4** | Low (DX: reduce navigation noise) | XS | **closed** |
 | 026 | `[webhook-dns-executor-do-max-workers](./archive/026-webhook-dns-executor-do-max-workers.md)` | **P1** | HIGH (security DoS) | XS | **closed** |
 | 027 | `[event-iterator-streaming-gzip](./archive/027-event-iterator-streaming-gzip.md)` | **P1** | HIGH (perf/OOM) | XS | **closed** |
 | 029 | `[blob-cache-thundering-herd-latch](./archive/029-blob-cache-thundering-herd-latch.md)` | **P2** | MED-HIGH (perf) | S | **closed** |
@@ -26,12 +26,9 @@ Senior-advisor audit (post-R1-R4 batch, 2026-07-10). Each plan is self-contained
 
 ## Dependency graph (open plans only)
 
-- **P1 (001)** — route-surface test coverage for `/api/v1/players/compare` is blocking-class.
-- **P2 (028)** — SQL aggregations for `/players/*` are independent and can run in parallel with 001.
-- **P3 (003)** — dependency-stability base for `libs/gw2_core` tests.
-- **P4 (004)** — cheap DX cleanup (archive stale plans).
+- **P2 (028)** — SQL aggregations for `/players/*` are the only remaining open plan. It is independent of all closed plans.
 
-There are NO inter-plan dependencies across the open plans. Recommended order is by leverage (blocking test coverage > perf/scaling > dependency stability > DX cleanup).
+There are NO inter-plan dependencies. The remaining work is the SQL-aggregation refactor.
 
 ## v0.10.10 cycle (026-031) — closed
 
