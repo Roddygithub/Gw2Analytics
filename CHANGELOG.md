@@ -236,7 +236,64 @@ Wave 6 (the Tour 5 wrap-up continuation) REPLACES the flat 12-member `Annotated[
 - **Design doc anchor**: [`docs/v0.9.0-combat-readout-design.md`](./docs/v0.9.0-combat-readout-design.md) §3-7 + §9 + §11.
 - **Schema-of-record (the discriminated union + wire shapes)**: [`libs/gw2_core/src/gw2_core/models.py`](./libs/gw2_core/src/gw2_core/models.py) + [`apps/api/src/gw2analytics_api/schemas/fight.py`](./apps/api/src/gw2analytics_api/schemas/fight.py).
 - **Aggregator surface (per-player damage/heal)**: [`libs/gw2_analytics/src/gw2_analytics/player_damage.py`](./libs/gw2_analytics/src/gw2_analytics/player_damage.py) + [`libs/gw2_analytics/src/gw2_analytics/player_heal.py`](./libs/gw2_analytics/src/gw2_analytics/player_heal.py).
-- **Predecessor cycle (Tour 4, independent)**: `## [0.10.22]` entry — Tour 4 does NOT touch the Cycle 5 surface (zero merge-conflict overlap).
+- **Predecessor cycle (Tour 4, independent)**: `## [0.10.24-pre] - 2026-07-15: Tour 6 v0.10.24-pre backend Workstream-A close-out (plan 068) — Combat-readout identity columns + StunBreaks + dry_run SCAFFOLD cleanup
+
+Tour 6 closes the 3 forward-blockers carried from the Tour 5 Wave 5 SCAFFOLD NIT-placeholder gap + the Round 14 SCAFFOLD anti-pattern on the `?dry_run=` query parameter + the Tour 6 stun_breaks column wiring. The cycle ships 3 atomic commits (mappers + aggregators + player_heal via the canonical combat-readout close-out). The Combat-readout F17 frontend rollout rolls into Tour 7 (separate cycle); the parser-stream + Skills DB catalog roll into WAVE-8 (separate cycle).
+
+### Added (apps/api — Tour 6 Workstream-A close-out of Combat-readout Wave 5 NIT placeholders)
+
+- NEW `AgentIdentity` Pydantic model (`apps/api/src/gw2analytics_api/routes/fights/mappers.py`) — the per-player Combat-readout identity slice hydrated from `OrmFightAgent`. The 5 shared identity columns (per `docs/v0.9.0-combat-readout-design.md` §2: `subgroup` integer label + stripped `name` + `account_name` + formatted `profession` + `elite_spec` + `is_commander` flag) populate from this single Pydantic model. `is_commander` derives from the arcdps `" [CMDR]"` name-tag suffix heuristic (the canonical pre-Phase-C path; a v0.11.0 parser-side `is_commander` Mapped[bool] column is deferred). `model_config = ConfigDict(frozen=True, extra="forbid")` ensures wire-shape byte-for-byte fidelity.
+- NEW `agent_id_to_identity` mapper helper (`mappers.py`) — builds the per-fight `agent_id -> AgentIdentity` dict via a single small ORM query filtered to `is_player=True`. Three transform helpers support the mapper: `_parse_subgroup_label` (parses `"Subgroup N"` / `"Sub N"` strings to integer labels; falls back to 0 on None / empty / malformed), `_is_commander_from_name` (the `endswith(" [CMDR]")` heuristic with whitespace token prefix), `_strip_commander_tag` (removes the trailing ` [CMDR]` suffix from the wire-shape `name` field).
+- EXTENDED `aggregate_combat_readout` dispatcher (`apps/api/src/gw2analytics_api/routes/fights/aggregators.py`) — the `agent_id_to_name_map: dict[int, str | None]` parameter is REPLACED with `agent_id_to_identity_map: dict[int, AgentIdentity]` (the new contract for the 5 shared identity columns). A NEW `stun_break_events: Iterable[StunBreakEvent] = ()` parameter (forwarded to `PlayerHealAggregator.aggregate`) wires the StunBreakEvent stream through the dispatcher. The per-aspect row-builder loop intersects the union of damage + heal + boons + defense rows with the identity-map keys (NPC target-side hits are silently dropped per the design doc §2 PLAYER-only contract) and uses a `dict.get(agent_id, sentinel)` pattern with per-aspect zero-row sentinels so a player present in only ONE aspect (e.g. dealt damage but never healed) does not crash with `KeyError` on the missing-aspect dict access.
+- REFACTORED `get_fight_readout` route handler (`apps/api/src/gw2analytics_api/routes/fights/__init__.py`) — the production route handler no longer accepts the SCAFFOLD `?dry_run=` query parameter (Round 14 reviewer cleanup). The heterogeneous events stream is split into 9 single-typed inputs (the existing 8 streams + a NEW `stun_break_events: Iterable[StunBreakEvent]` slice derived from the StunBreakEvent stream). The `agent_id_to_identity(db, fight_id)` call replaces the legacy `agent_id_to_name_map` build; the 5 shared identity columns hydrate from the `AgentIdentity` slice at the per-agent row-builder loop.
+
+### Added (libs/gw2_analytics — Tour 6 close-out: stun_breaks per-player column + conservation invariant + union-keys semantics)
+
+- EXTENDED `PlayerHealRow.stun_breaks` field (`libs/gw2_analytics/src/gw2_analytics/player_heal.py`) — the Combat readout `Heal` table `Breakstunt` column (per design doc §4) is wired through the heal aggregator (NOT the defense aggregator). Actor-side attribution (the player who broke the stun gets the credit on the `source_agent_id` field).
+- EXTENDED `PlayerHealAggregator.aggregate` signature (Tour 6) — accepts the new `stun_break_events: Iterable[StunBreakEvent] = ()` optional parameter (default empty for pre-Tour-6 SCAFFOLD streams, where every row gets `stun_breaks=0`).
+- NEW row-builder union-keys semantics (Tour 6) — a player who broke stuns WITHOUT healing anyone still surfaces a row (per design doc §4 the Breakstunt column lives on the Heal aspect). The row-builder iterates `set(total_by_source) | set(stun_breaks_by_source)` with the `count_by_source.get(source, 1)` Pydantic-compatible sentinel (the `heal_count: int = Field(..., ge=1)` constraint forces a minimum of 1; this is an internal counter not surfaced on the wire for the breakstunt-only case).
+- NEW `_check_invariants` stun_breaks conservation invariant (Tour 6) — the `_check_invariants` static method now accepts a 4th parameter `expected_stun_break_total: int = 0` and raises `ValueError` on `sum(r.stun_breaks for r in rows) != expected_stun_break_total` drift. Closes the silent-failure mode flagged by the Round-1 code-reviewer.
+
+### Removed (apps/api — Round 14 reviewer cleanup)
+
+- REMOVED `?dry_run=` SCAFFOLD escape hatch (`get_fight_readout` route handler) — the production endpoint no longer accepts the Wave-5 SCAFFOLD `?dry_run=true` query parameter. FastAPI by default silently ignores the now-unknown query param on GET endpoints (with no `Query()` binding) and the route handler always proceeds through the real-DB path. The empty-state envelope (canonical for hermetic test paths) is now exercised via the canonical FastAPI `app.dependency_overrides[get_session] = ...` test fixture pattern + the new `apps/api/tests/routes/test_fights_readout.py` direct `aggregate_combat_readout` call site — the SCAFFOLD escape hatch is fully closed.
+
+### Added (apps/api/tests — Tour 6 hermetic test coverage)
+
+- NEW `apps/api/tests/routes/test_fights_readout.py` (~210 LoC, 6 hermetic tests) — covers the happy-path player identity columns population, the commander flag derivation from the `" [CMDR]"` name-tag suffix (with name stripping), the NPC-only empty envelope (`players: []` on a 0-player fight), the 404 unknown fight (canonical `_load_fight_events` 404 contract), the Round-14 cleanup regression (legacy `?dry_run=true` queries yield 200 with the canonical envelope — FastAPI silently ignores the now-unknown query param; the SCAFFOLD short-circuit branch is gone), and the direct `aggregate_combat_readout` StunBreakEvent wiring (closes the actor-side column test for the heal aggregator's new optional param).
+
+### Closed (Tour 6 cycle-end fixes — Round-1 to Round-5)
+
+- Wave 5 SCAFFOLD NIT-placeholder gap (Round-1 to Round-3): the 5 shared identity columns on `PlayerReadoutOut` no longer hardcode the wave-5 SCAFFOLD placeholders.
+- Round 14 SCAFFOLD anti-pattern (`?dry_run=` query param): REMOVED entirely; production endpoint is bare-bones (only the real-DB path).
+- Dispatcher KeyError silent-failure mode (Round-3 fix ledger): the per-aspect row-builder loop intersection logic was hardened with per-aspect zero-row sentinels + `dict.get(agent_id, sentinel).field` patterns.
+- Tour 6 StunBreakEvent pipeline (Round-4 to Round-5 fix): the actor-side `stun_breaks` column on `PlayerHealRow` is wired through the dispatcher + heal aggregator with union-keys row-builder semantics + a conservation invariant check.
+
+### Forward-blockers carried to Tour 7+ v0.10.25+ (and parallel cycles)
+
+The Combat-readout v1.0 cycle-end awaits 3 forward-blockers (down from 6 carried from Tour 5 — Tour 6 closes the 3 backend-workstream ones):
+
+1. **Closed (Tour 6):** Wave 5 NIT-placeholder gap on the 5 shared identity columns → closed via `AgentIdentity` + `agent_id_to_identity` mapper. (was: open in [0.10.23-pre] forward-blockers)
+2. **Closed (Tour 6):** Round 14 SCAFFOLD anti-pattern on the `?dry_run=` query parameter → REMOVED. (was: open in [0.10.23-pre] forward-blockers)
+3. **Closed (Tour 6):** Tour-6 close-out of the per-row `stun_breaks` column on `PlayerHealRow` → wired through the heal aggregator + dispatcher. (new in [0.10.24-pre])
+4. **Open:** F17 frontend rollout — 4 NEW AG Grid Client Components sharing `<PlayerReadoutBase>`. (carried from [0.10.23-pre])
+5. **Open:** WAVE-8 parser-side — Blocker A (statechange extension in `libs/gw2_evtc_parser`) + Blocker B (NEW `libs/gw2_skills/` Skills DB catalog). (carried from [0.10.23-pre])
+6. **Open:** Phase 6 v2 parser-stream switch — yields the parser-side `ConditionRemoveEvent` + `DownEvent` + `DeathEvent` + `StunBreakEvent` (and 3 NEW Event subclasses for Phase 6 v2: `DodgeEvent` + `BlockEvent` + `InterruptEvent`). (carried from [0.10.23-pre])
+
+### Validation matrix
+
+| Gate | Status | Tool |
+|---|---|---|
+| `uv run ruff check libs/gw2_analytics/src libs/gw2_core/src apps/api/src` | **GREEN** (0 violations across 5 modified files) | ruff 0.15.21 |
+| `uv run mypy libs/gw2_analytics/src libs/gw2_core/src apps/api/src` | **GREEN** (0 errors across 74 source files) | mypy 2.2.0 |
+| `uv run pytest apps/api/tests/` | **GREEN** (328/328 tests pass; 322-test baseline + 6 NEW readout tests) | pytest 9.1.1 |
+| `uv run pytest apps/api/tests/routes/test_fights_readout.py` | **GREEN** (6/6 tests pass) | pytest 9.1.1 |
+| Code-reviewer (Round-1 to Round-5) | **5 reviews clean** + 1 sentinel-pattern confirmation + 1 union-keys confirmation + 1 stun_breaks-invariant confirmation | code-reviewer-minimax-m3 |
+
+**Cycle conclusion:** Tour 6 v0.10.24-pre is shippable. The Combat-readout backend surface is fully closed (Workstream-A dispatcher + identity + StunBreaks wiring). The Combat-readout v1.0 cycle-end awaits F17 frontend (Tour 7) + WAVE-8 parser-side (separate cycle).
+
+
+## [0.10.22]` entry — Tour 4 does NOT touch the Cycle 5 surface (zero merge-conflict overlap).
 - **ROADMAP sync**: [`docs/ROADMAP.md`](./docs/ROADMAP.md) "Last refreshed AT v0.10.23-pre cycle close-out (2026-07-15)" + §1.1 v0.10.23-pre cycle shipts entry + §1.2 shortlist re-classification.
 - **Cycle release plan** (newly authored this cycle): [`plans/RELEASE-v0.10.23-pre.md`](./plans/RELEASE-v0.10.23-pre.md).
 - **Cycle-end audit** (newly authored this cycle): [`plans/AUDIT-2026-07-15-v0.10.23-pre.md`](./plans/AUDIT-2026-07-15-v0.10.23-pre.md).

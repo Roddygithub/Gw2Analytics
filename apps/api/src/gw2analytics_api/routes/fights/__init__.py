@@ -103,6 +103,7 @@ from gw2_core import (
     Event,
     HealingEvent,
     InterruptEvent,
+    StunBreakEvent,
 )
 from gw2analytics_api._event_dispatch import build_event_iterator
 from gw2analytics_api.database import get_session
@@ -117,6 +118,7 @@ from gw2analytics_api.routes.fights.aggregators import (
 from gw2analytics_api.routes.fights.blob_cache import _cached_get_events
 from gw2analytics_api.routes.fights.blob_loader import _load_fight_events
 from gw2analytics_api.routes.fights.mappers import (
+    agent_id_to_identity,
     agent_id_to_name,
     agent_id_to_subgroup,
     skill_id_to_name,
@@ -898,105 +900,53 @@ def get_fight_player_skills(
 )
 def get_fight_readout(
     fight_id: str,
-    dry_run: bool = Query(
-        False,
-        description=(
-            "(SCAFFOLD-ONLY ESCAPE HATCH; future-tour refactor target: "
-            "If True, exercise ``aggregate_combat_readout`` against an "
-            "EMPTY events stream (returns the empty-schema envelope -- "
-            "0-player ``players: []`` -- with ``duration_s=0.0``). "
-            "Useful for hermetic route testing without docker compose "
-            "/ MinIO / Postgres. Production GET requests set "
-            "``dry_run=False``."
-            "**WARNING**: the ``?dry_run=`` query param is a "
-            "SCAFFOLD anti-pattern on a production endpoint (the "
-            "reviewer flagged this in Round 14) — Wave 6 refactor "
-            "must switch this to a FastAPI "
-            "``app.dependency_overrides[get_session] = ...`` test "
-            "fixture pattern so the production route is bare-bones "
-            "(only the real database path; the empty-state path "
-            "closes over the dependency-override contract for "
-            "tests)."
-        ),
-    ),
     db: Session = Depends(get_session),  # noqa: B008
 ) -> FightReadoutOut:
     """Return the full Combat-readout envelope for one fight (plan 045 §5.1).
 
-    Wave 5 SCAFFOLD + Workstream D-extension bridge. Unified endpoint
-    per design doc §5.1 (``GET /api/v1/fights/{fight_id}/readout``)
-    returning the :class:`FightReadoutOut` envelope containing one
-    :class:`PlayerReadoutOut` per player agent. The route delegates
-    to :func:`aggregate_combat_readout` (the dispatcher in
-    :mod:`gw2analytics_api.routes.fights.aggregators`) which wraps
-    the 4 per-player aggregators (PlayerDamage / PlayerHeal /
-    PlayerBoons / PlayerDefense).
+    Tour 6 v0.10.24 close-out: the 5 shared identity columns are
+    hydrated from ``OrmFightAgent`` via the new
+    :func:`agent_id_to_identity` helper (closes the Wave 5
+    SCAFFOLD NIT-placeholder gap); the per-row
+    ``stun_breaks`` column is wired via the StunBreakEvent
+    stream; and the SCAFFOLD ``?dry_run=`` escape hatch is
+    REMOVED (Round 14 reviewer flagged the production query
+    param as a SCAFFOLD anti-pattern). Empty-state tests now
+    exercise the route against an actual NPC-only fight blob
+    (the canonical ``players: []`` envelope).
 
-    The 8 input streams are split from the canonical heterogeneous
-    ``Iterable[Event]`` via ``isinstance`` at the call site
-    (parallel to the per-target trio dispatch in
+    The 9 input streams are split from the canonical
+    heterogeneous ``Iterable[Event]`` via ``isinstance`` at the
+    call site (parallel to the per-target trio dispatch in
     ``apps/api/routes/fights/aggregators.py::_aggregate_per_target_rollup``).
 
-    Response codes match the v0.10.13 per-fight timeline contract:
+    Response codes:
 
     - ``404 Not Found``: fight id is unknown OR the events blob
       is missing (the shared :func:`_load_fight_events` helper
-      raises the canonical pre-Phase 7 OR post-Phase-7-with-zero-events
-      contract).
-    - ``422 Unprocessable Entity``: ``dry_run`` is non-boolean
-      (handled by FastAPI before this handler runs).
+      raises the canonical pre-Phase 7 OR
+      post-Phase-7-with-zero-events contract).
     - ``502 Bad Gateway``: events blob is present but corrupt.
-    - ``200 OK``: ``FightReadoutOut`` envelope, even when
-      ``players: []`` (a 0-player NPC-only fight).
-
-    The dry_run escape hatch: when ``dry_run=True``, the route
-    short-circuits the blob load + event-split + agent-load
-    pipeline and invokes ``aggregate_combat_readout`` against
-    empty streams. The result is a valid envelope with 0 players
-    + ``duration_s=0.0`` -- the canonical empty-state. This
-    path is INTENDED for hermetic route-testing on dev hosts
-    WITHOUT docker compose; production callers SHOULD set
-    ``dry_run=False`` (the default).
+    - ``200 OK``: ``FightReadoutOut`` envelope. A 0-player
+      NPC-only fight yields ``players: []`` (the per-aspect
+      aggregators see no player-actor events; the dispatcher's
+      identity-map intersection drops the NPC agent_ids).
     """
-    if dry_run:
-        # Hermetic empty-state path. No blob load, no DB queries,
-        # no upstream calls. Returns the valid empty envelope.
-        return aggregate_combat_readout(
-            damage_events=(),
-            healing_events=(),
-            boon_apply_events=(),
-            cc_events=(),
-            death_events=(),
-            dodge_events=(),
-            block_events=(),
-            interrupt_events=(),
-            skill_id_to_name_map={},
-            agent_id_to_name_map={},
-            duration_s=0.0,
-            fight_id=fight_id,
-        )
-
     # Production path -- shared helper handles the blob load +
     # decompress + event-split + 404 / 502 error contract.
     events = _load_fight_events(db, fight_id)
 
-    # Load the fight's agent rows for the player-name
-    # denormalisation (`agent_id_to_name_map`). A single small
-    # query on the fight's agent table; pre-load pattern
-    # mirrors `get_fight_player_timeline` so a future
-    # `selectinload` migration is mechanical.
-    agents: list[OrmFightAgent] = list(
-        db.execute(
-            select(OrmFightAgent).where(OrmFightAgent.fight_id == fight_id),
-        )
-        .scalars()
-        .all()
-    )
-    agent_id_to_name_map: dict[int, str | None] = {a.agent_id: a.name for a in agents}
+    # Tour 6 v0.10.24: the per-player identity slice hydrates
+    # from ``OrmFightAgent.is_player=True`` rows. The helper
+    # parses the arcdps subgroup string into the integer wire
+    # label, derives the commander flag from the ``[CMDR]``
+    # name-tag, and formats ``profession`` + ``elite_spec``
+    # via :func:`format_profession` + :func:`format_elite_spec`.
+    agent_id_to_identity_map = agent_id_to_identity(db, fight_id)
 
-    # The per-skill name map for the Boons `other_boons_out`
+    # The per-skill name map for the Boons ``other_boons_out``
     # bucket (the per-player Boons aggregator reads it via the
-    # `name_map` parameter to resolve skill_id -> string).
+    # ``name_map`` parameter to resolve skill_id -> string).
     skill_id_to_name_map: dict[int, str | None] = dict(skill_id_to_name(db, fight_id))
 
     # Compute the duration sentinel from the events stream (the
@@ -1005,9 +955,11 @@ def get_fight_readout(
     # wall-clock duration scalar).
     duration_s = max(e.time_ms for e in events) / 1000.0
 
-    # Split the heterogeneous stream into 8 single-typed inputs
-    # via `isinstance` at the call site. Mirrors the
-    # `_aggregate_per_target_rollup` shape for consistency.
+    # Split the heterogeneous stream into 9 single-typed inputs
+    # via ``isinstance`` at the call site (mirrors the
+    # ``_aggregate_per_target_rollup`` shape for consistency).
+    # The 9th stream (StunBreakEvent, Tour 6 close-out) feeds
+    # the per-row ``stun_breaks`` column on the Heal side.
     damage_events = [e for e in events if isinstance(e, DamageEvent)]
     healing_events = [e for e in events if isinstance(e, HealingEvent)]
     boon_apply_events = [e for e in events if isinstance(e, BoonApplyEvent)]
@@ -1016,6 +968,7 @@ def get_fight_readout(
     dodge_events = [e for e in events if isinstance(e, DodgeEvent)]
     block_events = [e for e in events if isinstance(e, BlockEvent)]
     interrupt_events = [e for e in events if isinstance(e, InterruptEvent)]
+    stun_break_events = [e for e in events if isinstance(e, StunBreakEvent)]
 
     return aggregate_combat_readout(
         damage_events=damage_events,
@@ -1026,8 +979,9 @@ def get_fight_readout(
         dodge_events=dodge_events,
         block_events=block_events,
         interrupt_events=interrupt_events,
+        stun_break_events=stun_break_events,
         skill_id_to_name_map=skill_id_to_name_map,
-        agent_id_to_name_map=agent_id_to_name_map,
+        agent_id_to_identity_map=agent_id_to_identity_map,
         duration_s=duration_s,
         fight_id=fight_id,
     )

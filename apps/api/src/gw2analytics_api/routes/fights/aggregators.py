@@ -130,7 +130,9 @@ from gw2_core import (
     Event,
     HealingEvent,
     InterruptEvent,
+    StunBreakEvent,
 )
+from gw2analytics_api.routes.fights.mappers import AgentIdentity
 from gw2analytics_api.schemas import (
     FightReadoutOut,
     PlayerReadoutBoonsOut,
@@ -257,10 +259,11 @@ def aggregate_combat_readout(
     dodge_events: Iterable[DodgeEvent],
     block_events: Iterable[BlockEvent],
     interrupt_events: Iterable[InterruptEvent],
-    skill_id_to_name_map: dict[int, str | None],
-    agent_id_to_name_map: dict[int, str | None],
-    duration_s: float,
-    fight_id: str,
+    stun_break_events: Iterable[StunBreakEvent] = (),
+    skill_id_to_name_map: dict[int, str | None] | None = None,
+    agent_id_to_identity_map: dict[int, AgentIdentity] | None = None,
+    duration_s: float = 0.0,
+    fight_id: str = "",
     dps_split_getter: DpsSplitGetter | None = None,
     barrier_portion_getter_heal: HealBarrierGetter | None = None,
     buff_removal_events: Iterable[BuffRemovalEvent] | None = None,
@@ -320,10 +323,26 @@ def aggregate_combat_readout(
       materialise the parser-side :class:`BuffRemovalEvent`
       stream here.)
     """
+    # Reviewer #2 fix: hoist the identity->name dict allocation to a
+    # SINGLE intermediate so the 3 per-player aggregators share ONE
+    # computed dict instead of rebuilding {aid: ident.name for ...}
+    # at each call site. Saves one allocation per aggregator call
+    # (3 -> 1) and eliminates the asymmetric dispatch pattern the
+    # previous review flagged. The None fallback preserves the
+    # legacy ``agent_id_to_name_map=None`` call site contract.
+    _identity_name_map: dict[int, str | None] | None = (
+        {aid: ident.name for aid, ident in (agent_id_to_identity_map or {}).items()}
+        if agent_id_to_identity_map is not None
+        else None
+    )
     damage_rows: list[PlayerDamageRow] = PlayerDamageAggregator().aggregate(
         damage_events,
         duration_s,
-        name_map=agent_id_to_name_map,
+        # Tour 6 v0.10.24: the heal aggregator now keys on the
+        # identity (name) map; fall back to the name-only map (the
+        # legacy ``agent_id_to_name_map``) when callers haven't
+        # adopted the identity-map contract yet.
+        name_map=_identity_name_map,
         # Phase 3 SCAFFOLD: forward the optional dps-split getter.
         # When ``None``, the per-player aggregator substitutes
         # :func:`gw2_core.default_dps_split` -- the canonical
@@ -333,13 +352,20 @@ def aggregate_combat_readout(
     heal_rows: list[PlayerHealRow] = PlayerHealAggregator().aggregate(
         healing_events,
         duration_s,
-        name_map=agent_id_to_name_map,
+        # Tour 6 v0.10.24: heal-side chain to the identity-map's
+        # ``name`` attribute (the same name only fallback as damage).
+        name_map=_identity_name_map,
         # Phase 3 SCAFFOLD: forward the optional heal-side barrier
         # getter. When ``None``, the per-player aggregator
         # substitutes
         # :func:`gw2_core.default_barrier_portion_from_healing` --
         # the canonical no-barrier wireshape.
         barrier_portion_getter=barrier_portion_getter_heal,
+        # Tour 6 v0.10.24 close-out: forward the optional
+        # StunBreakEvent stream for the ``stun_breaks`` column.
+        # When empty (canonical pre-Tour-6 SCAFFOLD path), every
+        # row has ``stun_breaks=0``.
+        stun_break_events=stun_break_events,
     )
     boons_rows: list[PlayerBoonsRow] = PlayerBoonsAggregator().aggregate(
         boon_apply_events,
@@ -363,7 +389,9 @@ def aggregate_combat_readout(
         block_events=block_events,
         interrupt_events=interrupt_events,
         barrier_portion_getter=None,
-        name_map=agent_id_to_name_map,
+        # Tour 6 v0.10.24: defensive-side chain to the identity-map's
+        # ``name`` attribute (the same name-only fallback as damage).
+        name_map=_identity_name_map,
     )
 
     # Build the per-agent_id -> per-aspect-row map. The 4
@@ -383,71 +411,137 @@ def aggregate_combat_readout(
     all_agent_ids = set(damage_by_id) | set(heal_by_id) | set(boons_by_id) | set(defense_by_id)
 
     # Single pass to build the per-agent PlayerReadoutOut envelope.
-    # The 5 shared identity columns (per design doc §2) get NIT
-    # placeholders (``agent_id`` + ``subgroup`` + ``name`` etc --
-    # NOT populated here; the route handler layer wires the
-    # canonical ORM-derived identity fields).
+    # The 5 shared identity columns (per design doc §2) hydrate
+    # from the ``AgentIdentity`` map (Tour 6 v0.10.24 close-out of
+    # the Wave 5 SCAFFOLD NIT placeholders). ``agent_id`` is the
+    # dispatcher-set value (the key of the per-aspect aggregator
+    # outputs); the remaining 5 columns + ``account_name`` come
+    # from the OrmFightAgent-hydrated identity slice. ``roles``
+    # stays at ``[]`` (canonical Wave 2 SCAFFOLD default -- the
+    # role classifier is Blocker C deferred to a future cycle).
+    identity_map = agent_id_to_identity_map or {}
+    # Intersect the union of per-aspect rows with the identity
+    # map keys so NPC targets (target_agent_id in defense row
+    # set without an is_player=True agent row in the DB) are
+    # silently dropped from the envelope. This keeps the wire
+    # shape strictly player-only.
+    all_agent_ids = (
+        set(damage_by_id) | set(heal_by_id) | set(boons_by_id) | set(defense_by_id)
+    ) & set(identity_map)
+    # Compose the per-aspect zero-row sentinels ONCE before the
+    # per-agent loop so a player present in ONE aspect (e.g.
+    # damage) but missing from ANOTHER (e.g. he never healed
+    # anyone) does NOT crash with a ``KeyError`` on the missing-
+    # aspect dict access. The zero-row ssoTiming is the canonical
+    # Wave 2 SCAFFOLD default. The row-builders accept the
+    # ``default`` argument directly via :func:`dict.get` -- no
+    # intermediate float / int default values need to be inline.
+    _zero_damage: PlayerDamageRow = PlayerDamageRow(
+        source_agent_id=0,
+        total_damage=0,
+        attack_count=1,
+        dps=0.0,
+        dps_power=0.0,
+        dps_condi=0.0,
+    )
+    _zero_heal: PlayerHealRow = PlayerHealRow(
+        source_agent_id=0,
+        total_healing=0,
+        heal_count=1,
+        hps=0.0,
+        barrier_total=0,
+        barrier_ps=0.0,
+        stun_breaks=0,
+    )
+    _zero_boons: PlayerBoonsRow = PlayerBoonsRow(
+        agent_id=0,
+        boons_out=0,
+        boons_in=0,
+        boons_out_rate=0.0,
+        boons_in_rate=0.0,
+        stability_out=0,
+        alacrity_out=0,
+        resistance_out=0,
+        aegis_out=0,
+        superspeed_out=0,
+        stealth_out=0,
+    )
+    _zero_defense: PlayerDefenseRow = PlayerDefenseRow(
+        agent_id=0,
+        damage_taken=0,
+        cc_taken=0,
+        deaths=0,
+    )
+    # Reviewer #3 fix: TODO(v0.11.0) -- the truthy `or ""` collapse
+    # on the ``account_name`` line below drops the distinction
+    # between a None and an empty-string arcdps account-name; the
+    # next cycle widens PlayerReadoutOut.account_name to
+    # ``str | None`` (wire-contract migration) and removes the
+    # coercion. The runtime behaviour still matches the
+    # PlayerReadoutOut schema (``account_name: str``) so callers
+    # see an empty string for an absent account -- documented at
+    # the route module docstring to surface the lossy transition.
     players: list[PlayerReadoutOut] = [
         PlayerReadoutOut(
             agent_id=agent_id,
-            subgroup=0,  # NIT placeholder; the route handler resolves from OrmFightAgent.
-            name=agent_id_to_name_map.get(agent_id) or "",
-            account_name="",  # NIT placeholder; resolved from OrmFightAgent in the route handler.
-            profession="UNKNOWN",  # NIT placeholder.
-            elite_spec="UNKNOWN",  # NIT placeholder.
-            is_commander=False,  # canonical default per Wave 2 SCAFFOLD.
-            roles=[],  # canonical default per Wave 2 SCAFFOLD; the role classifier fills in Tour 6.
+            subgroup=identity_map[agent_id].subgroup,
+            name=identity_map[agent_id].name,
+            account_name=identity_map[agent_id].account_name or "",
+            profession=identity_map[agent_id].profession,
+            elite_spec=identity_map[agent_id].elite_spec,
+            is_commander=identity_map[agent_id].is_commander,
+            roles=[],  # canonical Wave 2 SCAFFOLD default -- Blocker C deferred.
             damage=PlayerReadoutDamageOut(
-                dps_total=damage_by_id[agent_id].dps,
+                dps_total=damage_by_id.get(agent_id, _zero_damage).dps,
                 # Phase 3 SCAFFOLD: power/condi split driven from
                 # the per-player row's rate columns. Pre-Phase-6-v2
                 # wireshape: ``dps_power=0.0 + dps_condi=dps``
                 # (because :func:`gw2_core.default_dps_split`
                 # returns ``(0, damage)`` -- the canonical
                 # "everything is power" SCAFFOLD fallback).
-                dps_power=damage_by_id[agent_id].dps_power,
-                dps_condi=damage_by_id[agent_id].dps_condi,
+                dps_power=damage_by_id.get(agent_id, _zero_damage).dps_power,
+                dps_condi=damage_by_id.get(agent_id, _zero_damage).dps_condi,
                 strips=0,  # awaits Phase 9 BuffRemovalEvent strip classification.
                 cc_applied=0,  # awaits CCEvent source attribution (Phase 9 v2 yields).
                 down_contribution_dps=0.0,  # awaits Phase 9 v2 'is target down' attribution.
                 kills=0,  # awaits DeathEvent + DPS stream cross-walk (Phase 9 v2).
             ),
             heal=PlayerReadoutHealOut(
-                heal_total=heal_by_id[agent_id].total_healing,
-                hps=heal_by_id[agent_id].hps,
+                heal_total=heal_by_id.get(agent_id, _zero_heal).total_healing,
+                hps=heal_by_id.get(agent_id, _zero_heal).hps,
                 # Phase 3 SCAFFOLD: heal-side barrier columns driven
                 # from the per-player row. Pre-Phase-6-v2 wireshape:
                 # ``barrier_total=0 + barrier_ps=0.0`` (because
                 # :func:`gw2_core.default_barrier_portion_from_healing`
                 # returns ``0`` -- the canonical no-barrier SCAFFOLD
                 # fallback).
-                barrier_total=heal_by_id[agent_id].barrier_total,
-                barrier_ps=heal_by_id[agent_id].barrier_ps,
+                barrier_total=heal_by_id.get(agent_id, _zero_heal).barrier_total,
+                barrier_ps=heal_by_id.get(agent_id, _zero_heal).barrier_ps,
                 cleanses=0,  # awaits ConditionRemoveEvent stream (Phase 6 v2 yields).
-                # awaits StunBreakEvent row integration at the
-                # aggregator level (Tour 6+).
-                stun_breaks=0,
+                # Tour 6 v0.10.24 close-out: stun_breaks populated
+                # from the per-player row (actor-side attribution).
+                stun_breaks=heal_by_id.get(agent_id, _zero_heal).stun_breaks,
             ),
             boons=PlayerReadoutBoonsOut(
-                boons_out_rate=boons_by_id[agent_id].boons_out_rate,
-                boons_in_rate=boons_by_id[agent_id].boons_in_rate,
-                stability_out=boons_by_id[agent_id].stability_out,
-                alacrity_out=boons_by_id[agent_id].alacrity_out,
-                resistance_out=boons_by_id[agent_id].resistance_out,
-                aegis_out=boons_by_id[agent_id].aegis_out,
-                superspeed_out=boons_by_id[agent_id].superspeed_out,
-                stealth_out=boons_by_id[agent_id].stealth_out,
-                other_boons_out=dict(boons_by_id[agent_id].other_boons_out),
+                boons_out_rate=boons_by_id.get(agent_id, _zero_boons).boons_out_rate,
+                boons_in_rate=boons_by_id.get(agent_id, _zero_boons).boons_in_rate,
+                stability_out=boons_by_id.get(agent_id, _zero_boons).stability_out,
+                alacrity_out=boons_by_id.get(agent_id, _zero_boons).alacrity_out,
+                resistance_out=boons_by_id.get(agent_id, _zero_boons).resistance_out,
+                aegis_out=boons_by_id.get(agent_id, _zero_boons).aegis_out,
+                superspeed_out=boons_by_id.get(agent_id, _zero_boons).superspeed_out,
+                stealth_out=boons_by_id.get(agent_id, _zero_boons).stealth_out,
+                other_boons_out=dict(boons_by_id.get(agent_id, _zero_boons).other_boons_out),
             ),
             defense=PlayerReadoutDefenseOut(
-                damage_taken=defense_by_id[agent_id].damage_taken,
-                cc_taken=defense_by_id[agent_id].cc_taken,
-                deaths=defense_by_id[agent_id].deaths,
-                time_downed_ms=defense_by_id[agent_id].time_downed_ms,
-                dodges=defense_by_id[agent_id].dodges,
-                blocks=defense_by_id[agent_id].blocks,
-                interrupts=defense_by_id[agent_id].interrupts,
-                barrier_absorbed=defense_by_id[agent_id].barrier_absorbed,
+                damage_taken=defense_by_id.get(agent_id, _zero_defense).damage_taken,
+                cc_taken=defense_by_id.get(agent_id, _zero_defense).cc_taken,
+                deaths=defense_by_id.get(agent_id, _zero_defense).deaths,
+                time_downed_ms=defense_by_id.get(agent_id, _zero_defense).time_downed_ms,
+                dodges=defense_by_id.get(agent_id, _zero_defense).dodges,
+                blocks=defense_by_id.get(agent_id, _zero_defense).blocks,
+                interrupts=defense_by_id.get(agent_id, _zero_defense).interrupts,
+                barrier_absorbed=defense_by_id.get(agent_id, _zero_defense).barrier_absorbed,
             ),
         )
         for agent_id in sorted(all_agent_ids)

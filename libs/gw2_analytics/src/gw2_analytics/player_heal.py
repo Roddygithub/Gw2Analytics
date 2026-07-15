@@ -88,7 +88,7 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gw2_core import HealingEvent
+from gw2_core import HealingEvent, StunBreakEvent
 from gw2_core._scaffold import default_barrier_portion_from_healing
 
 # HPS sentinel when ``duration_s <= 0``: invalid (zero/negative)
@@ -174,6 +174,29 @@ class PlayerHealRow(BaseModel):
             "the parser-side barrier table when Phase 6 v2 lands."
         ),
     )
+    # Tour 6 v0.10.24 close-out: per-fight count of
+    # :class:`~gw2_core.StunBreakEvent` rows where this player is
+    # the ``source_agent_id`` (actor-side attribution -- the
+    # player broke the stun). Pre-Tour-6 SCAFFOLD: ``stun_breaks=0``.
+    # Combat readout ``Heal`` table ``Breakstunt`` column per
+    # ``docs/v0.9.0-combat-readout-design.md`` §4. Source-attributed
+    # because the player RECEIVED the breakstunt credit (the
+    # Phase 9 v2 rule -- the player who broke the stun); the
+    # counter lives on the Heal aggregator rather than the
+    # Defense aggregator because the design doc groups ``stun_breaks``
+    # with the Heal aspect (not the Defense aspect).
+    stun_breaks: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Tour 6 v0.10.24 close-out: per-fight count of "
+            "StunBreakEvent rows where this player is the source "
+            "agent (the player broke the stun). Pre-Tour-6 "
+            "streams return 0; the Wave 5 SCAFFOLD landed the "
+            "StunBreakEvent subclass and Tour 6 wires the "
+            "aggregator to count by source_agent_id."
+        ),
+    )
     # Optional player-name denormalisation (mirrors TargetHealingRow.name
     # convention for grep-ability + diff-based maintenance). Strict
     # parallel of the target-side row.
@@ -196,6 +219,7 @@ class PlayerHealAggregator:
         duration_s: float,
         name_map: dict[int, str | None] | None = None,
         barrier_portion_getter: HealBarrierGetter | None = None,
+        stun_break_events: Iterable[StunBreakEvent] = (),
     ) -> list[PlayerHealRow]:
         """Compute the per-player heal roll-up.
 
@@ -220,7 +244,18 @@ class PlayerHealAggregator:
         parser-side barrier lookup; the SCAFFOLD absorbs the swap
         via one constructor change.
 
-        Empty input yields ``[]`` -- no placeholder row.
+        ``stun_break_events`` is OPTIONAL and provides the
+        :class:`~gw2_core.StunBreakEvent` stream for the
+        ``stun_breaks`` counter (Tour 6 v0.10.24 close-out). Each
+        row contributes ``+1`` to the ``stun_breaks`` column of
+        the row keyed on ``event.source_agent_id``. When empty
+        (canonical pre-Tour-6 SCAFFOLD path), every row has
+        ``stun_breaks=0``. The breakstunt attribution is
+        actor-side -- the player who broke the stun gets the
+        credit (per the design doc §4 + Phase 9 v2 breakstunt rule).
+
+        Empty input across ALL streams (heal + stun_break) yields
+        ``[]`` -- no placeholder row.
         """
         if duration_s < 0:
             msg = f"duration_s must be >= 0, got {duration_s!r}"
@@ -240,6 +275,12 @@ class PlayerHealAggregator:
         total_by_source: dict[int, int] = defaultdict(int)
         count_by_source: dict[int, int] = defaultdict(int)
         barrier_by_source: dict[int, int] = defaultdict(int)
+        # Tour 6 v0.10.24 close-out: per-source-agent stun-break
+        # counter. Actor-side attribution (the player who broke
+        # the stun gets the credit). The empty-iterable
+        # ``stun_break_events`` SCAFFOLD path leaves every row at
+        # 0 -- the canonical pre-Tour-6 wire shape.
+        stun_breaks_by_source: dict[int, int] = defaultdict(int)
         grand_total = 0
         for e in events:
             total_by_source[e.source_agent_id] += e.healing
@@ -252,6 +293,12 @@ class PlayerHealAggregator:
             # the per-heal barrier side). The hot-loop cost is one
             # C-level function call per event.
             barrier_by_source[e.source_agent_id] += barrier(e)
+        # Tour 6 v0.10.24 close-out: per-source-agent stun-break
+        # counter loop. Actor-side attribution (the player who
+        # broke the stun is encoded as ``source_agent_id`` per the
+        # actor-only :class:`~gw2_core.StunBreakEvent` shape).
+        for sb in stun_break_events:
+            stun_breaks_by_source[sb.source_agent_id] += 1
 
         hps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_HPS
         # ``name_map or {}`` -- see the parallel branch in
@@ -259,22 +306,44 @@ class PlayerHealAggregator:
         # for the rationale (``dict.get`` returns ``None`` for
         # missing keys AND for explicit ``None`` values; both
         # surface as the ``name=None`` sentinel on the row).
+        # Tour 6 v0.10.24 close-out: union keys so a player who broke
+        # stuns WITHOUT healing anyone still surfaces a row (design
+        # doc §4 -- Breakstunt lives on the Heal aspect; without the
+        # union the conservation invariant below catches the silent
+        # drop). ``count_by_source.get(source, 1)`` satisfies the
+        # ``heal_count`` ``ge=1`` Pydantic constraint with the
+        # canonical sentinel "1 = breakstunt-only player".
         rows = [
             PlayerHealRow(
                 source_agent_id=source,
-                total_healing=total_by_source[source],
-                heal_count=count_by_source[source],
-                hps=total_by_source[source] * hps_factor,
-                barrier_total=barrier_by_source[source],
-                barrier_ps=barrier_by_source[source] * hps_factor,
+                total_healing=total_by_source.get(source, 0),
+                heal_count=count_by_source.get(source, 1),
+                hps=total_by_source.get(source, 0) * hps_factor,
+                barrier_total=barrier_by_source.get(source, 0),
+                barrier_ps=barrier_by_source.get(source, 0) * hps_factor,
+                stun_breaks=stun_breaks_by_source.get(source, 0),
                 name=(name_map or {}).get(source),
             )
-            for source in total_by_source
+            for source in set(total_by_source) | set(stun_breaks_by_source)
         ]
         # Sort: highest total_healing first; ties broken by ascending source_agent_id.
         rows.sort(key=lambda r: (-r.total_healing, r.source_agent_id))
 
-        self._check_invariants(rows, grand_total, duration_s)
+        # Tour 6 v0.10.24 close-out: the stun-break conservation
+        # invariant (sum of per-row stun_breaks must equal the
+        # total :class:`~gw2_core.StunBreakEvent` input count).
+        # We materialise the iterable ONCE here so the invariant
+        # check operates on the same length the hot loop saw -- a
+        # caller's lazy generator that yields additional events
+        # across iterations would otherwise leak silent drift.
+        # Tour 6 v0.10.24 close-out: the stun-break conservation
+        # invariant (sum of per-row stun_breaks must equal the
+        # total :class:`~gw2_core.StunBreakEvent` input count).
+        # We sum the per-source-agent counter map because the
+        # :class:`~gw2_core.StunBreakEvent` shape is actor-only
+        # (one event = ``+1`` to the source-agent's counter).
+        expected_stun_break_total = sum(stun_breaks_by_source.values())
+        self._check_invariants(rows, grand_total, duration_s, expected_stun_break_total)
         return rows
 
     @staticmethod
@@ -282,10 +351,18 @@ class PlayerHealAggregator:
         rows: list[PlayerHealRow],
         expected_sum: int,
         duration_s: float,
+        # Reviewer #1 fix: drop the `= 0` default. The aggregator
+        # always passes the actual total (derived from
+        # ``sum(stun_breaks_by_source.values())`` upstream); making
+        # this arg required eliminates a silent-failure trap if a
+        # future caller invokes ``_check_invariants`` directly
+        # without thinking about the parm.
+        expected_stun_break_total: int,
     ) -> None:
         """Raise ``ValueError`` if any cross-field invariant is violated.
 
-        Invariants checked (Phase 6 v2 SCAFFOLD addition):
+        Invariants checked (Phase 6 v2 SCAFFOLD addition + Tour 6
+        v0.10.24 stun-break conservation):
         1. Sum of ``row.total_healing`` == ``expected_sum`` (no
            event dropped on the source side).
         2. For every row, ``abs(barrier_ps - barrier_total /
@@ -297,11 +374,32 @@ class PlayerHealAggregator:
            redundant but explicit).
         4. Rows monotonic non-increasing by ``total_healing``;
            ties broken by ascending ``source_agent_id``.
+        5. Sum of ``row.stun_breaks`` across all rows ==
+           ``expected_stun_break_total`` (Tour 6 close-out: the
+           :class:`~gw2_core.StunBreakEvent` count conservation
+           contract; the canonical Wave 5 SCAFFOLD path with an
+           empty iterable leaves every row ``stun_breaks=0`` which
+           trivially satisfies when
+           ``expected_stun_break_total=0``).
         """
         actual_sum = sum(r.total_healing for r in rows)
         if actual_sum != expected_sum:
             msg = (
                 f"sum of row.total_healing ({actual_sum}) != sum of event.healing ({expected_sum})"
+            )
+            raise ValueError(msg)
+        # Tour 6 v0.10.24 close-out: stun-break conservation.
+        actual_stun_break_total = sum(r.stun_breaks for r in rows)
+        if actual_stun_break_total != expected_stun_break_total:
+            msg = (
+                f"sum of row.stun_breaks ({actual_stun_break_total}) "
+                f"!= count of StunBreakEvent input ({expected_stun_break_total}); "
+                # The earlier ``expected_stun_break_total = 0`` default
+                # has been retired -- the only path through this branch
+                # is from ``aggregate`` (which always derives the
+                # total upstream), so the trap is closed at the type
+                # level (required positional arg).
+                f"this signals a broken invariant in the dispatcher."
             )
             raise ValueError(msg)
         if duration_s > 0:
