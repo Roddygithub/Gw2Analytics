@@ -51,6 +51,66 @@ Eight sub-blocks from the spike doc §2 Blocker A:
 6. **A.6** Real-fixture integration test via `test_parser_applive_realfixture.py` (extends the F1 calibration pilot to the new statechange kinds). Effort: **M**.
 7. **A.7** Update `docs/v0.10.11-phase-9-conditions.md` + `docs/ROADMAP.md` §1.1 cycle shipts (Phase 9 step 4-STEPS). Effort: **S**.
 
+#### §2.A.4 detail — parser emit path design (sub-slice breakdown)
+
+The A.4 sub-block is the largest LoC slice in Blocker A (~600 LoC of the ~1200 LoC total) and decomposes into 3 sub-slices for incremental review. Each sub-slice ships behind its own feature flag + hermetic test so the F1 calibration pilot can validate one statechange family at a time without regressing the others.
+
+**A.4.1 — Statechange dispatch table + StunBreakEvent + BarrierEvent emit (~250 LoC)**
+
+- New module `libs/gw2_evtc_parser/src/gw2_evtc_parser/statechange_dispatch.py` — the statechange kind → EventType lookup table. Mirrors the `_EVENT_MAP` dict-dispatch pattern from `libs/gw2_core/src/gw2_core/models.py` but keyed on the arcdps `is_statechange` byte value. The dispatch table is the **single source-of-truth** for kind → EventType mapping (per §6 risk #2 mitigation; `event_type: "unknown_statechange"` is the catch-all fallback for unmapped kinds so coverage gaps are detectable in the F1 calibration pilot).
+- `StunBreakEvent` (statechange byte 56): the emit path is already LIVE through `PlayerHealAggregator.stun_breaks` (Tour 6 v0.10.24-pre shipped the end-to-end wire); A.4.1 confirms the parser emits the matching Pydantic instance + the WrapValidator routes via `_EVENT_MAP` (the dispatch wiring shipped in commit `c8ec65e`).
+- `BarrierEvent` (statechange byte — pending A.2 audit confirmation; the arcdps barrier kind was not in the Tour 6 audit but is needed for the `heal.barrier_*` columns per §1). The class shape already exists (`barrier_amount: int = Field(default=0, ge=0)` + `duration_ms: int = Field(default=0, ge=0)`); A.4.1 adds the parser yield path with `barrier_amount` populated from the arcdps barrier table + `duration_ms` from the per-skill barrier duration field (Phase 6 v2 parser-stream switch is the precondition for production-realistic barrier yields; pre-Phase-6-v2 streams parse cleanly because both fields default to `0`).
+
+**A.4.2 — DODGE + BLOCK + INTERRUPT emit (~150 LoC)**
+
+- These are the defense-tracking triplet (`defense.dodges` + `defense.blocks` + `defense.interrupts` columns per §1).
+- arcdps does NOT surface these as statechange records (the arcdps in-game overlay logger is the canonical source per the Wave 5 SCAFFOLD docstrings on `DodgeEvent` + `BlockEvent` + `InterruptEvent`).
+- A.4.2 adds the **player-action tracking** emit path: a parallel branch in the cbtevent decode loop that counts dodge + block + interrupt per `source_agent_id` without going through the statechange dispatch table.
+- The arcdps in-game overlay log is the input source for this slice; the parser consumes a new input format (`--overlay-log` CLI flag) alongside the EVTC binary. Pre-A.4.2 streams parse cleanly because the player-action counters default to `0` per the existing SCAFFOLD-zero column contract.
+
+**A.4.3 — DEATH + DOWN attribution + CONDITION_REMOVE + CC (~200 LoC)**
+
+- `DownEvent.downtime_ms` aggregation requires tracking down → alive transitions per `source_agent_id` (the `time_downed_ms` column is the sum of down-state durations; §6 risk #5 mitigation). The parser maintains a per-agent down-state map keyed on `source_agent_id` + enters/exits based on the statechange kind byte (CHANGE_DOWN vs CHANGE_ALIVE).
+- `DeathEvent.killed_by_agent_id` + `killing_skill_id` are forward-compat Optional fields (the arcdps DEATH record is actor-only; the kill attribution is derived from the prior damaging events on the same `target_agent_id` per the design doc §11). A.4.3 ships with a heuristic attribution that walks the recent damage window (last 5 seconds) on the dying agent; pre-A.4.3 streams parse cleanly because both fields default to `None`.
+- `ConditionRemoveEvent` requires the skills DB catalog (Blocker B) to distinguish boon-strips from condition-removes; A.4.3 ships with a stub catalog lookup that defaults to "unknown" (Blocker B will resolve this in v0.10.22 per §4 sequencing).
+- `CCEvent` is the defiance-bar damage / duration tuple; the arcdps CC kind byte is mapped via the design doc §3 CC appliqués column.
+
+**Backward compat with V1.3 parser-stream:**
+
+The V1.3 parser does NOT consume the event block; the A.4 change is purely additive. The existing `if is_statechange != 0: continue` filter at line 439 is REPLACED with the new emit path; the REMOVE/APPLY predicates that follow are unaffected (they gate on `is_buffremove` which is a different byte from `is_statechange`).
+
+**Dispatch integration (cross-ref A.3 first-slice commit `c8ec65e`):**
+
+The parser yields Pydantic instances via `Event.model_validate(dict)`; the existing `WrapValidator` in `libs/gw2_core/src/gw2_core/models.py` routes via `_EVENT_MAP` so the new emit path requires NO additional gw2_core changes. The A.3 first-slice dispatched-wiring + the DODGE/BLOCK/INTERRUPT enum restoration are the preconditions for A.4 to ship without gw2_core changes.
+
+**Test strategy (per §2.A.5):**
+
+8 hermetic `parse_events` predicate-boundary tests in `libs/gw2_evtc_parser/tests/test_parser_emit_statechange.py` (one per new subclass: BarrierEvent + ConditionRemoveEvent + CCEvent + DownEvent + DeathEvent + DodgeEvent + BlockEvent + InterruptEvent). Each test:
+- Constructs a hand-crafted statechange byte tuple (matching the arcdps binary layout per the `rev.py` decode helpers).
+- Asserts the parser yields the matching subclass with the right fields populated.
+- Asserts `event_type: Literal[EventType.X] = EventType.X` discriminator is correctly populated.
+- Asserts `frozen=True + extra="forbid"` Pydantic constraints don't reject the parser-emitted payload (the `_dispatch_event` WrapValidator routes through `_EVENT_MAP` so the frozen model is constructed once via `model_validate(v)` + returned as-is).
+
+**LoC budget (A.4 detail):**
+
+- A.4.1: ~250 LoC (parser: ~150, dispatch table: ~50, tests: ~50)
+- A.4.2: ~150 LoC (parser: ~80, overlay-log consumer: ~40, tests: ~30)
+- A.4.3: ~200 LoC (parser: ~100, attribution logic: ~50, tests: ~50)
+- **Total: ~600 LoC** (matches the §2.A.4 effort estimate)
+
+**Cross-references:**
+
+- `docs/statechange-ids.md` — the canonical arcdps kind byte reference (A.2 audit deliverable).
+- `plans/adr/002-statechange-parser-extension.md` — the ADR that captures the design rationale (extends the parser to handle statechange records + the player-action tracking).
+- `plans/F17-frontend-rollout.md` §3 migration-impact contract — the frontend fan-out per the WAVE-8 §5 3-edit pattern (page.tsx SCAFFOLD-zero prune + `PlayerReadout*.tsx` valueGetter flip + Playwright spec). The F17 plan §3 is the operator's single source-of-truth for the per-column pattern; the WAVE-8 step 17 cross-link in the Tour 7 release plan signals the BACKEND-ready moment.
+- `docs/v0.9.0-combat-readout-design.md` §11 + §13 — the column contracts that the emitted events must conform to (the 4 readout tables + 5 shared columns + 10 §3.1 role vocabulary).
+
+**Risks (per §6):**
+
+- §6 #2 (statechange kind unmapped) — mitigated by A.4.1's `event_type: "unknown_statechange"` catch-all (the F1 calibration pilot surfaces unmapped kinds via the catch-all event_type).
+- §6 #3 (discriminator fallout) — mitigated by the WrapValidator + the A.3 first-slice dispatch table (the `_EVENT_MAP` is the single source-of-truth for kind → subclass routing on the consumer side).
+- §6 #5 (time on ground semantics) — mitigated by A.4.3's down → alive transition tracking (the per-agent down-state map is the canonical state machine; the `downtime_ms` aggregation is the sum of down-state durations).
+
 **Done when:** `parse_events` emits the 9 new subclasses from a real-fixture input; the F1 calibration pilot passes; the `is_statechange != 0` skip at line 439 no longer hides statechange records upstream of the REMOVE/APPLY predicates.
 
 ## §3 Blocker B — Skills DB catalog bootstrap (M-L, ~600 LoC, NEW `libs/gw2_skills/` library)
