@@ -723,32 +723,6 @@ def test_retry_scheduler_first_attempt_success(
         assert verify_db.get(OrmWebhookDlq, delivery_id) is None
 
 
-def test_retry_scheduler_failure_promotes_to_dlq_after_max_attempts(
-    session_factory: Any,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Plan 007 v0.9.1: STUB POINTER — moved to a standalone module.
-
-    The canonical 2-tick exponential-backoff → DLQ promotion test
-    landed in ``apps/api/tests/test_webhooks_e2e_scheduler.py``
-    (the re-attempt of the in-session deferral). Keeping this
-    function here as a stub via ``pytest.skip`` preserves the
-    name (so anyone searching by test name lands on a clear
-    pointer instead of a deleted-symbol surprise).
-
-    The standalone module flattens the ``with``-block structure
-    (``_respx.mock`` OUTERMOST + per-tick short-lived
-    ``time_machine.travel``) to avoid the nested-dedent footgun
-    that broke the original in-session test.
-    """
-    pytest.skip(
-        "moved to test_webhooks_e2e_scheduler.py::"
-        "test_retry_scheduler_failure_promotes_to_dlq_after_max_attempts "
-        "(re-attempt of the in-session deferral; flat with-block structure "
-        "to avoid the nested dedent footgun)"
-    )
-
-
 def test_replay_dlq_idempotent_concurrent_calls(
     session_factory: Any,
     monkeypatch: pytest.MonkeyPatch,

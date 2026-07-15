@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import uuid as _uuid
 
-import pytest
 from _fixtures import (
     make_cbtevent,
     post_minimal_fight,
@@ -348,20 +347,3 @@ def test_backfill_is_idempotent() -> None:
         session.close()
 
 
-def test_backfill_skips_npc_only_fights() -> None:
-    """v0.8.5: ``run_backfill`` skips NPC-only fights (no player agents).
-
-    NPC-only fights cannot contribute to a player profile (the
-    cross-fight join is keyed on ``account_name``), so writing
-    summary rows for them would inflate the table without
-    serving any route. The script counts them as ``skipped``
-    and writes zero rows.
-    """
-    # This is covered indirectly by the e2e tests (the
-    # happy-path fights have 2 player agents, so the skipped
-    # path is not exercised). A focused unit test would
-    # require seeding an NPC-only fight, which is a larger
-    # fixture. The contract is documented in
-    # :func:`run_backfill`'s docstring's "No player agents"
-    # edge case.
-    pytest.skip("NPC-only fight fixture is out of scope for the v0.8.5 bring-up")
