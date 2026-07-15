@@ -12,6 +12,7 @@ export default tseslint.config(
       "scripts/",
       "tests/e2e/",
       "tests/mock-server.mjs",
+      "test-results/",
     ],
   },
   js.configs.recommended,

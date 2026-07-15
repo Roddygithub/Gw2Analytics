@@ -56,6 +56,7 @@ export function PlayerSearchBar() {
     <form
       onSubmit={onSubmit}
       role="search"
+      data-testid="player-search-form"
       style={{ display: "flex", gap: 8, alignItems: "center" }}
     >
       <label

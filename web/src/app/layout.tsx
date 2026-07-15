@@ -70,6 +70,7 @@ export default function RootLayout({
           header sits inside the existing dark theme.
         */}
         <header
+          data-testid="global-header"
           style={{
             position: "sticky",
             top: 0,
@@ -87,6 +88,7 @@ export default function RootLayout({
         >
           <Link
             href="/"
+            data-testid="brand-link"
             style={{
               display: "flex",
               alignItems: "center",
@@ -123,6 +125,7 @@ export default function RootLayout({
           >
             <Link
               href="/players"
+              data-testid="nav-players"
               style={{
                 fontSize: 13,
                 color: "var(--link)",
@@ -133,6 +136,7 @@ export default function RootLayout({
             </Link>
             <Link
               href="/players/compare"
+              data-testid="nav-compare"
               style={{
                 fontSize: 13,
                 color: "var(--link)",
