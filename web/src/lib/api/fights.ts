@@ -228,7 +228,14 @@ export interface PlayerReadoutOut {
   agent_id: number;
   subgroup: number;
   name: string;
-  account_name: string;
+  // Tour 6 v0.10.24-pre follow-up wire-contract widening: the
+  // account_name is now string | null (the schema widening
+  // completed in lockstep with the apps/api schema change). The
+  // arcdps None-vs-empty-string distinction now survives the wire
+  // so consumers can attribute the two cases independently. The
+  // Tier-2 consumers (PlayersGrid, CrossAccountTimelineChart,
+  // PerPlayerTimelineChart) handle the null path explicitly.
+  account_name: string | null;
   profession: string;
   elite_spec: string;
   is_commander: boolean;

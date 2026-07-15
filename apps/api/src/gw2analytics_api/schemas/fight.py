@@ -408,7 +408,15 @@ class PlayerReadoutOut(BaseModel):
     agent_id: int
     subgroup: int
     name: str
-    account_name: str
+    # Tour 6 v0.10.24-pre follow-up wire-contract widening: the
+    # ``account_name`` is now ``str | None`` (was ``str`` pre-follow-up;
+    # the lossy truthy ``or ""`` collapse in
+    # routes.fights.aggregators was removed alongside this widening).
+    # The arcdps ``None`` vs empty-string distinction now survives the
+    # wire so callers can attribute the two cases independently. The
+    # web/ F17 frontend-window lock picks up the null path through
+    # the regenerated OpenAPI schema.
+    account_name: str | None
     profession: str
     elite_spec: str
     is_commander: bool = False

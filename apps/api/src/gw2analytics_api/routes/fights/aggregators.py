@@ -472,21 +472,23 @@ def aggregate_combat_readout(
         cc_taken=0,
         deaths=0,
     )
-    # Reviewer #3 fix: TODO(v0.11.0) -- the truthy `or ""` collapse
-    # on the ``account_name`` line below drops the distinction
-    # between a None and an empty-string arcdps account-name; the
-    # next cycle widens PlayerReadoutOut.account_name to
-    # ``str | None`` (wire-contract migration) and removes the
-    # coercion. The runtime behaviour still matches the
-    # PlayerReadoutOut schema (``account_name: str``) so callers
-    # see an empty string for an absent account -- documented at
-    # the route module docstring to surface the lossy transition.
+    # Tour 6 v0.10.24-pre follow-up wire-contract widening: the
+    # truthy ``or ""`` collapse is GONE. ``PlayerReadoutOut.account_name``
+    # is now ``str | None`` (the schema widening completed in lockstep
+    # with this commit) so the wire payload PRESERVES the arcdps
+    # ``None``-vs-empty-string distinction. The web/ Tier-2 consumers
+    # (PlayersGrid, CrossAccountTimelineChart, PerPlayerTimelineChart)
+    # handle the null path explicitly. The pre-follow-up lossy transition
+    # (every None-or-"" collapsing to "") ended with this commit. See
+    # CHANGELOG.md [0.10.24-pre] follow-up sub-bullet for the breakage
+    # framing (additive: the field was always nullable in the DB; the
+    # wire schema now mirrors the DB).
     players: list[PlayerReadoutOut] = [
         PlayerReadoutOut(
             agent_id=agent_id,
             subgroup=identity_map[agent_id].subgroup,
             name=identity_map[agent_id].name,
-            account_name=identity_map[agent_id].account_name or "",
+            account_name=identity_map[agent_id].account_name,
             profession=identity_map[agent_id].profession,
             elite_spec=identity_map[agent_id].elite_spec,
             is_commander=identity_map[agent_id].is_commander,

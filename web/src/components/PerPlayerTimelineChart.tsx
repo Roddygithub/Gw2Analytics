@@ -254,8 +254,13 @@ export function selectTopNByMetric(
 ): PerPlayerTimelineSeries[] {
   const sorted = [...series].sort((a, b) => {
     const totalDiff = getMetricTotal(b, metric) - getMetricTotal(a, metric);
-    if (totalDiff !== 0) return totalDiff;
-    return a.account_name.localeCompare(b.account_name);
+  if (totalDiff !== 0) return totalDiff;
+  // Tour 6 v0.10.24-pre follow-up null-safety: account_name is now
+  // string | null on the wire (the schema widening); the ``?? ""``
+  // fallbacks preserve stable ordering when either side is null
+  // (two-null series stay tied at 0; null-vs-non-null sorts after
+  // the non-null side without crashing the comparator).
+  return (a.account_name ?? "").localeCompare(b.account_name ?? "");
   });
   return sorted.slice(0, n);
 }

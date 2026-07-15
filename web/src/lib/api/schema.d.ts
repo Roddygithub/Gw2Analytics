@@ -1461,7 +1461,7 @@ export interface components {
          */
         PlayerReadoutOut: {
             /** Account Name */
-            account_name: string;
+            account_name: string | null;
             /** Agent Id */
             agent_id: number;
             /**
