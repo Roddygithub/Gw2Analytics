@@ -33,6 +33,7 @@ members = [
     "libs/gw2_analytics",
     "libs/gw2_api_client",
     "apps/api",
+    "libs/gw2_skills"
 ]
 
 [tool.uv.sources]

@@ -294,8 +294,8 @@ export default async function FightEventsPage({
   const activeTab: "overview" | "replay" | "readout" = (() => {
     const t = (tab_raw ?? "").toLowerCase();
     if (t === "replay") return "replay";
-    if (t === "readout") return "readout";
-    return "overview";
+    if (t === "overview") return "overview";
+    return "readout";
   })();
 
   let summary: FightEventsSummaryRow | null = null;

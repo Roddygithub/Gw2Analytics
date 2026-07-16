@@ -321,7 +321,7 @@ describe("FightEventsPage", () => {
     mockFightFetch({ events: POPULATED_PAYLOAD });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      searchParams: Promise.resolve({}),
+      searchParams: Promise.resolve({ tab: "overview" }),
     });
     render(tree);
     expect(
@@ -367,7 +367,7 @@ describe("FightEventsPage", () => {
     mockFightFetch({ events: EMPTY_PAYLOAD });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      searchParams: Promise.resolve({}),
+      searchParams: Promise.resolve({ tab: "overview" }),
     });
     render(tree);
     expect(
@@ -442,7 +442,7 @@ describe("FightEventsPage", () => {
     mockFightFetch({ events: multiPayload });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      searchParams: Promise.resolve({ target: "1" }),
+      searchParams: Promise.resolve({ target: "1", tab: "overview" }),
     });
     render(tree);
     expect(screen.getByText(/filtered to target 1/)).toBeInTheDocument();
@@ -467,7 +467,7 @@ describe("FightEventsPage", () => {
     mockFightFetch({ events: POPULATED_PAYLOAD });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      searchParams: Promise.resolve({ target: "not-a-number" }),
+      searchParams: Promise.resolve({ target: "not-a-number", tab: "overview" }),
     });
     render(tree);
     expect(screen.queryByText(/filtered to target/)).not.toBeInTheDocument();
@@ -490,7 +490,7 @@ describe("FightEventsPage", () => {
     mockFightFetch({ events: POPULATED_PAYLOAD });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      searchParams: Promise.resolve({}),
+      searchParams: Promise.resolve({ tab: "overview" }),
     });
     render(tree);
     expect(
@@ -519,7 +519,7 @@ describe("FightEventsPage", () => {
     mockFightFetch({ events: POPULATED_PAYLOAD });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      searchParams: Promise.resolve({ account: "UnknownAccount.9999" }),
+      searchParams: Promise.resolve({ account: "UnknownAccount.9999", tab: "overview" }),
     });
     render(tree);
     // The per-player section still renders (the prompt
@@ -558,7 +558,7 @@ describe("FightEventsPage", () => {
     });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      searchParams: Promise.resolve({ account: "TestAccount.1234" }),
+      searchParams: Promise.resolve({ account: "TestAccount.1234", tab: "overview" }),
     });
     render(tree);
     expect(screen.getByTestId("player-skill-error")).toBeInTheDocument();
@@ -577,7 +577,7 @@ describe("FightEventsPage", () => {
     });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      searchParams: Promise.resolve({ account: "TestAccount.1234" }),
+      searchParams: Promise.resolve({ account: "TestAccount.1234", tab: "overview" }),
     });
     render(tree);
     // The agents-fetch-specific chip carries the
@@ -627,7 +627,7 @@ describe("FightEventsPage", () => {
     });
     const tree = await FightEventsPage({
       params: Promise.resolve({ id: FIGHT_ID }),
-      searchParams: Promise.resolve({ account: "TestAccount.1234" }),
+      searchParams: Promise.resolve({ account: "TestAccount.1234", tab: "overview" }),
     });
     render(tree);
     // BOTH chips are present.
