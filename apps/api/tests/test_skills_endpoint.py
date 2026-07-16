@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from fastapi.testclient import TestClient
+
+from gw2analytics_api.main import app
 
 
 def test_list_skills_returns_catalog_entries(client: TestClient) -> None:
@@ -57,3 +61,54 @@ def test_get_skill_profession_string_serialization(client: TestClient) -> None:
     # The profession MUST be a plain string (per schema.d.ts contract),
     # NEVER an integer (IntEnum default serialisation).
     assert isinstance(entry["profession"], str)
+
+
+def test_list_skills_503_when_state_none(client: TestClient) -> None:
+    """v0.10.26-pre regression guard: lifespan fail-safe path sets
+    app.state.skill_catalog = None on any startup exception. Without
+    this test, a future PR that reorders the lifespan silently
+    breaks the SKILLS_UNAVAILABLE 503 contract surfaced to the
+    frontend via web/src/lib/fetchCached.ts error_code lookup.
+    """
+    # Monkeypatch the app state to simulate the lifespan fail-safe.
+    # ``app`` is imported at module level (apps/api/tests/__init__.py
+    # ancestor path); the ``client`` fixture already triggered the
+    # lifespan, so ``app.state.skill_catalog`` is populated.
+    sentinel = object()  # unique marker for "attribute not yet set"
+    original_state = getattr(app.state, "skill_catalog", sentinel)
+    app.state.skill_catalog = None
+    try:
+        resp = client.get("/api/v1/skills")
+        assert resp.status_code == 503, resp.text
+        body = resp.json()
+        # FastAPI wraps HTTPException ``detail={...}`` under the outer
+        # response ``detail`` key: body shape is
+        # ``{"detail": {"detail": "...", "error_code": "..."}}``.
+        # The frontend's fetchCached.ts:60-73 reads `detail.error_code`
+        # for this nesting; this lock guards the wire shape contract.
+        assert isinstance(body, dict)
+        outer_detail = body.get("detail")
+        assert isinstance(outer_detail, dict)
+        assert outer_detail.get("error_code") == "SKILLS_UNAVAILABLE"
+    finally:
+        # Restore so subsequent tests in the same module aren't poisoned.
+        if original_state is sentinel:
+            with suppress(AttributeError):
+                del app.state.skill_catalog
+        else:
+            app.state.skill_catalog = original_state
+
+
+def test_list_skills_catalog_count_meets_minimum(client: TestClient) -> None:
+    """SCAFFOLD-gate: the shipped NDJSON catalogue must have at
+    least 30 entries (v0.10.26-pre minimum) so the frontend's
+    client-side lookup has material to bootstrap. The 129-entry
+    v0.10.26-pre expansion is the per-cycle target.
+    """
+    resp = client.get("/api/v1/skills")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data) >= 30, (
+        f"Catalog should have >= 30 entries (got {len(data)}). "
+        "If you removed fixtures, restore from v0.10.25 baseline."
+    )
