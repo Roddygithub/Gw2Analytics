@@ -1,14 +1,14 @@
 """Unit tests for the in-memory GW2 skills catalog."""
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import pytest
-from gw2_core import Profession
-
-from gw2_skills.catalog import SkillCatalog, find_skill_by_id, find_skills_by_profession
+from gw2_skills.catalog import SkillCatalog
 from gw2_skills.models import SkillEntry
+
+from gw2_core import Profession
 
 
 def test_find_skill_by_id_empty_catalog_returns_none() -> None:
@@ -44,8 +44,18 @@ def test_load_catalog_from_ndjson_with_three_entries(tmp_path: Path) -> None:
     """End-to-end: write 3-line NDJSON, load, verify lookups."""
     catalog = SkillCatalog()
     rows = [
-        {"id": 10, "name": "Test Skill A", "profession": Profession.GUARDIAN.value, "is_elite": False},
-        {"id": 20, "name": "Test Skill B", "profession": Profession.WARRIOR.value, "is_elite": True},
+        {
+            "id": 10,
+            "name": "Test Skill A",
+            "profession": Profession.GUARDIAN.value,
+            "is_elite": False,
+        },
+        {
+            "id": 20,
+            "name": "Test Skill B",
+            "profession": Profession.WARRIOR.value,
+            "is_elite": True,
+        },
         {"id": 30, "name": "Test Skill C", "profession": None, "is_elite": False},
     ]
     ndjson_path = tmp_path / "skills.ndjson"
@@ -53,7 +63,9 @@ def test_load_catalog_from_ndjson_with_three_entries(tmp_path: Path) -> None:
     loaded = catalog.load(ndjson_path)
     assert loaded == 3
     assert catalog.find_skill_by_id(10) is not None
-    assert catalog.find_skill_by_id(10).name == "Test Skill A"
+    entry_a = catalog.find_skill_by_id(10)
+    assert entry_a is not None
+    assert entry_a.name == "Test Skill A"
     assert catalog.find_skills_by_profession(Profession.GUARDIAN)[0].id == 10
     assert catalog.find_skills_by_profession(Profession.MESMER) == []
 
@@ -86,6 +98,10 @@ def test_load_ndjson_skips_malformed_lines_silently(tmp_path: Path) -> None:
     loaded = catalog.load(ndjson_path)
     assert loaded == 2  # only the 2 valid lines counted
     assert catalog.find_skill_by_id(10) is not None
-    assert catalog.find_skill_by_id(10).name == "Valid Skill A"
+    valid_entry = catalog.find_skill_by_id(10)
+    assert valid_entry is not None
+    assert valid_entry.name == "Valid Skill A"
     assert catalog.find_skill_by_id(30) is not None
-    assert catalog.find_skill_by_id(30).profession is None
+    another_entry = catalog.find_skill_by_id(30)
+    assert another_entry is not None
+    assert another_entry.profession is None

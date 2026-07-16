@@ -4,12 +4,14 @@ Schema reference: ``libs/gw2_core/src/gw2_core/models.py::Skill``
 (the parser-side adapter layer writes the same ``id`` int that this
 catalog enriches with human display names).
 """
+
 from __future__ import annotations
 
 from typing import Literal
 
-from gw2_core import Profession
 from pydantic import BaseModel, ConfigDict, Field
+
+from gw2_core import Profession
 
 type SkillType = Literal[
     "weapon",
