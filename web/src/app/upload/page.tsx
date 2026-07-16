@@ -53,6 +53,11 @@ import styles from "./page.module.css";
 
 const ACCEPTED_EXT = ".zevtc";
 
+// v0.10.25: mirror the API's compressed-upload cap so the UI can
+// reject oversized files before spending bandwidth. Keep this in
+// sync with the backend ``MAX_UPLOAD_SIZE_BYTES`` setting.
+const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
+
 // Wizard parameters -- tuned so the worst-case analyst never waits
 // more than ``POLL_INTERVAL_MS * POLL_MAX_ATTEMPTS`` = 2s * 15 =
 // 30s without a redirect-or-reset affordance.
@@ -121,6 +126,15 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
           ...state,
           file: null,
           rejected: `Only ${ACCEPTED_EXT} files are accepted.`,
+        };
+      }
+      if (action.file.size > MAX_UPLOAD_SIZE_BYTES) {
+        return {
+          ...state,
+          file: null,
+          rejected: `File is too large (${formatBytes(
+            action.file.size,
+          )}). Maximum is ${formatBytes(MAX_UPLOAD_SIZE_BYTES)}.`,
         };
       }
       return {
@@ -440,7 +454,9 @@ function PickStep({
         />
         <span className={styles.fileChip} data-testid="file-chip">
           {file === null
-            ? `No file selected — click to choose a ${ACCEPTED_EXT}`
+            ? `No file selected — click to choose a ${ACCEPTED_EXT} (max ${formatBytes(
+                MAX_UPLOAD_SIZE_BYTES,
+              )})`
             : `${file.name} · ${formatBytes(file.size)}`}
         </span>
       </label>
