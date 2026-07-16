@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Logo } from "@/components/Logo";
@@ -47,6 +47,20 @@ export const metadata: Metadata = {
     shortcut: "/favicon.ico",
     apple: "/favicon.ico",
   },
+};
+
+// v0.10.25 mobile audit: Next.js 14+ separates `viewport` + `themeColor`
+// out of `metadata` into a sibling export. Sets the canonical mobile
+// viewport so the AG Grid tables + the sticky header render correctly
+// on a 360 px - 768 px viewport (the analyst phone / tablet envelope
+// per the F17 §4 mobile risk). The themeColor matches `--background`
+// at the canonical dark-Quartz value so the browser-chrome (status
+// bar on iOS / Safari, address bar on Android Chrome) blends into
+// the app surface.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#0a0a0a",
 };
 
 export default function RootLayout({

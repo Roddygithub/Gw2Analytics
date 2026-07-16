@@ -210,40 +210,33 @@ export interface paths {
          * Get Fight Readout
          * @description Return the full Combat-readout envelope for one fight (plan 045 §5.1).
          *
-         *     Wave 5 SCAFFOLD + Workstream D-extension bridge. Unified endpoint
-         *     per design doc §5.1 (``GET /api/v1/fights/{fight_id}/readout``)
-         *     returning the :class:`FightReadoutOut` envelope containing one
-         *     :class:`PlayerReadoutOut` per player agent. The route delegates
-         *     to :func:`aggregate_combat_readout` (the dispatcher in
-         *     :mod:`gw2analytics_api.routes.fights.aggregators`) which wraps
-         *     the 4 per-player aggregators (PlayerDamage / PlayerHeal /
-         *     PlayerBoons / PlayerDefense).
+         *     Tour 6 v0.10.24 close-out: the 5 shared identity columns are
+         *     hydrated from ``OrmFightAgent`` via the new
+         *     :func:`agent_id_to_identity` helper (closes the Wave 5
+         *     SCAFFOLD NIT-placeholder gap); the per-row
+         *     ``stun_breaks`` column is wired via the StunBreakEvent
+         *     stream; and the SCAFFOLD ``?dry_run=`` escape hatch is
+         *     REMOVED (Round 14 reviewer flagged the production query
+         *     param as a SCAFFOLD anti-pattern). Empty-state tests now
+         *     exercise the route against an actual NPC-only fight blob
+         *     (the canonical ``players: []`` envelope).
          *
-         *     The 8 input streams are split from the canonical heterogeneous
-         *     ``Iterable[Event]`` via ``isinstance`` at the call site
-         *     (parallel to the per-target trio dispatch in
+         *     The 9 input streams are split from the canonical
+         *     heterogeneous ``Iterable[Event]`` via ``isinstance`` at the
+         *     call site (parallel to the per-target trio dispatch in
          *     ``apps/api/routes/fights/aggregators.py::_aggregate_per_target_rollup``).
          *
-         *     Response codes match the v0.10.13 per-fight timeline contract:
+         *     Response codes:
          *
          *     - ``404 Not Found``: fight id is unknown OR the events blob
          *       is missing (the shared :func:`_load_fight_events` helper
-         *       raises the canonical pre-Phase 7 OR post-Phase-7-with-zero-events
-         *       contract).
-         *     - ``422 Unprocessable Entity``: ``dry_run`` is non-boolean
-         *       (handled by FastAPI before this handler runs).
+         *       raises the canonical pre-Phase 7 OR
+         *       post-Phase-7-with-zero-events contract).
          *     - ``502 Bad Gateway``: events blob is present but corrupt.
-         *     - ``200 OK``: ``FightReadoutOut`` envelope, even when
-         *       ``players: []`` (a 0-player NPC-only fight).
-         *
-         *     The dry_run escape hatch: when ``dry_run=True``, the route
-         *     short-circuits the blob load + event-split + agent-load
-         *     pipeline and invokes ``aggregate_combat_readout`` against
-         *     empty streams. The result is a valid envelope with 0 players
-         *     + ``duration_s=0.0`` -- the canonical empty-state. This
-         *     path is INTENDED for hermetic route-testing on dev hosts
-         *     WITHOUT docker compose; production callers SHOULD set
-         *     ``dry_run=False`` (the default).
+         *     - ``200 OK``: ``FightReadoutOut`` envelope. A 0-player
+         *       NPC-only fight yields ``players: []`` (the per-aspect
+         *       aggregators see no player-actor events; the dispatcher's
+         *       identity-map intersection drops the NPC agent_ids).
          */
         get: operations["get_fight_readout_api_v1_fights__fight_id__readout_get"];
         put?: never;
@@ -1459,17 +1452,6 @@ export interface components {
          *     scaffold primes the field for the future Phase C
          *     feature where the parser writes the flag).
          */
-        // # noqa: wire-followup-2026-07-15
-        // The `account_name: string | null` widening on PlayerReadoutOut is
-        // a MANUAL edit promoted alongside the v0.10.24-pre backend close-out
-        // (closing the lossy truthy `or ""` flag from the code review on
-        // commit bef9063). The Python Pydantic schema was updated
-        // in lockstep in apps/api/src/gw2analytics_api/schemas/fight.py
-        // (PlayerReadoutOut.account_name: str | None). If a future OpenAPI
-        // regeneration overwrites this hand-edit, reconcile against
-        // the Python schema (the Python is the source-of-truth; the TS
-        // is the auto-gen consumer). See CHANGELOG.md [0.10.24-pre]
-        // Wire-contract followup sub-bullet for the migration history.
         PlayerReadoutOut: {
             /** Account Name */
             account_name: string | null;
@@ -2083,10 +2065,7 @@ export interface operations {
     };
     get_fight_readout_api_v1_fights__fight_id__readout_get: {
         parameters: {
-            query?: {
-                /** @description (SCAFFOLD-ONLY ESCAPE HATCH; future-tour refactor target: If True, exercise ``aggregate_combat_readout`` against an EMPTY events stream (returns the empty-schema envelope -- 0-player ``players: []`` -- with ``duration_s=0.0``). Useful for hermetic route testing without docker compose / MinIO / Postgres. Production GET requests set ``dry_run=False``.**WARNING**: the ``?dry_run=`` query param is a SCAFFOLD anti-pattern on a production endpoint (the reviewer flagged this in Round 14) — Wave 6 refactor must switch this to a FastAPI ``app.dependency_overrides[get_session] = ...`` test fixture pattern so the production route is bare-bones (only the real database path; the empty-state path closes over the dependency-override contract for tests). */
-                dry_run?: boolean;
-            };
+            query?: never;
             header?: never;
             path: {
                 fight_id: string;

@@ -260,6 +260,15 @@ class EventType(StrEnum):
     DODGE = "DODGE"
     BLOCK = "BLOCK"
     INTERRUPT = "INTERRUPT"
+    # v0.10.25 close-out (WAVE-8 A.3 last piece): barrier
+    # application event. arcdps writes is_statechange records
+    # when a shield skill absorbs incoming damage; the parser
+    # (Phase 6 v2) yields one BarrierEvent per absorption hit
+    # so the PlayerHealAggregator can split barrier from heal.
+    # Modeled after BoonApplyEvent (a shield is a temporary
+    # buff-like state with a duration) so the schema stays
+    # symmetry-consistent with the post-Tour-6 event vocabulary.
+    BARRIER = "BARRIER"
 
 
 class BaseEvent(BaseModel):
@@ -583,6 +592,62 @@ class InterruptEvent(BaseEvent):
     event_type: Literal[EventType.INTERRUPT] = EventType.INTERRUPT
 
 
+class BarrierEvent(BaseEvent):
+    """One barrier-application event (WAVE-8 A.3 last piece; SCAFFOLD for Phase 6 v2).
+
+    Emitted when a shield / barrier skill applies a temporary absorption
+    layer to the target. Mirrors :class:`BoonApplyEvent` semantically
+    (``barrier_amount`` is the absorption magnitude in hit points;
+    ``duration_ms`` is the lifetime of the barrier stack) but tags the
+    shield variety so the Heal table ``barrier_total`` + ``barrier_ps``
+    columns can attribute barrier absorption distinct from heal output
+    once the parser-side pipeline lands.
+
+    Design rationale for the BoonApplyEvent symmetry
+    ===============================================
+    Both barrier and boon are "temporary positive state on the target";
+    modeling them through the same (amount, duration) pair keeps the
+    schema uniform for downstream aggregators. The alternative (a
+    :class:`HealingEvent`-style single magnitude field, no duration)
+    would lose the :class:`PlayerHealAggregator`'s ability to compute
+    ``barrier_ps`` (rate requires both the magnitude AND the lifetime
+    over which the barrier was active).
+
+    Full :class:`BaseEvent` shape (NOT actor-only — explicit contrast
+    with :class:`DodgeEvent` / :class:`BlockEvent` which ARE
+    actor-only). The asymmetry is by design: barrier carries a target
+    (the ally whose shield decays) + a skill_id (the barrier mechanic),
+    and these fields carry the per-barrier forensic signal the heal
+    aggregator consumes.
+
+    Actor = the player who applied the barrier (``source_agent_id``).
+    Target = the player who absorbed the damage
+    (``target_agent_id``; zero only for self-cast barriers).
+    ``skill_id`` is the barrier skill id (FK to fight.skills).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.BARRIER] = EventType.BARRIER
+    barrier_amount: int = Field(
+        ...,
+        ge=0,
+        description=(
+            "Barrier absorption magnitude in hit points (the total damage "
+            "absorbed before the barrier expired or was consumed)."
+        ),
+    )
+    duration_ms: int = Field(
+        ...,
+        ge=0,
+        description=(
+            "Barrier application duration in milliseconds. Mirrors "
+            "BoonApplyEvent.duration_ms so the heal aggregator can "
+            "compute ``barrier_ps`` = ``barrier_amount / duration_s``."
+        ),
+    )
+
+
 # ---------------------------------------------------------------------
 # Event dispatch table (Wave 6 partition refactor — Tour 5 wrap-up)
 # ---------------------------------------------------------------------
@@ -612,6 +677,7 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.DODGE: DodgeEvent,
     EventType.BLOCK: BlockEvent,
     EventType.INTERRUPT: InterruptEvent,
+    EventType.BARRIER: BarrierEvent,
 }
 
 
@@ -710,6 +776,7 @@ __all__ = [
     "_EVENT_MAP",
     "AccountInfo",
     "Agent",
+    "BarrierEvent",
     "BaseEvent",
     "BlockEvent",
     "BoonApplyEvent",
