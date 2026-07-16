@@ -140,6 +140,7 @@ from gw2analytics_api.models import (
 )
 from gw2analytics_api.routes import webhooks
 from gw2analytics_api.routes.fights.blob_cache import clear_blob_caches
+from gw2analytics_api.routes.fights.blob_loader import clear_parsed_events_cache
 
 
 @pytest.fixture(autouse=True)
@@ -205,6 +206,7 @@ def _clear_blob_caches() -> None:
     the contract documented in blob_cache.py's module docstring.
     """
     clear_blob_caches()
+    clear_parsed_events_cache()
 
 
 @pytest.fixture(autouse=True)

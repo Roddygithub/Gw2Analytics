@@ -195,7 +195,7 @@ cd "$API_PATH"
 # metacharacters break the tmux command string. The wrapper exports the
 # resolved env vars directly and then execs uvicorn, so the process
 # tree is clean and tmux only sees a single executable argument.
-WRAPPER=$(build_wrapper "uv run uvicorn gw2analytics_api.main:app --host 0.0.0.0 --port ${PORT}" "$LOG" "api-dev")
+WRAPPER=$(build_wrapper "uv run uvicorn gw2analytics_api.main:app --host 0.0.0.0 --port ${PORT} --timeout-keep-alive 120" "$LOG" "api-dev")
 
 # Run the wrapper through bash explicitly so it works even if /tmp is
 # mounted noexec (the file still needs read permission, not execute).

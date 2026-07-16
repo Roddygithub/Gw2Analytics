@@ -20,6 +20,7 @@ from gw2analytics_api._event_dispatch import (
 )
 from gw2analytics_api.routes import fights as fights_module
 from gw2analytics_api.routes import players as players_module
+from gw2analytics_api.routes.fights import blob_loader
 
 
 def _event_line(event: Event) -> bytes:
@@ -84,10 +85,21 @@ def test_build_event_iterator_yields_three_subtypes_in_discriminator_order() -> 
 
 
 def test_routes_fights_drops_local_event_type_adapter() -> None:
-    """``routes/fights.py`` no longer instantiates its own adapter."""
+    """``routes/fights`` no longer instantiates its own adapter.
+
+    Post-A2 god-module refactor (plan 021), the ``build_event_iterator``
+    import moved from ``routes/fights/__init__.py`` to
+    ``routes/fights/blob_loader.py`` (the extracted blob-load helper).
+    The test checks the correct module: ``fights/__init__.py`` must NOT
+    have a local ``TypeAdapter(Event)`` (the old pattern), and
+    ``blob_loader.py`` MUST import ``build_event_iterator`` (the
+    canonical hub helper).
+    """
     source = inspect.getsource(fights_module)
     assert "TypeAdapter(Event)" not in source
-    assert "build_event_iterator" in source
+    # The canonical helper now lives in blob_loader (A2 refactor).
+    blob_source = inspect.getsource(blob_loader)
+    assert "build_event_iterator" in blob_source
 
 
 def test_routes_players_drops_local_event_type_adapter() -> None:

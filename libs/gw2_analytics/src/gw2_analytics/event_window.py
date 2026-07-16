@@ -68,6 +68,15 @@ from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 # event write rate is ~30Hz so 1s is a reasonable minimum).
 _MIN_WINDOW_S: Final[int] = 1
 
+# Maximum number of buckets the aggregator will produce. A 10-minute
+# fight at 1s resolution = 600 buckets; a 2-hour raid at 1s = 7200.
+# 50_000 is a generous ceiling that catches pathological time_ms
+# values (arcdps GetTickCount64 not normalized to fight-relative)
+# without rejecting legitimate long fights. If exceeded, the
+# aggregator raises ``ValueError`` so the caller surfaces a clear
+# error instead of OOM-killing the process.
+_MAX_BUCKETS: Final[int] = 50_000
+
 
 class EventBucket(BaseModel):
     """One time-bucketed roll-up window spanning ``[start_ms, end_ms)``."""
@@ -145,8 +154,24 @@ class EventWindowAggregator:
             # counted in ``event_count`` even when no damage /
             # healing / buff-removal attribute exists.
 
+        # Safety cap: if the last bucket index exceeds _MAX_BUCKETS,
+        # the time_ms values are likely not normalized to fight-relative
+        # (arcdps GetTickCount64 can be in the billions for a PC up for
+        # days). Raising here prevents an OOM from allocating millions of
+        # EventBucket objects.
+        num_buckets = last_bucket_index + 1
+        if num_buckets > _MAX_BUCKETS:
+            msg = (
+                f"EventWindowAggregator would produce {num_buckets} buckets "
+                f"(max {_MAX_BUCKETS}); time_ms values may not be normalized "
+                f"to fight-relative (last time_ms={last_bucket_index * window_ms}, "
+                f"window_s={window_s}). Consider checking the parser's time_ms "
+                f"normalization."
+            )
+            raise ValueError(msg)
+
         buckets: list[EventBucket] = []
-        for idx in range(last_bucket_index + 1):
+        for idx in range(num_buckets):
             buckets.append(
                 EventBucket(
                     start_ms=idx * window_ms,
