@@ -27,11 +27,12 @@ empty Fight record), but the per-event emulator will short-circuit on
 synthetic load-test fixture (we don't want the parser competing for
 CPU with the load driver).
 """
+
 from __future__ import annotations
 
-import os
 import struct
 import zipfile
+from pathlib import Path
 
 HEADER_STRUCT: struct.Struct = struct.Struct("<4s8sBHBI IB")
 DEFAULT_BUILD: bytes = b"20251001"
@@ -40,25 +41,25 @@ DEFAULT_BUILD: bytes = b"20251001"
 def _build_minimal_evtc_header() -> bytes:
     """Build the canonical 25-byte arcdps EVTC header with zero agents/skills."""
     return HEADER_STRUCT.pack(
-        b"EVTC",      # magic
+        b"EVTC",  # magic
         DEFAULT_BUILD,  # build version (yymmdd style)
-        0,           # rev
-        0,           # encounter_id
-        0,           # unused
-        0,           # agent_count
-        0,           # skill_count
-        0,           # language
+        0,  # rev
+        0,  # encounter_id
+        0,  # unused
+        0,  # agent_count
+        0,  # skill_count
+        0,  # language
     )
 
 
 def main() -> None:
     """Generate tests/load/fixtures/sample.zevtc with the canonical layout."""
-    path = "tests/load/fixtures/sample.zevtc"
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    path = Path("tests/load/fixtures/sample.zevtc")
+    path.parent.mkdir(parents=True, exist_ok=True)
     evtc_bytes = _build_minimal_evtc_header()
     with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as zf:
         zf.writestr("fight.evtc", evtc_bytes)
-    print(f"Generated {path} ({os.path.getsize(path)} bytes, inner EVTC={len(evtc_bytes)} bytes)")
+    print(f"Generated {path} ({path.stat().st_size} bytes, inner EVTC={len(evtc_bytes)} bytes)")
 
 
 if __name__ == "__main__":
