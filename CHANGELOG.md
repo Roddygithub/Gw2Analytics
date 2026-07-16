@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Notes (Repo cleanup — 2026-07-16)
+
+- **Archeology note for the F17 + WAVE-8 merge window**: commit `fbeb0d2` (`feat(readout): default to combat readout tab on /fights/[id]`) bundles three distinct changes under one message — (a) the F17 default-tab wire-up (`web/src/app/fights/[id]/page.tsx` + `web/tests/app/fight-events-page.test.tsx`), (b) the WAVE-8 Deliverables A+B batch — NEW `libs/gw2_skills/` package (`pyproject.toml` + `src/gw2_skills/{__init__,catalog,models}.py` + `tests/test_catalog.py`) + NEW `tests/load/` k6/Locust harness (README + `k6/{upload-zevtc,browse-fights}.ts` + `locust/locustfile.py` + `scripts/generate_sample_zevtc.py` + `fixtures/sample.zevtc`), and (c) the top-level `pyproject.toml` workspace-member registration for `libs/gw2_skills`. The commit message names only (a); (b) and (c) are silently transitively delivered by the same SHA. Commit `3f403c0` (`chore(uv): refresh lockfile after libs/gw2_skills workspace-member addition`) brings `uv.lock` into sync with the new workspace member. No commit-message rewrite (preserves the project's no-`--force-push` policy during the cleanup); this CHANGELOG entry is the canonical archeology pointer for any future auditor running `git log --grep="feat(readout)" -p` or auditing libs/gw2_skills provenance.
+
 ### Security
 
 - **Bump vitest ≥ 3.2.6 and vite ≥ 6.4.3** (`web/package.json`): closes critical/high Node.js dependency vulnerabilities in the frontend build/test toolchain. `vitest` bumped to `^3.2.6`, `vite` to `^6.4.3`.
