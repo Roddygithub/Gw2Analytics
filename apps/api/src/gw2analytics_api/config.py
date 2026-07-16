@@ -134,6 +134,20 @@ class Settings(BaseSettings):
         default=300,
         validation_alias="STUCK_SWEEPER_THRESHOLD_S",
     )
+    # v0.10.25: hard cap on the compressed ``.zevtc`` upload body.
+    # Real WvW logs are ~5-40 MB compressed; the cap gives headroom
+    # for the largest known files while preventing OOM from malicious
+    # or broken clients. The parser's decompressed cap (500 MB) is
+    # separate and larger.
+    max_upload_size_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        validation_alias="MAX_UPLOAD_SIZE_BYTES",
+        # Floor at 1 MiB so an operator typo (MAX_UPLOAD_SIZE_BYTES=0 or
+        # negative) cannot silently disable the cap -- Pydantic raises
+        # ValidationError on app startup. Upper bound is intentionally
+        # unbounded (the parser-side MAX_EVTC_BYTES is the second gate).
+        ge=1024 * 1024,
+    )
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod

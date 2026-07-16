@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from gw2analytics_api.config import get_settings
+from gw2analytics_api import config as _config
 from gw2analytics_api.database import get_session, get_sessionmaker
 from gw2analytics_api.models import Upload
 from gw2analytics_api.schemas import UploadCreatedResponse, UploadOut
@@ -69,7 +69,7 @@ async def _enqueue_parse(
     at the cost of response latency.
     """
     pool = getattr(request.app.state, "arq_pool", None)
-    if pool is not None and not get_settings().allow_inrequest_parse_fallback:
+    if pool is not None and not _config.get_settings().allow_inrequest_parse_fallback:
         await pool.enqueue_job("parse_job", str(upload_id), raw)
         return
     # Arq pool is None (Redis unreachable at lifespan startup)
@@ -87,7 +87,7 @@ async def _enqueue_parse(
     # is unreachable, which is the correct loud signal: a
     # misconfigured broker is an operational concern that deserves
     # a 5xx, not a silent latency increase.
-    if not get_settings().allow_inrequest_parse_fallback:
+    if not _config.get_settings().allow_inrequest_parse_fallback:
         logger.error(
             "arq pool unavailable; refusing upload %s to surface "
             "the misconfiguration (set ALLOW_INREQUEST_PARSE_FALLBACK=1 "
@@ -149,7 +149,38 @@ async def create_upload(
     db: Session = Depends(get_session),  # noqa: B008
 ) -> UploadCreatedResponse:
     """Accept a ``.zevtc`` upload."""
+    max_size = _config.get_settings().max_upload_size_bytes
+
+    # Defense-in-depth #1: reject oversized bodies before reading
+    # them into memory. ``Content-Length`` is optional (chunked
+    # encoding) but when present this short-circuits the OOM risk.
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > max_size:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=(f"Request body too large. Maximum allowed is {max_size} bytes."),
+                )
+        except ValueError:
+            # Malformed Content-Length; fall through and let the
+            # read-time check below handle it.
+            pass
+
+    # Defense-in-depth #2: Starlette's UploadFile may already know
+    # the file size from the multipart metadata. Reject before read.
+    if file.size is not None and file.size > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(f"File too large ({file.size} bytes). Maximum allowed is {max_size} bytes."),
+        )
+
     raw = file.file.read()
+    if len(raw) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(f"File too large ({len(raw)} bytes). Maximum allowed is {max_size} bytes."),
+        )
     sha = hashlib.sha256(raw).hexdigest()
 
     # Idempotent: SELECT before INSERT so we never see an IntegrityError
