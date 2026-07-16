@@ -35,6 +35,7 @@ from gw2analytics_api.routes import (
     health,
     player_compare,
     players,
+    skills,
     uploads,
     webhooks,
 )
@@ -137,6 +138,44 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     sweeper_task = asyncio.create_task(
         lifespan_stuck_upload_sweeper(get_sessionmaker()),
     )
+    # Step 4: skills catalog eager-load (v0.10.26-pre). The catalog
+    # is small (~30 entries today; expected 600 once WAVE-8 C
+    # populates the full DB). ``load_with_stats`` returns
+    # ``(loaded, skipped)`` tuples so data drift in the shipped
+    # NDJSON surfaces in the startup log at INFO / WARNING level
+    # without crashing the API. If 0 entries load (placeholder
+    # NDJSON missing or empty), the ``GET /api/v1/skills`` endpoint
+    # returns ``[]`` per libs/gw2_skills SLO-014.
+    try:
+        from gw2_skills.catalog import SkillCatalog  # noqa: PLC0415
+
+        catalog = SkillCatalog()
+        loaded, skipped = catalog.load_with_stats()
+        _app.state.skill_catalog = catalog
+        logger.info(
+            "skills catalog eager-loaded: %d entries, %d skipped",
+            loaded,
+            skipped,
+        )
+    except (
+        FileNotFoundError,
+        PermissionError,
+        ValueError,
+        OSError,
+        UnicodeDecodeError,
+    ) as exc:
+        # Plan 032 hardening: narrow catch to the documented
+        # SkillCatalog.load_with_stats raise surface. ImportError is
+        # NOT caught -- a missing libs/gw2_skills dep is an operator
+        # fixable misconfiguration that must surface loudly rather
+        # than being masked as a generic catalog-unavailable warning.
+        logger.warning(
+            "skills catalog eager-load failed (type=%s); "
+            "/api/v1/skills endpoint will return 503 SKILLS_UNAVAILABLE",
+            type(exc).__name__,
+            exc_info=True,
+        )
+        _app.state.skill_catalog = None
     try:
         yield
     finally:
@@ -235,6 +274,7 @@ app.include_router(players.router)
 app.include_router(webhooks.router)
 app.include_router(account.router)
 app.include_router(health.router)
+app.include_router(skills.router)
 
 FastApiMCP(app).mount()
 

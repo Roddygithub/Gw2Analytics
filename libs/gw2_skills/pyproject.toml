@@ -14,4 +14,4 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["gw2_skills"]
+packages = ["src/gw2_skills"]

@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from gw2_core import Profession
+from gw2_core import (
+    Profession,
+)  # re-exported via field_validator (SkillEntry._accept_profession_aliases)
 
 type SkillType = Literal[
     "weapon",
@@ -56,6 +58,37 @@ class SkillEntry(BaseModel):
         description="URL to the wiki icon (used by the web frontend).",
     )
     description: str | None = Field(default=None, max_length=512)
+
+    @field_validator("profession", mode="before")
+    @classmethod
+    def _accept_profession_aliases(cls, v: object) -> object:
+        """Accept Profession (canonical), int (arcdps bytes), str (catalog fixture), or None.
+
+        v0.10.26-pre: gw2_core.Profession is IntEnum, not StrEnum, so Pydantic
+        v2's default validation ONLY accepts integer values. NDJSON fixtures
+        ship human-readable profession names ("Elementalist", "Guardian").
+        This validator resolves those to the matching IntEnum MEMBER NAME.
+        Unknown strings raise ValueError so the catalog loader's
+        ``except (json.JSONDecodeError, ValueError)`` can silently skip them
+        with a logger WARNING.
+        """
+        if v is None or isinstance(v, Profession):
+            return v
+        if isinstance(v, bool):
+            raise ValueError(f"profession must not be bool (got {v!r})")
+        if isinstance(v, int):
+            try:
+                return Profession(v)
+            except ValueError as e:
+                raise ValueError(f"Unknown profession int: {v!r}") from e
+        if isinstance(v, str):
+            try:
+                return Profession[v.upper()]
+            except KeyError as e:
+                raise ValueError(f"Unknown profession name: {v!r}") from e
+        raise ValueError(
+            f"profession must be Profession | int | str | None (got {type(v).__name__})"
+        )
 
 
 __all__ = ["SkillEntry", "SkillType"]

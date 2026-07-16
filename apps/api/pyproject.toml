@@ -34,6 +34,7 @@ dependencies = [
     "gw2_evtc_parser",
     "gw2_analytics",
     "gw2_api_client>=0.1.0",
+    "gw2_skills",
 ]
 
 [dependency-groups]
