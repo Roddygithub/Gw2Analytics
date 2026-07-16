@@ -30,7 +30,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gw2analytics_api.schema_guard import _alembic_cfg_path, check_schema_drift
+from gw2analytics_api.schema_guard import _ALEMBIC_CFG, check_schema_drift
 
 
 @pytest.fixture
@@ -201,16 +201,13 @@ def test_check_schema_drift_from_arbitrary_cwd(
 
 
 def test_alembic_cfg_path_helper_is_unchanged() -> None:
-    """The pre-existing ``_alembic_cfg_path`` helper is unchanged.
+    """The ``_ALEMBIC_CFG`` constant is unchanged.
 
     The plan 030 fix added the ``script_location`` override; the
-    .ini's PATH resolution (via ``_alembic_cfg_path``) was
-    already robust to CWD. The test pins the contract: the
-    helper still derives the .ini location from ``__file__``
-    regardless of the operator's CWD. (A future maintainer
-    who "simplifies" the helper to a CWD-relative lookup
-    would re-introduce the bug.)
+    .ini's PATH resolution was already robust to CWD. The test
+    pins the contract: the constant still derives the .ini
+    location from ``__file__`` regardless of the operator's CWD.
     """
-    path = _alembic_cfg_path()
+    path = _ALEMBIC_CFG
     assert Path(path).is_absolute()
     assert path.endswith(str(Path("apps") / "api" / "alembic.ini"))
