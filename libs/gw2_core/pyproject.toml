@@ -1,6 +1,6 @@
 [project]
 name = "gw2_core"
-version = "0.3.0"
+version = "0.10.25"
 description = "Stable internal data model for GW2 combat events + REST API shapes. Pure Pydantic, no I/O."
 requires-python = ">=3.12"
 license = { text = "MIT" }

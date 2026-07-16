@@ -1,3 +1,23 @@
+## [0.10.25] - 2026-07-16
+
+### Added
+- **WAVE-8 A.4 parser emit path extension (CBTS_BUFFAPPLY=18)**: New `BuffApplyEvent` Pydantic v2 model (`libs/gw2_core/src/gw2_core/models.py`) emitted by the parser when arcdps encodes channel-b buff-applies via the orthogonal statechange sub-case. Adds `EventType.BUFF_APPLY` to the `EventType` StrEnum + the `_EVENT_MAP` entry + the `gw2_core/__init__.py` public-surface export. 3 unit tests + 1 integration test guard the new emit contract. The `test_real_fixture_dual_channel_emit_contract` real-fixture per-kind summing is extended to include `buff_apply_count` (channel-b) so the structural `total_count == len(events)` invariant correctly accounts for the new emit (1702 channel-a + 1 channel-b = 1703 events on the F1 fixture).
+- **libs/gw2_skills SCAFFOLD library (forward-foundation for v0.11.0 WAVE-8 B)**: New `SkillEntry` Pydantic v2 model + `SkillCatalog` (with O(1) id lookup + profession-keyed index + NDJSON load). 7 tests covering empty-catalog invariants + `len()` + `__contains__` membership + NDJSON happy path + malformed-line silent skip. The catalog is the foundation for the v0.11.0 Skills DB population work-block (`libs/gw2_skills/src/gw2_skills/data/gw2_skills.ndjson` is currently empty -- population is WAVE-8 B cycle operator-signed v0.11.0, not v0.10.25 scope).
+- **Upload-size guard hardening (defense-in-depth)**: `MAX_UPLOAD_SIZE_BYTES=100 * 1024 * 1024` (100 MiB compressed cap, the `.env.example` default). Verified at 3 layers: (a) Content-Length header check BEFORE the body is read (`apps/api/src/gw2analytics_api/routes/uploads.py`), (b) Starlette `UploadFile.size` check before multipart-read, (c) post-read `len(raw) > max_size` check (catches chunked-encoding bypass of the Content-Length path). Mirrored at the Caddy reverse-proxy layer (the Caddyfile's `request_body { max_size 100MB }`) so requests exceeding 100 MiB return 413 BEFORE the bytes reach the API. The parser-side MAX_EVTC_BYTES cap is separate and bumped to 500 MB to accommodate the largest real-world WvW logs (a 40 MB .zevtc file decompresses to ~221 MB).
+- **Caddy reverse-proxy body cap (`Caddyfile`)**: `request_body { max_size 100MB }` mirrors the API-level cap so OOM-bytes are rejected at the edge.
+
+### Changed
+- **`mypy.ini` was extended with `libs/gw2_skills/src` in `mypy_path`** so mypy can resolve `from gw2_skills.X import Y` imports on the new SCAFFOLD library. The pre-existing `libs/*/tests` exclusion is documented in the inline comment (avoids the duplicate-module `conftest` collision).
+- **`pytest.ini` pythonpath was extended with `libs/gw2_skills/src`** symmetric to the mypy_path extension.
+- **ruff `extend-exclude` was extended with `*.ini` + `.pre-commit-config.yaml`** to prevent E999 syntax-error noise when ruff is asked to lint non-Python config files explicitly.
+
+### Fixed
+- **WAVE-8 A.4 6-recovery-round cleanup**: the `dfa2637` commit (substantive WAVE-8 A.4 work) + the `f1d9c62` commit (style cleanup) close the cycle.
+- **Real-fixture per-kind summing regression**: prior to WAVE-8 A.4 the `test_real_fixture_dual_channel_emit_contract` summed 5 event categories (damage + heal + strip + apply + remove). WAVE-8 A.4 added `buff_apply_count` so the 6-kind sum (1702 channel-a + 1 channel-b = 1703) matches `len(events)` on the F1 fixture.
+
+### Security
+- **No new security-relevant changes in this release.** The MAX_UPLOAD_SIZE_BYTES cap prevents OOM from malicious uploads; the parser-side MAX_EVTC_BYTES cap prevents zip-bomb attacks.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

@@ -632,7 +632,7 @@ wheels = [
 
 [[package]]
 name = "gw2-analytics"
-version = "0.7.0"
+version = "0.10.25"
 source = { editable = "libs/gw2_analytics" }
 dependencies = [
     { name = "gw2-core" },
@@ -647,7 +647,7 @@ requires-dist = [
 
 [[package]]
 name = "gw2-api-client"
-version = "0.1.0"
+version = "0.10.25"
 source = { editable = "libs/gw2_api_client" }
 dependencies = [
     { name = "httpx" },
@@ -658,7 +658,7 @@ requires-dist = [{ name = "httpx", specifier = ">=0.27" }]
 
 [[package]]
 name = "gw2-core"
-version = "0.3.0"
+version = "0.10.25"
 source = { editable = "libs/gw2_core" }
 dependencies = [
     { name = "pydantic" },
@@ -669,7 +669,7 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.9" }]
 
 [[package]]
 name = "gw2-evtc-parser"
-version = "0.1.0"
+version = "0.10.25"
 source = { editable = "libs/gw2_evtc_parser" }
 dependencies = [
     { name = "gw2-core" },
@@ -687,7 +687,7 @@ dev = []
 
 [[package]]
 name = "gw2-skills"
-version = "0.1.0"
+version = "0.10.25"
 source = { editable = "libs/gw2_skills" }
 dependencies = [
     { name = "gw2-core" },
@@ -702,7 +702,7 @@ requires-dist = [
 
 [[package]]
 name = "gw2analytics-api"
-version = "0.8.6"
+version = "0.10.25"
 source = { editable = "apps/api" }
 dependencies = [
     { name = "alembic" },
@@ -754,7 +754,7 @@ dev = []
 
 [[package]]
 name = "gw2analytics-root"
-version = "0.0.1"
+version = "0.10.25"
 source = { virtual = "." }
 
 [package.dev-dependencies]

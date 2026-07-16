@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gw2-skills"
-version = "0.1.0"
+version = "0.10.25"
 description = "GW2 skills catalog: lookup by skill_id, by profession, name resolution"
 readme = "README.md"
 requires-python = ">=3.12"

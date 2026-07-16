@@ -176,7 +176,7 @@ app = FastAPI(
     # timeline endpoint
     # (``GET /api/v1/players/compare/timeline?accounts=A&accounts=B``)
     # so the analyst can overlay 2-4 accounts on the same chart.
-    version="0.10.0",
+    version="0.10.25",
 )
 
 # CORS — wide-open by default for local dev (Next.js at :3000,

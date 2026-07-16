@@ -1,6 +1,6 @@
 [project]
 name = "gw2_analytics"
-version = "0.7.0"
+version = "0.10.25"
 description = "Multi-level Guild Wars 2 combat analytics (single / multi-fight / per-player profiles)."
 requires-python = ">=3.12"
 license = { text = "MIT" }

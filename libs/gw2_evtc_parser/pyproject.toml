@@ -1,6 +1,6 @@
 [project]
 name = "gw2_evtc_parser"
-version = "0.1.0"
+version = "0.10.25"
 description = "arcdps EVTC binary parser. Behind EvtcParser Protocol — implementations are swappable."
 requires-python = ">=3.12"
 license = { text = "MIT" }

@@ -1,6 +1,6 @@
 [project]
 name = "gw2_api_client"
-version = "0.1.0"
+version = "0.10.25"
 description = "Typed client for the Guild Wars 2 REST API v2."
 requires-python = ">=3.12"
 license = { text = "MIT" }
