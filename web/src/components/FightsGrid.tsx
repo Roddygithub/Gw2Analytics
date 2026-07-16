@@ -51,7 +51,12 @@ export function FightsGrid({ rows }: { rows: FightRow[] }) {
         headerName: FIGHTS_GRID_COLUMN_FIGHT_ID,
         sortable: true,
         filter: true,
-        minWidth: 240,
+        // 2026-07-16 mobile+a11y audit F4: lower
+        //   minWidth from 240 to 180 so the column fits
+        //   inside a 320-360px viewport content area
+        //   without horizontal overflow. The column header
+        //   text shortens gracefully when squeezed.
+        minWidth: 180,
         // Phase 7 v1 of web: the fight id is the primary key into
         // the new drill-down page. Render it as an anchor so a
         // single click on the row carries the analyst to the
@@ -124,7 +129,12 @@ export function FightsGrid({ rows }: { rows: FightRow[] }) {
   );
 
   return (
-    <div style={{ height: 600, width: "100%" }}>
+    // 2026-07-16 mobile+a11y audit F3: use
+    //   ``min(600px, 70vh)`` so short mobile viewports
+    //   (a 360x640 portrait phone shows the grid at 70vh
+    //   = 448px instead of the canonical 600px) don't push
+    //   the per-fight drill-down off-screen below the fold.
+    <div style={{ height: "min(600px, 70vh)", width: "100%" }}>
       <AgGridReact<FightRow>
         theme={appGridTheme}
         rowData={rows}

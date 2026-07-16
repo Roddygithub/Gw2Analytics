@@ -64,6 +64,18 @@ const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
 const POLL_INTERVAL_MS = 2_000;
 const POLL_MAX_ATTEMPTS = 15;
 
+// 2026-07-16 mobile+a11y audit U3: stable id for the file
+//   rejection error paragraph so the file input can point
+//   to it via ``aria-describedby`` (a screen reader will
+//   announce the rejection reason immediately when the
+//   input is focused). The id is module-scoped (not derived
+//   from React state) so the ``aria-describedby`` attribute
+//   can be a string literal — a dynamic ref would require
+//   the consuming input to get the ref via React, which the
+//   hidden file <input> pattern (positioned absolute + clip
+//   + 1px size) doesn't support cleanly.
+const REJECTED_ERROR_ID = "upload-rejected-error";
+
 // Discriminated union for the wizard state. Each variant narrows
 // which fields are available: Pick has no envelope, Upload has a
 // file, Parse has an envelope, Done has a status. The compiler
@@ -312,8 +324,45 @@ export default function UploadPage() {
     };
   }, [state.step]);
 
+  // 2026-07-16 mobile+a11y audit U2: ref-target for the
+  //   step-transition focus effect below. ``HTMLElement``
+  //   (not ``HTMLDivElement``) because the ref attaches to
+  //   a <main> — React's type system rejects
+  //   ``HTMLDivElement`` on <main>. ``tabIndex={-1}`` makes
+  //   <main> programmatically focusable without pulling
+  //   it into the natural tab order (a11y best practice for
+  //   focus-target divs).
+  const panelRef = useRef<HTMLElement>(null);
+  // Reviewer followup: skip the focus call on the FIRST
+  //   render so an analyst navigating to /upload via a
+  //   re-load doesn't have focus yanked to the top of the
+  //   page (they may have scrolled mid-task). The guard
+  //   ref flips to ``true`` after the first effect tick
+  //   so post-mount step transitions behave normally.
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    panelRef.current?.focus();
+  }, [state.step]);
+
   return (
-    <main className={styles.main}>
+    /* 2026-07-16 mobile+a11y audit U2: ref target for the
+       step-transition focus effect above. ``tabIndex={-1}``
+       makes the <main> programmatically focusable without
+       pulling it into the natural tab order (a11y best
+       practice for non-interactive focus targets). The
+       ``outline: 'none'`` style preserves visual identity
+       after focus so the outline indicator doesn't appear
+       over the page title text. */
+    <main
+      ref={panelRef}
+      tabIndex={-1}
+      className={styles.main}
+      style={{ outline: "none" }}
+    >
       <header className={styles.header}>
         <span className={styles.brand}>Combat log</span>
         <h1 className={styles.title}>Upload a .zevtc replay</h1>
@@ -451,6 +500,19 @@ function PickStep({
           }
           className={styles.fileInput}
           data-testid="file-input"
+          /* 2026-07-16 mobile+a11y audit U3: link the
+             hidden file <input> to the rejected-error
+             <p> via ``aria-describedby`` so a screen
+             reader announces the rejection reason
+             ("Only .zevtc files ..." / "File is too large
+             ..." / ...) immediately when the input is
+             focused. The id is stable across renders
+             (REJECTED_ERROR_ID is module-scoped), so
+             aria-describedby can be a plain string. SR
+             tolerates a missing-or-empty referenced id
+             (silently no-ops), so the attribute is safe
+             even when ``rejected === null``. */
+          aria-describedby={REJECTED_ERROR_ID}
         />
         <span className={styles.fileChip} data-testid="file-chip">
           {file === null
@@ -459,13 +521,16 @@ function PickStep({
               )})`
             : `${file.name} · ${formatBytes(file.size)}`}
         </span>
-      </label>
-
-      {rejected !== null ? (
-        <p className={styles.error} role="alert" data-testid="rejected">
-          {rejected}
-        </p>
-      ) : null}
+      </label>        {rejected !== null ? (
+          <p
+            id={REJECTED_ERROR_ID}
+            className={styles.error}
+            role="alert"
+            data-testid="rejected"
+          >
+            {rejected}
+          </p>
+        ) : null}
 
       <div className={styles.buttonRow}>
         <button

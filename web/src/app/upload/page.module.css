@@ -30,8 +30,14 @@
   color: var(--accent);
 }
 
+/* 2026-07-16 mobile+a11y audit U4: clamp the title size to
+   a viewport-responsive range so a 320-360px mobile
+   viewport shows ~28px (1.75rem) and a 1024px+ desktop
+   shows the canonical 40px (2.5rem). The hand-tuned
+   gradient + letter-spacing + line-height are preserved
+   so the visual identity is unchanged on desktop. */
 .title {
-  font-size: 40px;
+  font-size: clamp(1.75rem, 5vw, 2.5rem);
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.025em;
@@ -121,7 +127,14 @@
   outline-offset: 2px;
 }
 
+/* 2026-07-16 mobile+a11y audit U5: explicit
+   ``min-height: 44px`` so the wizard CTAs hit WCAG
+   2.5.8's 44x44 touch-target minimum on every browser
+   (the prior ``padding: 12px 16px`` only reached ~40px
+   depending on font metrics). The min-height is a hard
+   backstop; the padding still drives visual rhythm. */
 .submit {
+  min-height: 44px;
   padding: 12px 16px;
   border-radius: 12px;
   border: 1px solid var(--accent);
@@ -334,6 +347,7 @@
    with the accent muted. Lives alongside ``.submit`` in the same
    button row so the visual hierarchy is preserved. */
 .muted {
+  min-height: 44px;
   padding: 12px 16px;
   border-radius: 12px;
   border: 1px solid var(--border);
