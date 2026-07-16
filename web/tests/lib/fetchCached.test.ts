@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fetchCached } from "@/lib/fetchCached";
+import { ApiError } from "@/lib/api/errors";
 
 describe("fetchCached", () => {
   beforeEach(() => {
@@ -94,8 +95,11 @@ describe("fetchCached", () => {
       new Response("not found", { status: 404 }),
     );
 
-    await expect(
-      fetchCached("http://test/api/v1/missing"),
-    ).rejects.toThrow("404");
+    const err = (await fetchCached("http://test/api/v1/missing").catch(
+      (e) => e,
+    )) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(404);
+    expect(err.message).toBe("not found");
   });
 });

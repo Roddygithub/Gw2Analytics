@@ -68,6 +68,7 @@ import {
   __resetCacheForTests,
   __cacheSizeForTests,
 } from "@/lib/fetchCached";
+import { ApiError } from "@/lib/api/errors";
 
 const FIGHT_ID = "abc123def456";
 const BASE_URL = "http://test/api";
@@ -198,9 +199,14 @@ describe("fetchReplayTimeline wrapper substrate contract (v0.10.17 D5)", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("upstream gateway failure", { status: 502 }),
     );
-    await expect(
-      fetchReplayTimeline(FIGHT_ID, BASE_URL, { windowS: 5 }),
-    ).rejects.toThrow(/502/);
+    const err = await fetchReplayTimeline(
+      FIGHT_ID,
+      BASE_URL,
+      { windowS: 5 },
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(502);
+    expect(err.message).toBe("upstream gateway failure");
 
     // Simulate a network rejection (the globalThis.fetch resolves
     // to a rejected promise). The wrapper must propagate.

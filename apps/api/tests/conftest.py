@@ -92,7 +92,6 @@ from __future__ import annotations
 # regress E402) AND more grep-discoverable for test-infra audits.
 import base64
 import concurrent.futures
-import functools
 import io
 import os
 import secrets
@@ -284,7 +283,6 @@ def _disable_arq_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
 def _get_settings_no_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     os.environ.pop("GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS", None)
 
-    @functools.cache
     def _no_dotenv_get_settings() -> Settings:
         return Settings(_env_file=None)
 

@@ -201,7 +201,7 @@ describe("PlayerTimelineSection", () => {
     fireEvent.click(screen.getByRole("button", { name: /load more timeline points/i }));
     await waitFor(() =>
       expect(
-        screen.getByText("Upstream error: 502: 502: upstream gateway"),
+        screen.getByText("Upstream error: 502: upstream gateway"),
       ).toBeInTheDocument(),
     );
     // The button re-enables after the error (we don't lock the

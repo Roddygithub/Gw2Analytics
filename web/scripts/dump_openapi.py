@@ -29,6 +29,7 @@ If you add a NEW required field to :class:`Settings`, add it to
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -39,6 +40,7 @@ _REQUIRED_ENV: tuple[str, ...] = (
     "S3_ACCESS_KEY",
     "S3_SECRET_KEY",
     "S3_BUCKET",
+    "SECRETS_KEK",
 )
 
 # Self-default: the script never opens a connection, so any token
@@ -46,7 +48,12 @@ _REQUIRED_ENV: tuple[str, ...] = (
 # supply real credentials (and :class:`Settings` validates them
 # downstream); this default is purely for the codegen plumbing.
 for var in _REQUIRED_ENV:
-    os.environ.setdefault(var, "ci-dummy")
+    default: str = "ci-dummy"
+    if var == "SECRETS_KEK":
+        # Settings validates SECRETS_KEK as a 44-char URL-safe
+        # base64 Fernet key, so generate a deterministic dummy.
+        default = base64.urlsafe_b64encode(b"a" * 32).decode()
+    os.environ.setdefault(var, default)
 
 from gw2analytics_api.main import app  # noqa: E402
 
