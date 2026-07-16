@@ -9,6 +9,8 @@
  * same key share the same Promise until the first one resolves.
  */
 
+import { ApiError } from "@/lib/api/errors";
+
 interface CacheEntry {
   result?: unknown;
   expiresAt?: number;
@@ -55,7 +57,21 @@ export async function fetchCached<T>(
     .then(async (resp) => {
       if (!resp.ok) {
         const text = await resp.text().catch(() => "");
-        throw new Error(`${resp.status}: ${text}`);
+        let detail = text;
+        let errorCode: string | undefined;
+        try {
+          const parsed = JSON.parse(text) as { detail?: string | { detail?: string; error_code?: string }; error_code?: string };
+          if (typeof parsed.detail === "string") {
+            detail = parsed.detail;
+          } else if (parsed.detail && typeof parsed.detail === "object") {
+            if (typeof parsed.detail.detail === "string") detail = parsed.detail.detail;
+            if (typeof parsed.detail.error_code === "string") errorCode = parsed.detail.error_code;
+          }
+          if (typeof parsed.error_code === "string") errorCode = parsed.error_code;
+        } catch {
+          // not JSON, keep raw text as detail
+        }
+        throw new ApiError(resp.status, detail || resp.statusText || String(resp.status), errorCode);
       }
       return resp.json() as Promise<T>;
     })

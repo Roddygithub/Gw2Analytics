@@ -100,7 +100,10 @@ import {
   COMBAT_READOUT_FETCH_FAILED,
   COMBAT_READOUT_LOADING,
   PER_PLAYER_PROMPT_PLACEHOLDER,
+  NO_EVENT_DATA_TITLE,
+  NO_EVENT_DATA_BODY,
 } from "@/lib/copy/error-messages";
+import { ApiError } from "@/lib/api/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -447,6 +450,10 @@ export default async function FightEventsPage({
   }
 
   if (fetchError || !summary) {
+    const isEventsUnavailable =
+      results[0].status === "rejected" &&
+      results[0].reason instanceof ApiError &&
+      results[0].reason.error_code === "EVENTS_UNAVAILABLE";
     return (
       <main style={{ padding: "32px" }}>
         <header style={{ marginBottom: 16 }}>
@@ -455,7 +462,21 @@ export default async function FightEventsPage({
             Per-target damage + healing + buff-removal roll-up + event windows.
           </p>
         </header>
-        <p style={{ color: "var(--accent)" }}>{fetchError}</p>
+        {isEventsUnavailable ? (
+          <div
+            style={{
+              padding: "16px 20px",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              background: "var(--surface)",
+            }}
+          >
+            <h2 style={{ fontSize: 18, marginBottom: 8 }}>{NO_EVENT_DATA_TITLE}</h2>
+            <p style={{ opacity: 0.8, margin: 0 }}>{NO_EVENT_DATA_BODY}</p>
+          </div>
+        ) : (
+          <p style={{ color: "var(--accent)" }}>{fetchError}</p>
+        )}
       </main>
     );
   }

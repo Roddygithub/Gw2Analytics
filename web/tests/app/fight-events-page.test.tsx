@@ -359,7 +359,7 @@ describe("FightEventsPage", () => {
       screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(`${UPSTREAM_ERROR_PREFIX}404: 404: fight not found`),
+      screen.getByText(`${UPSTREAM_ERROR_PREFIX}404: fight not found`),
     ).toBeInTheDocument();
   });
 
