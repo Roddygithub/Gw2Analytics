@@ -12,6 +12,7 @@ members = [
     "gw2-api-client",
     "gw2-core",
     "gw2-evtc-parser",
+    "gw2-skills",
     "gw2analytics-api",
     "gw2analytics-root",
 ]
@@ -683,6 +684,21 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = []
+
+[[package]]
+name = "gw2-skills"
+version = "0.1.0"
+source = { editable = "libs/gw2_skills" }
+dependencies = [
+    { name = "gw2-core" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gw2-core", editable = "libs/gw2_core" },
+    { name = "pydantic", specifier = ">=2.9" },
+]
 
 [[package]]
 name = "gw2analytics-api"
