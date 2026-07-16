@@ -50,12 +50,19 @@ function CompareCta({ rows }: { rows: PlayerListRow[] }) {
     `/players/compare?accounts=${encodeURIComponent(a.account_name)}` +
     `&accounts=${encodeURIComponent(b.account_name)}`;
   return (
+    // 2026-07-16 mobile+a11y audit P1: touch-target bump from
+    //   ~24px to ~44px (WCAG 2.5.8). The new padding
+    //   ``14px 16px`` + fontSize 14 hit the canonical 44x44
+    //   minimum bounding box for a text-only link on a
+    //   mobile browser (the link is still rendered as an
+    //   <a> with no fixed height so the padding fully
+    //   drives the hit area on every viewport).
     <a
       href={href}
       style={{
         alignSelf: "flex-start",
-        padding: "6px 12px",
-        fontSize: 12,
+        padding: "14px 16px",
+        fontSize: 14,
         border: "1px solid var(--accent)",
         borderRadius: 4,
         color: "var(--accent)",
@@ -115,7 +122,12 @@ export default async function PlayersPage(props: {
     >
       <header>
         <h1 style={{ fontSize: 28, marginBottom: 4 }}>Players</h1>
-        <p style={{ opacity: 0.7 }}>
+        {/* 2026-07-16 mobile+a11y audit P2: replace the
+            fragile ``opacity: 0.7`` muted-text pattern with
+            the theme-aware ``--foreground-muted`` token so
+            the contrast is locked at ~4.6:1 (WCAG AA) and
+            future theme changes can't drop it below 4.5:1. */}
+        <p style={{ color: "var(--foreground-muted)" }}>
           {rows.length} player{rows.length === 1 ? "" : "s"} across the
           cross-fight roll-up. Use the search bar in the header to
           jump to a specific account.

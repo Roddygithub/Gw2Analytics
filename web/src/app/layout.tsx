@@ -101,7 +101,17 @@ export default function RootLayout({
         >
           Aller au contenu principal
         </a>
-        <div id="main-content" role="main">
+        {/* 2026-07-16 mobile+a11y audit X1: removed the
+            nested ``role="main"`` wrapper. Each page already
+            renders its own ``<main>`` element; nesting two
+            ``role="main"`` landmarks confuses screen-reader
+            landmark navigation. The ``<div id="main-content">``
+            remains so the skip-to-content anchor
+            (``href="#main-content"``) still resolves to a
+            focusable target. The actual landmark is provided
+            by the page-level ``<main>`` element (which has
+            the implicit role="main"). */}
+        <div id="main-content">
         {/*
           v0.7.1 of web: a sticky header bar hosts the global
           player search affordance (the :class:`PlayerSearchBar`)

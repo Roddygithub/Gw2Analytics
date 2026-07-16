@@ -455,7 +455,7 @@ export default async function FightEventsPage({
       results[0].reason instanceof ApiError &&
       results[0].reason.error_code === "EVENTS_UNAVAILABLE";
     return (
-      <main style={{ padding: "32px" }}>
+      <main style={{ padding: "clamp(16px, 5vw, 32px)" }}>
         <header style={{ marginBottom: 16 }}>
           <h1 style={{ fontSize: 28, marginBottom: 4 }}>Fight {id}</h1>
           <p style={{ opacity: 0.7 }}>
@@ -475,7 +475,14 @@ export default async function FightEventsPage({
             <p style={{ opacity: 0.8, margin: 0 }}>{NO_EVENT_DATA_BODY}</p>
           </div>
         ) : (
-          <p style={{ color: "var(--accent)" }}>{fetchError}</p>
+          // 2026-07-16 mobile+a11y audit D1: ``role="alert"``
+          //   surfaces the fetch failure to screen readers
+          //   immediately (without it, SR users have no
+          //   audible signal that the page failed). The
+          //   visual treatment (``color: var(--accent)``)
+          //   is preserved so sighted users still see the
+          //   red error text.
+          <p role="alert" style={{ color: "var(--accent)" }}>{fetchError}</p>
         )}
       </main>
     );
@@ -577,7 +584,7 @@ export default async function FightEventsPage({
     return (
       <main
         style={{
-          padding: "32px",
+          padding: "clamp(16px, 5vw, 32px)",
           display: "flex",
           flexDirection: "column",
           gap: "24px",
@@ -726,7 +733,7 @@ export default async function FightEventsPage({
     return (
       <main
         style={{
-          padding: "32px",
+          padding: "clamp(16px, 5vw, 32px)",
           display: "flex",
           flexDirection: "column",
           gap: "24px",
@@ -815,7 +822,7 @@ export default async function FightEventsPage({
   return (
     <main
       style={{
-        padding: "32px",
+        padding: "clamp(16px, 5vw, 32px)",
         display: "flex",
         flexDirection: "column",
         gap: "24px",

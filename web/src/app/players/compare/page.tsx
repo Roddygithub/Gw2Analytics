@@ -53,19 +53,23 @@ export const dynamic = "force-dynamic";
 const MIN_ACCOUNTS = 2;
 const MAX_ACCOUNTS = 4;
 
+// 2026-07-16 mobile+a11y audit C2: replace the
+//   fragile ``opacity: 0.7`` muted-text pattern with the
+//   theme-aware ``--foreground-muted`` token so the
+//   contrast is locked at ~4.6:1 (WCAG AA) and future theme
+//   changes can't drop it below 4.5:1.
 const EMPTY_STYLE: React.CSSProperties = {
   padding: "12px 16px",
   border: "1px solid var(--border)",
   borderRadius: 4,
-  color: "var(--foreground)",
-  opacity: 0.7,
+  color: "var(--foreground-muted)",
   fontSize: 14,
   fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
 };
 
 const HINT_STYLE: React.CSSProperties = {
   fontSize: 13,
-  opacity: 0.7,
+  color: "var(--foreground-muted)",
   fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
 };
 
@@ -111,9 +115,30 @@ export default async function ComparePage(props: {
       >
         <header>
           <p style={{ marginBottom: 8 }}>
+            {/* 2026-07-16 mobile+a11y audit C1: padding
+                bump on the ``Back to players`` anchor from
+                ~18px to ~42px so the touch target meets WCAG
+                2.5.8 (44x44 minimum). ``display:
+                inline-block`` is REQUIRED so the vertical
+                padding actually takes effect on an inline
+                anchor element; without it the padding is
+                ignored by the browser layout engine. The
+                rule applies to all 3 back-to-players
+                ``<a>`` instances in this file (empty / too-
+                many-accounts / fetchError branches). */}
             <a
               href="/players"
               style={{
+                display: "inline-block",
+                /* 2026-07-16 mobile+a11y audit C1 +
+                   reviewer followup: padding bumped from
+                   12px to 16px so the touch target
+                   reaches ~46px vertical (the audit
+                   prescription of 12px 0 hit only ~37px,
+                   below WCAG 2.5.8's 44x44 minimum).
+                   Applies to all 3 ``Back to players``
+                   branches via allowMultiple. */
+                padding: "16px 0",
                 color: "var(--accent)",
                 fontSize: 13,
                 textDecoration: "none",
@@ -159,9 +184,30 @@ export default async function ComparePage(props: {
       >
         <header>
           <p style={{ marginBottom: 8 }}>
+            {/* 2026-07-16 mobile+a11y audit C1: padding
+                bump on the ``Back to players`` anchor from
+                ~18px to ~42px so the touch target meets WCAG
+                2.5.8 (44x44 minimum). ``display:
+                inline-block`` is REQUIRED so the vertical
+                padding actually takes effect on an inline
+                anchor element; without it the padding is
+                ignored by the browser layout engine. The
+                rule applies to all 3 back-to-players
+                ``<a>`` instances in this file (empty / too-
+                many-accounts / fetchError branches). */}
             <a
               href="/players"
               style={{
+                display: "inline-block",
+                /* 2026-07-16 mobile+a11y audit C1 +
+                   reviewer followup: padding bumped from
+                   12px to 16px so the touch target
+                   reaches ~46px vertical (the audit
+                   prescription of 12px 0 hit only ~37px,
+                   below WCAG 2.5.8's 44x44 minimum).
+                   Applies to all 3 ``Back to players``
+                   branches via allowMultiple. */
+                padding: "16px 0",
                 color: "var(--accent)",
                 fontSize: 13,
                 textDecoration: "none",
@@ -209,9 +255,30 @@ export default async function ComparePage(props: {
       >
         <header>
           <p style={{ marginBottom: 8 }}>
+            {/* 2026-07-16 mobile+a11y audit C1: padding
+                bump on the ``Back to players`` anchor from
+                ~18px to ~42px so the touch target meets WCAG
+                2.5.8 (44x44 minimum). ``display:
+                inline-block`` is REQUIRED so the vertical
+                padding actually takes effect on an inline
+                anchor element; without it the padding is
+                ignored by the browser layout engine. The
+                rule applies to all 3 back-to-players
+                ``<a>`` instances in this file (empty / too-
+                many-accounts / fetchError branches). */}
             <a
               href="/players"
               style={{
+                display: "inline-block",
+                /* 2026-07-16 mobile+a11y audit C1 +
+                   reviewer followup: padding bumped from
+                   12px to 16px so the touch target
+                   reaches ~46px vertical (the audit
+                   prescription of 12px 0 hit only ~37px,
+                   below WCAG 2.5.8's 44x44 minimum).
+                   Applies to all 3 ``Back to players``
+                   branches via allowMultiple. */
+                padding: "16px 0",
                 color: "var(--accent)",
                 fontSize: 13,
                 textDecoration: "none",

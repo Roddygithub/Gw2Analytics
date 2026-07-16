@@ -67,7 +67,13 @@ export function FightsGrid({ rows }: { rows: FightRow[] }) {
           if (typeof id !== "string") {
             return null;
           }
-          return <a href={`/fights/${id}`}>{id}</a>;
+          // 2026-07-16 mobile+a11y audit F2: SR announces the
+          //   anchor with screen-reader-friendly copy so the
+          //   analyst hears "View fight <id>" instead of the
+          //   raw hash on each row. The textContent stays the
+          //   raw id so sighted users still see the canonical
+          //   drill-down key.
+          return <a href={`/fights/${id}`} aria-label={`View fight ${id}`}>{id}</a>;
         },
       },
       {

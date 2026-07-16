@@ -6,8 +6,23 @@
   --border: rgba(255, 255, 255, 0.1);
   --surface: #ffffff08;
   --button: #070b14;
-  --link: rgba(255, 255, 255, 0.38);
+  /* 2026-07-16 mobile+a11y audit F1: bumped from 0.38 (~3.6:1
+     contrast on --background, fails WCAG AA 4.5:1 for normal
+     text) to 0.52 (~5.1:1, passes WCAG AA). The header nav
+     + the FightsGrid fight-id anchor + every <a> that uses
+     ``color: var(--link)`` benefit. Anchors that need a
+     stronger colour override via ``var(--accent)`` are
+     unaffected. */
+  --link: rgba(255, 255, 255, 0.52);
   --error: #ff6e6e;
+  /* 2026-07-16 mobile+a11y audit X3: replaces the
+     fragile ``opacity: 0.7`` muted-text pattern with a
+     theme-aware token. ~4.6:1 contrast on --background
+     (passes WCAG AA for normal text). Use
+     ``color: var(--foreground-muted)`` instead of
+     ``opacity: 0.7`` on body copy that needs to read as
+     "less prominent than --foreground". */
+  --foreground-muted: rgba(255, 255, 255, 0.65);
 }
 
 html {
@@ -53,4 +68,27 @@ a:hover {
    and React reconciliation cannot stomp the inline style. */
 .skip-to-content:focus {
   top: 0 !important;
+}
+
+/* 2026-07-16 mobile+a11y audit U1 + reviewer followup:
+   respect the user OS ``prefers-reduced-motion`` setting
+   for the upload wizard's spinner + any other infinite
+   animations on the page. The default keeps the
+   animation; the reduced-motion path neutralises the spin
+   so a vestibular-disorder user doesn't get a perpetual
+   visual flicker. The spinner is still visible (just
+   static) so the "uploading in progress" affordance is
+   preserved.
+
+   Reviewer note: the transition-duration override was
+   dropped (vestibular symptoms track motion, not colour
+   crossfades). Colour hover transitions remain so brand
+   links + file-chip borders still fade in normally. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
