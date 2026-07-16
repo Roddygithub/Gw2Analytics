@@ -65,8 +65,6 @@
  * 50-150 KB to the bundle for features we don't need.
  */
 
-/* eslint-disable react-refresh/only-export-components */
-
 "use client";
 
 import { useMemo } from "react";

@@ -32,6 +32,11 @@ import type {
 
 import type { PlayerReadoutOut } from "@/lib/api";
 import { appGridTheme } from "./ag-grid-setup";
+// F17 W.1: Tango-icon cellRenderers (React components). Kept in a
+// dedicated .tsx file so PlayerReadoutBase can stay pure TS (.ts
+// extension-true) per the existing "NOT a React Component" module
+// intent.
+import { CommanderCellRenderer, EliteSpecCellRenderer } from "./PlayerReadoutCells";
 
 /**
  * Format the warp-reported integer subgroup (``1`` -> ``"Sub 1"``,
@@ -105,12 +110,22 @@ export const SHARED_COLUMNS: ColDef<PlayerReadoutOut>[] = [
   {
     field: "elite_spec",
     headerName: "Spécialisation",
-    width: 160,
+    width: 180,
+    // F17 W.1: Tango icon cellRenderer (elite_spec > profession
+    // precedence; falls back to text for unknown enum values
+    // captured in the Phase 6 v2 SCAFFOLD-zero contract).
+    cellRenderer: EliteSpecCellRenderer,
   },
   {
     field: "is_commander",
     headerName: "Cmdr",
     width: 80,
+    // F17 W.1: inline-SVG Commander crown via React cellRenderer.
+    // The shell ``valueFormatter`` is retained as a screen-reader
+    // fallback (AG Grid announces cellRenderer output to AT only
+    // when the renderer emits accessible text); the canonical
+    // render path is the cellRenderer.
+    cellRenderer: CommanderCellRenderer,
     valueFormatter: (params: ValueFormatterParams) =>
       formatCommanderIcon(params.value),
   },

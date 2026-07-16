@@ -178,8 +178,13 @@ def _load_fight_events(
     trio each accept one single-typed stream).
     """
     fight = db.get(OrmFight, fight_id)
-    if fight is None or fight.events_blob_uri is None:
+    if fight is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
+    if fight.events_blob_uri is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"detail": "events unavailable", "error_code": "EVENTS_UNAVAILABLE"},
+        )
 
     try:
         gz_bytes = _cached_get_events(fight.events_blob_uri)

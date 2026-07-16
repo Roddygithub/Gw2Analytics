@@ -113,14 +113,14 @@ describe("/players page", () => {
     fetchPlayersMock.mockRejectedValueOnce(new ApiError(502, "upstream gateway"));
     const tree = await PlayersPage({ searchParams: emptySearchParams });
     const html = JSON.stringify(tree);
-    expect(html).toContain("Upstream error: 502: 502: upstream gateway");
+    expect(html).toContain("Upstream error: 502: upstream gateway");
   });
 
   it("renders the upstream-error card on a 404 from the gateway", async () => {
     fetchPlayersMock.mockRejectedValueOnce(new ApiError(404, "upstream 404"));
     const tree = await PlayersPage({ searchParams: emptySearchParams });
     const html = JSON.stringify(tree);
-    expect(html).toContain("Upstream error: 404: 404: upstream 404");
+    expect(html).toContain("Upstream error: 404: upstream 404");
   });
 
   it("forwards ?profession= searchParams to fetchPlayers", async () => {

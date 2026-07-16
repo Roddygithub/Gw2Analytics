@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Logo } from "@/components/Logo";
@@ -49,14 +49,59 @@ export const metadata: Metadata = {
   },
 };
 
+// v0.10.25 mobile audit: Next.js 14+ separates `viewport` + `themeColor`
+// out of `metadata` into a sibling export. Sets the canonical mobile
+// viewport so the AG Grid tables + the sticky header render correctly
+// on a 360 px - 768 px viewport (the analyst phone / tablet envelope
+// per the F17 §4 mobile risk). The themeColor matches `--background`
+// at the canonical dark-Quartz value so the browser-chrome (status
+// bar on iOS / Safari, address bar on Android Chrome) blends into
+// the app surface.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#0a0a0a",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    <html lang="fr" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body>
+        {/*
+          Skip-to-content link for keyboard / screen-reader users.
+          Visually hidden by default; becomes visible on focus so a
+          keyboard-only analyst can bypass the sticky header (the link
+          strip + the player search bar) on every page.
+
+          Uses a `<div role="main">` wrapper (NOT a `<main>` element)
+          because every page already renders its own `<main>`; nesting
+          two visible <main> elements would violate HTML5 (the spec
+          mandates ONE visible <main> per page). The role="main"
+          preserves the accessible landmark semantics.
+        */}
+        <a
+          href="#main-content"
+          data-testid="skip-to-content"
+          className="skip-to-content"
+          style={{
+            position: "absolute",
+            top: -40,
+            left: 0,
+            zIndex: 100,
+            padding: "8px 16px",
+            background: "var(--accent)",
+            color: "var(--accent-foreground, #fff)",
+            fontSize: 13,
+            textDecoration: "none",
+          }}
+        >
+          Aller au contenu principal
+        </a>
+        <div id="main-content" role="main">
         {/*
           v0.7.1 of web: a sticky header bar hosts the global
           player search affordance (the :class:`PlayerSearchBar`)
@@ -149,6 +194,7 @@ export default function RootLayout({
           <PlayerSearchBar />
         </header>
         {children}
+        </div>
       </body>
     </html>
   );

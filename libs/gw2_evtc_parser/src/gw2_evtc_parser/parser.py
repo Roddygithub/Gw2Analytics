@@ -265,19 +265,17 @@ MAX_SKILLS: Final[int] = 100_000
 MAX_SKILL_NAME_BYTES: Final[int] = 4_096
 
 #: v0.10.2 hotfix followup #9: maximum bytes for the entire EVTC blob.
-#: arcdps caps canonical WvW raids at ~5-20 MB; the API layer caps at
-#: 30 MB (per plan 048). The parser's cap is set to 100 MB to give direct
-#: library consumers (CLI tools, Jupyter notebooks, FaaS workers) headroom
-#: for processing larger fight archives without OOM. The cap is checked
-#: once in :func:`_read_all` AFTER the bytes are materialised (Option A in
-#: the v0.10.2 design -- the OOM risk is on the downstream algorithm
-#: allocation, not the ``source.read()`` itself for the 30 MB-100 MB
-#: range; the API layer already caps at 30 MB so anything reaching the
-#: parser is at most 100 MB). The error message includes the actual
-#: size + the bound in MB + a remediation hint ("split the blob or use
-#: the streaming parse_events API for larger archives"). Centralised
-#: here so a future bump (e.g. 200 MB) only needs to touch this constant.
-MAX_EVTC_BYTES: Final[int] = 100 * 1024 * 1024
+#: arcdps caps canonical WvW raids at ~5-20 MB compressed, but the
+#: decompressed EVTC blob can be much larger — a 40 MB .zevtc file
+#: decompresses to ~221 MB. Real WvW fights with 500+ agents produce
+#: some of the largest logs in the game. The cap is set to 500 MB to
+#: accommodate the largest real-world .zevtc files (matching the
+#: ``_MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE`` zip-bomb defence). The cap is
+#: checked once in :func:`_read_all` AFTER the bytes are materialised.
+#: The error message includes the actual size + the bound in MB + a
+#: remediation hint. Centralised here so a future bump only needs to
+#: touch this constant.
+MAX_EVTC_BYTES: Final[int] = 500 * 1024 * 1024
 
 #: arcdps account-name soft signal. Real arcdps revisions usually
 #: prefix account strings with ``:``; we surface ``account_name``
@@ -674,9 +672,9 @@ def _read_all(source: BinaryIO | bytes) -> bytes:
     the input. For ``BinaryIO`` we read everything once.
 
     v0.10.2 hotfix followup #9: after the materialisation, enforce
-    the :data:`MAX_EVTC_BYTES` cap (100 MB) as a defense-in-depth
-    backstop. The API layer caps at 30 MB (per plan 048), so anything
-    reaching the parser is at most 100 MB; direct library consumers
+    the :data:`MAX_EVTC_BYTES` cap (500 MB) as a defense-in-depth
+    backstop. The API layer caps uploads at a generous size to
+    accommodate real WvW logs; direct library consumers
     (CLI tools, notebooks, FaaS workers) bypass the API cap and could
     feed 1 GB+ blobs that OOM the parser's downstream allocations
     (the agent list, the skill list, the events list). The cap

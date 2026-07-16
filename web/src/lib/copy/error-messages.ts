@@ -157,6 +157,22 @@ export const FIGHTS_GRID_BROWSE_FIGHT_PAGE = "← Browse fights grid";
  */
 export const UPSTREAM_ERROR_PREFIX = "Upstream error: ";
 
+/**
+ * Title for the empty-state panel shown on the fight detail page
+ * when the fight exists but has no combat event blob (e.g. a
+ * synthetic / empty log). Renders as the heading of the panel.
+ */
+export const NO_EVENT_DATA_TITLE = "No event data";
+
+/**
+ * Body text for the empty-state panel shown on the fight detail
+ * page when the fight exists but has no combat event blob. Explains
+ * that the fight was parsed successfully but no combat events were
+ * recorded, so roll-ups and event windows cannot be computed.
+ */
+export const NO_EVENT_DATA_BODY =
+  "This fight was parsed successfully, but no combat events were recorded in the log. The fight summary and agent list are still available above; roll-ups and event windows cannot be computed without event data.";
+
 /** Retry button text. Used in BOTH `web/src/app/error.tsx`
  *  (root global error boundary) AND `web/src/app/fights/[id]/error.tsx`
  *  (per-fight error boundary). The two surfaces share the same affordance

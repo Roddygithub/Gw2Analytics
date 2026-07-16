@@ -147,7 +147,7 @@ describe("UploadPage wizard", () => {
     // legacy page did.
     const errorMsg = await screen.findByTestId("error");
     expect(errorMsg).toHaveTextContent(
-      "Upstream error: 502: 502: upstream gateway",
+      "Upstream error: 502: upstream gateway",
     );
     expect(screen.getByTestId("step-upload")).toBeInTheDocument();
   });

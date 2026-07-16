@@ -158,7 +158,7 @@ describe("/players/[account_name] page", () => {
       params: Promise.resolve({ account_name: ":synth.unknown" }),
     });
     const html = JSON.stringify(tree);
-    expect(html).toContain("Upstream error: 404: 404: player not found");
+    expect(html).toContain("Upstream error: 404: player not found");
   });
 
   it("renders the upstream-error card on a 502 from the gateway", async () => {
@@ -167,6 +167,6 @@ describe("/players/[account_name] page", () => {
       params: Promise.resolve({ account_name: ":synth.aaa" }),
     });
     const html = JSON.stringify(tree);
-    expect(html).toContain("Upstream error: 502: 502: upstream gateway");
+    expect(html).toContain("Upstream error: 502: upstream gateway");
   });
 });
