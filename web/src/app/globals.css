@@ -47,3 +47,10 @@ a {
 a:hover {
   color: var(--accent);
 }
+
+/* v0.10.25 A11y: visually hidden skip-to-content link becomes
+   visible on keyboard focus. CSS-only so the rule is SSR-safe
+   and React reconciliation cannot stomp the inline style. */
+.skip-to-content:focus {
+  top: 0 !important;
+}

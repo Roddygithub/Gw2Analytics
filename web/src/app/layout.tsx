@@ -55,8 +55,39 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    <html lang="fr" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body>
+        {/*
+          Skip-to-content link for keyboard / screen-reader users.
+          Visually hidden by default; becomes visible on focus so a
+          keyboard-only analyst can bypass the sticky header (the link
+          strip + the player search bar) on every page.
+
+          Uses a `<div role="main">` wrapper (NOT a `<main>` element)
+          because every page already renders its own `<main>`; nesting
+          two visible <main> elements would violate HTML5 (the spec
+          mandates ONE visible <main> per page). The role="main"
+          preserves the accessible landmark semantics.
+        */}
+        <a
+          href="#main-content"
+          data-testid="skip-to-content"
+          className="skip-to-content"
+          style={{
+            position: "absolute",
+            top: -40,
+            left: 0,
+            zIndex: 100,
+            padding: "8px 16px",
+            background: "var(--accent)",
+            color: "var(--accent-foreground, #fff)",
+            fontSize: 13,
+            textDecoration: "none",
+          }}
+        >
+          Aller au contenu principal
+        </a>
+        <div id="main-content" role="main">
         {/*
           v0.7.1 of web: a sticky header bar hosts the global
           player search affordance (the :class:`PlayerSearchBar`)
@@ -149,6 +180,7 @@ export default function RootLayout({
           <PlayerSearchBar />
         </header>
         {children}
+        </div>
       </body>
     </html>
   );

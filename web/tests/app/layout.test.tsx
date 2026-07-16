@@ -51,7 +51,7 @@ describe("RootLayout", () => {
     expect(metadata.description).toMatch(/WvW combat analytics/i);
   });
 
-  it("wraps children in <html lang=en> with the Geist font classes", () => {
+  it("wraps children in <html lang=fr> with the Geist font classes", () => {
     const { container } = withSuppressedHydrationWarning(() =>
       render(
         <RootLayout>
@@ -62,7 +62,7 @@ describe("RootLayout", () => {
 
     const html = container.ownerDocument.documentElement;
     expect(html.tagName).toBe("HTML");
-    expect(html.getAttribute("lang")).toBe("en");
+    expect(html.getAttribute("lang")).toBe("fr");
     // next/font/google shim in setup.ts returns --mock-sans + --mock-mono
     // which RootLayout interpolates into the html className.
     expect(html.className).toContain("--mock-sans");
