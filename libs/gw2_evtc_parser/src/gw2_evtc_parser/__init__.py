@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from gw2_evtc_parser.exceptions import EvtcBaseError, EvtcParseError, UnsupportedVersionError
 from gw2_evtc_parser.interface import EvtcParser
+from gw2_evtc_parser.overlay_log import (
+    OverlayLogAction,
+    OverlayLogEvent,
+    parse_overlay_events,
+)
 from gw2_evtc_parser.parser import (
     EVENT_SIZE,
     PythonEvtcParser,
@@ -31,10 +36,13 @@ __all__ = [
     "EvtcBaseError",
     "EvtcParseError",
     "EvtcParser",
+    "OverlayLogAction",
+    "OverlayLogEvent",
     "PythonEvtcParser",
     "UnsupportedVersionError",
     "__version__",
     "dispatch_statechange",
+    "parse_overlay_events",
     "read_zevtc_archive",
     "read_zevtc_bytes",
 ]
