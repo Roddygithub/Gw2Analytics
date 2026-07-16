@@ -1475,15 +1475,15 @@ def test_parse_events_with_oversized_blob_raises(monkeypatch: pytest.MonkeyPatch
     assert "parse_events" in str(exc_info.value)
 
 
-def test_max_evtc_bytes_constant_is_100_mb() -> None:
-    """v0.10.2 hotfix followup #9: the cap is 100 MB (the canonical value per plans/067).
+def test_max_evtc_bytes_constant_is_500_mb() -> None:
+    """v0.10.25: the cap is 500 MB to accommodate large real-world WvW files.
 
-    Pins the cap value. A future bump (e.g. to 200 MB) MUST
-    update this test + the :data:`MAX_EVTC_BYTES` constant in
-    :mod:`gw2_evtc_parser.parser`. The 100 MB value is
-    defense-in-depth: it's 3.3x the API layer's 30 MB cap
-    (per plan 048) and 5-20x typical WvW raid log sizes.
+    A 40 MB .zevtc file decompresses to ~221 MB, so the previous 100 MB
+    cap rejected real fight logs. 500 MB matches the
+    ``_MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE`` zip-bomb defence and
+    accommodates the largest known WvW files with headroom. A future
+    bump MUST update this test + the :data:`MAX_EVTC_BYTES` constant.
     """
     # ``MAX_EVTC_BYTES`` is now imported at top-of-file (v0.10.5 audit R2.3).
-    assert MAX_EVTC_BYTES == 100 * 1024 * 1024
-    assert MAX_EVTC_BYTES == 104_857_600
+    assert MAX_EVTC_BYTES == 500 * 1024 * 1024
+    assert MAX_EVTC_BYTES == 524_288_000
