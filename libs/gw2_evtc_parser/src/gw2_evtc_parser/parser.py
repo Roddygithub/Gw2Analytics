@@ -69,6 +69,7 @@ from typing import BinaryIO, Final
 from gw2_core import (
     Agent,
     BoonApplyEvent,
+    BuffApplyEvent,
     BuffRemovalEvent,
     DamageEvent,
     EliteSpec,
@@ -434,6 +435,25 @@ class PythonEvtcParser:
             # yet surfaced to the Event stream (a future Phase 9 step
             # may use it for 90%-threshold markers on Removals).
             cursor += EVENT_SIZE
+            # v0.11.0 WAVE-8 A.4: CBTS_BUFFAPPLY=18 statechange emit path.
+            # arcdps encodes BUFF_APPLY via two channels:
+            #   (a) the canonical non-statechange record flagged via
+            #       ``ev.buff != 0`` (captured by BoonApplyEvent), AND
+            #   (b) the orthogonal statechange sub-case
+            #       ``is_statechange == 18`` (CBTS_BUFFAPPLY).
+            # This intercept captures channel (b) BEFORE the generic
+            # statechange skip that follows; it shares the BoonApplyEvent
+            # field shape so downstream BUFF_APPLY / BUFF_REMOVAL dispatch
+            # is uniform. The F1 byte-alignment lock pins is_statechange
+            # to byte 48 (struct slot 12).
+            if is_statechange == 18:
+                yield BuffApplyEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent,
+                    target_agent_id=dst_agent,
+                    skill_id=skill_id,
+                )
+                continue
             if is_statechange != 0:
                 continue
             # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11, commit

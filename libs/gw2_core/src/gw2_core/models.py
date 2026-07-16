@@ -269,6 +269,7 @@ class EventType(StrEnum):
     # buff-like state with a duration) so the schema stays
     # symmetry-consistent with the post-Tour-6 event vocabulary.
     BARRIER = "BARRIER"
+    BUFF_APPLY = "BUFF_APPLY"
 
 
 class BaseEvent(BaseModel):
@@ -664,6 +665,29 @@ class BarrierEvent(BaseEvent):
 # (NO union-membership change, NO consumer-side update, NO schema
 # bump for existing JSONL blobs). The POST-Wave-5 FORBIDDEN clause is
 # RESOLVED by this dispatch-table design.
+#: v0.11.0 WAVE-8 A.4 parser emit path extension. arcdps encodes
+#: buff-apply events through TWO channels:
+#:   (a) the canonical non-statechange record flagged via ``ev.buff != 0``
+#:       (already covered by :class:`BoonApplyEvent`), AND
+#:   (b) the orthogonal statechange sub-case ``is_statechange == 18``,
+#:       arcdps's ``CBTS_BUFFAPPLY`` opcode.
+#: This model captures channel (b); channel (a) is unchanged.
+#: The shape mirrors :class:`BoonApplyEvent` so downstream consumers can
+#: dispatch BUFF_APPLY / BUFF_REMOVAL uniformly. The parser detects
+#: ``is_statechange == 18`` BEFORE the generic ``is_statechange != 0``
+#: filter that skips the record.
+class BuffApplyEvent(BaseEvent):
+    """CBTS_BUFFAPPLY=18 statechange emit path (v0.11.0 WAVE-8 A.4)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.BUFF_APPLY] = EventType.BUFF_APPLY
+    time_ms: int = Field(..., ge=0)
+    source_agent_id: int = Field(..., ge=0)
+    target_agent_id: int = Field(..., ge=0)
+    skill_id: int = Field(..., ge=0)
+
+
 _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.DAMAGE: DamageEvent,
     EventType.HEALING: HealingEvent,
@@ -678,6 +702,7 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.BLOCK: BlockEvent,
     EventType.INTERRUPT: InterruptEvent,
     EventType.BARRIER: BarrierEvent,
+    EventType.BUFF_APPLY: BuffApplyEvent,
 }
 
 

@@ -42,7 +42,15 @@ from typing import Final
 
 import pytest
 
-from gw2_core import BoonApplyEvent, BuffRemovalEvent, DamageEvent, HealingEvent
+from gw2_core import (
+    BoonApplyEvent,
+    BuffApplyEvent,
+    BuffRemovalEvent,
+    DamageEvent,
+    HealingEvent,
+)
+from gw2_core.models import _EVENT_MAP, EventType
+from gw2_core.models import EventType as _EventType
 from gw2_evtc_parser import PythonEvtcParser
 from gw2_evtc_parser.parser import _EVENT_STRUCT
 
@@ -681,3 +689,96 @@ def test_parse_events_offset_49_is_ev_buff_empirical_lock_F1() -> None:  # noqa:
         f"Read {unpacked[13]} from slot 13 of the unpack tuple. "
         f"F1 calibration pinned this byte to arcdps's ev.buff field."
     )
+
+
+def test_buffapply_event_is_registered_in_event_map() -> None:
+    """WAVE-8 A.4: EventType.BUFF_APPLY is wired to BuffApplyEvent in _EVENT_MAP.
+
+    The :class:`gw2_core.models._EVENT_MAP` dict maps every
+    EventType StrEnum value to its Pydantic BaseEvent subclass. WAVE-8
+    A.4 adds the CBTS_BUFFAPPLY=18 channel, so EventType.BUFF_APPLY
+    must resolve to the new BuffApplyEvent class (not None, not a
+    previously-shared class). The parser's intercept relies on this
+    mapping being present at module-import time.
+    """
+
+    assert _EventType.BUFF_APPLY in _EVENT_MAP
+    assert _EVENT_MAP[_EventType.BUFF_APPLY] is BuffApplyEvent
+
+
+def test_buffapply_event_validates_minimum_payload() -> None:
+    """WAVE-8 A.4: BuffApplyEvent validates the 4 required fields.
+
+    The CBTS_BUFFAPPLY emit path yields a BuffApplyEvent with
+    time_ms + source_agent_id + target_agent_id + skill_id sourced
+    from the parser's local-struct unpacking (tuple slots 0/1/2/6).
+    The Pydantic v2 model freezes the event + rejects extra fields;
+    this test pins the canonical happy-path payload.
+    """
+    ev = BuffApplyEvent(
+        time_ms=1_234_567,
+        source_agent_id=9_999,
+        target_agent_id=8_888,
+        skill_id=7_777,
+    )
+    assert ev.event_type == EventType.BUFF_APPLY
+    assert ev.time_ms == 1_234_567
+    assert ev.source_agent_id == 9_999
+    assert ev.target_agent_id == 8_888
+    assert ev.skill_id == 7_777
+
+
+def test_buffapply_event_rejects_extra_fields() -> None:
+    """WAVE-8 A.4: BuffApplyEvent's extra='forbid' guards the emit contract.
+
+    Any extra kwarg would indicate a CBTS_BUFFAPPLY parser regression
+    attempting to surface a non-canonical payload. The model must
+    raise ValueError (extra='forbid')
+    """
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        BuffApplyEvent(  # type: ignore[call-arg]
+            time_ms=1,
+            source_agent_id=1,
+            target_agent_id=1,
+            skill_id=1,
+            unknown_field=42,
+        )
+
+
+def test_parse_events_emits_buffapply_via_cbts_statechange_18() -> None:
+    """WAVE-8 A.4: arcdps CBTS_BUFFAPPLY=18 statechange emits BuffApplyEvent.
+
+    The parser intercepts ``is_statechange == 18`` BEFORE the generic
+    statechange skip that follows. This integration test packs a
+    synthetic cbtevent with is_statechange=18 + the required fields
+    (time_ms / src_agent / dst_agent / skill_id), feeds it through
+    PythonEvtcParser().parse_events(...), and asserts a single
+    BuffApplyEvent is yielded with the expected 4-field round-trip.
+
+    The F1 byte-alignment lock (`test_is_statechange_offset_48_empirical_lock`)
+    pins is_statechange to byte 48 (= struct slot 12 in the parser's
+    local-variable unpack scope). No regress on byte 49 (ev.buff) or
+    byte 53 (is_ninety).
+    """
+    record = _build_event_record(
+        time_ms=1_234_567,
+        src_agent=9_999,
+        dst_agent=8_888,
+        value=0,
+        skill_id=7_777,
+        is_statechange=18,  # CBTS_BUFFAPPLY opcode
+    )
+    evtc = _build_minimal_evtc(agents=[], events=[record])
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    apply_events = [e for e in events if isinstance(e, BuffApplyEvent)]
+    assert len(apply_events) == 1, (
+        f"expected exactly 1 BuffApplyEvent, got {len(apply_events)}. "
+        f"All events: {[type(e).__name__ for e in events]}"
+    )
+    ev = apply_events[0]
+    assert ev.event_type == EventType.BUFF_APPLY
+    assert ev.time_ms == 1_234_567
+    assert ev.source_agent_id == 9_999
+    assert ev.target_agent_id == 8_888
+    assert ev.skill_id == 7_777

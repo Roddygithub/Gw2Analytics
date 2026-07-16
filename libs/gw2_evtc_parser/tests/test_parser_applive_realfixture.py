@@ -76,7 +76,7 @@ from pathlib import Path
 
 import pytest
 
-from gw2_core import BoonApplyEvent, BuffRemovalEvent, DamageEvent, HealingEvent
+from gw2_core import BoonApplyEvent, BuffApplyEvent, BuffRemovalEvent, DamageEvent, HealingEvent
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
 #: Path to the F1-pilot fixture. Default points at the user's local
@@ -131,6 +131,7 @@ def test_real_fixture_dual_channel_emit_contract() -> None:
     strip_count = sum(1 for e in events if isinstance(e, BuffRemovalEvent))
     apply_count = sum(1 for e in events if isinstance(e, BoonApplyEvent) and e.kind == "apply")
     remove_count = sum(1 for e in events if isinstance(e, BoonApplyEvent) and e.kind != "apply")
+    buff_apply_count = sum(1 for e in events if isinstance(e, BuffApplyEvent))
 
     # ------- Sanity: event counts are >= minimum spec-stable thresholds. -------
 
@@ -196,11 +197,16 @@ def test_real_fixture_dual_channel_emit_contract() -> None:
 
     # Defence in depth: the per-kind counts must add up to the total event
     # count (no silent drop + no double-count).
-    total_count = damage_count + heal_count + strip_count + apply_count + remove_count
+    total_count = (
+        damage_count + heal_count + strip_count + apply_count + remove_count + buff_apply_count
+    )
     assert total_count == len(events), (
         f"F1 fixture: per-kind counts sum to {total_count} but "
         f"``len(events) == {len(events)}``. Mismatch = silent drop or "
-        f"double-count in the parse_events dispatch."
+        f"double-count in the parse_events dispatch. The 6-kind sum "
+        f"(damage + heal + strip + apply + remove + buff_apply) counts "
+        f"the WAVE-8 A.4 dual-channel surface (chann a = ev.buff != 0 "
+        f"records, channel b = is_statechange=18 / CBTS_BUFFAPPLY)."
     )
 
     # ------- REMOVE branch verification. -------
