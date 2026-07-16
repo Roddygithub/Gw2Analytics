@@ -108,14 +108,40 @@ describe("fetchCached", () => {
 
 // ---------------------------------------------------------------------------
 // Code-reviewer hardening #2 (2026-07-15 fetchCached.ts lock).
-// Locks the wire-contract parsing precedence so a future maintainer who
-// reorders the branches does not silently invert the priority between
-// nested-detail.error_code (the EVENTS_UNAVAILABLE case the /fights/[id]
-// page branching depends on) and the flat error_code envelope.
+// Locks the wire-contract parsing precedence. The branches in
+// ``fetchCached.ts`` run in a fixed ORDER -- a future refactor that
+// reorders them MUST update these specs + this comment block
+// together so the contract remains a single source of truth.
 //
-// Precedence contract (from fetchCached.ts):
-//   detail precedence: string_detail > nested.detail > raw_text
-//   error_code precedence: nested.detail.error_code > flat.error_code
+// Precedence contract (from ``fetchCached.ts``, the 5 ``if`` lines
+// inside the ``fetch().then(...)`` callback):
+//
+//     detail precedence (assignment, NOT overwrite):
+//       (a) parsed.detail as a top-level string  - highest
+//       (b) parsed.detail.detail (nested string)  - fall-back if (a) is null/object
+//       (c) raw response text                     - default
+//
+//     error_code precedence (assignment WITH last-wins overwrite):
+//       (i)  parsed.detail.error_code  (nested shape)   - SET FIRST
+//       (ii) parsed.error_code         (flat envelope)  - OVERWRITES (i)
+//
+// The asymmetry (detail uses fall-back, error_code uses overwrite)
+// is what the current code does: the bottom ``if`` is UNCONDITIONAL.
+// This means a present flat envelope ALWAYS beats a nested
+// ``error_code`` even if both are populated. Today only one shape
+// exists per endpoint (no coexistence) so the precedence is harmless.
+// If a future v0.11 refactor introduces mixed envelopes (CDN
+// rewrites / proxy adapters), the precedence determines which
+// discriminator the consumers see -- the /fights/[id] page branches
+// on EVENTS_UNAVAILABLE which today's blob_loader.py emits ONLY in
+// the nested shape, so the flat envelope currently surfaces no
+// error_code and the nested path is the discriminator's source of
+// truth.
+//
+// The specs below pin BOTH the "nested-only" path AND the
+// "flat-overwrites-nested" path so a future flip is a CI-visible
+// diff (you cannot satisfy all of these tests AND change the code
+// without explicitly updating them together).
 // ---------------------------------------------------------------------------
 
 describe("fetchCached error_code parsing precedence (v0.10.25 hardening)", () => {
@@ -215,5 +241,100 @@ describe("fetchCached error_code parsing precedence (v0.10.25 hardening)", () =>
     // the proxy-gateway message (HTML markup rendered as text).
     expect(err.message).toContain("Bad Gateway");
     expect(err.error_code).toBeUndefined();
+  });
+
+  it("does NOT crash when the nested shape's ``detail`` field is null", async () => {
+    // Edge case: the API may legitimately return ``{detail: null}`` if
+    // the gateway short-circuits an error before building the nested
+    // envelope (e.g. a FastAPI handler that returns ``HTTPException``
+    // without a JSON detail). The fetchCached.ts guard
+    // ``parsed.detail && typeof parsed.detail === "object"`` is the
+    // CRITICAL null-safety: the ``&&`` short-circuits when
+    // ``parsed.detail`` is null (null is falsy), so the ``else if``
+    // branch is skipped AND the bottom ``if`` runs the flat check.
+    //
+    // Pin this so a future maintainer who refactors the guard to
+    // ``typeof parsed.detail === "object"`` WITHOUT the null check
+    // gets a TypeError in CI instead of a production 500.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ detail: null, error_code: "GATEWAY_NULL" }),
+        { status: 502 },
+      ),
+    );
+    const err = (await fetchCached(
+      "http://test/api/v1/shape-5-null-nested-detail",
+    ).catch((e) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(502);
+    // Flat error_code wins (the nested path is skipped because
+    // parsed.detail is null -- the ``else if`` requires both
+    // truthy AND object).
+    expect(err.error_code).toBe("GATEWAY_NULL");
+    // Tighten the message to ``toBe`` (NOT ``toContain`` -- the
+    // previous hardening pass used just ``error_code`` which did
+    // not pin the verbatim-fallback). The ``else if`` guard
+    // ``parsed.detail && typeof ... === "object"`` is the
+    // null-safety contract; the unexpected path is
+    // ``message = parsed.error_code`` (substituting the code for
+    // the body), which would still pass a too-loose assertion.
+    // ``JSON.stringify`` of the same fixture is deterministic
+    // (no whitespace + insertion-order keys), so equality is
+    // stable across vitest runs.
+    expect(err.message).toBe(
+      JSON.stringify({ detail: null, error_code: "GATEWAY_NULL" }),
+    );
+  });
+
+  it("falls back to raw JSON when nested shape has only nested.error_code (no nested inner 'detail')", async () => {
+    // Edge case: an envelope like ``{detail: {error_code: "X"}}``
+    // with NO inner ``detail`` string. fetchCached.ts's inner
+    // assignment requires ``typeof parsed.detail.detail === "string"``;
+    // if missing, the inner detail stays undefined and the outer
+    // ``detail = raw_text`` default surfaces. Pin this so a future
+    // refactor that changes the guard to ``parsed.detail.detail !==
+    // undefined`` doesn't silently surface ``undefined`` in the
+    // ApiError message.
+    //
+    // Also pins that the flat ``error_code`` still OVERWRITES the
+    // nested one even when the nested envelope doesn't carry an
+    // inner ``detail``. The two channels are paired: when nested
+    // wins on detail, flat wins on error_code.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: { error_code: "NESTED_ONLY" },
+          error_code: "FLAT_BEATS_NESTED_ONLY",
+        }),
+        { status: 503 },
+      ),
+    );
+    const err = (await fetchCached(
+      "http://test/api/v1/shape-6-nested-no-inner-detail",
+    ).catch((e) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(503);
+    // Flat OVERWRITES nested error_code (the locked contract).
+    expect(err.error_code).toBe("FLAT_BEATS_NESTED_ONLY");
+    // Tighten the raw-text fallback contract with ``toBe`` (NOT
+    // ``toContain`` -- the previous hardening pass asserted
+    // ``toContain(\"FLAT_BEATS_NESTED_ONLY\")`` AND
+    // ``toContain(\"NESTED_ONLY\")``, both of which were too
+    // loose: a refactor that maps ``detail = parsed.error_code``
+    // (a misguided optimization that would put the flat code in
+    // the message body) ALSO produces a message that contains
+    // both substrings, so the old assertions would silently
+    // pass. ``JSON.stringify`` of the same fixture is
+    // deterministic (no whitespace + insertion-order keys), so
+    // equality is stable across vitest runs AND locks the
+    // raw-text fallback semantic -- a refactor that diverges
+    // from ``detail = text`` (the typedef-defaulted value at
+    // the top of the ``if/else if`` chain) breaks the assertion.
+    expect(err.message).toBe(
+      JSON.stringify({
+        detail: { error_code: "NESTED_ONLY" },
+        error_code: "FLAT_BEATS_NESTED_ONLY",
+      }),
+    );
   });
 });

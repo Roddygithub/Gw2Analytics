@@ -1487,3 +1487,45 @@ def test_max_evtc_bytes_constant_is_500_mb() -> None:
     # ``MAX_EVTC_BYTES`` is now imported at top-of-file (v0.10.5 audit R2.3).
     assert MAX_EVTC_BYTES == 500 * 1024 * 1024
     assert MAX_EVTC_BYTES == 524_288_000
+
+
+def test_max_evtc_bytes_matches_zip_bomb_defense() -> None:
+    """v0.10.25 hardening: post-decompression cap == pre-extraction cap.
+
+    Both safety bounds are intentionally equal (500 MB) by design:
+
+    - ``_MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE`` (pre-extraction, in
+      :func:`_first_entry`) rejects any zip entry whose **declared**
+      uncompressed size exceeds the bound. This is the zip-bomb DoS
+      defence: a 42-byte zip header can claim a 4 GB payload, so the
+      check runs BEFORE ``ZipFile.read()`` materialises the bytes.
+    - ``MAX_EVTC_BYTES`` (post-decompression, in :func:`_read_all`)
+      rejects any blob whose **materialised** size exceeds the bound.
+      This is the defence-in-depth backstop for streaming library
+      consumers (CLI tools, notebooks, FaaS workers) who bypass the
+      API-layer upload cap and could feed 1 GB+ blobs.
+
+    The invariant ``MAX_EVTC_BYTES == _MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE``
+    MUST hold because zip compression cannot EXPAND the payload beyond
+    its declared uncompressed size: any entry whose declared size is
+    <= the zip-bomb bound will decompress to bytes <= the
+    post-decompression bound. If a future maintainer raises one cap
+    without raising the other (e.g. +200 MB on MAX_EVTC_BYTES only, to
+    accommodate a new streaming consumer), the check at
+    ``_read_all`` becomes the only line of defence for that consumer
+    and the zip-bomb check is bypassable. This test pins the
+    relationship so a future delta is a CI-visible diff.
+    """
+    # ``_MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE`` is private (leading
+    # underscore). We access via ``parser_mod`` (the hoisted import at
+    # top-of-file per v0.10.5 audit R2.3 PLC0415) rather than adding
+    # ``_MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE`` to the from-import list.
+    # Keeping the explicit private access signals to future maintainers
+    # that the constant is a module-internal invariant + not a public
+    # API contract.
+    assert parser_mod._MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE == parser_mod.MAX_EVTC_BYTES
+    # Both are 500 MB. The literal 500 * 1024 * 1024 (not 500_000_000)
+    # avoids confusion with decimal MB (the zip-bomb convention uses
+    # binary MiB matching the byte counts in arcdps / GW2 tooling).
+    assert parser_mod._MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE == 500 * 1024 * 1024
+    assert parser_mod.MAX_EVTC_BYTES == 500 * 1024 * 1024
