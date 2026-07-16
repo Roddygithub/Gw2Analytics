@@ -63,11 +63,35 @@ a:hover {
   color: var(--accent);
 }
 
+/* 2026-07-16 mobile+a11y audit A2 + reviewer followup: implicit
+   ``:focus`` (mouse click) intentionally falls through to no style
+   (the user clicked, the keyboard focus ring would feel like a
+   surprise). The explicit ``:focus-visible`` selector only fires
+   on keyboard focus. The accent-coloured ring (--accent + 2px
+   outline + 2px offset) is visible on every focusable element
+   (buttons, links, form inputs). The offset keeps the ring from
+   colliding with 1px borders on chip / button components. */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* v0.10.25 A11y: visually hidden skip-to-content link becomes
    visible on keyboard focus. CSS-only so the rule is SSR-safe
    and React reconciliation cannot stomp the inline style. */
 .skip-to-content:focus {
   top: 0 !important;
+}
+
+a:focus-visible {
+  /* Override any ``opacity`` dimming that ``a:hover`` patterns
+     leave latched on keyboard-focused anchor links; the link must
+     read at full opacity under the focus ring. */
+  opacity: 1;
 }
 
 /* 2026-07-16 mobile+a11y audit U1 + reviewer followup:
