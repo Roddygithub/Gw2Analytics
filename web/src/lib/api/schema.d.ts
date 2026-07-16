@@ -657,6 +657,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Skills
+         * @description Return the FULL catalog. The frontend caches this once.
+         *
+         *     Empty catalog (lifespan loaded 0 entries) returns ``[]`` per the
+         *     public contract. App-level state missing (lifespan startup
+         *     failure) returns ``503 SKILLS_UNAVAILABLE``.
+         */
+        get: operations["list_skills_api_v1_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/{skill_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill
+         * @description Return ONE catalog entry by arcdps skill id. 404 on unknown id.
+         */
+        get: operations["get_skill_api_v1_skills__skill_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uploads": {
         parameters: {
             query?: never;
@@ -971,7 +1015,7 @@ export interface components {
              * Skills
              * @default []
              */
-            skills: components["schemas"]["SkillOut"][];
+            skills: components["schemas"]["gw2analytics_api__schemas__fight__SkillOut"][];
             /**
              * Started At
              * Format: date-time
@@ -1653,13 +1697,6 @@ export interface components {
             /** Total Healing */
             total_healing: number;
         };
-        /** SkillOut */
-        SkillOut: {
-            /** Id */
-            id: number;
-            /** Name */
-            name: string;
-        };
         /** SkillUsageRowOut */
         SkillUsageRowOut: {
             /** Hit Count */
@@ -1904,6 +1941,40 @@ export interface components {
             id: string;
             /** Url */
             url: string;
+        };
+        /**
+         * SkillOut
+         * @description API wire shape of one catalog entry.
+         *
+         *     Mirrors :class:`SkillEntry` minus the ``__init__``/``__contains__``
+         *     overhead. The ``profession`` field is typed as ``str | None``; the
+         *     IntEnum-to-string mapping happens in :func:`_to_wire` via
+         *     ``entry.profession.name``. Pydantic v2 ``model_dump`` on a plain
+         *     ``str | None`` field serialises the string as-is (no separate
+         *     field_serializer needed -- removed in v0.10.26-pre review #7).
+         */
+        gw2analytics_api__routes__skills__SkillOut: {
+            /** Description */
+            description: string | null;
+            /** Icon Url */
+            icon_url: string | null;
+            /** Id */
+            id: number;
+            /** Is Elite */
+            is_elite: boolean;
+            /** Name */
+            name: string;
+            /** Profession */
+            profession: string | null;
+            /** Skill Type */
+            skill_type: string;
+        };
+        /** SkillOut */
+        gw2analytics_api__schemas__fight__SkillOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
         };
     };
     responses: never;
@@ -2368,6 +2439,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlayerTimelineOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_skills_api_v1_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["gw2analytics_api__routes__skills__SkillOut"][];
+                };
+            };
+        };
+    };
+    get_skill_api_v1_skills__skill_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["gw2analytics_api__routes__skills__SkillOut"];
                 };
             };
             /** @description Validation Error */
