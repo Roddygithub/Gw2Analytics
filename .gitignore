@@ -54,6 +54,16 @@ data/
 !libs/gw2_skills/src/gw2_skills/data/*.ndjson
 logs/
 
+# v0.10.26-pre followup-4: load-test fixtures are GENERATED artifacts
+# (regenerated on every ``uv run python
+# tests/load/scripts/generate_sample_zevtc.py`` invocation). Tracking
+# them in git would bloat the repo + mask parser regressions when a
+# deterministic regenerated fixture differs from a stale committed one.
+# The pattern matches the canonical ``.zevtc`` extension only (not
+# arbitrary ``*.bin`` / ``*.dat``); mirrors the Playwright/Visual/
+# Marketing fixture gitignore groups above.
+tests/load/fixtures/*.zevtc
+
 # OS
 Thumbs.db
 
