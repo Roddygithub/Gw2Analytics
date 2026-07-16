@@ -5,6 +5,7 @@ would force `pip install locust[geventhttpclient]` as a separate step
 in the README which is more friction than warranted for a single
 endpoint smoke test).
 """
+
 from __future__ import annotations
 
 from locust import HttpUser, between, task

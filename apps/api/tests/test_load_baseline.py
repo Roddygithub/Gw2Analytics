@@ -108,8 +108,7 @@ def test_load_baseline_sequential_uploads_and_parses(
         # POST upload: 201 created.
         post = client.post(
             "/api/v1/uploads",
-            files={"file": (f"baseline-{suffix}.zevtc", blob,
-                            "application/octet-stream")},
+            files={"file": (f"baseline-{suffix}.zevtc", blob, "application/octet-stream")},
         )
         assert post.status_code == 201, (
             f"iteration {n}: POST status={post.status_code} body={post.text}"
@@ -133,9 +132,7 @@ def test_load_baseline_sequential_uploads_and_parses(
         # net for slower hosts (e.g. CI under memory pressure).
         for _attempt in range(POLL_MAX_ATTEMPTS):
             r = client.get(f"/api/v1/uploads/{upload_id}")
-            assert r.status_code == 200, (
-                f"iteration {n}: GET upload status={r.status_code}"
-            )
+            assert r.status_code == 200, f"iteration {n}: GET upload status={r.status_code}"
             last_status = r.json()["status"]
             if last_status == "completed":
                 fight_id = r.json()["fight_id"]
@@ -149,9 +146,7 @@ def test_load_baseline_sequential_uploads_and_parses(
     # GET fight: 200 OK + valid wire envelope. Iterates all N.
     for n, fid in enumerate(fight_ids):
         r = client.get(f"/api/v1/fights/{fid}")
-        assert r.status_code == 200, (
-            f"iteration {n}: GET fight status={r.status_code}"
-        )
+        assert r.status_code == 200, f"iteration {n}: GET fight status={r.status_code}"
         payload = r.json()
         assert payload["id"] == fid
 
@@ -167,20 +162,27 @@ def test_load_baseline_sequential_uploads_and_parses(
     )
 
     with get_sessionmaker()() as db:
-        rows = db.execute(
-            select(OrmFight).where(OrmFight.id.in_(fight_ids)),
-        ).scalars().all()
+        rows = (
+            db.execute(
+                select(OrmFight).where(OrmFight.id.in_(fight_ids)),
+            )
+            .scalars()
+            .all()
+        )
         assert len(rows) == SEQUENTIAL_BASELINE_N, (
             f"expected {SEQUENTIAL_BASELINE_N} OrmFight rows, "
             f"got {len(rows)} (silent-drop regression?)"
         )
 
-        uploads = db.execute(
-            select(Upload).where(Upload.fight.has(OrmFight.id.in_(fight_ids))),
-        ).scalars().all()
+        uploads = (
+            db.execute(
+                select(Upload).where(Upload.fight.has(OrmFight.id.in_(fight_ids))),
+            )
+            .scalars()
+            .all()
+        )
         assert len(uploads) == SEQUENTIAL_BASELINE_N, (
-            f"expected {SEQUENTIAL_BASELINE_N} Upload rows, "
-            f"got {len(uploads)}"
+            f"expected {SEQUENTIAL_BASELINE_N} Upload rows, got {len(uploads)}"
         )
 
     # Wallclock ceiling: a parse-pipeline regression that triples

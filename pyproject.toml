@@ -23,7 +23,52 @@ dev = [
     "respx>=0.21",
     "time-machine>=3.2.0",
     "pytest-cov>=6.0",
-    "pip-audit>=2.7",
+    "pip-audit>=2.7",    # v0.10.26-pre followup-5: the load-test harness in tests/load/locust/
+    # imports `locust`; locust ships with PEP 561 type info since 2.x
+    # (py.typed stub at top-level), so pin a modern >= for clean mypy
+    # + ruff resolution. The mypy override below mirrors the fastapi_mcp
+    # one for the /tests/load/locust/locustfile.py HttpUser subclass.
+    # TODO: bump <3.0 -> <4.0 when locust 3.0 ships GA (Q1 2026 estimate).
+    "locust>=2.40,<3.0",
+    # v0.10.26-pre followup-6: mypy.ini declares
+    # ``plugins = pydantic.mypy`` but uv only resolves the ROOT
+    # [dependency-groups].dev for ``uv run mypy`` invocations --
+    # workspace members' production deps (pydantic lives in
+    # apps/api + libs/gw2_core + libs/gw2_skills pyprojects) are
+    # NOT visible at the root level, so any root-level tool
+    # (mypy plugin, ruff plugin, CLI) needs its own pin here.
+    # Workspace members all require ``>=2.9``; pin to match + cap
+    # <3.0 until workspace members migrate to pydantic 3.x.    # TODO: bump <3 -> <4 when pydantic 3.0 ships GA + workspace
+    # members require it (Q1 2026 estimate).
+    "pydantic>=2.9,<3",
+    # v0.10.26-pre followup-7: mypy . cascading-error closure (root-cause).
+    # uv only resolves ROOT [dependency-groups].dev for ``uv run mypy .``
+    # invocations; workspace-member production deps below are NOT visible
+    # at the root level, which is the same gap closed in followup-6 for
+    # pydantic: 143 import-not-found + 27 untyped-decorator + 12 no-any-
+    # return + 6 unused-ignore + 3 misc + 1 import-untyped errors cascade
+    # when mypy strict runs against apps/api/src (slight breakdown-vs-total
+    # variance is fine -- some errors carry multiple rule tags per stderr
+    # line).
+    # Pinned here so the root venv matches what the workspace members
+    # themselves require (mirrors the locust + pydantic followups-5+6
+    # pattern). Each upper bound caps the next major so a future bump
+    # breaks loud. Workspace references (gw2_core etc.) are resolved
+    # via [tool.uv.sources] workspace = true, not as dev-deps.
+    # TODO: bump each <N -> <N+1 once a workspace member migrates that far.
+    "fastapi-mcp>=0.4,<1",
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "pydantic-settings>=2.6,<3",
+    "sqlalchemy>=2.0,<3",
+    "psycopg[binary]>=3.3.4,<4",
+    "alembic>=1.13,<2",
+    "minio>=7.2,<8",
+    "python-multipart>=0.0.20,<1",
+    "cryptography>=43.0.1,<45",
+    "arq>=0.25,<1",
+    "redis>=5.0,<8",
+    "prometheus_client>=0.20,<1",
 ]
 
 [tool.uv.workspace]
@@ -174,6 +219,18 @@ check_untyped_defs = true
 
 [[tool.mypy.overrides]]
 module = ["fastapi_mcp"]
+ignore_missing_imports = true
+
+# v0.10.26-pre followup-5: the Locust load-test harness subclasses
+# ``HttpUser`` and decorates ``@task`` methods. Locust since 2.x ships
+# its own .pyi stubs but the @task decorator's return-type annotation
+# is still ``Any`` in the upstream stubs, which trips
+# ``untyped-decorator`` on the browse_fights hook. Pinning ``locust``
+# to ``>=2.40,<3.0`` in [dependency-groups].dev + this override
+# closes the 3 errors in tests/load/locust/locustfile.py without
+# needing a real .pyi (locust's stub provides everything else).
+[[tool.mypy.overrides]]
+module = ["locust"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------

@@ -89,9 +89,9 @@ def _worker_round_trip(
 
     post = client.post(
         "/api/v1/uploads",
-        files={"file": (
-            f"concurrent-{worker_index}-{suffix}.zevtc", blob,
-            "application/octet-stream")},
+        files={
+            "file": (f"concurrent-{worker_index}-{suffix}.zevtc", blob, "application/octet-stream")
+        },
     )
     if post.status_code != 201:
         return (None, post.status_code, 0)
@@ -157,8 +157,7 @@ def test_load_concurrent_workers_upload_and_get(
         max_workers=CONCURRENT_WORKERS,
     ) as pool:
         futures = [
-            pool.submit(_worker_round_trip, client, idx)
-            for idx in range(CONCURRENT_WORKERS)
+            pool.submit(_worker_round_trip, client, idx) for idx in range(CONCURRENT_WORKERS)
         ]
         for future in concurrent.futures.as_completed(futures):
             fight_id, post_status, get_status = future.result()
@@ -168,12 +167,8 @@ def test_load_concurrent_workers_upload_and_get(
 
     # All workers returned 201 + 200.
     for idx, (post, get) in enumerate(statuses):
-        assert post == 201, (
-            f"worker {idx}: POST status={post} (race-induced failure?)"
-        )
-        assert get == 200, (
-            f"worker {idx}: GET status={get} (race-induced failure?)"
-        )
+        assert post == 201, f"worker {idx}: POST status={post} (race-induced failure?)"
+        assert get == 200, f"worker {idx}: GET status={get} (race-induced failure?)"
 
     # All fight_ids are distinct (no UUID collision; no DB PK skip).
     assert len(set(fight_ids)) == CONCURRENT_WORKERS, (
@@ -189,18 +184,26 @@ def test_load_concurrent_workers_upload_and_get(
     )
 
     with get_sessionmaker()() as db:
-        fights = db.execute(
-            select(OrmFight).where(OrmFight.id.in_(fight_ids)),
-        ).scalars().all()
+        fights = (
+            db.execute(
+                select(OrmFight).where(OrmFight.id.in_(fight_ids)),
+            )
+            .scalars()
+            .all()
+        )
         assert len(fights) == CONCURRENT_WORKERS, (
             f"expected {CONCURRENT_WORKERS} OrmFight rows, "
             f"got {len(fights)} (silent-drop regression?)"
         )
-        uploads = db.execute(
-            select(Upload).where(
-                Upload.fight.has(OrmFight.id.in_(fight_ids)),
-            ),
-        ).scalars().all()
+        uploads = (
+            db.execute(
+                select(Upload).where(
+                    Upload.fight.has(OrmFight.id.in_(fight_ids)),
+                ),
+            )
+            .scalars()
+            .all()
+        )
         assert len(uploads) == CONCURRENT_WORKERS, (
             f"expected {CONCURRENT_WORKERS} Upload rows, "
             f"got {len(uploads)} (silent-drop regression?)"

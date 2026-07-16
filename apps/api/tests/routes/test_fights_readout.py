@@ -243,10 +243,17 @@ def test_readout_aggregator_stun_break_events_wired() -> None:
     sb_skill = 0  # StunBreakEvent has no skill attribution (actor-only shape)
     heal_skill = 4_500_001
     heal_event = HealingEvent(
-        time_ms=1_000, source_agent_id=a, target_agent_id=a + 1, skill_id=heal_skill, healing=500,
+        time_ms=1_000,
+        source_agent_id=a,
+        target_agent_id=a + 1,
+        skill_id=heal_skill,
+        healing=500,
     )
     stun_break = StunBreakEvent(
-        time_ms=2_000, source_agent_id=a, target_agent_id=0, skill_id=sb_skill,
+        time_ms=2_000,
+        source_agent_id=a,
+        target_agent_id=0,
+        skill_id=sb_skill,
     )
 
     aid_to_identity = {
@@ -312,7 +319,11 @@ def test_readout_aggregator_account_name_none_passthrough() -> None:
     a = 400_002
     heal_skill = 4_500_002
     heal_event = HealingEvent(
-        time_ms=1_000, source_agent_id=a, target_agent_id=a + 1, skill_id=heal_skill, healing=500,
+        time_ms=1_000,
+        source_agent_id=a,
+        target_agent_id=a + 1,
+        skill_id=heal_skill,
+        healing=500,
     )
     aid_to_identity = {
         a: AgentIdentity(
