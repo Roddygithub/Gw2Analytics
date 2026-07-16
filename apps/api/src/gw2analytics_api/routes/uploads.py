@@ -169,10 +169,15 @@ async def create_upload(
 
     # Defense-in-depth #2: Starlette's UploadFile may already know
     # the file size from the multipart metadata. Reject before read.
-    if file.size is not None and file.size > max_size:
+    # Use ``getattr`` so an older Starlette pin (< 0.30 did not yet
+    # expose the ``size`` attribute) does NOT raise ``AttributeError``;
+    # the contract falls through to the read-time check below in that
+    # case. Code-reviewer flagged for pre-0.30 deploys.
+    file_size = getattr(file, "size", None)
+    if file_size is not None and file_size > max_size:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(f"File too large ({file.size} bytes). Maximum allowed is {max_size} bytes."),
+            detail=(f"File too large ({file_size} bytes). Maximum allowed is {max_size} bytes."),
         )
 
     raw = file.file.read()
