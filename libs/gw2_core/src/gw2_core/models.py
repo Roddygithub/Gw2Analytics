@@ -536,10 +536,17 @@ class StunBreakEvent(BaseEvent):
 class BarrierEvent(BaseEvent):
     """WAVE-8 v0.11.0 Blocker A.3 part 2: barrier application event.
 
-    Arcdps statechange kind ``statechange == BARRIER`` (a planned Phase 6 v2 yield).
-    The barrier amount + duration are sub-class-specific fields not part of
-    the BaseEvent parent (Phase 6 v2 parser-stream will surface these from the
-    per-skill barrier table).
+    Arcdps statechange kind byte 38 ``BarrierUpdate`` per
+    :file:`docs/statechange-ids.md` -- the canonical Elite Insights
+    StateChange enum. The dispatch wiring lives in
+    ``libs.gw2_evtc_parser/src/gw2_evtc_parser/statechange_dispatch.py``
+    (:data:`statechange_dispatch.STATE_CHANGE_BARRIER_UPDATE`); changing
+    the byte here requires updating both files in lockstep.
+
+    Phase 6 v2 parser-stream switch yields ``barrier_amount`` +
+    ``duration_ms`` from the per-skill barrier table. Pre-Phase-6-v2
+    streams parse cleanly because both fields default to ``0``
+    (the ``ge=0`` constraint accepts ``0`` as a valid null sentinel).
     """
 
     event_type: Literal[EventType.BARRIER] = EventType.BARRIER

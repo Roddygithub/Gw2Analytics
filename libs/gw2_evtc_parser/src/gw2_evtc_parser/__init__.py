@@ -15,16 +15,26 @@ from gw2_evtc_parser.parser import (
     read_zevtc_archive,
     read_zevtc_bytes,
 )
+from gw2_evtc_parser.statechange_dispatch import (
+    STATE_CHANGE_BARRIER_UPDATE,
+    STATE_CHANGE_STUN_BREAK,
+    STATECHANGE_MAP,
+    dispatch_statechange,
+)
 
 __version__ = "0.5.0"
 
 __all__ = [
+    "STATECHANGE_MAP",
+    "STATE_CHANGE_BARRIER_UPDATE",
+    "STATE_CHANGE_STUN_BREAK",
     "EvtcBaseError",
     "EvtcParseError",
     "EvtcParser",
     "PythonEvtcParser",
     "UnsupportedVersionError",
     "__version__",
+    "dispatch_statechange",
     "read_zevtc_archive",
     "read_zevtc_bytes",
 ]

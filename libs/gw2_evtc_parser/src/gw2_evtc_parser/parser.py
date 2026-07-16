@@ -80,6 +80,7 @@ from gw2_core import (
     Skill,
 )
 from gw2_evtc_parser.exceptions import EvtcParseError
+from gw2_evtc_parser.statechange_dispatch import dispatch_statechange
 
 # Module-level logger for soft warnings (e.g. unrecognised arcdps
 # account_name format). Library consumers control verbosity via the
@@ -437,6 +438,27 @@ class PythonEvtcParser:
             # may use it for 90%-threshold markers on Removals).
             cursor += EVENT_SIZE
             if is_statechange != 0:
+                # WAVE-8 v0.11.0 Blocker A.4.1 (see
+                # ``plans/WAVE-8-parser-side.md`` §A.4.1): the upstream
+                # filter ``if is_statechange != 0: continue`` is REPLACED
+                # with a dispatch call to
+                # :func:`statechange_dispatch.dispatch_statechange`.
+                # The dispatch table maps the arcdps ``is_statechange``
+                # byte (per :file:`docs/statechange-ids.md`) to a
+                # Pydantic event constructor -- currently StunBreak
+                # (byte 56) + Barrier (byte 38). Unmapped kinds return
+                # ``None`` so the filter continues to suppress them at
+                # the byte boundary (backward compat preserved).
+                statechange_event = dispatch_statechange(
+                    is_statechange=is_statechange,
+                    time_ms=time_ms,
+                    src_agent=src_agent,
+                    dst_agent=dst_agent,
+                    value=value,
+                    skill_id=skill_id,
+                )
+                if statechange_event is not None:
+                    yield statechange_event
                 continue
             # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11, commit
             # ``e13ab3b``). Predicate: ``is_buffremove`` byte in the
