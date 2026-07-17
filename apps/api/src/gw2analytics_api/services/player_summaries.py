@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
@@ -31,7 +32,33 @@ def _persist_player_summaries(  # noqa: PLR0912
 
     skill_name_map: dict[int, str | None] = {int(s.skill_id): s.name for s in orm_fight.skills}
 
-    per_account: dict[str, dict[str, int | str]] = {}
+    @dataclass(slots=True)
+    class _SummaryBucket:
+        """Mutable per-account summary totals."""
+
+        damage: int = 0
+        healing: int = 0
+        strip: int = 0
+        power: int = 0
+        condi: int = 0
+        name: str = ""
+        prof: int = 0
+        elite: int = 0
+
+    def _make_bucket(agent: OrmFightAgent) -> _SummaryBucket:
+        """Return a fresh zero-totals summary bucket for ``agent``."""
+        return _SummaryBucket(
+            name=_sanitize_name(agent.name),
+            prof=int(agent.profession),
+            elite=int(agent.elite_spec),
+        )
+
+    per_account: dict[str, _SummaryBucket] = {}
+    # Hoist globals / method lookups to local variables so the
+    # per-event hot loop pays local-variable cost only.
+    _known_condi_names = KNOWN_CONDI_NAMES
+    _skill_name_map_get = skill_name_map.get
+
     # v0.10.11 fix for test_uploads_e2e::test_players_list_returns_accounts_present_in_fight:
     # ONLY when ``events`` is empty, pre-seed per_account with one
     # zero-totals bucket per attending player agent. Pre-fix, the
@@ -52,16 +79,7 @@ def _persist_player_summaries(  # noqa: PLR0912
             account = agent.account_name
             assert account is not None  # noqa: S101  -- narrowed by source_map filter
             if account not in per_account:
-                per_account[account] = {
-                    "damage": 0,
-                    "healing": 0,
-                    "strip": 0,
-                    "power": 0,
-                    "condi": 0,
-                    "name": _sanitize_name(agent.name),
-                    "prof": int(agent.profession),
-                    "elite": int(agent.elite_spec),
-                }
+                per_account[account] = _make_bucket(agent)
 
     for event in events:
         evt_agent = source_map.get(event.source_agent_id)
@@ -69,32 +87,24 @@ def _persist_player_summaries(  # noqa: PLR0912
             continue
         account = evt_agent.account_name
         assert account is not None  # noqa: S101
-        if account in per_account:
-            bucket: dict[str, int | str] = per_account[account]
-            bucket["name"] = _sanitize_name(evt_agent.name)
-        else:
-            bucket = {
-                "damage": 0,
-                "healing": 0,
-                "strip": 0,
-                "power": 0,
-                "condi": 0,
-                "name": _sanitize_name(evt_agent.name),
-                "prof": int(evt_agent.profession),
-                "elite": int(evt_agent.elite_spec),
-            }
-            per_account[account] = bucket
+        if account not in per_account:
+            per_account[account] = _make_bucket(evt_agent)
+        bucket = per_account[account]
+
+        # Inline event application to avoid per-event function-call
+        # overhead in this hot loop. ``isinstance`` is required because
+        # the event types inherit from ``Event``.
         if isinstance(event, DamageEvent):
-            bucket["damage"] = int(bucket["damage"]) + event.damage
-            skill_name = skill_name_map.get(event.skill_id)
-            if skill_name in KNOWN_CONDI_NAMES:
-                bucket["condi"] = int(bucket["condi"]) + event.damage
+            bucket.damage += event.damage
+            skill_name = _skill_name_map_get(event.skill_id)
+            if skill_name in _known_condi_names:
+                bucket.condi += event.damage
             else:
-                bucket["power"] = int(bucket["power"]) + event.damage
+                bucket.power += event.damage
         elif isinstance(event, HealingEvent):
-            bucket["healing"] = int(bucket["healing"]) + event.healing
+            bucket.healing += event.healing
         elif isinstance(event, BuffRemovalEvent):
-            bucket["strip"] = int(bucket["strip"]) + event.buff_removal
+            bucket.strip += event.buff_removal
 
     if not per_account and source_map:
         logger.warning(
@@ -121,25 +131,25 @@ def _persist_player_summaries(  # noqa: PLR0912
             )
             continue
         detected_role, detected_tags = detect_role_lite(
-            total_damage=int(bucket["damage"]),
-            total_healing=int(bucket["healing"]),
-            total_buff_removal=int(bucket["strip"]),
-            profession_int=int(bucket["prof"]),
-            elite_spec_int=int(bucket["elite"]),
+            total_damage=bucket.damage,
+            total_healing=bucket.healing,
+            total_buff_removal=bucket.strip,
+            profession_int=bucket.prof,
+            elite_spec_int=bucket.elite,
         )
         db.add(
             OrmFightPlayerSummary(
                 fight_id=orm_fight.id,
                 account_name=sanitized_account,
-                name=bucket["name"],
-                profession=int(bucket["prof"]),
-                elite_spec=int(bucket["elite"]),
-                total_damage=int(bucket["damage"]),
-                total_healing=int(bucket["healing"]),
-                total_buff_removal=int(bucket["strip"]),
+                name=bucket.name,
+                profession=bucket.prof,
+                elite_spec=bucket.elite,
+                total_damage=bucket.damage,
+                total_healing=bucket.healing,
+                total_buff_removal=bucket.strip,
                 detected_role=detected_role,
                 detected_tags=detected_tags,
-                power_damage=int(bucket.get("power", 0)),
-                condi_damage=int(bucket.get("condi", 0)),
+                power_damage=bucket.power,
+                condi_damage=bucket.condi,
             ),
         )

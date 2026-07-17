@@ -37,8 +37,17 @@ import { appGridTheme } from "./ag-grid-setup";
 import type { PlayerListRow } from "@/lib/api";
 import type { CsvColumn } from "@/lib/csv";
 import { CsvDownloadButton } from "./CsvDownloadButton";
+import {
+  EMPTY_STYLE,
+  FLEX_COLUMN_STYLE,
+  FLEX_END_STYLE,
+  gridContainerStyle,
+  LINK_STYLE,
+} from "@/shared/styles";
 
 const GRID_HEIGHT_PX = 480;
+
+const GRID_CONTAINER_STYLE = gridContainerStyle(GRID_HEIGHT_PX);
 
 /**
  * CSV column spec for the ``/players`` paginated list. The order
@@ -84,7 +93,7 @@ export function PlayersGrid({
           return (
             <a
               href={`/players/${encodeURIComponent(value)}`}
-              style={{ color: "var(--accent)" }}
+              style={LINK_STYLE}
             >
               {value}
             </a>
@@ -144,30 +153,17 @@ export function PlayersGrid({
   );
 
   if (rows.length === 0) {
-    return (
-      <div
-        style={{
-          padding: "12px 16px",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          color: "var(--foreground)",
-          opacity: 0.7,
-          fontSize: 14,
-        }}
-      >
-        No players in the cross-fight roll-up.
-      </div>
-    );
+    return <div style={EMPTY_STYLE}>No players in the cross-fight roll-up.</div>;
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+    <div style={FLEX_COLUMN_STYLE}>
       {filename ? (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={FLEX_END_STYLE}>
           <CsvDownloadButton rows={rows} columns={CSV_COLUMNS} filename={filename} />
         </div>
       ) : null}
-      <div style={{ height: GRID_HEIGHT_PX, width: "100%" }}>
+      <div style={GRID_CONTAINER_STYLE}>
         <AgGridReact<PlayerListRow>
           theme={appGridTheme}
           rowData={rows}

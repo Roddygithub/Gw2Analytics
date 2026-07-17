@@ -57,7 +57,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from itertools import pairwise
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -179,17 +181,20 @@ class CrossAccountTimelineAggregator:
         (the analyst sees the most-recent char-name on the
         chart label).
         """
+        # ``contributions`` is already the per-account iterable
+        # (the caller's ``per_account_contributions[account_name]``),
+        # so no account filter is needed here.
         sorted_contributions = sorted(
-            (c for c in contributions if c.account_name == account_name),
+            contributions,
             key=lambda c: (
                 fight_id_to_started[c.fight_id],
                 c.fight_id,
             ),
             reverse=True,
         )
-        last_seen_name = ""
-        for c in sorted_contributions:
-            last_seen_name = c.name
+        # The list is sorted recency-first, so the most recent
+        # contribution (if any) is the first element.
+        last_seen_name = sorted_contributions[0].name if sorted_contributions else ""
         if bucket == "day":
             points = _day_bucketed_points(sorted_contributions, fight_id_to_started, tz)
         else:
@@ -221,18 +226,20 @@ class CrossAccountTimelineAggregator:
         here -- adding it would be a tautological guard.
         """
         for s in series_list:
-            if (
-                s.points
-                and sorted(
-                    s.points,
-                    key=lambda p: (p.started_at, p.fight_id),
-                    reverse=True,
-                )
-                != s.points
-            ):
-                raise ValueError(
-                    f"series {s.account_name!r} not recency-first sorted: {s.points!r}"
-                )
+            for prev, curr in pairwise(s.points):
+                if (prev.started_at, prev.fight_id) < (curr.started_at, curr.fight_id):
+                    raise ValueError(
+                        f"series {s.account_name!r} not recency-first sorted: {s.points!r}"
+                    )
+
+
+@dataclass(slots=True)
+class _DayTotals:
+    """Mutable per-day accumulator for cross-account timeline bucketing."""
+
+    damage: int = 0
+    healing: int = 0
+    strip: int = 0
 
 
 def _day_bucketed_points(
@@ -250,9 +257,7 @@ def _day_bucketed_points(
     day-bucketed point is the most-recent fight_id of the day (the
     deterministic recency-first tiebreaker).
     """
-    day_totals: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"damage": 0, "healing": 0, "strip": 0},
-    )
+    day_totals: dict[str, _DayTotals] = defaultdict(_DayTotals)
     day_first_fight: dict[str, str] = {}
     day_first_started: dict[str, datetime] = {}
     for c in sorted_contributions:
@@ -261,16 +266,17 @@ def _day_bucketed_points(
         day_key = aware_utc.astimezone(tz).date().isoformat()
         day_first_fight.setdefault(day_key, c.fight_id)
         day_first_started.setdefault(day_key, started_at)
-        day_totals[day_key]["damage"] += c.total_damage
-        day_totals[day_key]["healing"] += c.total_healing
-        day_totals[day_key]["strip"] += c.total_buff_removal
+        totals = day_totals[day_key]
+        totals.damage += c.total_damage
+        totals.healing += c.total_healing
+        totals.strip += c.total_buff_removal
     return [
         CrossAccountTimelinePoint(
             fight_id=day_first_fight[day_key],
             started_at=_combine_day_midnight(day_first_started[day_key], tz),
-            total_damage=day_totals[day_key]["damage"],
-            total_healing=day_totals[day_key]["healing"],
-            total_buff_removal=day_totals[day_key]["strip"],
+            total_damage=day_totals[day_key].damage,
+            total_healing=day_totals[day_key].healing,
+            total_buff_removal=day_totals[day_key].strip,
         )
         for day_key in day_totals
     ]

@@ -21,7 +21,7 @@ pattern).
 This module does NOT do uptime arithmetic (the
 :class:`~gw2_analytics.buff_uptime.BuffState` pattern in
 :mod:`gw2_analytics.buff_uptime` is the SSoT for that); the
-Combat readout's Boons table is COUNTS + RATES only. ``remove``
+Combat readout Boons table is COUNTS + RATES only. ``remove``
 events (``kind == "remove_single"`` / ``"remove_all"``) are
 state-maintenance for uptime calculation -- the Combat readout
 boon counters ignore them (they reflect apply-counts).
@@ -134,6 +134,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from itertools import pairwise
 from typing import Final
 
@@ -247,6 +248,17 @@ class PlayerBoonsRow(BaseModel):
     name: str | None = None
 
 
+@dataclass(slots=True)
+class _PlayerAccumulator:
+    """Mutable accumulator for one player's boon statistics."""
+
+    boons_out: int = 0
+    boons_in: int = 0
+    strips_received_in: int = 0
+    fixed_boons: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    other_boons: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+
+
 class PlayerBoonsAggregator:
     """Stateless aggregator: boon-apply events -> per-player boons roll-up rows.
 
@@ -300,21 +312,14 @@ class PlayerBoonsAggregator:
         # is BOTH a boon-provider AND a boon-receiver gets BOTH totals.
         # The 6 fixed counter buckets partition the ``boons_out`` per
         # player; ``other_boons_out`` captures the rest.
-        fixed_by_player: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        other_by_player: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        total_out_by_player: dict[int, int] = defaultdict(int)
-        total_in_by_player: dict[int, int] = defaultdict(int)
-        # Phase 6 v2 SCAFFOLD: target-side strip count from the
-        # buff-removal stream. Player is the TARGET (strippee)
-        # -- target-side attribution. The buff-removal event has
-        # ``source_agent_id`` (the stripper) and
-        # ``target_agent_id`` (the strippee); we count by
-        # ``target_agent_id`` so a player who was stripped 5x
-        # surfaces ``strips_received_in=5``. Empty iterable SCAFFOLD
-        # path: every player has ``strips_received_in=0``.
-        strips_received_by_player: dict[int, int] = defaultdict(int)
-        grand_total_out = 0
-        grand_total_in = 0
+        metrics_by_player: dict[int, _PlayerAccumulator] = defaultdict(_PlayerAccumulator)
+
+        # Hoist the name-map fallback outside the hot loop so the
+        # per-event path pays the dict-allocation cost exactly once.
+        safe_name_map = name_map or {}
+        name_map_get = safe_name_map.get
+        metrics_get = metrics_by_player.__getitem__
+        known_column_get = KNOWN_BOON_ID_TO_COLUMN.get
 
         for e in events:
             # Pre-filter: count ``kind == "apply"`` only. The
@@ -324,27 +329,25 @@ class PlayerBoonsAggregator:
             # Boons counter is apply-counts only.
             if e.kind != "apply":
                 continue
-            total_out_by_player[e.source_agent_id] += 1
-            total_in_by_player[e.target_agent_id] += 1
-            grand_total_out += 1
-            grand_total_in += 1
-            if e.skill_id in KNOWN_BOON_IDS:
-                # Partition into the matching fixed bucket for the
-                # SOURCE agent (the boon creator). The mapping
-                # ``KNOWN_BOON_ID_TO_COLUMN[skill_id]`` returns the
-                # exact Pydantic field name on the row, so a
-                # ``setattr`` round-trip at instantiation avoids a
-                # 6-way match arm.
-                column = KNOWN_BOON_ID_TO_COLUMN[e.skill_id]
-                fixed_by_player[e.source_agent_id][column] += 1
+            source_id = e.source_agent_id
+            target_id = e.target_agent_id
+            source_metrics = metrics_get(source_id)
+            source_metrics.boons_out += 1
+            metrics_get(target_id).boons_in += 1
+            # Use a single ``get`` lookup instead of ``in`` + ``[]``
+            # to decide whether this skill_id maps to a fixed bucket.
+            column = known_column_get(e.skill_id)
+            if column is not None:
+                source_metrics.fixed_boons[column] += 1
             else:
                 # Key ``other_boons_out`` by HUMAN-READABLE name
                 # (resolved via ``name_map`` if present, else the
                 # ``"Unknown (<id>)"`` sentinel). The skill_id-based
                 # sentinel is a stable string for round-trip tests.
-                resolved_name = (name_map or {}).get(e.skill_id)
-                key = resolved_name if resolved_name is not None else f"Unknown ({e.skill_id})"
-                other_by_player[e.source_agent_id][key] += 1
+                skill_id = e.skill_id
+                resolved_name = name_map_get(skill_id)
+                key = resolved_name if resolved_name is not None else f"Unknown ({skill_id})"
+                source_metrics.other_boons[key] += 1
 
         # Phase 6 v2 SCAFFOLD: target-side strip count from the
         # buff-removal stream. Pre-filter at the aggregator
@@ -357,39 +360,44 @@ class PlayerBoonsAggregator:
         # event with ``target_agent_id > 0`` into the row.
         for bre in buff_removal_events:
             if bre.target_agent_id > 0:
-                strips_received_by_player[bre.target_agent_id] += 1
+                metrics_by_player[bre.target_agent_id].strips_received_in += 1
+
+        # Derive the source/target apply totals from the accumulated
+        # per-player metrics rather than tracking them inside the hot
+        # loop. This saves two integer additions per input event.
+        grand_total_out = sum(m.boons_out for m in metrics_by_player.values())
+        grand_total_in = sum(m.boons_in for m in metrics_by_player.values())
 
         rate_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_RATE
         # ``name_map.get(agent_id)`` returns ``None`` for missing keys
         # AND for explicit ``None`` values -- both cases surface as
         # ``name=None`` on the row, which is the intended
         # "unresolved" sentinel. No need to distinguish.
-        row_names = name_map or {}
+        row_names = safe_name_map
         # Phase 6 v2 SCAFFOLD row-builder patch (close-out): UNITE source +
         # target keys so a pure-target agent (the player RECEIVING a boon
         # but never APPLYING one) surfaces a row. Pre-fix, the loop
         # iterated over ``total_out_by_player`` only, so a target-only
         # agent was silently dropped -- ``sum(row.boons_in) !=
         # grand_total_in`` would fire at the invariants check.
-        all_players_sorted = sorted(set(total_out_by_player) | set(total_in_by_player))
         rows = [
             PlayerBoonsRow(
                 agent_id=player,
-                boons_out=total_out_by_player[player],
-                boons_in=total_in_by_player[player],
-                boons_out_rate=total_out_by_player[player] * rate_factor,
-                boons_in_rate=total_in_by_player[player] * rate_factor,
-                stability_out=fixed_by_player[player]["stability_out"],
-                alacrity_out=fixed_by_player[player]["alacrity_out"],
-                resistance_out=fixed_by_player[player]["resistance_out"],
-                aegis_out=fixed_by_player[player]["aegis_out"],
-                superspeed_out=fixed_by_player[player]["superspeed_out"],
-                stealth_out=fixed_by_player[player]["stealth_out"],
-                other_boons_out=dict(other_by_player[player]),
-                strips_received_in=strips_received_by_player[player],
+                boons_out=metrics.boons_out,
+                boons_in=metrics.boons_in,
+                boons_out_rate=metrics.boons_out * rate_factor,
+                boons_in_rate=metrics.boons_in * rate_factor,
+                stability_out=metrics.fixed_boons["stability_out"],
+                alacrity_out=metrics.fixed_boons["alacrity_out"],
+                resistance_out=metrics.fixed_boons["resistance_out"],
+                aegis_out=metrics.fixed_boons["aegis_out"],
+                superspeed_out=metrics.fixed_boons["superspeed_out"],
+                stealth_out=metrics.fixed_boons["stealth_out"],
+                other_boons_out=dict(metrics.other_boons),
+                strips_received_in=metrics.strips_received_in,
                 name=row_names.get(player),
             )
-            for player in all_players_sorted
+            for player, metrics in metrics_by_player.items()
         ]
         # Sort: highest boons_out first; ties broken by ascending agent_id.
         rows.sort(key=lambda r: (-r.boons_out, r.agent_id))

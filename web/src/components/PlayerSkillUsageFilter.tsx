@@ -39,6 +39,8 @@
  *   ``fetchCached`` cache key).
  */
 import { useRouter, useSearchParams } from "next/navigation";
+import { LABEL_STYLE, SELECT_STYLE } from "@/shared/styles";
+import React from "react";
 
 interface PlayerAgentOption {
   /** Account name (the URL value, e.g. ``"TestAccount.1234"``). */
@@ -47,7 +49,16 @@ interface PlayerAgentOption {
   label: string;
 }
 
-export function PlayerSkillUsageFilter({
+const PLAYER_SKILL_SELECT_STYLE: React.CSSProperties = {
+  ...SELECT_STYLE,
+  padding: "6px 10px",
+  fontSize: 14,
+  background: "var(--bg-elev)",
+  color: "inherit",
+  border: "1px solid var(--border)",
+};
+
+function PlayerSkillUsageFilterComponent({
   currentValue,
   playerAgents,
   fightId,
@@ -100,29 +111,14 @@ export function PlayerSkillUsageFilter({
   }
 
   return (
-    <label
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        fontSize: 14,
-        opacity: 0.85,
-      }}
-    >
+    <label style={LABEL_STYLE}>
       Filter by player:
       <select
         data-testid="player-skill-filter"
         aria-label="Filter per-skill attribution by player"
         value={currentValue ?? ""}
         onChange={handleChange}
-        style={{
-          padding: "6px 10px",
-          fontSize: 14,
-          background: "var(--bg-elev)",
-          color: "inherit",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-        }}
+        style={PLAYER_SKILL_SELECT_STYLE}
       >
         <option value="">All players</option>
         {playerAgents.map((opt) => (
@@ -134,3 +130,5 @@ export function PlayerSkillUsageFilter({
     </label>
   );
 }
+
+export const PlayerSkillUsageFilter = React.memo(PlayerSkillUsageFilterComponent);

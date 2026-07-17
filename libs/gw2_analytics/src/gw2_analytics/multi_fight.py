@@ -53,6 +53,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
+from itertools import pairwise
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -65,6 +67,16 @@ logger = logging.getLogger(__name__)
 # ``logger.warning(...)`` calls don't fall through to the root
 # logger in downstream apps that haven't configured logging yet.
 logger.addHandler(logging.NullHandler())
+
+
+@dataclass(slots=True)
+class _AccountState:
+    """Mutable per-account state for the multi-fight roll-up."""
+
+    profession: Profession
+    elite: EliteSpec
+    name: str = ""
+    attendance: int = 0
 
 # ---------------------------------------------------------------------------
 # Models
@@ -142,10 +154,7 @@ class MultiFightAggregator:
         accepted_fight_ids: list[str] = []
         total_agents = 0
         # Per-account rollup state.
-        first_seen_profession: dict[str, Profession] = {}
-        first_seen_elite: dict[str, EliteSpec] = {}
-        last_seen_name: dict[str, str] = {}
-        player_attendance: dict[str, int] = {}
+        state_by_account: dict[str, _AccountState] = {}
 
         for fight in fights:
             if not fight.id:
@@ -192,21 +201,26 @@ class MultiFightAggregator:
                 if acct in seen_accounts_this_fight:
                     continue
                 seen_accounts_this_fight.add(acct)
-                first_seen_profession.setdefault(acct, c.profession)
-                first_seen_elite.setdefault(acct, c.elite)
-                last_seen_name[acct] = c.name
-                player_attendance[acct] = player_attendance.get(acct, 0) + 1
+                state = state_by_account.get(acct)
+                if state is None:
+                    state = _AccountState(
+                        profession=c.profession,
+                        elite=c.elite,
+                    )
+                    state_by_account[acct] = state
+                state.name = c.name
+                state.attendance += 1
 
         combatant_rollups = sorted(
             [
                 CombatantRollup(
                     account_name=acct,
-                    name=last_seen_name.get(acct, ""),
-                    profession=first_seen_profession[acct],
-                    elite=first_seen_elite[acct],
-                    player_attendance=count,
+                    name=state.name,
+                    profession=state.profession,
+                    elite=state.elite,
+                    player_attendance=state.attendance,
                 )
-                for acct, count in player_attendance.items()
+                for acct, state in state_by_account.items()
             ],
             key=lambda c: c.account_name,
         )
@@ -214,7 +228,7 @@ class MultiFightAggregator:
         aggregate = MultiFightAggregate(
             fight_ids=sorted(accepted_fight_ids),
             total_agents=total_agents,
-            total_players=sum(player_attendance.values()),
+            total_players=sum(state.attendance for state in state_by_account.values()),
             combatant_rollups=combatant_rollups,
         )
 
@@ -224,13 +238,17 @@ class MultiFightAggregator:
     @staticmethod
     def _check_invariants(agg: MultiFightAggregate) -> None:
         """Raise ``ValueError`` if any cross-field invariant is violated."""
-        if sorted(agg.fight_ids) != agg.fight_ids:
-            msg = f"fight_ids not strictly ascending: {agg.fight_ids!r}"
-            raise ValueError(msg)
-        names = [c.account_name for c in agg.combatant_rollups]
-        if names != sorted(names):
-            msg = f"combatant_rollups not sorted by account_name: {names!r}"
-            raise ValueError(msg)
+        for prev_id, curr_id in pairwise(agg.fight_ids):
+            if prev_id >= curr_id:
+                msg = f"fight_ids not strictly ascending: {agg.fight_ids!r}"
+                raise ValueError(msg)
+        for prev, curr in pairwise(agg.combatant_rollups):
+            if prev.account_name >= curr.account_name:
+                msg = (
+                    f"combatant_rollups not sorted by account_name: "
+                    f"{prev.account_name!r} >= {curr.account_name!r}"
+                )
+                raise ValueError(msg)
         for c in agg.combatant_rollups:
             if c.player_attendance > len(agg.fight_ids):
                 msg = (

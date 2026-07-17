@@ -81,15 +81,15 @@ yet).
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
-from itertools import pairwise
+from dataclasses import dataclass
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gw2_analytics._invariants import check_desc_asc_ordering
 from gw2_core import HealingEvent, StunBreakEvent
-from gw2_core._scaffold import default_barrier_portion_from_healing
 
 # HPS sentinel when ``duration_s <= 0``: invalid (zero/negative)
 # duration collapses to 0.0 rather than raising -- the canonical
@@ -203,6 +203,16 @@ class PlayerHealRow(BaseModel):
     name: str | None = None
 
 
+@dataclass(slots=True)
+class _HealAccumulator:
+    """Mutable accumulator for one source agent's healing statistics."""
+
+    total_healing: int = 0
+    heal_count: int = 0
+    barrier: int = 0
+    stun_breaks: int = 0
+
+
 class PlayerHealAggregator:
     """Stateless aggregator: heal events -> per-player HPS roll-up rows.
 
@@ -236,10 +246,10 @@ class PlayerHealAggregator:
         per-event ``barrier`` portion of a heal hit (mirrors the
         damage-side :func:`~gw2_analytics.player_defense.PlayerDefenseAggregator.aggregate`'s
         ``barrier_portion_getter``). When ``None`` (the canonical
-        v0.10.23 SCAFFOLD path), the substitute
-        :func:`gw2_core._scaffold.default_barrier_portion_from_healing`
-        returns ``0`` -- the no-barrier fallback that preserves
-        the pre-Phase-6-v2 wire shape where
+        v0.10.23 SCAFFOLD path), the hot loop skips the barrier
+        call entirely and the ``barrier`` accumulator stays at
+        ``0`` -- the no-barrier fallback that preserves the
+        pre-Phase-6-v2 wire shape where
         ``barrier_total=0, barrier_ps=0.0``. Phase 6 v2 wires the
         parser-side barrier lookup; the SCAFFOLD absorbs the swap
         via one constructor change.
@@ -261,44 +271,34 @@ class PlayerHealAggregator:
             msg = f"duration_s must be >= 0, got {duration_s!r}"
             raise ValueError(msg)
 
-        # SCAFFOLD substitution: when ``barrier_portion_getter is
-        # None``, substitute the canonical SCAFFOLD default so the
-        # aggregator's hot loop never branches on "did the caller
-        # wire the getter?". One-line substitute vs an if/else per
-        # event.
-        barrier = (
-            barrier_portion_getter
-            if barrier_portion_getter is not None
-            else default_barrier_portion_from_healing
-        )
+        stats_by_source: dict[int, _HealAccumulator] = defaultdict(_HealAccumulator)
 
-        total_by_source: dict[int, int] = defaultdict(int)
-        count_by_source: dict[int, int] = defaultdict(int)
-        barrier_by_source: dict[int, int] = defaultdict(int)
-        # Tour 6 v0.10.24 close-out: per-source-agent stun-break
-        # counter. Actor-side attribution (the player who broke
-        # the stun gets the credit). The empty-iterable
-        # ``stun_break_events`` SCAFFOLD path leaves every row at
-        # 0 -- the canonical pre-Tour-6 wire shape.
-        stun_breaks_by_source: dict[int, int] = defaultdict(int)
-        grand_total = 0
-        for e in events:
-            total_by_source[e.source_agent_id] += e.healing
-            count_by_source[e.source_agent_id] += 1
-            grand_total += e.healing
-            # Per-event SCAFFOLD barrier: the SCAFFOLD path
-            # consumes the heal hit once, returning 0; the
-            # post-Phase-6-v2 path queries the parser-side barrier
-            # table (shared with the damage-side barrier table +
-            # the per-heal barrier side). The hot-loop cost is one
-            # C-level function call per event.
-            barrier_by_source[e.source_agent_id] += barrier(e)
+        # Hoist the barrier-getter branch outside the hot loop so
+        # the canonical SCAFFOLD path (``barrier_portion_getter is
+        # None``) avoids a Python function call per event. The
+        # explicit getter path pays the call cost only when a real
+        # parser-side side-table is wired.
+        if barrier_portion_getter is not None:
+            barrier = barrier_portion_getter
+            for e in events:
+                acc = stats_by_source[e.source_agent_id]
+                acc.total_healing += e.healing
+                acc.heal_count += 1
+                acc.barrier += barrier(e)
+        else:
+            for e in events:
+                acc = stats_by_source[e.source_agent_id]
+                acc.total_healing += e.healing
+                acc.heal_count += 1
+
         # Tour 6 v0.10.24 close-out: per-source-agent stun-break
         # counter loop. Actor-side attribution (the player who
         # broke the stun is encoded as ``source_agent_id`` per the
         # actor-only :class:`~gw2_core.StunBreakEvent` shape).
-        for sb in stun_break_events:
-            stun_breaks_by_source[sb.source_agent_id] += 1
+        # Use C-level Counter for the pure-counting stream.
+        stun_break_counts = Counter(sb.source_agent_id for sb in stun_break_events)
+        for agent_id, count in stun_break_counts.items():
+            stats_by_source[agent_id].stun_breaks = count
 
         hps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_HPS
         # ``name_map or {}`` -- see the parallel branch in
@@ -306,25 +306,19 @@ class PlayerHealAggregator:
         # for the rationale (``dict.get`` returns ``None`` for
         # missing keys AND for explicit ``None`` values; both
         # surface as the ``name=None`` sentinel on the row).
-        # Tour 6 v0.10.24 close-out: union keys so a player who broke
-        # stuns WITHOUT healing anyone still surfaces a row (design
-        # doc §4 -- Breakstunt lives on the Heal aspect; without the
-        # union the conservation invariant below catches the silent
-        # drop). ``count_by_source.get(source, 1)`` satisfies the
-        # ``heal_count`` ``ge=1`` Pydantic constraint with the
-        # canonical sentinel "1 = breakstunt-only player".
+        safe_name_map = name_map or {}
         rows = [
             PlayerHealRow(
                 source_agent_id=source,
-                total_healing=total_by_source.get(source, 0),
-                heal_count=count_by_source.get(source, 1),
-                hps=total_by_source.get(source, 0) * hps_factor,
-                barrier_total=barrier_by_source.get(source, 0),
-                barrier_ps=barrier_by_source.get(source, 0) * hps_factor,
-                stun_breaks=stun_breaks_by_source.get(source, 0),
-                name=(name_map or {}).get(source),
+                total_healing=acc.total_healing,
+                heal_count=acc.heal_count if acc.heal_count > 0 else 1,
+                hps=acc.total_healing * hps_factor,
+                barrier_total=acc.barrier,
+                barrier_ps=acc.barrier * hps_factor,
+                stun_breaks=acc.stun_breaks,
+                name=safe_name_map.get(source),
             )
-            for source in set(total_by_source) | set(stun_breaks_by_source)
+            for source, acc in stats_by_source.items()
         ]
         # Sort: highest total_healing first; ties broken by ascending source_agent_id.
         rows.sort(key=lambda r: (-r.total_healing, r.source_agent_id))
@@ -332,18 +326,21 @@ class PlayerHealAggregator:
         # Tour 6 v0.10.24 close-out: the stun-break conservation
         # invariant (sum of per-row stun_breaks must equal the
         # total :class:`~gw2_core.StunBreakEvent` input count).
-        # We materialise the iterable ONCE here so the invariant
-        # check operates on the same length the hot loop saw -- a
-        # caller's lazy generator that yields additional events
-        # across iterations would otherwise leak silent drift.
-        # Tour 6 v0.10.24 close-out: the stun-break conservation
-        # invariant (sum of per-row stun_breaks must equal the
-        # total :class:`~gw2_core.StunBreakEvent` input count).
         # We sum the per-source-agent counter map because the
         # :class:`~gw2_core.StunBreakEvent` shape is actor-only
         # (one event = ``+1`` to the source-agent's counter).
-        expected_stun_break_total = sum(stun_breaks_by_source.values())
-        self._check_invariants(rows, grand_total, duration_s, expected_stun_break_total)
+        expected_stun_break_total = sum(
+            acc.stun_breaks for acc in stats_by_source.values()
+        )
+        # The invariant total is derived from the aggregated rows
+        # rather than accumulated in the hot loop, saving one integer
+        # addition per input event.
+        self._check_invariants(
+            rows,
+            sum(r.total_healing for r in rows),
+            duration_s,
+            expected_stun_break_total,
+        )
         return rows
 
     @staticmethod
@@ -353,10 +350,10 @@ class PlayerHealAggregator:
         duration_s: float,
         # Reviewer #1 fix: drop the `= 0` default. The aggregator
         # always passes the actual total (derived from
-        # ``sum(stun_breaks_by_source.values())`` upstream); making
-        # this arg required eliminates a silent-failure trap if a
-        # future caller invokes ``_check_invariants`` directly
-        # without thinking about the parm.
+        # ``sum(acc.stun_breaks for acc in stats_by_source.values())``
+        # upstream); making this arg required eliminates a
+        # silent-failure trap if a future caller invokes
+        # ``_check_invariants`` directly without thinking about the parm.
         expected_stun_break_total: int,
     ) -> None:
         """Raise ``ValueError`` if any cross-field invariant is violated.
@@ -427,22 +424,13 @@ class PlayerHealAggregator:
                 raise ValueError(msg)
         # Pydantic field constraints already guarantee ``ge=0`` for total_healing;
         # the cross-row ordering invariant is the only ordering contract.
-        for prev, curr in pairwise(rows):
-            if prev.total_healing < curr.total_healing:
-                msg = (
-                    f"rows not ordered by (total_healing DESC, "
-                    f"source_agent_id ASC): {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
-            if (
-                prev.total_healing == curr.total_healing
-                and prev.source_agent_id >= curr.source_agent_id
-            ):
-                msg = (
-                    f"tie on total_healing not broken by "
-                    f"source_agent_id ASC: {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
+        check_desc_asc_ordering(
+            rows,
+            primary_key=lambda r: r.total_healing,
+            secondary_key=lambda r: r.source_agent_id,
+            primary_label="total_healing",
+            secondary_label="source_agent_id",
+        )
 
 
 __all__ = ["HealBarrierGetter", "PlayerHealAggregator", "PlayerHealRow"]

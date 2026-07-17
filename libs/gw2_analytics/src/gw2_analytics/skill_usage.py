@@ -60,6 +60,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from itertools import pairwise
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -82,6 +83,16 @@ class SkillUsageRow(BaseModel):
     total_damage: int = Field(..., ge=0)
     total_healing: int = Field(..., ge=0)
     total_buff_removal: int = Field(..., ge=0)
+
+
+@dataclass(slots=True)
+class _SkillStats:
+    """Mutable accumulator for one skill's combat contribution."""
+
+    damage: int = 0
+    healing: int = 0
+    strip: int = 0
+    hits: int = 0
 
 
 class SkillUsageAggregator:
@@ -114,41 +125,41 @@ class SkillUsageAggregator:
         ``skill_id`` are rendered as ``skill_id == <raw>`` +
         ``skill_name == ""`` rather than dropped.
         """
-        total_damage: dict[int, int] = defaultdict(int)
-        total_healing: dict[int, int] = defaultdict(int)
-        total_strip: dict[int, int] = defaultdict(int)
-        hit_count: dict[int, int] = defaultdict(int)
-        grand_damage = 0
-        grand_healing = 0
-        grand_strip = 0
-        grand_hits = 0
+        stats: dict[int, _SkillStats] = defaultdict(_SkillStats)
 
-        for dmg in damage_events:
-            total_damage[dmg.skill_id] += dmg.damage
-            hit_count[dmg.skill_id] += 1
-            grand_damage += dmg.damage
-            grand_hits += 1
-        for heal in healing_events:
-            total_healing[heal.skill_id] += heal.healing
-            hit_count[heal.skill_id] += 1
-            grand_healing += heal.healing
-            grand_hits += 1
-        for strip in strip_events:
-            total_strip[strip.skill_id] += strip.buff_removal
-            hit_count[strip.skill_id] += 1
-            grand_strip += strip.buff_removal
-            grand_hits += 1
+        for dmg_ev in damage_events:
+            st = stats[dmg_ev.skill_id]
+            st.damage += dmg_ev.damage
+            st.hits += 1
+
+        for heal_ev in healing_events:
+            st = stats[heal_ev.skill_id]
+            st.healing += heal_ev.healing
+            st.hits += 1
+
+        for strip_ev in strip_events:
+            st = stats[strip_ev.skill_id]
+            st.strip += strip_ev.buff_removal
+            st.hits += 1
+
+        # Derive the grand totals from the accumulated per-skill
+        # stats rather than tracking them inside the hot loops. This
+        # saves four integer additions per input event.
+        grand_damage = sum(st.damage for st in stats.values())
+        grand_healing = sum(st.healing for st in stats.values())
+        grand_strip = sum(st.strip for st in stats.values())
+        grand_hits = sum(st.hits for st in stats.values())
 
         rows = [
             SkillUsageRow(
                 skill_id=skill_id,
                 skill_name=skill_id_to_name.get(skill_id, ""),
-                hit_count=hit_count[skill_id],
-                total_damage=total_damage[skill_id],
-                total_healing=total_healing[skill_id],
-                total_buff_removal=total_strip[skill_id],
+                hit_count=st.hits,
+                total_damage=st.damage,
+                total_healing=st.healing,
+                total_buff_removal=st.strip,
             )
-            for skill_id in set(total_damage) | set(total_healing) | set(total_strip)
+            for skill_id, st in stats.items()
         ]
         # Sort: highest total_damage first; ties broken by ascending skill_id.
         rows.sort(key=lambda r: (-r.total_damage, r.skill_id))

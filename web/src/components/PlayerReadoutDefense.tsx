@@ -32,16 +32,11 @@
  * Wave 5 SCAFFOLD shipped but whose parser yield paths remain
  * Phase 6 v2 work.
  */
-import { AgGridReact } from "ag-grid-react";
 import type { ColDef, SortModelItem } from "ag-grid-community";
 
 import type { PlayerReadoutOut } from "@/lib/api";
 
-import {
-  AGENT_ID_TIEBREAKER,
-  AG_GRID_PROPS,
-  SHARED_COLUMNS,
-} from "./PlayerReadoutBase";
+import { PlayerReadoutGrid } from "./PlayerReadoutGrid";
 
 const DEFENSE_COLUMNS: ColDef<PlayerReadoutOut>[] = [
   { field: "defense.damage_taken", headerName: "Damage reçu", width: 130 },
@@ -64,42 +59,13 @@ const DEFENSE_DEFAULT_SORT: SortModelItem[] = [
   { colId: "agent_id", sort: "asc" },
 ];
 
-export function PlayerReadoutDefense({
-  rows,
-}: {
-  rows: PlayerReadoutOut[];
-}) {
-  if (rows.length === 0) {
-    return (
-      <div
-        data-testid="player-readout-defense-empty"
-        style={{
-          padding: "12px 16px",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          color: "var(--foreground)",
-          opacity: 0.7,
-          fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-        }}
-      >
-        No player rows in this readout.
-      </div>
-    );
-  }
-
+export function PlayerReadoutDefense({ rows }: { rows: PlayerReadoutOut[] }) {
   return (
-    <div
-      data-testid="player-readout-defense"
-      style={{ width: "100%" }}
-    >
-      <AgGridReact<PlayerReadoutOut>
-        rowData={rows}
-        columnDefs={[...SHARED_COLUMNS, ...DEFENSE_COLUMNS, AGENT_ID_TIEBREAKER]}
-        defaultColDef={{ comparator: (a, b) => (Number(a ?? 0) - Number(b ?? 0)) || 0 }}
-        {...AG_GRID_PROPS}
-        initialState={{ sort: { sortModel: DEFENSE_DEFAULT_SORT } }}
-        getRowId={(params) => String(params.data.agent_id)}
-      />
-    </div>
+    <PlayerReadoutGrid
+      testId="player-readout-defense"
+      rows={rows}
+      aspectColumns={DEFENSE_COLUMNS}
+      defaultSort={DEFENSE_DEFAULT_SORT}
+    />
   );
 }

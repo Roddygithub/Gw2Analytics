@@ -76,7 +76,7 @@
 
 /* eslint-disable react-refresh/only-export-components */
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { PlayerTimelineLegend } from "@/components/PlayerTimelineLegend";
 
 // ---------------------------------------------------------------------------
@@ -107,6 +107,28 @@ const EMPTY_STYLE: React.CSSProperties = {
   color: "var(--foreground)",
   opacity: 0.7,
   fontSize: 14,
+  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+};
+
+const SECTION_STYLE: React.CSSProperties = {
+  padding: "12px 16px",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  background: "var(--surface)",
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+
+const HEADER_STYLE: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+};
+
+const CAPTION_STYLE: React.CSSProperties = {
+  fontSize: 13,
+  opacity: 0.7,
   fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
 };
 
@@ -202,9 +224,14 @@ export function buildTimelineLayout<
   if (points.length === 0) {
     return null;
   }
-  const maxDamage = Math.max(1, ...points.map((p) => p.series[0]));
-  const maxHealing = Math.max(1, ...points.map((p) => p.series[1]));
-  const maxStrip = Math.max(1, ...points.map((p) => p.series[2]));
+  let maxDamage = 1;
+  let maxHealing = 1;
+  let maxStrip = 1;
+  for (const p of points) {
+    if (p.series[0] > maxDamage) maxDamage = p.series[0];
+    if (p.series[1] > maxHealing) maxHealing = p.series[1];
+    if (p.series[2] > maxStrip) maxStrip = p.series[2];
+  }
   const innerW =
     CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
   const innerH =
@@ -348,6 +375,199 @@ export function formatLogTick(v: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Memoized SVG sub-component
+// ---------------------------------------------------------------------------
+
+interface PointGeometry {
+  key: string;
+  tooltip: string;
+  x: number;
+  damageY: number;
+  healingY: number;
+  stripY: number;
+}
+
+interface TimelineSvgProps {
+  ariaLabel: string;
+  innerW: number;
+  innerH: number;
+  isLog: boolean;
+  ticks: number[];
+  xFor: (i: number) => number;
+  yFor: (v: number, max?: number) => number;
+  damageD: string;
+  healingD: string;
+  stripD: string;
+  pointGeometry: PointGeometry[];
+  xLabelIndices: Set<number>;
+  points: TimelineChartPoint[];
+}
+
+/**
+ * Memoized SVG chart body.
+ *
+ * Isolating the SVG prevents parent re-renders from diffing
+ * the chart's DOM nodes when the underlying data has not
+ * changed. The SVG only re-renders when its props change.
+ */
+const TimelineSvg = memo(function TimelineSvg({
+  ariaLabel,
+  innerW,
+  innerH,
+  isLog,
+  ticks,
+  xFor,
+  yFor,
+  damageD,
+  healingD,
+  stripD,
+  pointGeometry,
+  xLabelIndices,
+  points,
+}: TimelineSvgProps) {
+  return (
+    <svg
+      viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+      width="100%"
+      style={{ display: "block" }}
+      role="img"
+      aria-label={ariaLabel}
+    >
+      <g
+        transform={`translate(${CHART_PADDING.left}, ${CHART_PADDING.top})`}
+      >
+        {/* Y-axis baseline + max tick (single set, since 3 series share a 0-100% scale) */}
+        <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="var(--border)" />
+        <line x1={0} y1={0} x2={0} y2={innerH} stroke="var(--border)" />
+        {/* v0.8.2 of web: Y-axis labels. In ``"linear"`` mode
+            the axis is per-series normalised so the labels
+            are ``0`` + ``100%`` (the series max). In
+            ``"log"`` mode the axis is shared + logarithmic
+            so the labels are decades (``0`` + ``1`` + ``10``
+            + ... up to ``globalMax``). */}
+        {isLog
+          ? ticks.map((tick) => (
+              <text
+                key={`y-${tick}`}
+                x={-8}
+                y={yFor(tick)}
+                textAnchor="end"
+                dominantBaseline="middle"
+                fontSize={10}
+                fill="var(--foreground)"
+                opacity={0.7}
+              >
+                {formatLogTick(tick)}
+              </text>
+            ))
+          : (
+              <>
+                <text
+                  x={-8}
+                  y={0}
+                  textAnchor="end"
+                  dominantBaseline="middle"
+                  fontSize={10}
+                  fill="var(--foreground)"
+                  opacity={0.7}
+                >
+                  100%
+                </text>
+                <text
+                  x={-8}
+                  y={innerH}
+                  textAnchor="end"
+                  dominantBaseline="middle"
+                  fontSize={10}
+                  fill="var(--foreground)"
+                  opacity={0.7}
+                >
+                  0
+                </text>
+              </>
+            )}
+
+        {/* 3 polylines: damage (accent), healing (foreground @ 0.7), strip (warm orange) */}
+        <path
+          d={damageD}
+          fill="none"
+          stroke={DAMAGE_STROKE}
+          strokeWidth={1.5}
+        />
+        <path
+          d={healingD}
+          fill="none"
+          stroke={HEALING_STROKE}
+          strokeWidth={1.5}
+          opacity={0.7}
+        />
+        <path
+          d={stripD}
+          fill="none"
+          stroke={STRIP_STROKE}
+          strokeWidth={1.5}
+        />
+
+        {/* Per-point dots, one set per series. The wrapper
+            owns the React ``key`` (fight_id for the
+            per-account timeline, bucket index for the
+            per-fight timeline) so the base is data-shape
+            agnostic. The SVG ``<title>`` tooltip is
+            pre-formatted by the wrapper; the base just
+            renders the string. A single concatenated
+            string is used (NOT multiple template-string
+            children) so React receives a single string
+            child -- multiple children trigger a hydration
+            mismatch and inflate the DOM with
+            reconciliation wrappers. */}
+        {pointGeometry.map((p) => (
+          <g key={p.key}>
+            <title>{p.tooltip}</title>
+            <circle
+              cx={p.x}
+              cy={p.damageY}
+              r={POINT_RADIUS_PX}
+              fill={DAMAGE_STROKE}
+            />
+            <circle
+              cx={p.x}
+              cy={p.healingY}
+              r={POINT_RADIUS_PX}
+              fill={HEALING_STROKE}
+              opacity={0.7}
+            />
+            <circle
+              cx={p.x}
+              cy={p.stripY}
+              r={POINT_RADIUS_PX}
+              fill={STRIP_STROKE}
+            />
+          </g>
+        ))}
+
+        {/* X-axis labels: first + last always; intermediate sampled by labelStep */}
+        {[...xLabelIndices].sort((a, b) => a - b).map((i) => {
+          const p = points[i];
+          return (
+            <text
+              key={`x-${p.key}`}
+              x={xFor(i)}
+              y={innerH + 16}
+              textAnchor="middle"
+              fontSize={9}
+              fill="var(--foreground)"
+              opacity={0.6}
+            >
+              {p.xLabel}
+            </text>
+          );
+        })}
+      </g>
+    </svg>
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The base component
 // ---------------------------------------------------------------------------
 
@@ -369,6 +589,76 @@ export function TimelineChart<T extends TimelineChartPoint>({
     [points, scale],
   );
 
+  // X-axis label sampling: first + last always drawn; others
+  // at roughly one-label-per-X_LABEL_SAMPLE_PX intervals. The
+  // sampling keeps the axis legible for long timelines
+  // (limit=100) without forcing the analyst to render 100
+  // text elements. Kept before the early return so the hook
+  // call order stays unconditional; the null-layout case
+  // returns an empty set.
+  const xLabelIndices = useMemo(() => {
+    if (!layout) {
+      return new Set<number>();
+    }
+    const { innerW } = layout;
+    const labelStep = Math.max(
+      1,
+      Math.ceil(X_LABEL_SAMPLE_PX / (innerW / Math.max(1, points.length))),
+    );
+    const indices = new Set<number>([0, points.length - 1]);
+    for (let i = 0; i < points.length; i += labelStep) {
+      indices.add(i);
+    }
+    return indices;
+  }, [layout, points.length]);
+
+  const { maxDamage, maxHealing, maxStrip, innerW, innerH, xFor, yFor, ticks } =
+    layout ?? {
+      maxDamage: 1,
+      maxHealing: 1,
+      maxStrip: 1,
+      innerW: 0,
+      innerH: 0,
+      xFor: () => 0,
+      yFor: () => 0,
+      ticks: [0, 1],
+    };
+  const isLog = layout?.scale === "log";
+
+  // Pre-build the 3 polyline path strings and per-point circle
+  // coordinates so the SVG render loop does not recompute them
+  // on every render (e.g. parent hover re-renders). Kept before
+  // the early return so the hook call order stays unconditional.
+  const { damageD, healingD, stripD, pointGeometry } = useMemo(() => {
+    const buildD = (values: number[], max: number): string =>
+      values
+        .map(
+          (v, i) =>
+            `${i === 0 ? "M" : "L"}${xFor(i).toFixed(2)},${yFor(v, max).toFixed(2)}`,
+        )
+        .join(" ");
+
+    const damageValues = points.map((p) => p.series[0]);
+    const healingValues = points.map((p) => p.series[1]);
+    const stripValues = points.map((p) => p.series[2]);
+
+    const pointGeometry = points.map((p, i) => ({
+      key: p.key,
+      tooltip: p.tooltip,
+      x: xFor(i),
+      damageY: yFor(p.series[0], maxDamage),
+      healingY: yFor(p.series[1], maxHealing),
+      stripY: yFor(p.series[2], maxStrip),
+    }));
+
+    return {
+      damageD: buildD(damageValues, maxDamage),
+      healingD: buildD(healingValues, maxHealing),
+      stripD: buildD(stripValues, maxStrip),
+      pointGeometry,
+    };
+  }, [points, xFor, yFor, maxDamage, maxHealing, maxStrip]);
+
   if (points.length === 0 || !layout) {
     return (
       <div style={EMPTY_STYLE}>
@@ -379,216 +669,29 @@ export function TimelineChart<T extends TimelineChartPoint>({
     );
   }
 
-  const { maxDamage, maxHealing, maxStrip, innerW, innerH, xFor, yFor, ticks } =
-    layout;
-  const isLog = layout.scale === "log";
-
-  // Build the polyline ``d`` strings: one ``M`` + N ``L``s.
-  const buildD = (values: number[], max: number): string =>
-    values
-      .map(
-        (v, i) =>
-          `${i === 0 ? "M" : "L"}${xFor(i).toFixed(2)},${yFor(v, max).toFixed(2)}`,
-      )
-      .join(" ");
-
-  const damageD = buildD(
-    points.map((p) => p.series[0]),
-    maxDamage,
-  );
-  const healingD = buildD(
-    points.map((p) => p.series[1]),
-    maxHealing,
-  );
-  const stripD = buildD(
-    points.map((p) => p.series[2]),
-    maxStrip,
-  );
-
-  // X-axis label sampling: first + last always drawn; others
-  // at roughly one-label-per-X_LABEL_SAMPLE_PX intervals. The
-  // sampling keeps the axis legible for long timelines
-  // (limit=100) without forcing the analyst to render 100
-  // text elements.
-  const labelStep = Math.max(
-    1,
-    Math.ceil(X_LABEL_SAMPLE_PX / (innerW / Math.max(1, points.length))),
-  );
-  const xLabelIndices = new Set<number>([0, points.length - 1]);
-  for (let i = 0; i < points.length; i += labelStep) {
-    xLabelIndices.add(i);
-  }
-
   return (
-    <div
-      style={{
-        padding: "12px 16px",
-        border: "1px solid var(--border)",
-        borderRadius: 4,
-        background: "var(--surface)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
+    <div style={SECTION_STYLE}>
+      <div style={HEADER_STYLE}>
         {caption !== undefined && (
-          <span
-            style={{
-              fontSize: 13,
-              opacity: 0.7,
-              fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-            }}
-          >
-            {caption}
-          </span>
+          <span style={CAPTION_STYLE}>{caption}</span>
         )}
         <PlayerTimelineLegend />
       </div>
-      <svg
-        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        width="100%"
-        style={{ display: "block" }}
-        role="img"
-        aria-label={ariaLabel}
-      >
-        <g
-          transform={`translate(${CHART_PADDING.left}, ${CHART_PADDING.top})`}
-        >
-          {/* Y-axis baseline + max tick (single set, since 3 series share a 0-100% scale) */}
-          <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="var(--border)" />
-          <line x1={0} y1={0} x2={0} y2={innerH} stroke="var(--border)" />
-          {/* v0.8.2 of web: Y-axis labels. In ``"linear"`` mode
-              the axis is per-series normalised so the labels
-              are ``0`` + ``100%`` (the series max). In
-              ``"log"`` mode the axis is shared + logarithmic
-              so the labels are decades (``0`` + ``1`` + ``10``
-              + ... up to ``globalMax``). */}
-          {isLog
-            ? ticks.map((tick) => (
-                <text
-                  key={`y-${tick}`}
-                  x={-8}
-                  y={yFor(tick)}
-                  textAnchor="end"
-                  dominantBaseline="middle"
-                  fontSize={10}
-                  fill="var(--foreground)"
-                  opacity={0.7}
-                >
-                  {formatLogTick(tick)}
-                </text>
-              ))
-            : (
-                <>
-                  <text
-                    x={-8}
-                    y={0}
-                    textAnchor="end"
-                    dominantBaseline="middle"
-                    fontSize={10}
-                    fill="var(--foreground)"
-                    opacity={0.7}
-                  >
-                    100%
-                  </text>
-                  <text
-                    x={-8}
-                    y={innerH}
-                    textAnchor="end"
-                    dominantBaseline="middle"
-                    fontSize={10}
-                    fill="var(--foreground)"
-                    opacity={0.7}
-                  >
-                    0
-                  </text>
-                </>
-              )}
-
-          {/* 3 polylines: damage (accent), healing (foreground @ 0.7), strip (warm orange) */}
-          <path
-            d={damageD}
-            fill="none"
-            stroke={DAMAGE_STROKE}
-            strokeWidth={1.5}
-          />
-          <path
-            d={healingD}
-            fill="none"
-            stroke={HEALING_STROKE}
-            strokeWidth={1.5}
-            opacity={0.7}
-          />
-          <path
-            d={stripD}
-            fill="none"
-            stroke={STRIP_STROKE}
-            strokeWidth={1.5}
-          />
-
-          {/* Per-point dots, one set per series. The wrapper
-              owns the React ``key`` (fight_id for the
-              per-account timeline, bucket index for the
-              per-fight timeline) so the base is data-shape
-              agnostic. The SVG ``<title>`` tooltip is
-              pre-formatted by the wrapper; the base just
-              renders the string. A single concatenated
-              string is used (NOT multiple template-string
-              children) so React receives a single string
-              child -- multiple children trigger a hydration
-              mismatch and inflate the DOM with
-              reconciliation wrappers. */}
-          {points.map((p, i) => (
-            <g key={p.key}>
-              <title>{p.tooltip}</title>
-              <circle
-                cx={xFor(i)}
-                cy={yFor(p.series[0], maxDamage)}
-                r={POINT_RADIUS_PX}
-                fill={DAMAGE_STROKE}
-              />
-              <circle
-                cx={xFor(i)}
-                cy={yFor(p.series[1], maxHealing)}
-                r={POINT_RADIUS_PX}
-                fill={HEALING_STROKE}
-                opacity={0.7}
-              />
-              <circle
-                cx={xFor(i)}
-                cy={yFor(p.series[2], maxStrip)}
-                r={POINT_RADIUS_PX}
-                fill={STRIP_STROKE}
-              />
-            </g>
-          ))}
-
-          {/* X-axis labels: first + last always; intermediate sampled by labelStep */}
-          {[...xLabelIndices].sort((a, b) => a - b).map((i) => {
-            const p = points[i];
-            return (
-              <text
-                key={`x-${p.key}`}
-                x={xFor(i)}
-                y={innerH + 16}
-                textAnchor="middle"
-                fontSize={9}
-                fill="var(--foreground)"
-                opacity={0.6}
-              >
-                {p.xLabel}
-              </text>
-            );
-          })}
-        </g>
-      </svg>
+      <TimelineSvg
+        ariaLabel={ariaLabel}
+        innerW={innerW}
+        innerH={innerH}
+        isLog={isLog}
+        ticks={ticks}
+        xFor={xFor}
+        yFor={yFor}
+        damageD={damageD}
+        healingD={healingD}
+        stripD={stripD}
+        pointGeometry={pointGeometry}
+        xLabelIndices={xLabelIndices}
+        points={points}
+      />
     </div>
   );
 }

@@ -56,26 +56,16 @@
 
 import { useMemo } from "react";
 import type { PerFightTimelinePoint } from "@/lib/api";
-import { TimelineChart, type TimelineChartPoint, type TimelineScale } from "@/components/TimelineChart";
+import { formatSecondsLabel } from "@/lib/format";
+import { TimelineChart, type TimelineChartPoint } from "@/components/TimelineChart";
 
 export { buildTimelineLayout as buildPerFightTimelineLayout, formatLogTick as formatPerFightLogTick } from "@/components/TimelineChart";
 
-/**
- * Format a bucket's ``window_start_ms`` as a ``M:SS`` label.
- * ``window_start_ms=0`` -> ``"0:00"`` (the fight-start bucket).
- * ``window_start_ms=65000`` -> ``"1:05"`` (1 min 5 sec into
- * the fight). The 2-digit zero-padding on seconds keeps the
- * axis labels aligned vertically (without the pad, a
- * ``"0:5"`` label would shift the ``"0:15"`` label to the
- * right by 1 character width and break the X-axis tick
- * alignment).
- */
-export function formatSecondsLabel(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return `${m}:${rem.toString().padStart(2, "0")}`;
-}
+export type TimelineScale = "linear" | "log";
+
+// Re-export the shared helper so existing consumers (e.g.
+// ReplayPlayer) keep working without changing their imports.
+export { formatSecondsLabel };
 
 export function PerFightTimelineChart({
   points,

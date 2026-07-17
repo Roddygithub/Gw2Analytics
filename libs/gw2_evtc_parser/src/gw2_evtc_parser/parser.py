@@ -81,6 +81,7 @@ from gw2_core import (
     Skill,
 )
 from gw2_evtc_parser.exceptions import EvtcParseError
+from gw2_evtc_parser.statechange_dispatch import dispatch_statechange
 
 # Module-level logger for soft warnings (e.g. unrecognised arcdps
 # account_name format). Library consumers control verbosity via the
@@ -205,7 +206,19 @@ EVENT_SIZE: Final[int] = 64
 #: shift invalidates downstream damage / heal / strip emission for
 #: past dumps AND breaks the 3 byte-lock assertions in
 #: ``tests/test_parser_byte_alignment.py``.
+#: Full 22-field struct. Kept as the canonical public constant
+#: because downstream byte-alignment tests import it and rely
+#: on the full tuple shape.
 _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
+
+#: Optimized event struct: only unpacks the 10 fields actually
+#: consumed by :meth:`PythonEvtcParser.parse_events`. The byte
+#: positions are identical to the legacy 22-field struct above;
+#: this variant avoids allocating / assigning 12 unused values
+#: per event in the hot loop.
+_EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct(
+    "<QQQii 4x I 7x bbb 2x b 11x"
+)
 
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
 #: byte values 1, 2, 3 ↔ ``BoonApplyEvent.kind: Literal["remove_all",
@@ -374,6 +387,13 @@ class PythonEvtcParser:
         offset = _compute_post_skills_offset(data)
         end = len(data)
         cursor = offset
+        # Local binding shaves attribute-lookup overhead in the
+        # tight event-unpack loop.
+        _unpack_event = _EVENT_STRUCT_EVENTS.unpack_from
+        # Hoist the REMOVE-kind tuple to a local variable so the
+        # hot loop pays local-variable lookup cost instead of
+        # global lookup cost.
+        _cbtbufremove_kinds = _CBTBUFREMOVE_KINDS
         while cursor + EVENT_SIZE <= end:
             (
                 time_ms,
@@ -381,12 +401,7 @@ class PythonEvtcParser:
                 dst_agent,
                 value,
                 buff_dmg,
-                _overstack_value,
                 skill_id,
-                _src_instid,
-                _dst_instid,
-                _translocated,
-                _is_cleanup,
                 is_nondamage,
                 is_statechange,
                 # byte 49 = arcdps ``ev.buff`` field -- the buff ID for
@@ -397,8 +412,6 @@ class PythonEvtcParser:
                 # unchanged so the existing damage / heal / strip
                 # / REMOVE-emit logic is unaffected.
                 _ev_buff,
-                _is_shields,
-                _is_offcycle,
                 # v0.10.6+ Phase 9 step 2: bytes 52-53 of the arcdps
                 # ``cbtevent`` record are the ``is_buffremove`` byte
                 # (the arcdps ``cbtbuffremove`` enum: 0=NONE in this
@@ -408,26 +421,8 @@ class PythonEvtcParser:
                 # naming -- the byte offset is unchanged so the
                 # existing damage / healing / buff-removal emission
                 # logic is unaffected.
-                #
-                # v0.10.11+ Phase 9 step 3 also consumes byte 49
-                # (struct slot 13) as ``ev.buff`` -- the arcdps buff
-                # ID for mid-combat APPLY records (per F1 byte mapping:
-                # the parser's 8-byte region reads bytes 46-53 = arcdps
-                # bytes 46 (dst_master_instid low) + 47 (high) + 48
-                # (iff/is_statechange) + 49 (buff) + ... + 52
-                # (cbtbuffremove) + 53 (is_ninety). The legacy binding
-                # named this slot ``_is_flanking``; v0.10.11+ renames
-                # the binding to ``_ev_buff`` to reflect the F1 byte
-                # mapping. The rename has zero byte-level impact (the
-                # byte position is unchanged) but aligns the variable
-                # name with the arcdps.h field semantics.
                 is_buffremove,
-                is_ninety,
-                _pad63,
-                _pad64,
-                _pad65,
-                _pad66,
-            ) = _EVENT_STRUCT.unpack_from(data, cursor)
+            ) = _unpack_event(data, cursor)
             # NOTE: ``is_buffremove`` is consumed below by
             # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``) AND
             # by Step 3 APPLY-BRANCH (predicate ``_ev_buff != 0 AND
@@ -455,6 +450,27 @@ class PythonEvtcParser:
                 )
                 continue
             if is_statechange != 0:
+                # WAVE-8 v0.11.0 Blocker A.4.1 (see
+                # ``plans/WAVE-8-parser-side.md`` §A.4.1): the upstream
+                # filter ``if is_statechange != 0: continue`` is REPLACED
+                # with a dispatch call to
+                # :func:`statechange_dispatch.dispatch_statechange`.
+                # The dispatch table maps the arcdps ``is_statechange``
+                # byte (per :file:`docs/statechange-ids.md`) to a
+                # Pydantic event constructor -- currently StunBreak
+                # (byte 56) + Barrier (byte 38). Unmapped kinds return
+                # ``None`` so the filter continues to suppress them at
+                # the byte boundary (backward compat preserved).
+                statechange_event = dispatch_statechange(
+                    is_statechange=is_statechange,
+                    time_ms=time_ms,
+                    src_agent=src_agent,
+                    dst_agent=dst_agent,
+                    value=value,
+                    skill_id=skill_id,
+                )
+                if statechange_event is not None:
+                    yield statechange_event
                 continue
             # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11, commit
             # ``e13ab3b``). Predicate: ``is_buffremove`` byte in the
@@ -586,7 +602,7 @@ class PythonEvtcParser:
                     # Index by ``byte - 1`` so the 3-tuple aligns with
                     # the REMOVE byte range [1, 2, 3] (byte 0 is the
                     # CBTB_NONE sentinel excluded by the predicate).
-                    kind=_CBTBUFREMOVE_KINDS[is_buffremove - 1],
+                    kind=_cbtbufremove_kinds[is_buffremove - 1],
                 )
             elif _ev_buff != 0:
                 # Phase 9 Step 3 APPLY-BRANCH (SHIPPED 2026-07-11).
@@ -624,10 +640,6 @@ class PythonEvtcParser:
                     stacks=1,
                     kind="apply",
                 )
-            # Suppress ruff RUF059 (unused-variable on the is_ninety
-            # unpack above); re-emit once the 90%-threshold marker
-            # is added to BoonApplyEvent in a future Phase 9 step.
-            del is_ninety
             magnitude = max(0, value)
             buff_strip = max(0, buff_dmg)
             if is_nondamage == 0:
@@ -798,23 +810,29 @@ def _iter_agents(data: bytes, count: int) -> Iterator[Agent]:
         cursor += AGENT_SIZE
 
 
-def _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
-    """Read up to ``count`` variable-size skill records starting at ``offset``.
+def _iter_skill_records(
+    data: bytes,
+    offset: int,
+    count: int,
+) -> Iterator[tuple[int, int, int, int]]:
+    """Yield ``(cursor, skill_id, name_len, record_size)`` for each valid skill record.
 
-    Each record has a fixed 8-byte header (``skill_id`` u32 + ``name_len``
-    u32) followed by ``name_len`` bytes of UTF-8 name. arcdps writes a
-    trailing null byte after the name, which is included in the byte
-    stream but not counted in ``name_len``; the next record starts
-    immediately after the null terminator (``offset += 8 + name_len + 1``).
+    Reads up to ``count`` variable-size skill records starting at
+    ``offset``. Each record has a fixed 8-byte header (``skill_id`` u32 +
+    ``name_len`` u32) followed by ``name_len`` bytes of UTF-8 name. arcdps
+    writes a trailing null byte after the name, which is included in the
+    byte stream but not counted in ``name_len``; the next record starts
+    immediately after the null terminator
+    (``offset += 8 + name_len + 1``).
 
-    The function is **lenient**: if the cursor runs past the end of the
+    The generator is **lenient**: if the cursor runs past the end of the
     data, or if a record's ``name_len`` exceeds the safety bound (which
     happens when ``header.skill_count`` is larger than the actual number
-    of skill records — a known arcdps quirk), the parser stops early
-    and emits a warning. The yielded count may therefore be less than
+    of skill records — a known arcdps quirk), the parser stops early and
+    emits a warning. The yielded count may therefore be less than
     ``count``. This is preferable to raising, because the alternative
-    (reading into the event stream) produces garbage records that
-    pollute downstream analytics.
+    (reading into the event stream) produces garbage records that pollute
+    downstream analytics.
     """
     if count == 0:
         return
@@ -856,20 +874,30 @@ def _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
                 end - cursor,
             )
             return
+        yield cursor, skill_id, name_len, record_size
+        cursor += record_size
+
+
+def _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
+    """Read up to ``count`` variable-size skill records starting at ``offset``.
+
+    Thin wrapper around :func:`_iter_skill_records` that decodes the
+    UTF-8 skill name and yields :class:`Skill` instances.
+    """
+    for cursor, skill_id, name_len, _record_size in _iter_skill_records(data, offset, count):
         name_bytes = data[
             cursor + _SKILL_HEADER_STRUCT.size : cursor + _SKILL_HEADER_STRUCT.size + name_len
         ]
         name = name_bytes.decode("utf-8", errors="replace")
         yield Skill(id=skill_id, name=name)
-        cursor += record_size
 
 
 def _compute_post_skills_offset(data: bytes) -> int:
     """Return the byte offset where the event stream starts.
 
-    Mirrors :func:`_iter_skills` cursor logic without yielding Skill
-    records, so :meth:`PythonEvtcParser.parse_events` can advance past
-    the skill table deterministically. Truncation behaviour matches
+    Reuses :func:`_iter_skill_records` cursor logic without yielding
+    Skill records, so :meth:`PythonEvtcParser.parse_events` can advance
+    past the skill table deterministically. Truncation behaviour matches
     :func:`_iter_skills`: stops at the cursor it would have stopped at
     when iterating, returning either the start of the event block OR
     ``len(data)`` if the skill table ate the entire blob.
@@ -879,19 +907,12 @@ def _compute_post_skills_offset(data: bytes) -> int:
     unpacked_header = _HEADER_STRUCT.unpack_from(data, 0)
     agent_count = int(unpacked_header[5])
     skill_count = int(unpacked_header[6])
-    cursor = HEADER_SIZE + agent_count * AGENT_SIZE
-    end = len(data)
-    for _ in range(skill_count):
-        if cursor + _SKILL_HEADER_STRUCT.size > end:
-            return cursor
-        unpacked_skill = _SKILL_HEADER_STRUCT.unpack_from(data, cursor)
-        name_len = int(unpacked_skill[1])
-        if name_len > MAX_SKILL_NAME_BYTES:
-            return cursor
-        record_size = _SKILL_HEADER_STRUCT.size + name_len + 1
-        if cursor + record_size > end:
-            return cursor
-        cursor += record_size
+    offset = HEADER_SIZE + agent_count * AGENT_SIZE
+    cursor = offset
+    for record_start, _skill_id, _name_len, record_size in _iter_skill_records(
+        data, offset, skill_count
+    ):
+        cursor = record_start + record_size
     return cursor
 
 

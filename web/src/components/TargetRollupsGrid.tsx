@@ -47,8 +47,16 @@ import {
 } from "ag-grid-community";
 import { appGridTheme } from "./ag-grid-setup";
 import { CsvDownloadButton } from "./CsvDownloadButton";
+import {
+  EMPTY_STYLE,
+  FLEX_COLUMN_STYLE,
+  FLEX_END_STYLE,
+  gridContainerStyle,
+} from "@/shared/styles";
 
 const GRID_HEIGHT_PX = 320;
+
+const GRID_CONTAINER_STYLE = gridContainerStyle(GRID_HEIGHT_PX);
 
 export interface TargetRollupColumn<TRow> {
   /** Pydantic field name on the row model (e.g. ``"target_agent_id"``). */
@@ -140,29 +148,20 @@ export function TargetRollupsGrid<TRow extends { target_agent_id: number }>({
 
   if (rows.length === 0) {
     return (
-      <div
-        style={{
-          padding: "12px 16px",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          color: "var(--foreground)",
-          opacity: 0.7,
-          fontSize: 14,
-        }}
-      >
+      <div style={EMPTY_STYLE}>
         {caption ? `${caption}: ` : ""}no rows.
       </div>
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+    <div style={FLEX_COLUMN_STYLE}>
       {filename ? (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={FLEX_END_STYLE}>
           <CsvDownloadButton rows={rows} columns={columns} filename={filename} />
         </div>
       ) : null}
-      <div style={{ height: GRID_HEIGHT_PX, width: "100%" }}>
+      <div style={GRID_CONTAINER_STYLE}>
         <AgGridReact<TRow>
           theme={appGridTheme}
           rowData={rows}

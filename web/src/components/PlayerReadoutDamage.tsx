@@ -17,26 +17,20 @@
  * 3. ``agent_id`` ASC (final deterministic tie-breaker; the
  *    column is hidden by default but participates in sort
  *    priority via array order — AG Grid Community v34
- *    ``SortModelItem`` omits ``sortIndex`` and interprets array
- *    order as the sort priority).
+ *    ``SortModelItem`` omits ``sortIndex``).
  *
- * The component is a thin wrapper around ``AgGridReact`` -- the
- * SCAFFOLD-getter plumbing we wired in Wave 6 PART-2 makes the
- * ``dps_power`` / ``dps_condi`` fields carry real phase-6-v2
+ * The component is a thin wrapper around ``PlayerReadoutGrid``
+ * -- the SCAFFOLD-getter plumbing we wired in Wave 6 PART-2 makes
+ * the ``dps_power`` / ``dps_condi`` fields carry real phase-6-v2
  * values once the parser-side ``condi_portion`` table lands.
  * Pre-phase-6-v2 streams show ``dps_power=0.0`` + ``dps_condi=0.0``
  * for every row -- the byte-equivalent SCAFFOLD wire shape.
  */
-import { AgGridReact } from "ag-grid-react";
 import type { ColDef, SortModelItem } from "ag-grid-community";
 
 import type { PlayerReadoutOut } from "@/lib/api";
 
-import {
-  AGENT_ID_TIEBREAKER,
-  AG_GRID_PROPS,
-  SHARED_COLUMNS,
-} from "./PlayerReadoutBase";
+import { PlayerReadoutGrid } from "./PlayerReadoutGrid";
 
 const DAMAGE_COLUMNS: ColDef<PlayerReadoutOut>[] = [
   { field: "damage.dps_total", headerName: "DPS total", width: 130 },
@@ -62,42 +56,13 @@ const DAMAGE_DEFAULT_SORT: SortModelItem[] = [
   { colId: "agent_id", sort: "asc" },
 ];
 
-export function PlayerReadoutDamage({
-  rows,
-}: {
-  rows: PlayerReadoutOut[];
-}) {
-  if (rows.length === 0) {
-    return (
-      <div
-        data-testid="player-readout-damage-empty"
-        style={{
-          padding: "12px 16px",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          color: "var(--foreground)",
-          opacity: 0.7,
-          fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-        }}
-      >
-        No player rows in this readout.
-      </div>
-    );
-  }
-
+export function PlayerReadoutDamage({ rows }: { rows: PlayerReadoutOut[] }) {
   return (
-    <div
-      data-testid="player-readout-damage"
-      style={{ width: "100%" }}
-    >
-      <AgGridReact<PlayerReadoutOut>
-        rowData={rows}
-        columnDefs={[...SHARED_COLUMNS, ...DAMAGE_COLUMNS, AGENT_ID_TIEBREAKER]}
-        defaultColDef={{ comparator: (a, b) => (Number(a ?? 0) - Number(b ?? 0)) || 0 }}
-        {...AG_GRID_PROPS}
-        initialState={{ sort: { sortModel: DAMAGE_DEFAULT_SORT } }}
-        getRowId={(params) => String(params.data.agent_id)}
-      />
-    </div>
+    <PlayerReadoutGrid
+      testId="player-readout-damage"
+      rows={rows}
+      aspectColumns={DAMAGE_COLUMNS}
+      defaultSort={DAMAGE_DEFAULT_SORT}
+    />
   );
 }

@@ -29,16 +29,11 @@
  * 2. ``boons_out_rate`` DESC (top boon provider of each squad first)
  * 3. ``agent_id`` ASC tie-breaker
  */
-import { AgGridReact } from "ag-grid-react";
 import type { ColDef, SortModelItem } from "ag-grid-community";
 
 import type { PlayerReadoutOut } from "@/lib/api";
 
-import {
-  AGENT_ID_TIEBREAKER,
-  AG_GRID_PROPS,
-  SHARED_COLUMNS,
-} from "./PlayerReadoutBase";
+import { PlayerReadoutGrid } from "./PlayerReadoutGrid";
 
 /**
  * Sum all values in the ``other_boons_out`` dict for one row.
@@ -50,8 +45,7 @@ function sumOtherBoons(
 ): number {
   if (!dict) return 0;
   let total = 0;
-  for (const key of Object.keys(dict)) {
-    const value = dict[key];
+  for (const value of Object.values(dict)) {
     if (typeof value === "number" && Number.isFinite(value)) {
       total += value;
     }
@@ -94,37 +88,12 @@ export function PlayerReadoutBoons({
 }: {
   rows: PlayerReadoutOut[];
 }) {
-  if (rows.length === 0) {
-    return (
-      <div
-        data-testid="player-readout-boons-empty"
-        style={{
-          padding: "12px 16px",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          color: "var(--foreground)",
-          opacity: 0.7,
-          fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-        }}
-      >
-        No player rows in this readout.
-      </div>
-    );
-  }
-
   return (
-    <div
-      data-testid="player-readout-boons"
-      style={{ width: "100%" }}
-    >
-      <AgGridReact<PlayerReadoutOut>
-        rowData={rows}
-        columnDefs={[...SHARED_COLUMNS, ...BOONS_COLUMNS, AGENT_ID_TIEBREAKER]}
-        defaultColDef={{ comparator: (a, b) => (Number(a ?? 0) - Number(b ?? 0)) || 0 }}
-        {...AG_GRID_PROPS}
-        initialState={{ sort: { sortModel: BOONS_DEFAULT_SORT } }}
-        getRowId={(params) => String(params.data.agent_id)}
-      />
-    </div>
+    <PlayerReadoutGrid
+      testId="player-readout-boons"
+      rows={rows}
+      aspectColumns={BOONS_COLUMNS}
+      defaultSort={BOONS_DEFAULT_SORT}
+    />
   );
 }

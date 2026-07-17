@@ -88,30 +88,39 @@ def split_condi_power(
     condi_total = 0
     power_total = 0
     is_new_build = build_date.isdigit() and int(build_date) >= int(_BUILD_DATE_GATE)
+    # Cache skill-name lookups so repeated damage events with the
+    # same skill_id only pay the getter cost once. The cache is
+    # local to this call; ``None`` is a valid cached value.
+    skill_name_cache: dict[int, str | None] = {}
+    # Hoist the frozenset to a local variable so the hot loop pays
+    # local-variable lookup cost instead of global lookup cost.
+    known_condi_names = KNOWN_CONDI_NAMES
 
-    for event in events:
-        magnitude = event.damage
-        if is_new_build:
-            # New builds encode condi directly in the raw cbtevent's
-            # `buff_dmg` field (NOT on the v2 DamageEvent model -- the
-            # kept side table is closed over by the caller). Cap condi
-            # at the hit magnitude (a condi hit can never exceed the
-            # total) and emit power = damage - condi.
-            if condi_portion_getter is None:
-                # Graceful degrade: caller did not wire the getter; the
-                # entire hit goes to power.
-                power_total += magnitude
-                continue
-            buff_dmg = condi_portion_getter(event)
-            condi = min(magnitude, max(0, buff_dmg))
-            condi_total += condi
-            power_total += magnitude - condi
+    if is_new_build:
+        # Fast path: new builds encode condi directly in the raw
+        # cbtevent's ``buff_dmg`` field. Branching outside the loop
+        # avoids re-evaluating ``is_new_build`` on every event.
+        if condi_portion_getter is None:
+            for event in events:
+                power_total += event.damage
         else:
-            # Old builds encode condi implicitly via skill name. If the
-            # resolved skill is one of the canonical condition names,
-            # the entire hit is condi; otherwise power.
-            skill_name = skill_name_getter(event.skill_id)
-            if skill_name in KNOWN_CONDI_NAMES:
+            for event in events:
+                magnitude = event.damage
+                buff_dmg = condi_portion_getter(event)
+                condi = min(magnitude, max(0, buff_dmg))
+                condi_total += condi
+                power_total += magnitude - condi
+    else:
+        # Slow path: old builds encode condi implicitly via skill
+        # name. If the resolved skill is one of the canonical
+        # condition names, the entire hit is condi; otherwise power.
+        for event in events:
+            magnitude = event.damage
+            skill_id = event.skill_id
+            if skill_id not in skill_name_cache:
+                skill_name_cache[skill_id] = skill_name_getter(skill_id)
+            skill_name = skill_name_cache[skill_id]
+            if skill_name in known_condi_names:
                 condi_total += magnitude
             else:
                 power_total += magnitude

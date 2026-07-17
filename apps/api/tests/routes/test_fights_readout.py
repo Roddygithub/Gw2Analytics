@@ -151,8 +151,9 @@ def test_readout_200_default_empty_players_when_no_player_agents(client: TestCli
     npc_a = 340_000 + int(suffix[:4], 16)
     sk = 3_400_000 + int(suffix[:4], 16)
 
+    # ``make_minimal_zevtc`` writes ``account = b""`` for NPC agents.
     blob = make_minimal_zevtc(
-        # NPC marker; ``make_minimal_zevtc`` writes ``account=b""`` for non-players.
+
         [(npc_a, 2, 18, f"NPC {suffix}", False)],
         build=f"2025{suffix[:4]}",
         skills=[(sk, "Dmg")],
@@ -270,15 +271,7 @@ def test_readout_aggregator_stun_break_events_wired() -> None:
     }
     duration_s = 5.0
     out = aggregate_combat_readout(
-        damage_events=(),
-        healing_events=[heal_event],
-        boon_apply_events=(),
-        cc_events=(),
-        death_events=(),
-        dodge_events=(),
-        block_events=(),
-        interrupt_events=(),
-        stun_break_events=[stun_break],
+        events=[heal_event, stun_break],
         skill_id_to_name_map={},
         agent_id_to_identity_map=aid_to_identity,
         duration_s=duration_s,
@@ -338,15 +331,7 @@ def test_readout_aggregator_account_name_none_passthrough() -> None:
         ),
     }
     out = aggregate_combat_readout(
-        damage_events=(),
-        healing_events=[heal_event],
-        boon_apply_events=(),
-        cc_events=(),
-        death_events=(),
-        dodge_events=(),
-        block_events=(),
-        interrupt_events=(),
-        stun_break_events=(),
+        events=[heal_event],
         skill_id_to_name_map={},
         agent_id_to_identity_map=aid_to_identity,
         duration_s=5.0,

@@ -53,6 +53,22 @@ const TD_STYLE: React.CSSProperties = {
   color: "var(--foreground)",
 };
 
+const TH_RIGHT_STYLE: React.CSSProperties = {
+  ...TH_STYLE,
+  textAlign: "right",
+};
+
+const TD_RIGHT_STYLE: React.CSSProperties = {
+  ...TD_STYLE,
+  textAlign: "right",
+};
+
+const TD_ACCENT_STYLE: React.CSSProperties = {
+  ...TD_STYLE,
+  textAlign: "right",
+  color: "var(--accent)",
+};
+
 const EMPTY_STYLE: React.CSSProperties = {
   padding: "12px 16px",
   border: "1px solid var(--border)",
@@ -74,9 +90,9 @@ export function EventWindowsTable({ buckets }: { buckets: EventBucket[] }) {
         <tr>
           <th style={TH_STYLE}>Start (ms)</th>
           <th style={TH_STYLE}>End (ms)</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>Damage total</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>Healing total</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>Event count</th>
+          <th style={TH_RIGHT_STYLE}>Damage total</th>
+          <th style={TH_RIGHT_STYLE}>Healing total</th>
+          <th style={TH_RIGHT_STYLE}>Event count</th>
         </tr>
       </thead>
       <tbody>
@@ -84,13 +100,9 @@ export function EventWindowsTable({ buckets }: { buckets: EventBucket[] }) {
           <tr key={`${b.start_ms}-${b.end_ms}`}>
             <td style={TD_STYLE}>{b.start_ms}</td>
             <td style={TD_STYLE}>{b.end_ms}</td>
-            <td style={{ ...TD_STYLE, textAlign: "right" }}>
-              {b.damage_total}
-            </td>
-            <td style={{ ...TD_STYLE, textAlign: "right", color: "var(--accent)" }}>
-              {b.healing_total}
-            </td>
-            <td style={{ ...TD_STYLE, textAlign: "right" }}>{b.event_count}</td>
+            <td style={TD_RIGHT_STYLE}>{b.damage_total}</td>
+            <td style={TD_ACCENT_STYLE}>{b.healing_total}</td>
+            <td style={TD_RIGHT_STYLE}>{b.event_count}</td>
           </tr>
         ))}
       </tbody>

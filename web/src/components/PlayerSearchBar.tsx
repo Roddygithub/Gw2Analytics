@@ -40,6 +40,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  BUTTON_STYLE,
+  FORM_STYLE,
+  INPUT_STYLE,
+} from "@/shared/styles";
+
+const LABEL_STYLE: React.CSSProperties = {
+  fontSize: 12,
+  color: "var(--foreground)",
+  opacity: 0.7,
+};
 
 export function PlayerSearchBar() {
   const router = useRouter();
@@ -57,15 +68,11 @@ export function PlayerSearchBar() {
       onSubmit={onSubmit}
       role="search"
       data-testid="player-search-form"
-      style={{ display: "flex", gap: 8, alignItems: "center" }}
+      style={FORM_STYLE}
     >
       <label
         htmlFor="player-search"
-        style={{
-          fontSize: 12,
-          color: "var(--foreground)",
-          opacity: 0.7,
-        }}
+        style={LABEL_STYLE}
       >
         Player
       </label>
@@ -76,27 +83,13 @@ export function PlayerSearchBar() {
         placeholder=":account.1234"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        style={{
-          padding: "4px 8px",
-          fontSize: 13,
-          fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-          background: "var(--background)",
-          color: "var(--foreground)",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          minWidth: 200,
-        }}
+        style={INPUT_STYLE}
       />
       <button
         type="submit"
         disabled={!value.trim()}
         style={{
-          padding: "4px 12px",
-          fontSize: 13,
-          background: "var(--accent)",
-          color: "var(--background)",
-          border: "none",
-          borderRadius: 4,
+          ...BUTTON_STYLE,
           cursor: value.trim() ? "pointer" : "not-allowed",
           opacity: value.trim() ? 1 : 0.5,
         }}

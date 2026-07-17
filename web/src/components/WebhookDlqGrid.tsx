@@ -10,6 +10,11 @@ import { replayDlq } from "@/lib/api";
 import { appGridTheme } from "./ag-grid-setup";
 import styles from "./WebhookDlqGrid.module.css";
 
+const GRID_CONTAINER_STYLE: React.CSSProperties = {
+  height: 600,
+  width: "100%",
+};
+
 function formatDate(iso: string | null): string {
   if (!iso) {
     return "—";
@@ -112,7 +117,7 @@ export function WebhookDlqGrid({ rows }: { rows: WebhookDlqRow[] }) {
   }
 
   return (
-    <div style={{ height: 600, width: "100%" }}>
+    <div style={GRID_CONTAINER_STYLE}>
       <AgGridReact<WebhookDlqRow>
         theme={appGridTheme}
         rowData={rows}

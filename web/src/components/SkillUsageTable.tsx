@@ -82,6 +82,22 @@ const TD_STYLE: React.CSSProperties = {
   color: "var(--foreground)",
 };
 
+const TH_RIGHT_STYLE: React.CSSProperties = {
+  ...TH_STYLE,
+  textAlign: "right",
+};
+
+const TD_RIGHT_STYLE: React.CSSProperties = {
+  ...TD_STYLE,
+  textAlign: "right",
+};
+
+const TD_ACCENT_STYLE: React.CSSProperties = {
+  ...TD_STYLE,
+  textAlign: "right",
+  color: "var(--accent)",
+};
+
 const EMPTY_STYLE: React.CSSProperties = {
   padding: "12px 16px",
   border: "1px solid var(--border)",
@@ -122,10 +138,10 @@ export function SkillUsageTable({
         <tr>
           <th style={TH_STYLE}>{SKILL_USAGE_TABLE_COLUMN_SKILL_ID}</th>
           <th style={TH_STYLE}>{SKILL_USAGE_TABLE_COLUMN_SKILL_NAME}</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>{SKILL_USAGE_TABLE_COLUMN_HIT_COUNT}</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>{SKILL_USAGE_TABLE_COLUMN_TOTAL_DAMAGE}</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>{SKILL_USAGE_TABLE_COLUMN_TOTAL_HEALING}</th>
-          <th style={{ ...TH_STYLE, textAlign: "right" }}>{SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP}</th>
+          <th style={TH_RIGHT_STYLE}>{SKILL_USAGE_TABLE_COLUMN_HIT_COUNT}</th>
+          <th style={TH_RIGHT_STYLE}>{SKILL_USAGE_TABLE_COLUMN_TOTAL_DAMAGE}</th>
+          <th style={TH_RIGHT_STYLE}>{SKILL_USAGE_TABLE_COLUMN_TOTAL_HEALING}</th>
+          <th style={TH_RIGHT_STYLE}>{SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP}</th>
         </tr>
       </thead>
       <tbody>
@@ -133,12 +149,10 @@ export function SkillUsageTable({
           <tr key={r.skill_id}>
             <td style={TD_STYLE}>{r.skill_id}</td>
             <td style={TD_STYLE}>{r.skill_name || "(unnamed)"}</td>
-            <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.hit_count}</td>
-            <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.total_damage}</td>
-            <td style={{ ...TD_STYLE, textAlign: "right", color: "var(--accent)" }}>
-              {r.total_healing}
-            </td>
-            <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.total_buff_removal}</td>
+            <td style={TD_RIGHT_STYLE}>{r.hit_count}</td>
+            <td style={TD_RIGHT_STYLE}>{r.total_damage}</td>
+            <td style={TD_ACCENT_STYLE}>{r.total_healing}</td>
+            <td style={TD_RIGHT_STYLE}>{r.total_buff_removal}</td>
           </tr>
         ))}
       </tbody>

@@ -257,6 +257,10 @@ class EventType(StrEnum):
     DOWN = "DOWN"
     DEATH = "DEATH"
     STUN_BREAK = "STUN_BREAK"
+    # Wave 5 SCAFFOLD defense-tracking triplet (restored from baseline; the
+    # enum entry MUST be declared BEFORE the Literal[EventType.X] reference
+    # in the matching subclass body so the discriminator resolves at class
+    # definition time).
     DODGE = "DODGE"
     BLOCK = "BLOCK"
     INTERRUPT = "INTERRUPT"
@@ -448,11 +452,24 @@ class DownEvent(BaseEvent):
     down-contribution DPS; until Phase 6 v2 (parser-stream
     switch) delivers the statechange records this class
     exists as the parser-side landing pad.
+
+    WAVE-8 v0.11.0 §6 risk-5 mitigation: ``downtime_ms`` is the
+    per-instance down-state duration in milliseconds (design
+    doc §11 Q4 — "time on ground" semantics). The
+    ``PlayerReadoutDefenseOut.time_downed_ms`` column aggregates
+    ``downtime_ms`` per-source_agent_id (Phase 6 v2 parser-stream
+    emits the actual value; pre-Phase-6-v2 streams parse cleanly
+    because ``downtime_ms`` defaults to ``0``).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_type: Literal[EventType.DOWN] = EventType.DOWN
+    # WAVE-8 §6 risk-5 mitigation: see class docstring above. Field added
+    # by the Blocker A.3 first-slice followup commit (the original WAVE-8
+    # DownEvent draft carried this field; the dedup preserved it on the
+    # canonical Wave 5 SCAFFOLD class).
+    downtime_ms: int = Field(default=0, ge=0)
 
 
 class DeathEvent(BaseEvent):
@@ -506,6 +523,41 @@ class StunBreakEvent(BaseEvent):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_type: Literal[EventType.STUN_BREAK] = EventType.STUN_BREAK
+
+# WAVE-8 v0.11.0 Blocker A.3 part 2: 1 NEW subclass (BarrierEvent); the 7
+# other WAVE-8 backlog subclasses (ConditionRemoveEvent + CCEvent +
+# DownEvent + DeathEvent + DodgeEvent + BlockEvent + InterruptEvent)
+# were pre-existing in the Wave 5 SCAFFOLD + Plan 024 baseline, so
+# this commit adds ONLY BarrierEvent (the arcdps barrier statechange
+# yield from Phase 6 v2 parser-stream switch). Pattern mirrors
+# :class:`StunBreakEvent` (the Tour 6 v0.10.24-pre shipped subclass):
+# - arcdps statechange kind byte cbtevent.is_statechange != 0 emits the
+#   matching subclass (per A.4 parser decode loop extension, the deferred
+#   A.4 deliverable)
+# - the ``event_type: Literal[EventType.X]`` discriminator is the canonical
+#   JSONL forward-compat contract (verified by the
+#   ``tests.test_models_dispatch`` hermetic test below)
+
+
+class BarrierEvent(BaseEvent):
+    """WAVE-8 v0.11.0 Blocker A.3 part 2: barrier application event.
+
+    Arcdps statechange kind byte 38 ``BarrierUpdate`` per
+    :file:`docs/statechange-ids.md` -- the canonical Elite Insights
+    StateChange enum. The dispatch wiring lives in
+    ``libs.gw2_evtc_parser/src/gw2_evtc_parser/statechange_dispatch.py``
+    (:data:`statechange_dispatch.STATE_CHANGE_BARRIER_UPDATE`); changing
+    the byte here requires updating both files in lockstep.
+
+    Phase 6 v2 parser-stream switch yields ``barrier_amount`` +
+    ``duration_ms`` from the per-skill barrier table. Pre-Phase-6-v2
+    streams parse cleanly because both fields default to ``0``
+    (the ``ge=0`` constraint accepts ``0`` as a valid null sentinel).
+    """
+
+    event_type: Literal[EventType.BARRIER] = EventType.BARRIER
+    barrier_amount: int = Field(default=0, ge=0)
+    duration_ms: int = Field(default=0, ge=0)
 
 
 class DodgeEvent(BaseEvent):
@@ -698,6 +750,7 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.DOWN: DownEvent,
     EventType.DEATH: DeathEvent,
     EventType.STUN_BREAK: StunBreakEvent,
+    EventType.BARRIER: BarrierEvent,
     EventType.DODGE: DodgeEvent,
     EventType.BLOCK: BlockEvent,
     EventType.INTERRUPT: InterruptEvent,

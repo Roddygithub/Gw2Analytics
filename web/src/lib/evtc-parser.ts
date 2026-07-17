@@ -24,6 +24,9 @@
  */
 import { readFileSync } from "node:fs";
 
+/** Shared UTF-8 decoder reused across all buffer scans. */
+const _utf8Decoder = new TextDecoder("utf-8");
+
 /** 32-byte header shape (per the upstream stub fixture). */
 export interface EvtcHeader {
   /** 4 ASCII chars ``EVTC`` (must match verbatim). */
@@ -68,15 +71,14 @@ export function parseEvtcBuffer(buf: Uint8Array): EvtcParseResult {
       `EVTC buffer too small: ${buf.length} bytes (expected >= 32)`,
     );
   }
-  const magicBytes = buf.subarray(0, 4);
-  const magic = Buffer.from(magicBytes).toString("utf8");
+  const magic = _utf8Decoder.decode(buf.subarray(0, 4));
   if (magic !== "EVTC") {
     throw new EvtcParseError(
       `EVTC magic mismatch: expected "EVTC", got ${JSON.stringify(magic)}`,
     );
   }
-  const buildYear = Buffer.from(buf.subarray(4, 8)).toString("utf8");
-  const dayMark = Buffer.from(buf.subarray(8, 12)).toString("utf8");
+  const buildYear = _utf8Decoder.decode(buf.subarray(4, 8));
+  const dayMark = _utf8Decoder.decode(buf.subarray(8, 12));
   const prefixByte = buf[12];
 
   const payloadBuf = buf.subarray(32);
@@ -114,7 +116,7 @@ export function parseEvtcFile(path: string): EvtcParseResult {
  * with a 2-byte length prefix; that parsing is out-of-scope here.
  */
 function scanAsciiStrings(buf: Uint8Array): string[] {
-  const out: string[] = [];
+  const seen = new Set<string>();
   let cursor = 0;
   while (cursor < buf.length) {
     // Skip null bytes.
@@ -123,20 +125,25 @@ function scanAsciiStrings(buf: Uint8Array): string[] {
     const start = cursor;
     while (cursor < buf.length && buf[cursor] !== 0x00) cursor++;
     const end = cursor;
-    if (end - start < 4) continue;
-    // ASCII-only filter.
+    const len = end - start;
+    if (len < 4) continue;
+    // Printable ASCII spans 0x20..0x7e. Validate in one pass, then
+    // decode once with String.fromCharCode to avoid both the
+    // TextDecoder overhead and repeated string concatenation.
     let isAscii = true;
-    for (let i = start; i < end; i++) {
-      if (buf[i] < 0x20 || buf[i] > 0x7e) {
+    const codes = new Array<number>(len);
+    for (let i = 0; i < len; i++) {
+      const b = buf[start + i];
+      if (b < 0x20 || b > 0x7e) {
         isAscii = false;
         break;
       }
+      codes[i] = b;
     }
     if (!isAscii) continue;
-    const s = Buffer.from(buf.subarray(start, end)).toString("utf8");
-    if (!out.includes(s)) out.push(s);
+    seen.add(String.fromCharCode(...codes));
   }
-  return out;
+  return Array.from(seen);
 }
 
 // ----------------------------------------------------------------------------
@@ -351,7 +358,7 @@ function findRealAgent(payload: Uint8Array, start: number): _AgentWithEnd | null
   const nlen = p - nstart;
   if (nlen < 3 || nlen > 32) return null;
   if (!isPrintableAscii(payload, nstart, p)) return null;
-  const name = Buffer.from(payload.subarray(nstart, p)).toString("utf8");
+  const name = _utf8Decoder.decode(payload.subarray(nstart, p));
   p++; // skip the null terminator of the name.
 
   if (p >= payload.length || payload[p] !== 0x3a) return null; // expect ':'
@@ -364,7 +371,7 @@ function findRealAgent(payload: Uint8Array, start: number): _AgentWithEnd | null
   const alen = p - astart;
   if (alen < 5 || alen > 40) return null;
   if (!isPrintableAscii(payload, astart, p)) return null;
-  const account = Buffer.from(payload.subarray(astart, p)).toString("utf8");
+  const account = _utf8Decoder.decode(payload.subarray(astart, p));
   p++; // skip the null terminator of the account.
 
   // 3) Skip the post-record padding (consume up to 64 zero bytes; stop at the first non-zero).

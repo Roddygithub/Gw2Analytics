@@ -19,7 +19,7 @@ Conventions
 - **Unknown source_agent_id.** An event whose source agent is not
   in the map (e.g. an NPC without a subgroup, a gadget, a
   projectile owner whose id is stale) lands in the ``""``
-  (empty-string) bucket. The empty string is a VALID subgroup
+  (empty-string) bucket. The empty string is a valid subgroup
   label that mirrors the parser's lenient-parser WvW quirk
   convention -- an explicit empty bucket is preferred over a
   silent drop because the route layer can then surface a
@@ -67,6 +67,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from itertools import pairwise
 from typing import Final
 
@@ -99,6 +100,16 @@ class SquadRollupRow(BaseModel):
     dps: float = Field(..., ge=0.0)
     hps: float = Field(..., ge=0.0)
     bps: float = Field(..., ge=0.0)
+
+
+@dataclass(slots=True)
+class _SquadStats:
+    """Mutable accumulator for one subgroup's combat contribution."""
+
+    damage: int = 0
+    healing: int = 0
+    strip: int = 0
+    hits: int = 0
 
 
 class SquadRollupAggregator:
@@ -139,47 +150,47 @@ class SquadRollupAggregator:
             msg = f"duration_s must be >= 0, got {duration_s!r}"
             raise ValueError(msg)
 
-        total_damage: dict[str, int] = defaultdict(int)
-        total_healing: dict[str, int] = defaultdict(int)
-        total_strip: dict[str, int] = defaultdict(int)
-        hit_count: dict[str, int] = defaultdict(int)
-        grand_damage = 0
-        grand_healing = 0
-        grand_strip = 0
-        grand_hits = 0
+        stats: dict[str, _SquadStats] = defaultdict(_SquadStats)
 
-        for dmg in damage_events:
-            subgroup = agent_id_to_subgroup.get(dmg.source_agent_id, "")
-            total_damage[subgroup] += dmg.damage
-            hit_count[subgroup] += 1
-            grand_damage += dmg.damage
-            grand_hits += 1
-        for heal in healing_events:
-            subgroup = agent_id_to_subgroup.get(heal.source_agent_id, "")
-            total_healing[subgroup] += heal.healing
-            hit_count[subgroup] += 1
-            grand_healing += heal.healing
-            grand_hits += 1
-        for strip in strip_events:
-            subgroup = agent_id_to_subgroup.get(strip.source_agent_id, "")
-            total_strip[subgroup] += strip.buff_removal
-            hit_count[subgroup] += 1
-            grand_strip += strip.buff_removal
-            grand_hits += 1
+        for dmg_ev in damage_events:
+            subgroup = agent_id_to_subgroup.get(dmg_ev.source_agent_id, "")
+            st = stats[subgroup]
+            st.damage += dmg_ev.damage
+            st.hits += 1
+
+        for heal_ev in healing_events:
+            subgroup = agent_id_to_subgroup.get(heal_ev.source_agent_id, "")
+            st = stats[subgroup]
+            st.healing += heal_ev.healing
+            st.hits += 1
+
+        for strip_ev in strip_events:
+            subgroup = agent_id_to_subgroup.get(strip_ev.source_agent_id, "")
+            st = stats[subgroup]
+            st.strip += strip_ev.buff_removal
+            st.hits += 1
+
+        # Derive the grand totals from the accumulated per-subgroup
+        # stats rather than tracking them inside the hot loops. This
+        # saves four integer additions per input event.
+        grand_damage = sum(st.damage for st in stats.values())
+        grand_healing = sum(st.healing for st in stats.values())
+        grand_strip = sum(st.strip for st in stats.values())
+        grand_hits = sum(st.hits for st in stats.values())
 
         rate_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_RATE
         rows = [
             SquadRollupRow(
                 subgroup=subgroup,
-                total_damage=total_damage[subgroup],
-                total_healing=total_healing[subgroup],
-                total_buff_removal=total_strip[subgroup],
-                hit_count=hit_count[subgroup],
-                dps=total_damage[subgroup] * rate_factor,
-                hps=total_healing[subgroup] * rate_factor,
-                bps=total_strip[subgroup] * rate_factor,
+                total_damage=st.damage,
+                total_healing=st.healing,
+                total_buff_removal=st.strip,
+                hit_count=st.hits,
+                dps=st.damage * rate_factor,
+                hps=st.healing * rate_factor,
+                bps=st.strip * rate_factor,
             )
-            for subgroup in set(total_damage) | set(total_healing) | set(total_strip)
+            for subgroup, st in stats.items()
         ]
         # Sort: highest total_damage first; ties broken by ascending subgroup.
         rows.sort(key=lambda r: (-r.total_damage, r.subgroup))

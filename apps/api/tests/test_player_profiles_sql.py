@@ -120,20 +120,21 @@ def test_sql_aggregation_modal_profession_via_window_function(
     assert beta.profession == Profession.NECROMANCER
 
 
-def test_sql_aggregation_profession_filter_is_applied_client_side(
+def test_sql_aggregation_profession_filter_is_applied_sql_side(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ``?profession=`` filter is applied client-side on the modal profession.
+    """The ``?profession=`` filter is applied SQL-side on the modal profession.
 
-    The SQL query returns ALL accounts (the modal profession is a
-    per-account aggregate; a SQL-side filter would require a
-    self-join on the modal subquery). The Python-side filter is
-    O(results) which is bounded by ``limit`` -- acceptable cost.
+    The modal profession is computed by the CTE and joined into
+    the main aggregation, so the filter is pushed into the SQL
+    query before ``LIMIT``/``OFFSET``. This preserves pagination
+    correctness compared to the previous client-side filter.
     """
     mock_db = MagicMock(spec=Session)
+    # The mock simulates a DB that has already applied the
+    # SQL-side profession filter.
     mock_db.execute.return_value.all.return_value = [
         _make_row("alpha", "Alpha", Profession.MESMER.value, 0, 5, 1000),
-        _make_row("beta", "Beta", Profession.NECROMANCER.value, 0, 5, 1000),
         _make_row("gamma", "Gamma", Profession.MESMER.value, 0, 3, 500),
     ]
     profiles = aggregate_player_profiles_from_sql(
@@ -142,7 +143,6 @@ def test_sql_aggregation_profession_filter_is_applied_client_side(
         offset=0,
         profession_filter=Profession.MESMER,
     )
-    # Client-side filter: only MESMER-modal accounts survive.
     assert [p.account_name for p in profiles] == ["alpha", "gamma"]
     assert all(p.profession == Profession.MESMER for p in profiles)
 

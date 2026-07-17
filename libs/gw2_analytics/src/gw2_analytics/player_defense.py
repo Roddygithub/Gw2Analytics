@@ -74,13 +74,14 @@ each per-cell constraint):
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
-from itertools import pairwise
+from dataclasses import dataclass
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gw2_analytics._invariants import check_desc_asc_ordering
 from gw2_core import (
     BlockEvent,
     CCEvent,
@@ -159,6 +160,19 @@ class PlayerDefenseRow(BaseModel):
     name: str | None = None
 
 
+@dataclass(slots=True)
+class _DefenseAccumulator:
+    """Mutable accumulator for one agent's defense statistics."""
+
+    damage_taken: int = 0
+    barrier_absorbed: int = 0
+    cc_taken: int = 0
+    deaths: int = 0
+    dodges: int = 0
+    blocks: int = 0
+    interrupts: int = 0
+
+
 class PlayerDefenseAggregator:
     """Stateless aggregator: damage + CC + death events -> per-player defense roll-up rows.
 
@@ -212,81 +226,56 @@ class PlayerDefenseAggregator:
         Empty input across ALL THREE streams yields ``[]`` -- no
         placeholder row.
         """
-        damage_by_player: dict[int, int] = defaultdict(int)
-        barrier_by_player: dict[int, int] = defaultdict(int)
-        cc_by_player: dict[int, int] = defaultdict(int)
-        deaths_by_player: dict[int, int] = defaultdict(int)
-        # Wave 5 SCAFFOLD: the 3 NEW Event subclasses (DodgeEvent /
-        # BlockEvent / InterruptEvent) fill the previously-stub
-        # defensive columns. Actor-only attribution for DodgeEvent /
-        # BlockEvent (the player performed the action); actor-side
-        # attribution for InterruptEvent (the player interrupted the
-        # enemy cast). The Phase 6 v2 parser-stream switch yields the
-        # actual events; pre-Phase-6-v2 streams parse cleanly with
-        # the SCAFFOLD landed here.
-        dodges_by_player: dict[int, int] = defaultdict(int)
-        blocks_by_player: dict[int, int] = defaultdict(int)
-        interrupts_by_player: dict[int, int] = defaultdict(int)
+        stats: dict[int, _DefenseAccumulator] = defaultdict(_DefenseAccumulator)
         grand_damage_total = 0
 
-        for de in damage_events:
-            damage_by_player[de.target_agent_id] += de.damage
-            grand_damage_total += de.damage
-            if barrier_portion_getter is not None:
-                # Mirror the ``condi_portion_getter`` contract:
-                # caller-side responsibility for the side-table
-                # validation (negative / overflow clamping). The
-                # aggregator stays free of cross-source metadata.
-                barrier_by_player[de.target_agent_id] += barrier_portion_getter(de)
+        # Hoist the barrier-getter branch outside the hot loop so
+        # the per-event path pays the branch cost exactly once.
+        if barrier_portion_getter is not None:
+            getter = barrier_portion_getter
+            for de in damage_events:
+                acc = stats[de.target_agent_id]
+                acc.damage_taken += de.damage
+                grand_damage_total += de.damage
+                acc.barrier_absorbed += getter(de)
+        else:
+            for de in damage_events:
+                stats[de.target_agent_id].damage_taken += de.damage
+                grand_damage_total += de.damage
 
         for ce in cc_events:
-            cc_by_player[ce.target_agent_id] += ce.cc_value
+            stats[ce.target_agent_id].cc_taken += ce.cc_value
 
-        for dthe in death_events:
-            # :class:`~gw2_core.DeathEvent` uses actor-only shape:
-            # the dying player is ``source_agent_id``. Death
-            # attribution is per-player (the player died), NOT
-            # source-side "killed by" (that's a different column
-            # which would parse from ``killed_by_agent_id`` if
-            # present; not surfaced for v0.10.23).
-            deaths_by_player[dthe.source_agent_id] += 1
-
-        for doe in dodge_events:
-            dodges_by_player[doe.source_agent_id] += 1
-
-        for be in block_events:
-            blocks_by_player[be.source_agent_id] += 1
-
-        for ie in interrupt_events:
-            interrupts_by_player[ie.source_agent_id] += 1
-
-        # Build the row set from the union of every observed
-        # agent_id across all six streams. An NPC that received
-        # damage but did not die / receive CC / dodge still
-        # surfaces (the NPC's "defense" row exists -- only
-        # ``damage_taken`` is non-zero).
-        all_agents = (
-            set(damage_by_player)
-            | set(cc_by_player)
-            | set(deaths_by_player)
-            | set(dodges_by_player)
-            | set(blocks_by_player)
-            | set(interrupts_by_player)
+        # Use C-level Counter for the pure-counting event streams.
+        death_counts = Counter(de.source_agent_id for de in death_events)
+        dodge_counts = Counter(dodge_ev.source_agent_id for dodge_ev in dodge_events)
+        block_counts = Counter(block_ev.source_agent_id for block_ev in block_events)
+        interrupt_counts = Counter(
+            interrupt_ev.source_agent_id for interrupt_ev in interrupt_events
         )
+        for agent_id, count in death_counts.items():
+            stats[agent_id].deaths = count
+        for agent_id, count in dodge_counts.items():
+            stats[agent_id].dodges = count
+        for agent_id, count in block_counts.items():
+            stats[agent_id].blocks = count
+        for agent_id, count in interrupt_counts.items():
+            stats[agent_id].interrupts = count
+
         row_names = name_map or {}
         rows = [
             PlayerDefenseRow(
                 agent_id=agent,
-                damage_taken=damage_by_player[agent],
-                cc_taken=cc_by_player[agent],
-                deaths=deaths_by_player[agent],
-                dodges=dodges_by_player[agent],
-                blocks=blocks_by_player[agent],
-                interrupts=interrupts_by_player[agent],
-                barrier_absorbed=barrier_by_player[agent],
+                damage_taken=acc.damage_taken,
+                cc_taken=acc.cc_taken,
+                deaths=acc.deaths,
+                dodges=acc.dodges,
+                blocks=acc.blocks,
+                interrupts=acc.interrupts,
+                barrier_absorbed=acc.barrier_absorbed,
                 name=row_names.get(agent),
             )
-            for agent in all_agents
+            for agent, acc in stats.items()
         ]
         # Sort: DESCENDING ``damage_taken`` -- the Defense table's
         # leading indicator per design doc §13 ("Most-targeted
@@ -298,14 +287,15 @@ class PlayerDefenseAggregator:
         # player, by the spec's "defensive load" indicator.)
         rows.sort(key=lambda r: (-r.damage_taken, r.agent_id))
 
-        self._check_invariants(rows, grand_damage_total, barrier_by_player)
+        expected_barrier_total = sum(acc.barrier_absorbed for acc in stats.values())
+        self._check_invariants(rows, grand_damage_total, expected_barrier_total)
         return rows
 
     @staticmethod
     def _check_invariants(
         rows: list[PlayerDefenseRow],
         expected_damage_total: int,
-        barrier_by_player: dict[int, int],
+        expected_barrier_total: int,
     ) -> None:
         """Raise ``ValueError`` if any cross-field invariant is violated.
 
@@ -315,12 +305,12 @@ class PlayerDefenseAggregator:
            ``expected_damage_total`` (no damage event dropped on
            the target side).
         2. Sum of ``row.barrier_absorbed`` across all rows ==
-           sum of ``barrier_by_player`` (no barrier-absorbed event
+           ``expected_barrier_total`` (no barrier-absorbed event
            dropped) -- NOTE: this is a DOC-CHECK on the
            barrier-absorbed contract; if the getter returns
            values, the sum MUST match. Only valid when the
            ``barrier_portion_getter`` was provided (otherwise
-           ``barrier_by_player`` is all-zero and the contract is
+           ``expected_barrier_total`` is 0 and the contract is
            trivially satisfied).
         3. ``barrier_absorbed <= damage_taken`` per row (a
            damage event cannot absorb more barrier than its
@@ -337,12 +327,11 @@ class PlayerDefenseAggregator:
                 f"!= sum of event.damage ({expected_damage_total})"
             )
             raise ValueError(msg)
-        barrier_observed_total = sum(barrier_by_player.values())
         actual_barrier_total = sum(r.barrier_absorbed for r in rows)
-        if actual_barrier_total != barrier_observed_total:
+        if actual_barrier_total != expected_barrier_total:
             msg = (
                 f"sum of row.barrier_absorbed ({actual_barrier_total}) "
-                f"!= sum of barrier_portion_getter({barrier_observed_total})"
+                f"!= sum of barrier_portion_getter({expected_barrier_total})"
             )
             raise ValueError(msg)
         for r in rows:
@@ -357,20 +346,16 @@ class PlayerDefenseAggregator:
                     f"damage_taken ({r.damage_taken})"
                 )
                 raise ValueError(msg)
-        # ``pairwise`` pairs each row with its immediate successor;
-        # canonical idiom for adjacent-pair iteration (ruff RUF007).
         # Order check is the INVERSE of PlayerBoonsRow's: damage_taken
         # DESC (most-targeted first per design doc §13); ties broken
         # by ascending ``agent_id``.
-        for prev, curr in pairwise(rows):
-            if prev.damage_taken < curr.damage_taken:
-                msg = (
-                    f"rows not ordered by (damage_taken DESC, agent_id ASC): {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
-            if prev.damage_taken == curr.damage_taken and prev.agent_id >= curr.agent_id:
-                msg = f"tie on damage_taken not broken by agent_id ASC: {prev!r} then {curr!r}"
-                raise ValueError(msg)
+        check_desc_asc_ordering(
+            rows,
+            primary_key=lambda r: r.damage_taken,
+            secondary_key=lambda r: r.agent_id,
+            primary_label="damage_taken",
+            secondary_label="agent_id",
+        )
 
 
 __all__ = ["PlayerDefenseAggregator", "PlayerDefenseRow"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Final
 
@@ -43,6 +44,29 @@ def _sanitize_name(name: str | None, max_length: int = MAX_NAME_LEN) -> str:
     return name.replace("\x00", "")[:max_length]
 
 
+def _deduplicate_ids[T](
+    items: list[T],
+    *,
+    key: Callable[[T], int],
+    log_type: str,
+    fight_id: str,
+) -> Iterator[T]:
+    """Yield ``items`` keeping the first occurrence of each id."""
+    seen: set[int] = set()
+    for item in items:
+        item_id = key(item)
+        if item_id in seen:
+            logger.info(
+                "fight %s: deduplicating duplicate %s_id=%s; first-seen entry wins",
+                fight_id,
+                log_type,
+                item_id,
+            )
+            continue
+        seen.add(item_id)
+        yield item
+
+
 def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
     if cf.header is None:
         msg = "_save_fight called without header"
@@ -63,24 +87,16 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
     db.add(orm_fight)
     db.flush()
 
-    seen_agent_ids: set[int] = set()
-    for agent in cf.agents:
-        agent_id_int = int(agent.id)
-        if agent_id_int in seen_agent_ids:
-            logger.info(
-                "fight %s: deduplicating duplicate agent_id=%s (name=%r, "
-                "is_player=%s); first-seen entry wins",
-                cf.id,
-                agent_id_int,
-                agent.name,
-                agent.is_player,
-            )
-            continue
-        seen_agent_ids.add(agent_id_int)
+    for agent in _deduplicate_ids(
+        cf.agents,
+        key=lambda a: int(a.id),
+        log_type="agent",
+        fight_id=cf.id,
+    ):
         db.add(
             OrmFightAgent(
                 fight_id=cf.id,
-                agent_id=agent_id_int,
+                agent_id=int(agent.id),
                 name=_sanitize_name(agent.name),
                 profession=int(agent.profession.value),
                 elite_spec=int(agent.elite.value),
@@ -94,22 +110,16 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
             ),
         )
 
-    seen_skill_ids: set[int] = set()
-    for skill in cf.skills:
-        skill_id_int = int(skill.id)
-        if skill_id_int in seen_skill_ids:
-            logger.info(
-                "fight %s: deduplicating duplicate skill_id=%s (name=%r); first-seen entry wins",
-                cf.id,
-                skill_id_int,
-                skill.name,
-            )
-            continue
-        seen_skill_ids.add(skill_id_int)
+    for skill in _deduplicate_ids(
+        cf.skills,
+        key=lambda s: int(s.id),
+        log_type="skill",
+        fight_id=cf.id,
+    ):
         db.add(
             OrmFightSkill(
                 fight_id=cf.id,
-                skill_id=skill_id_int,
+                skill_id=int(skill.id),
                 name=_sanitize_name(skill.name),
             ),
         )

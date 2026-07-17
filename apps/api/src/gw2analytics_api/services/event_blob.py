@@ -14,23 +14,26 @@ from gw2analytics_api.models import OrmFight, Upload
 from gw2analytics_api.services.player_summaries import _persist_player_summaries
 from gw2analytics_api.storage import put_events
 
+# Module-level singleton: PythonEvtcParser is stateless and safe to reuse.
+_parser = PythonEvtcParser()
+
 logger = logging.getLogger(__name__)
 
 
 def _write_summary_for_fight(
     db: Session,
-    fight_id: str,
+    orm_fight: OrmFight,
     events: list[Event],
 ) -> None:
-    """Fetch the fight row + write ``OrmFightPlayerSummary`` rows.
+    """Write ``OrmFightPlayerSummary`` rows for a pre-fetched fight.
 
     Shared by the empty-events and non-empty-events paths in
-    :func:`_persist_event_blob` so the orm_fight fetch + the
-    SELECT-by-PK retry + the SQLAlchemyError-tolerant summary write
-    live in one place. Tolerates a missing fight row (logs + returns)
-    and SQLAlchemy errors on the summary write (logs + returns so
-    the upload still completes -- the slow-path fallback serves the
-    player routes from the events blob when the summary write fails).
+    :func:`_persist_event_blob`. The caller is responsible for
+    fetching the fight row (with ``selectinload(OrmFight.agents)``)
+    and for tolerating a missing row. This helper only performs the
+    summary materialization and logs SQLAlchemy errors so the upload
+    still completes -- the slow-path fallback serves the player
+    routes from the events blob when the summary write fails.
 
     The empty-events contract: when ``events`` is empty, the caller's
     conditional pre-seed in :func:`_persist_player_summaries`
@@ -38,18 +41,13 @@ def _write_summary_for_fight(
     /players fast-path is non-empty even for empty-events fights (the
     v0.8.4 ATTENDING-agents-always-surface contract).
     """
-    orm_fight = db.execute(
-        select(OrmFight).where(OrmFight.id == fight_id).options(selectinload(OrmFight.agents)),
-    ).scalar_one_or_none()
-    if orm_fight is None:
-        return
     try:
         _persist_player_summaries(db, orm_fight, events)
     except SQLAlchemyError:
         logger.exception(
             "player summary materialization failed for fight %s; "
             "slow-path fallback will serve the player routes",
-            fight_id,
+            orm_fight.id,
         )
 
 
@@ -59,9 +57,8 @@ def _persist_event_blob(
     evtc_bytes: bytes,
     fight_id: str,
 ) -> None:
-    parser = PythonEvtcParser()
     try:
-        events = list(parser.parse_events(evtc_bytes))
+        events = list(_parser.parse_events(evtc_bytes))
     except (EvtcParseError, S3Error, OSError, gzip.BadGzipFile):
         # v0.9.5 plan 019: narrowed from ``except Exception`` to the
         # specific exception types this call site can legitimately
@@ -90,11 +87,16 @@ def _persist_event_blob(
     # summary write.
     if not events:
         logger.debug("upload %s yielded zero events; events_blob_uri stays NULL", upload.id)
-        _write_summary_for_fight(db, fight_id, events)
+        orm_fight = db.execute(
+            select(OrmFight).where(OrmFight.id == fight_id).options(selectinload(OrmFight.agents)),
+        ).scalar_one_or_none()
+        if orm_fight is None:
+            return
+        _write_summary_for_fight(db, orm_fight, events)
         return
 
     try:
-        jsonl = "\n".join(event.model_dump_json() for event in events).encode("utf-8")
+        jsonl = "\n".join([event.model_dump_json() for event in events]).encode("utf-8")
         gz_bytes = gzip.compress(jsonl)
         blob_uri = put_events(fight_id, gz_bytes)
     except (EvtcParseError, S3Error, OSError, gzip.BadGzipFile):
@@ -102,9 +104,9 @@ def _persist_event_blob(
         return
 
     orm_fight = db.execute(
-        select(OrmFight).where(OrmFight.id == fight_id),
+        select(OrmFight).where(OrmFight.id == fight_id).options(selectinload(OrmFight.agents)),
     ).scalar_one_or_none()
     if orm_fight is None:
         return
     orm_fight.events_blob_uri = blob_uri
-    _write_summary_for_fight(db, fight_id, events)
+    _write_summary_for_fight(db, orm_fight, events)

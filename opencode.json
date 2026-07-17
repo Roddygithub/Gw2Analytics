@@ -1,0 +1,24 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [],
+  "references": {},
+  "mcp": {
+    "postgres": {
+      "type": "local",
+      "command": ["npx", "-y", "@yawlabs/postgres-mcp"],
+      "enabled": true,
+      "env": {
+        "DATABASE_URL": "postgresql://gw2analytics:gw2analytics@localhost:5432/gw2analytics"
+      }
+    },
+    "redis": {
+      "type": "local",
+      "command": ["npx", "-y", "redis-mcp"],
+      "enabled": true,
+      "env": {
+        "REDIS_HOST": "localhost",
+        "REDIS_PORT": "6379"
+      }
+    }
+  }
+}

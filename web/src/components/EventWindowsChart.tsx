@@ -39,7 +39,7 @@
  *   baseline). The legend still shows damage + healing.
  */
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { EventBucket } from "@/lib/api";
 
 const CHART_WIDTH = 720;
@@ -60,15 +60,78 @@ const EMPTY_STYLE: React.CSSProperties = {
 const DAMAGE_FILL = "var(--accent)";
 const HEALING_FILL = "var(--foreground)";
 
+interface BarBucketData {
+  key: string;
+  damageY: number;
+  damageH: number;
+  healingY: number;
+  healingH: number;
+  x0: number;
+  showLabel: boolean;
+  labelX: number;
+  startMs: number;
+}
+
+interface BarBucketProps {
+  bar: BarBucketData;
+  innerH: number;
+  barWidth: number;
+}
+
+/**
+ * Memoised single bucket group. The parent ``EventWindowsChart``
+ * re-renders whenever ``buckets`` changes; this component keeps
+ * the per-bucket rendering stable across parent re-renders that
+ * don't touch this bucket's data.
+ */
+const BarBucket = memo(function BarBucket({
+  bar,
+  innerH,
+  barWidth,
+}: BarBucketProps) {
+  return (
+    <g>
+      <rect
+        x={bar.x0 + BAR_PADDING_PX}
+        y={bar.damageY}
+        width={barWidth}
+        height={bar.damageH}
+        fill={DAMAGE_FILL}
+      />
+      <rect
+        x={bar.x0 + barWidth + BAR_GAP_PX}
+        y={bar.healingY}
+        width={barWidth}
+        height={bar.healingH}
+        fill={HEALING_FILL}
+        opacity={0.7}
+      />
+      {bar.showLabel && (
+        <text
+          x={bar.labelX}
+          y={innerH + 14}
+          textAnchor="middle"
+          fontSize={9}
+          fill="var(--foreground)"
+          opacity={0.6}
+        >
+          {bar.startMs}
+        </text>
+      )}
+    </g>
+  );
+});
+
 export function EventWindowsChart({ buckets }: { buckets: EventBucket[] }) {
   const layout = useMemo(() => {
     if (buckets.length === 0) {
       return null;
     }
-    const maxValue = Math.max(
-      1,
-      ...buckets.flatMap((b) => [b.damage_total, b.healing_total]),
-    );
+    let maxValue = 1;
+    for (const b of buckets) {
+      if (b.damage_total > maxValue) maxValue = b.damage_total;
+      if (b.healing_total > maxValue) maxValue = b.healing_total;
+    }
     const innerW = CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
     const innerH = CHART_HEIGHT - CHART_PADDING.top - CHART_PADDING.bottom;
     const groupWidth = innerW / buckets.length;
@@ -76,15 +139,39 @@ export function EventWindowsChart({ buckets }: { buckets: EventBucket[] }) {
       2,
       (groupWidth - BAR_GAP_PX) / 2 - BAR_PADDING_PX,
     );
-    return { maxValue, innerW, innerH, groupWidth, barWidth };
+    const labelStep = Math.max(1, Math.ceil(buckets.length / 8));
+    const yScale = (v: number) => innerH * (1 - v / maxValue);
+
+    const barBuckets: BarBucketData[] = buckets.map((b, i) => {
+      const x0 = i * groupWidth;
+      return {
+        key: `${b.start_ms}-${b.end_ms}`,
+        damageY: yScale(b.damage_total),
+        damageH: innerH - yScale(b.damage_total),
+        healingY: yScale(b.healing_total),
+        healingH: innerH - yScale(b.healing_total),
+        x0,
+        showLabel: i % labelStep === 0,
+        labelX: x0 + groupWidth / 2,
+        startMs: b.start_ms,
+      };
+    });
+
+    return {
+      maxValue,
+      innerW,
+      innerH,
+      barWidth,
+      barBuckets,
+    };
   }, [buckets]);
 
   if (buckets.length === 0 || !layout) {
     return <div style={EMPTY_STYLE}>No event windows.</div>;
   }
 
-  const { maxValue, innerW, innerH, groupWidth, barWidth } = layout;
-  const yScale = (v: number) => innerH * (1 - v / maxValue);
+  const { maxValue, innerW, innerH, barWidth, barBuckets } = layout;
+  const yMax = 0;
 
   return (
     <div
@@ -120,7 +207,7 @@ export function EventWindowsChart({ buckets }: { buckets: EventBucket[] }) {
           />
           <text
             x={-8}
-            y={yScale(maxValue)}
+            y={yMax}
             textAnchor="end"
             dominantBaseline="middle"
             fontSize={10}
@@ -141,42 +228,14 @@ export function EventWindowsChart({ buckets }: { buckets: EventBucket[] }) {
             0
           </text>
 
-          {buckets.map((b, i) => {
-            const x0 = i * groupWidth;
-            const damageH = innerH - yScale(b.damage_total);
-            const healingH = innerH - yScale(b.healing_total);
-            return (
-              <g key={`${b.start_ms}-${b.end_ms}`}>
-                <rect
-                  x={x0 + BAR_PADDING_PX}
-                  y={yScale(b.damage_total)}
-                  width={barWidth}
-                  height={damageH}
-                  fill={DAMAGE_FILL}
-                />
-                <rect
-                  x={x0 + barWidth + BAR_GAP_PX}
-                  y={yScale(b.healing_total)}
-                  width={barWidth}
-                  height={healingH}
-                  fill={HEALING_FILL}
-                  opacity={0.7}
-                />
-                {i % Math.max(1, Math.ceil(buckets.length / 8)) === 0 && (
-                  <text
-                    x={x0 + groupWidth / 2}
-                    y={innerH + 14}
-                    textAnchor="middle"
-                    fontSize={9}
-                    fill="var(--foreground)"
-                    opacity={0.6}
-                  >
-                    {b.start_ms}
-                  </text>
-                )}
-              </g>
-            );
-          })}
+          {barBuckets.map((b) => (
+            <BarBucket
+              key={b.key}
+              bar={b}
+              innerH={innerH}
+              barWidth={barWidth}
+            />
+          ))}
         </g>
       </svg>
       <div
