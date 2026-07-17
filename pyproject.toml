@@ -57,7 +57,7 @@ dev = [
     # via [tool.uv.sources] workspace = true, not as dev-deps.
     # TODO: bump each <N -> <N+1 once a workspace member migrates that far.
     "fastapi-mcp>=0.4,<1",
-    "fastapi>=0.115,<1",
+    "fastapi>=0.139.2,<1",
     "uvicorn[standard]>=0.32,<1",
     "pydantic-settings>=2.6,<3",
     "sqlalchemy>=2.0,<3",

@@ -7,7 +7,7 @@ license = { text = "MIT" }
 authors = [{ name = "GW2Analytics team" }]
 dependencies = [
     "fastapi-mcp>=0.4",
-    "fastapi>=0.115",
+    "fastapi>=0.139.2",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
