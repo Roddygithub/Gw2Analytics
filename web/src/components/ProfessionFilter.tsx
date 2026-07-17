@@ -36,6 +36,8 @@
  *   state).
  */
 import { useRouter, useSearchParams } from "next/navigation";
+import { LABEL_STYLE, SELECT_STYLE } from "@/shared/styles";
+import React from "react";
 
 interface ProfessionOption {
   /** Enum name (uppercase, e.g. ``"MESMER"``); the URL value. */
@@ -56,7 +58,16 @@ const PROFESSION_OPTIONS: readonly ProfessionOption[] = [
   { value: "REVENANT", label: "Revenant" },
 ];
 
-export function ProfessionFilter({
+const PROFESSION_SELECT_STYLE: React.CSSProperties = {
+  ...SELECT_STYLE,
+  padding: "6px 10px",
+  fontSize: 14,
+  background: "var(--bg-elev)",
+  color: "inherit",
+  border: "1px solid var(--border)",
+};
+
+function ProfessionFilterComponent({
   currentValue,
 }: {
   /**
@@ -87,29 +98,14 @@ export function ProfessionFilter({
   };
 
   return (
-    <label
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        fontSize: 14,
-        opacity: 0.85,
-      }}
-    >
+    <label style={LABEL_STYLE}>
       Filter by profession:
       <select
         data-testid="profession-filter"
         aria-label="Filter players by profession"
         value={currentValue ?? ""}
         onChange={handleChange}
-        style={{
-          padding: "6px 10px",
-          fontSize: 14,
-          background: "var(--bg-elev)",
-          color: "inherit",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-        }}
+        style={PROFESSION_SELECT_STYLE}
       >
         <option value="">All professions</option>
         {PROFESSION_OPTIONS.map((opt) => (
@@ -121,3 +117,5 @@ export function ProfessionFilter({
     </label>
   );
 }
+
+export const ProfessionFilter = React.memo(ProfessionFilterComponent);

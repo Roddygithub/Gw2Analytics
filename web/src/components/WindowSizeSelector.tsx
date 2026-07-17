@@ -53,6 +53,7 @@
  */
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { LABEL_STYLE, SELECT_STYLE } from "@/shared/styles";
 
 /**
  * The canonical preset list. Module-scope constant so the
@@ -68,22 +69,22 @@ export interface WindowSizeSelectorProps {
   fightId: string;
 }
 
+const WINDOW_SELECT_STYLE: React.CSSProperties = {
+  ...SELECT_STYLE,
+  background: "var(--background)",
+  color: "var(--foreground)",
+  border: "1px solid var(--border)",
+  fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
+  fontSize: 14,
+};
+
 export function WindowSizeSelector({ current, fightId }: WindowSizeSelectorProps) {
   const router = useRouter();
   const pathname = usePathname() ?? `/fights/${fightId}`;
   const searchParams = useSearchParams();
 
   return (
-    <label
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        fontSize: 14,
-        color: "var(--foreground)",
-        opacity: 0.85,
-      }}
-    >
+    <label style={LABEL_STYLE}>
       <span>Window (s):</span>
       <select
         data-testid="window-s-selector"
@@ -100,15 +101,7 @@ export function WindowSizeSelector({ current, fightId }: WindowSizeSelectorProps
           const url = queryString ? `${pathname}?${queryString}` : pathname;
           router.push(url);
         }}
-        style={{
-          padding: "4px 8px",
-          background: "var(--background)",
-          color: "var(--foreground)",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-          fontSize: 14,
-        }}
+        style={WINDOW_SELECT_STYLE}
       >
         {WINDOW_S_PRESETS.map((opt) => (
           <option key={opt} value={opt}>

@@ -83,6 +83,7 @@ import { useState } from "react";
 import { PerFightTimelineChart } from "@/components/PerFightTimelineChart";
 import { PerPlayerTimelineChart } from "@/components/PerPlayerTimelineChart";
 import type { FightTimeline, FightPlayerTimeline } from "@/lib/api";
+import { CAPTION_STYLE, HEADING_STYLE, SECTION_STYLE } from "@/shared/styles";
 
 type Tab = "aggregated" | "per_player";
 
@@ -110,6 +111,24 @@ const TAB_STYLE_DISABLED: React.CSSProperties = {
   cursor: "not-allowed",
 };
 
+const HEADER_ROW_STYLE: React.CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const TAB_CONTAINER_STYLE: React.CSSProperties = {
+  display: "inline-flex",
+  gap: 8,
+};
+
+const CAPTION_DETAIL_STYLE: React.CSSProperties = {
+  opacity: 0.7,
+  fontSize: 13,
+};
+
 export function PerFightTimelineSection({
   timeline,
   playerTimeline,
@@ -123,18 +142,10 @@ export function PerFightTimelineSection({
   const perPlayerDisabled = playerTimeline === null;
 
   return (
-    <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <h2 style={{ fontSize: 18, fontWeight: 600 }}>Per-fight timeline</h2>
-        <div style={{ display: "inline-flex", gap: 8 }}>
+    <section style={SECTION_STYLE}>
+      <div style={HEADER_ROW_STYLE}>
+        <h2 style={HEADING_STYLE}>Per-fight timeline</h2>
+        <div style={TAB_CONTAINER_STYLE}>
           <button
             type="button"
             style={
@@ -167,13 +178,13 @@ export function PerFightTimelineSection({
       </div>
 
       {timeline === null && playerTimeline === null ? (
-        <p style={{ opacity: 0.7 }}>Per-fight timeline unavailable.</p>
+        <p style={CAPTION_STYLE}>Per-fight timeline unavailable.</p>
       ) : activeTab === "aggregated" ? (
         timeline === null ? (
-          <p style={{ opacity: 0.7 }}>Aggregated timeline unavailable.</p>
+          <p style={CAPTION_STYLE}>Aggregated timeline unavailable.</p>
         ) : (
           <>
-            <p style={{ opacity: 0.7, fontSize: 13 }}>
+            <p style={CAPTION_DETAIL_STYLE}>
               Showing {timeline.points.length} bucket
               {timeline.points.length === 1 ? "" : "s"} ({timeline.window_s}
               -second window, {timeline.duration_s.toFixed(2)} s duration)
@@ -182,10 +193,10 @@ export function PerFightTimelineSection({
           </>
         )
       ) : playerTimeline === null ? (
-        <p style={{ opacity: 0.7 }}>Per-player timeline unavailable.</p>
+        <p style={CAPTION_STYLE}>Per-player timeline unavailable.</p>
       ) : (
         <>
-          <p style={{ opacity: 0.7, fontSize: 13 }}>
+          <p style={CAPTION_DETAIL_STYLE}>
             Showing {playerTimeline.series.length} player
             {playerTimeline.series.length === 1 ? "" : "s"} (
             {playerTimeline.window_s}-second window,{" "}

@@ -88,6 +88,20 @@ Canonical reference for the future integration length:
   ``StateChange`` enum reference (per the WAVE-8 A.4.1 commit).
 - ``plans/WAVE-8-parser-side.md`` §A.4.2 -- the plan fragment.
 - this module's ``__all__`` -- the SCAFFOLD surface.
+
+A.4.2 ↔ A.4.3 layering boundary (cross-reference for the next sub-slice):
+  A.4.2 is an **overlay-log stream** (a separate input file format
+  arcdps writes alongside the EVTC binary). A.4.3 will derive
+  DEATH + DOWN + CONDITION_REMOVE + CC events from the **EVTC
+  cbtevent statechange bytes** via the A.4.1 dispatch table
+  (:file:`gw2_evtc_parser.statechange_dispatch.STATECHANGE_MAP`) --
+  NOT from :func:`parse_overlay_events`. The two streams are
+  ortho: do NOT extend :class:`OverlayLogEvent` with cbtevent-derived
+  fields (that breaks the layered design); instead, the A.4.3
+  subclasses (:class:`~gw2_core.DeathEvent` /
+  :class:`~gw2_core.DownEvent` / :class:`~gw2_core.ConditionRemoveEvent`
+  / :class:`~gw2_core.CCEvent`) feed the shared Stream Merger that
+  heapq.merges BOTH streams on the shared EVTC epoch.
 """
 
 from __future__ import annotations

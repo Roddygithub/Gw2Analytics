@@ -191,7 +191,7 @@ class TestPlayerDefenseAggregator:
         ]
         with pytest.raises(ValueError, match=r"sum of row\.damage_taken"):
             PlayerDefenseAggregator._check_invariants(
-                rows, expected_damage_total=200, barrier_by_player={}
+                rows, expected_damage_total=200, expected_barrier_total=0
             )
 
     def test_check_invariants_raises_on_barrier_exceeds_damage(self) -> None:
@@ -202,7 +202,7 @@ class TestPlayerDefenseAggregator:
         ]
         with pytest.raises(ValueError, match=r"barrier_absorbed.*>.*damage_taken"):
             PlayerDefenseAggregator._check_invariants(
-                rows, expected_damage_total=50, barrier_by_player={1: 100}
+                rows, expected_damage_total=50, expected_barrier_total=100
             )
 
     def test_check_invariants_raises_on_wrong_ordering(self) -> None:
@@ -212,7 +212,7 @@ class TestPlayerDefenseAggregator:
         ]
         with pytest.raises(ValueError, match=r"not ordered by"):
             PlayerDefenseAggregator._check_invariants(
-                rows, expected_damage_total=300, barrier_by_player={}
+                rows, expected_damage_total=300, expected_barrier_total=0
             )
 
     def test_check_invariants_raises_on_tie_not_broken(self) -> None:
@@ -222,7 +222,7 @@ class TestPlayerDefenseAggregator:
         ]
         with pytest.raises(ValueError, match=r"tie on damage_taken"):
             PlayerDefenseAggregator._check_invariants(
-                rows, expected_damage_total=200, barrier_by_player={}
+                rows, expected_damage_total=200, expected_barrier_total=0
             )
 
     def test_dodge_block_interrupt_events(self) -> None:

@@ -53,6 +53,7 @@ from gw2_evtc_parser.parser import (
     MAX_EVTC_BYTES,
     MAX_SKILL_NAME_BYTES,
     SKILL_COUNT_OFFSET,
+    _iter_skill_records,
 )
 
 # v0.10.5 audit R2.3: hoist `import gw2_evtc_parser.parser as parser_mod`
@@ -588,6 +589,84 @@ def test_synthetic_skills_and_agents_together() -> None:
     assert len(fight.skills) == 2
     assert fight.agents[0].name == "W"
     assert fight.skills[0].name == "Whirlwind"
+
+
+# ---------------------------------------------------------------------------
+# _iter_skill_records helper tests
+# ---------------------------------------------------------------------------
+
+
+def test_iter_skill_records_yields_expected_tuples() -> None:
+    """``_iter_skill_records`` exposes cursor, skill_id, name_len and record_size."""
+    skill_block = _build_skill_record(101, "Whirlwind") + _build_skill_record(202, "Burning")
+    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 2, 0)
+    data = header + skill_block
+    records = list(_iter_skill_records(data, HEADER_SIZE, 2))
+    assert len(records) == 2
+    cursor0, skill_id0, name_len0, record_size0 = records[0]
+    assert skill_id0 == 101
+    assert name_len0 == len("Whirlwind")
+    assert record_size0 == 8 + name_len0 + 1
+    assert cursor0 == HEADER_SIZE
+    cursor1, skill_id1, name_len1, record_size1 = records[1]
+    assert skill_id1 == 202
+    assert cursor1 == HEADER_SIZE + record_size0
+    assert name_len1 == len("Burning")
+    assert record_size1 == 8 + name_len1 + 1
+
+
+def test_iter_skill_records_empty_count_yields_nothing() -> None:
+    """A count of zero yields no records without touching the data."""
+    records = list(_iter_skill_records(b"irrelevant", 0, 0))
+    assert records == []
+
+
+def test_iter_skill_records_truncated_header_stops_early(caplog: pytest.LogCaptureFixture) -> None:
+    """If the skill header does not fit, the generator stops and logs a warning."""
+    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 1, 0)
+    # Only 3 bytes after the header, not enough for the 8-byte skill header.
+    data = header + b"\x00\x00\x00"
+    with caplog.at_level("WARNING"):
+        records = list(_iter_skill_records(data, HEADER_SIZE, 1))
+    assert records == []
+    assert "Truncated skill table" in caplog.text
+
+
+def test_iter_skill_records_name_len_too_large_stops_early(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A name_len exceeding the safety bound stops the generator early."""
+    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 1, 0)
+    skill_header = struct.pack("<II", 1, MAX_SKILL_NAME_BYTES + 1)
+    data = header + skill_header
+    with caplog.at_level("WARNING"):
+        records = list(_iter_skill_records(data, HEADER_SIZE, 1))
+    assert records == []
+    assert "exceeding safety bound" in caplog.text
+
+
+def test_iter_skill_records_truncated_body_stops_early(caplog: pytest.LogCaptureFixture) -> None:
+    """A record whose body is truncated stops the generator early."""
+    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 1, 0)
+    # name_len=10 but only 3 bytes of name follow.
+    skill_header = struct.pack("<II", 1, 10)
+    data = header + skill_header + b"abc"
+    with caplog.at_level("WARNING"):
+        records = list(_iter_skill_records(data, HEADER_SIZE, 1))
+    assert records == []
+    assert "Truncated skill body" in caplog.text
+
+
+def test_iter_skill_records_stops_when_table_runs_past_end() -> None:
+    """The generator yields valid records and stops when data runs out."""
+    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 3, 0)
+    # Only 2 skills actually present.
+    skill_block = _build_skill_record(101, "A") + _build_skill_record(202, "B")
+    data = header + skill_block
+    records = list(_iter_skill_records(data, HEADER_SIZE, 3))
+    assert len(records) == 2
+    assert records[0][1] == 101
+    assert records[1][1] == 202
 
 
 # ---------------------------------------------------------------------------

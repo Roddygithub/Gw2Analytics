@@ -105,14 +105,9 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { FightTimeline, PerFightTimelinePoint } from "@/lib/api/fights";
-// Re-use the existing ``formatSecondsLabel`` helper from
-// :class:`PerFightTimelineChart` so the Replay tab's M:SS
-// readout + the Overview tab's per-bucket X-axis labels use
-// the IDENTICAL formatting (and the toolkit is one helper,
-// not two parallel implementations).
-import { formatSecondsLabel } from "@/components/PerFightTimelineChart";
+import { formatSecondsLabel } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -211,6 +206,73 @@ const SNAPSHOT_VALUE_STYLE: React.CSSProperties = {
   fontWeight: 600,
 };
 
+const HEADER_STYLE: React.CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const HEADER_TITLE_STYLE: React.CSSProperties = {
+  fontSize: 18,
+  fontWeight: 600,
+  margin: 0,
+};
+
+const HEADER_SUBTITLE_STYLE: React.CSSProperties = {
+  opacity: 0.7,
+  fontSize: 13,
+  margin: "4px 0 0 0",
+};
+
+const SCRUBBER_ROW_STYLE: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+};
+
+const SCRUBBER_INPUT_STYLE: React.CSSProperties = {
+  width: "100%",
+  accentColor: "var(--accent)",
+};
+
+const SCRUBBER_LABELS_STYLE: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  fontSize: 12,
+  opacity: 0.7,
+};
+
+const BAR_CHART_CONTAINER_STYLE: React.CSSProperties = {
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  background: "var(--background)",
+  padding: BAR_CHART_PADDING_PX,
+  overflowX: "auto",
+};
+
+const LEGEND_STYLE: React.CSSProperties = {
+  display: "flex",
+  gap: 16,
+  fontSize: 12,
+  opacity: 0.7,
+  flexWrap: "wrap",
+};
+
+const INLINE_FLEX_ITEM_STYLE: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+};
+
+const LEGEND_SWATCH_STYLE: React.CSSProperties = {
+  display: "inline-block",
+  width: 10,
+  height: 10,
+  borderRadius: 2,
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -221,12 +283,11 @@ const SNAPSHOT_VALUE_STYLE: React.CSSProperties = {
  * bucket rather than every bucket. Capped at 1 so a short
  * replay does NOT skip any labels.
  */
-function computeReadoutStep(_N: number): number {
-  // One label per ~120 px of bar-chart width; the bar chart
-  // width is ``N * (BAR_WIDTH_PX + BAR_GAP_PX)`` so the step
-  // is ``120 / 16`` = 7 (floor) = 7.
+function computeReadoutStep(N: number): number {
   const BAR_TOTAL_PX = BAR_WIDTH_PX + BAR_GAP_PX;
-  return Math.max(1, Math.floor(120 / BAR_TOTAL_PX));
+  const chartWidthPx = N * BAR_TOTAL_PX;
+  const desiredLabelSpacingPx = 120;
+  return Math.max(1, Math.floor(chartWidthPx / desiredLabelSpacingPx));
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +333,127 @@ type ReplayPlayerInnerProps = {
   fightId: string;
   timeline: FightTimeline;
 };
+
+interface BucketBarProps {
+  point: PerFightTimelinePoint;
+  heights: { damage: number; healing: number; strip: number };
+  isCurrent: boolean;
+  index: number;
+  N: number;
+  readoutStep: number;
+}
+
+/**
+ * Memoised single bucket bar.
+ *
+ * Extracted so that scrubbing ``currentIndex`` only re-renders
+ * the two buckets whose ``isCurrent`` prop actually changes;
+ * every other bucket reuses its cached React element.
+ */
+const BucketBar = memo(function BucketBar({
+  point,
+  heights,
+  isCurrent,
+  index,
+  N,
+  readoutStep,
+}: BucketBarProps) {
+  const left = index * (BAR_WIDTH_PX + BAR_GAP_PX);
+  const title =
+    `${formatSecondsLabel(point.window_start_ms)}–${formatSecondsLabel(point.window_end_ms)} · bucket ${index + 1}/${N}\n` +
+    `Dmg: ${point.total_damage.toLocaleString("en-US")} · Heal: ${point.total_healing.toLocaleString("en-US")} · Strip: ${point.total_buff_removal.toLocaleString("en-US")}`;
+
+  return (
+    <div
+      data-testid={isCurrent ? "replay-bar-current" : "replay-bar"}
+      title={title}
+      style={{
+        position: "absolute",
+        left,
+        top: 0,
+        width: BAR_WIDTH_PX,
+        height: BAR_CHART_HEIGHT_PX,
+        border: isCurrent
+          ? "2px solid var(--accent)"
+          : "1px solid var(--border)",
+        borderRadius: 2,
+        background: "var(--surface)",
+      }}
+    >
+      {/* Damage sub-bar (col 0). */}
+      <div
+        data-testid="replay-bar-damage"
+        style={{
+          position: "absolute",
+          left: 0,
+          bottom: 0,
+          width: BAR_SUB_WIDTH_PX,
+          height: heights.damage,
+          background: "var(--accent)",
+        }}
+      />
+      {/* Healing sub-bar (col 1). */}
+      <div
+        data-testid="replay-bar-healing"
+        style={{
+          position: "absolute",
+          left: BAR_SUB_WIDTH_PX + BAR_SUB_GAP_PX,
+          bottom: 0,
+          width: BAR_SUB_WIDTH_PX,
+          height: heights.healing,
+          background: "var(--foreground)",
+          opacity: 0.7,
+        }}
+      />
+      {/* Strip sub-bar (col 2). */}
+      <div
+        data-testid="replay-bar-strip"
+        style={{
+          position: "absolute",
+          left: 2 * (BAR_SUB_WIDTH_PX + BAR_SUB_GAP_PX),
+          bottom: 0,
+          width: BAR_SUB_WIDTH_PX,
+          height: heights.strip,
+          background: "#f59e0b",
+        }}
+      />
+      {isCurrent && (
+        <span
+          style={{
+            position: "absolute",
+            left: -2,
+            top: -22,
+            fontSize: 10,
+            fontWeight: 600,
+            background: "var(--accent)",
+            color: "var(--accent-foreground, #fff)",
+            padding: "2px 4px",
+            borderRadius: 2,
+            whiteSpace: "nowrap",
+            zIndex: 1,
+          }}
+        >
+          B{index + 1}
+        </span>
+      )}
+      {(index === 0 || index === N - 1 || index % readoutStep === 0) && (
+        <span
+          style={{
+            position: "absolute",
+            left: -6,
+            bottom: -16,
+            fontSize: 9,
+            color: "var(--foreground)",
+            opacity: 0.6,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {formatSecondsLabel(point.window_start_ms)}
+        </span>
+      )}
+    </div>
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Component
@@ -321,6 +503,107 @@ export function ReplayPlayer({ fightId, timeline }: ReplayPlayerProps) {
 }
 
 /**
+ * Memoized snapshot panel.
+ *
+ * Isolating the snapshot prevents control-state updates
+ * (play/pause, speed) from re-rendering the stats grid when
+ * the current bucket has not changed.
+ */
+const SnapshotPanel = memo(function SnapshotPanel({
+  point,
+}: {
+  point: PerFightTimelinePoint;
+}) {
+  return (
+    <div data-testid="replay-current-snapshot" style={SNAPSHOT_PANEL_STYLE}>
+      <div style={SNAPSHOT_CELL_STYLE}>
+        <span style={SNAPSHOT_LABEL_STYLE}>Damage</span>
+        <span style={SNAPSHOT_VALUE_STYLE}>
+          {point.total_damage.toLocaleString("en-US")}
+        </span>
+      </div>
+      <div style={SNAPSHOT_CELL_STYLE}>
+        <span style={SNAPSHOT_LABEL_STYLE}>Healing</span>
+        <span style={SNAPSHOT_VALUE_STYLE}>
+          {point.total_healing.toLocaleString("en-US")}
+        </span>
+      </div>
+      <div style={SNAPSHOT_CELL_STYLE}>
+        <span style={SNAPSHOT_LABEL_STYLE}>Strip</span>
+        <span style={SNAPSHOT_VALUE_STYLE}>
+          {point.total_buff_removal.toLocaleString("en-US")}
+        </span>
+      </div>
+      <div style={SNAPSHOT_CELL_STYLE}>
+        <span style={SNAPSHOT_LABEL_STYLE}>Window</span>
+        <span style={SNAPSHOT_VALUE_STYLE}>
+          {formatSecondsLabel(point.window_start_ms)}–
+          {formatSecondsLabel(point.window_end_ms)}
+        </span>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Memoized speed button.
+ *
+ * Extracted so the inline ``onClick`` closure is not
+ * re-created for every speed button on every playback tick.
+ */
+const SpeedButton = memo(function SpeedButton({
+  speed,
+  isActive,
+  onSelect,
+}: {
+  speed: Speed;
+  isActive: boolean;
+  onSelect: (s: Speed) => void;
+}) {
+  return (
+    <button
+      key={speed}
+      type="button"
+      onClick={() => onSelect(speed)}
+      aria-label={`Set speed to ${speed}x`}
+      aria-pressed={isActive}
+      data-testid={`replay-speed-${speed}x`}
+      style={isActive ? CONTROL_BUTTON_ACTIVE : CONTROL_BUTTON_BASE}
+    >
+      {speed}x
+    </button>
+  );
+});
+
+/**
+ * Static legend. Hoisted to module scope so it is never
+ * re-evaluated during playback ticks.
+ */
+const ReplayLegend = memo(function ReplayLegend() {
+  return (
+    <div style={LEGEND_STYLE} data-testid="replay-legend">        <span style={INLINE_FLEX_ITEM_STYLE}>
+          <span style={{ ...LEGEND_SWATCH_STYLE, background: "var(--accent)" }} />
+          Damage
+        </span>
+        <span style={INLINE_FLEX_ITEM_STYLE}>
+          <span
+            style={{
+              ...LEGEND_SWATCH_STYLE,
+              background: "var(--foreground)",
+              opacity: 0.7,
+            }}
+          />
+          Healing
+        </span>
+        <span style={INLINE_FLEX_ITEM_STYLE}>
+          <span style={{ ...LEGEND_SWATCH_STYLE, background: "#f59e0b" }} />
+          Strip
+        </span>
+    </div>
+  );
+});
+
+/**
  * Internal component: the real playback engine. Split out
  * so the empty-state branches above can short-circuit BEFORE
  * the playback hooks execute (a hook called conditionally is
@@ -366,14 +649,38 @@ function ReplayPlayerInner({ fightId, timeline }: ReplayPlayerInnerProps) {
   // The clamp to 1 mirrors :func:`buildTimelineLayout` so an
   // all-zero series collapses to a flat baseline rather than
   // a divide-by-zero error.
-  const maxDamage = Math.max(1, ...points.map((p) => p.total_damage));
-  const maxHealing = Math.max(1, ...points.map((p) => p.total_healing));
-  const maxStrip = Math.max(1, ...points.map((p) => p.total_buff_removal));
+  const { maxDamage, maxHealing, maxStrip } = useMemo(() => {
+    let maxDamage = 1;
+    let maxHealing = 1;
+    let maxStrip = 1;
+    for (const p of points) {
+      if (p.total_damage > maxDamage) maxDamage = p.total_damage;
+      if (p.total_healing > maxHealing) maxHealing = p.total_healing;
+      if (p.total_buff_removal > maxStrip) maxStrip = p.total_buff_removal;
+    }
+    return { maxDamage, maxHealing, maxStrip };
+  }, [points]);
   // Bar-chart total width; overflows horizontally on long
   // fights (the bar-chart <div> becomes a horizontal scrolling
   // region via the overflow-x style below).
   const barChartWidth = N * BAR_WIDTH_PX + (N - 1) * BAR_GAP_PX;
   const readoutStep = useMemo(() => computeReadoutStep(N), [N]);
+
+  // Pre-compute per-bucket bar heights so the chart re-renders
+  // only when the timeline data or global maxes change, not on
+  // every scrubber movement.
+  const bucketBars = useMemo(
+    () =>
+      points.map((p) => ({
+        damage:
+          (p.total_damage / maxDamage) * BAR_CHART_HEIGHT_PX,
+        healing:
+          (p.total_healing / maxHealing) * BAR_CHART_HEIGHT_PX,
+        strip:
+          (p.total_buff_removal / maxStrip) * BAR_CHART_HEIGHT_PX,
+      })),
+    [points, maxDamage, maxHealing, maxStrip],
+  );
 
   // ---- Handlers ----------------------------------------------------------
   const onScrub = useCallback(
@@ -420,20 +727,12 @@ function ReplayPlayerInner({ fightId, timeline }: ReplayPlayerInnerProps) {
       style={REPLAY_SECTION_STYLE}
       aria-label={`Replay fight ${fightId}`}
     >
-      <header
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
+      <header style={HEADER_STYLE}>
         <div>
-          <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
+          <h2 style={HEADER_TITLE_STYLE}>
             Replay — fight {fightId}
           </h2>
-          <p style={{ opacity: 0.7, fontSize: 13, margin: "4px 0 0 0" }}>
+          <p style={HEADER_SUBTITLE_STYLE}>
             {N} bucket{N === 1 ? "" : "s"} · {windowS}-s window ·
             {" "}
             {durationS.toFixed(2)}
@@ -462,31 +761,21 @@ function ReplayPlayerInner({ fightId, timeline }: ReplayPlayerInnerProps) {
         >
           {isPlaying ? "❚❚ Pause" : "▶ Play"}
         </button>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span style={INLINE_FLEX_ITEM_STYLE}>
           <span style={{ fontSize: 12, opacity: 0.7 }}>Speed:</span>
           {SPEEDS.map((s) => (
-            <button
+            <SpeedButton
               key={s}
-              type="button"
-              onClick={() => onSelectSpeed(s)}
-              aria-label={`Set speed to ${s}x`}
-              aria-pressed={speed === s}
-              data-testid={`replay-speed-${s}x`}
-              style={
-                speed === s ? CONTROL_BUTTON_ACTIVE : CONTROL_BUTTON_BASE
-              }
-            >
-              {s}x
-            </button>
+              speed={s}
+              isActive={speed === s}
+              onSelect={onSelectSpeed}
+            />
           ))}
         </span>
       </div>
 
       {/* Scrubber: range input bound to currentIndex */}
-      <div
-        style={{ display: "flex", flexDirection: "column", gap: 6 }}
-        data-testid="replay-scrubber-row"
-      >
+      <div style={SCRUBBER_ROW_STYLE} data-testid="replay-scrubber-row">
         <input
           type="range"
           min={0}
@@ -500,16 +789,9 @@ function ReplayPlayerInner({ fightId, timeline }: ReplayPlayerInnerProps) {
           aria-valuenow={currentIndex}
           aria-valuetext={currentPoint ? formatSecondsLabel(currentPoint.window_start_ms) : ""}
           data-testid="replay-scrubber"
-          style={{ width: "100%", accentColor: "var(--accent)" }}
+          style={SCRUBBER_INPUT_STYLE}
         />
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: 12,
-            opacity: 0.7,
-          }}
-        >
+        <div style={SCRUBBER_LABELS_STYLE}>
           <span>
             Bucket {currentIndex + 1} / {N}
           </span>
@@ -523,37 +805,7 @@ function ReplayPlayerInner({ fightId, timeline }: ReplayPlayerInnerProps) {
       </div>
 
       {/* Snapshot panel: current bucket's absolute totals. */}
-      {currentPoint && (
-        <div
-          data-testid="replay-current-snapshot"
-          style={SNAPSHOT_PANEL_STYLE}
-        >
-          <div style={SNAPSHOT_CELL_STYLE}>
-            <span style={SNAPSHOT_LABEL_STYLE}>Damage</span>
-            <span style={SNAPSHOT_VALUE_STYLE}>
-              {currentPoint.total_damage.toLocaleString("en-US")}
-            </span>
-          </div>
-          <div style={SNAPSHOT_CELL_STYLE}>
-            <span style={SNAPSHOT_LABEL_STYLE}>Healing</span>
-            <span style={SNAPSHOT_VALUE_STYLE}>
-              {currentPoint.total_healing.toLocaleString("en-US")}
-            </span>
-          </div>
-          <div style={SNAPSHOT_CELL_STYLE}>
-            <span style={SNAPSHOT_LABEL_STYLE}>Strip</span>
-            <span style={SNAPSHOT_VALUE_STYLE}>
-              {currentPoint.total_buff_removal.toLocaleString("en-US")}
-            </span>
-          </div>
-          <div style={SNAPSHOT_CELL_STYLE}>
-            <span style={SNAPSHOT_LABEL_STYLE}>Window</span>
-            <span style={SNAPSHOT_VALUE_STYLE}>
-              {formatSecondsLabel(currentPoint.window_start_ms)}–{formatSecondsLabel(currentPoint.window_end_ms)}
-            </span>
-          </div>
-        </div>
-      )}
+      {currentPoint && <SnapshotPanel point={currentPoint} />}
 
       {/* Per-bucket bar chart: 14 px-wide bucket subdivided into
           3 side-by-side 4 px-wide sub-bars (damage / healing /
@@ -570,13 +822,7 @@ function ReplayPlayerInner({ fightId, timeline }: ReplayPlayerInnerProps) {
           overflow for long fights (>60 buckets fills >720 px). */}
       <div
         data-testid="replay-bar-chart"
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          background: "var(--background)",
-          padding: BAR_CHART_PADDING_PX,
-          overflowX: "auto",
-        }}
+        style={BAR_CHART_CONTAINER_STYLE}
         aria-label="Per-bucket damage + healing + strip bar chart"
       >
         <div
@@ -586,172 +832,22 @@ function ReplayPlayerInner({ fightId, timeline }: ReplayPlayerInnerProps) {
             height: BAR_CHART_HEIGHT_PX,
           }}
         >
-          {points.map((p, i) => {
-            const isCurrent = i === currentIndex;
-            const dmgH = (p.total_damage / maxDamage) * BAR_CHART_HEIGHT_PX;
-            const healH =
-              (p.total_healing / maxHealing) * BAR_CHART_HEIGHT_PX;
-            const stripH =
-              (p.total_buff_removal / maxStrip) * BAR_CHART_HEIGHT_PX;
-            const left = i * (BAR_WIDTH_PX + BAR_GAP_PX);
-            // Sub-bar X positions inside the bucket:
-            //   dmg     at left=0  width=4  (col 0)
-            //   healing at left=5  width=4  (col 1, after 1px gap)
-            //   strip   at left=10 width=4  (col 2, after another 1px gap)
-            // BAR_WIDTH_PX = 14 = 3*4 + 2*1.
-            return (
-              <div
-                key={i}
-                data-testid={
-                  isCurrent ? "replay-bar-current" : "replay-bar"
-                }
-                title={
-                  `${formatSecondsLabel(p.window_start_ms)}–${formatSecondsLabel(p.window_end_ms)} · bucket ${i + 1}/${N}\n` +
-                  `Dmg: ${p.total_damage.toLocaleString("en-US")} · Heal: ${p.total_healing.toLocaleString("en-US")} · Strip: ${p.total_buff_removal.toLocaleString("en-US")}`
-                }
-                style={{
-                  position: "absolute",
-                  left,
-                  top: 0,
-                  width: BAR_WIDTH_PX,
-                  height: BAR_CHART_HEIGHT_PX,
-                  border: isCurrent
-                    ? "2px solid var(--accent)"
-                    : "1px solid var(--border)",
-                  borderRadius: 2,
-                  background: "var(--surface)",
-                }}
-              >
-                {/* Damage sub-bar (col 0). */}
-                <div
-                  data-testid="replay-bar-damage"
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    bottom: 0,
-                    width: BAR_SUB_WIDTH_PX,
-                    height: dmgH,
-                    background: "var(--accent)",
-                  }}
-                />
-                {/* Healing sub-bar (col 1). */}
-                <div
-                  data-testid="replay-bar-healing"
-                  style={{
-                    position: "absolute",
-                    left: BAR_SUB_WIDTH_PX + BAR_SUB_GAP_PX,
-                    bottom: 0,
-                    width: BAR_SUB_WIDTH_PX,
-                    height: healH,
-                    background: "var(--foreground)",
-                    opacity: 0.7,
-                  }}
-                />
-                {/* Strip sub-bar (col 2). */}
-                <div
-                  data-testid="replay-bar-strip"
-                  style={{
-                    position: "absolute",
-                    left: 2 * (BAR_SUB_WIDTH_PX + BAR_SUB_GAP_PX),
-                    bottom: 0,
-                    width: BAR_SUB_WIDTH_PX,
-                    height: stripH,
-                    background: "#f59e0b",
-                  }}
-                />
-                {isCurrent && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      left: -2,
-                      top: -22,
-                      fontSize: 10,
-                      fontWeight: 600,
-                      background: "var(--accent)",
-                      color: "var(--accent-foreground, #fff)",
-                      padding: "2px 4px",
-                      borderRadius: 2,
-                      whiteSpace: "nowrap",
-                      zIndex: 1,
-                    }}
-                  >
-                    B{i + 1}
-                  </span>
-                )}
-                {/* X-axis readout labels: dropped at every
-                    readoutStep-th bucket so the axis stays
-                    legible for long replays. First + last +
-                    every readoutStep-th bucket gets a label. */}
-                {(i === 0 || i === N - 1 || i % readoutStep === 0) && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      left: -6,
-                      bottom: -16,
-                      fontSize: 9,
-                      color: "var(--foreground)",
-                      opacity: 0.6,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {formatSecondsLabel(p.window_start_ms)}
-                  </span>
-                )}
-              </div>
-            );
-          })}
+          {points.map((p, i) => (
+            <BucketBar
+              key={i}
+              point={p}
+              heights={bucketBars[i]}
+              isCurrent={i === currentIndex}
+              index={i}
+              N={N}
+              readoutStep={readoutStep}
+            />
+          ))}
         </div>
       </div>
 
       {/* Legend */}
-      <div
-        style={{
-          display: "flex",
-          gap: 16,
-          fontSize: 12,
-          opacity: 0.7,
-          flexWrap: "wrap",
-        }}
-        data-testid="replay-legend"
-      >
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span
-            style={{
-              display: "inline-block",
-              width: 10,
-              height: 10,
-              background: "var(--accent)",
-              borderRadius: 2,
-            }}
-          />
-          Damage
-        </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span
-            style={{
-              display: "inline-block",
-              width: 10,
-              height: 10,
-              background: "var(--foreground)",
-              opacity: 0.7,
-              borderRadius: 2,
-            }}
-          />
-          Healing
-        </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span
-            style={{
-              display: "inline-block",
-              width: 10,
-              height: 10,
-              background: "#f59e0b",
-              borderRadius: 2,
-            }}
-          />
-          Strip
-        </span>
-      </div>
+      <ReplayLegend />
     </section>
   );
 }

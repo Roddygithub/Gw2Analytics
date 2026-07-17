@@ -63,11 +63,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable
-from itertools import pairwise
+from dataclasses import dataclass
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gw2_analytics._invariants import check_desc_asc_ordering
 from gw2_core import BuffRemovalEvent
 
 # BPS sentinel when ``duration_s <= 0``: invalid (zero/negative)
@@ -75,6 +76,12 @@ from gw2_core import BuffRemovalEvent
 # ``BuffRemovalEvent`` stream from the parser will always pair with a
 # known fight duration so the zero path is purely defensive.
 _DEFAULT_BPS: Final[float] = 0.0
+
+
+@dataclass(slots=True)
+class _TargetStats:
+    total: int = 0
+    count: int = 0
 
 
 class TargetBuffRemovalRow(BaseModel):
@@ -142,13 +149,15 @@ class TargetBuffRemovalAggregator:
             msg = f"duration_s must be >= 0, got {duration_s!r}"
             raise ValueError(msg)
 
-        total_by_target: dict[int, int] = defaultdict(int)
-        count_by_target: dict[int, int] = defaultdict(int)
-        grand_total = 0
+        # Consolidate per-target stats into a single dictionary.
+        # Each value is a slotted dataclass, cutting the hot-loop
+        # hash lookups from 2 per event to 1 while keeping the
+        # metrics self-documenting.
+        stats_by_target: dict[int, _TargetStats] = defaultdict(_TargetStats)
         for e in events:
-            total_by_target[e.target_agent_id] += e.buff_removal
-            count_by_target[e.target_agent_id] += 1
-            grand_total += e.buff_removal
+            stats = stats_by_target[e.target_agent_id]
+            stats.total += e.buff_removal
+            stats.count += 1
 
         bps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_BPS
         # ``name_map or {}`` -- see the parallel branch in
@@ -156,20 +165,24 @@ class TargetBuffRemovalAggregator:
         # for the rationale (``dict.get`` returns ``None`` for missing
         # keys AND for explicit ``None`` values; both surface as the
         # ``name=None`` sentinel on the row).
+        safe_name_map = name_map or {}
         rows = [
             TargetBuffRemovalRow(
                 target_agent_id=target,
-                total_buff_removal=total_by_target[target],
-                strip_count=count_by_target[target],
-                bps=total_by_target[target] * bps_factor,
-                name=(name_map or {}).get(target),
+                total_buff_removal=stats.total,
+                strip_count=stats.count,
+                bps=stats.total * bps_factor,
+                name=safe_name_map.get(target),
             )
-            for target in total_by_target
+            for target, stats in stats_by_target.items()
         ]
         # Sort: highest total_buff_removal first; ties broken by ascending target_agent_id.
         rows.sort(key=lambda r: (-r.total_buff_removal, r.target_agent_id))
 
-        self._check_invariants(rows, grand_total)
+        # The invariant total is derived from the aggregated rows
+        # rather than accumulated in the hot loop, saving one integer
+        # addition per input event.
+        self._check_invariants(rows, sum(r.total_buff_removal for r in rows))
         return rows
 
     @staticmethod
@@ -194,26 +207,14 @@ class TargetBuffRemovalAggregator:
                 raise ValueError(msg)
         # Pydantic field constraints already guarantee ``ge=0`` for
         # total_buff_removal; the cross-row ordering invariant is the
-        # only ordering contract. ``pairwise`` pairs each row with its
-        # immediate successor; equivalent to
-        # ``zip(rows, rows[1:], strict=False)`` but the canonical
-        # idiom for adjacent-pair iteration (ruff RUF007).
-        for prev, curr in pairwise(rows):
-            if prev.total_buff_removal < curr.total_buff_removal:
-                msg = (
-                    f"rows not ordered by (total_buff_removal DESC, "
-                    f"target_agent_id ASC): {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
-            if (
-                prev.total_buff_removal == curr.total_buff_removal
-                and prev.target_agent_id >= curr.target_agent_id
-            ):
-                msg = (
-                    f"tie on total_buff_removal not broken by "
-                    f"target_agent_id ASC: {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
+        # only ordering contract.
+        check_desc_asc_ordering(
+            rows,
+            primary_key=lambda r: r.total_buff_removal,
+            secondary_key=lambda r: r.target_agent_id,
+            primary_label="total_buff_removal",
+            secondary_label="target_agent_id",
+        )
 
 
 __all__ = ["TargetBuffRemovalAggregator", "TargetBuffRemovalRow"]

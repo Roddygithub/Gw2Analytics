@@ -24,6 +24,9 @@ from gw2analytics_api.services.fight_persistence import _save_fight
 
 logger = logging.getLogger(__name__)
 
+# Module-level singleton: PythonEvtcParser is stateless and safe to reuse.
+_parser = PythonEvtcParser()
+
 
 def process_parse(
     session_factory: Callable[[], Session],
@@ -37,7 +40,7 @@ def process_parse(
             return
         try:
             evtc_bytes = read_zevtc_bytes(raw_bytes)
-            fights = list(PythonEvtcParser().parse(evtc_bytes))
+            fights = list(_parser.parse(evtc_bytes))
         except EvtcParseError as exc:
             logger.warning("parse failed for upload %s: %s", upload_id, exc)
             upload.status = UPLOAD_STATUS_FAILED

@@ -30,7 +30,8 @@ Conventions
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
+from operator import attrgetter
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -183,10 +184,12 @@ class SingleFightAggregator:
         # Without a stable account identifier these rows cannot be
         # deduped across uploads, so they leave the analytics pipeline
         # here rather than silently mis-joining unrelated accounts.
-        player_rows = [a for a in fight.agents if a.is_player and a.account_name]
+        # Use a generator to avoid the intermediate list allocation;
+        # ``sorted()`` consumes it directly.
+        player_rows = (a for a in fight.agents if a.is_player and a.account_name)
 
         combatants = sorted(
-            [
+            (
                 CombatantSummary(
                     agent_id=a.id,
                     account_name=a.account_name or "",
@@ -196,8 +199,8 @@ class SingleFightAggregator:
                     subgroup=a.subgroup or "",
                 )
                 for a in player_rows
-            ],
-            key=lambda c: (c.account_name, c.name),
+            ),
+            key=attrgetter("account_name", "name"),
         )
 
         grouped: dict[str, list[CombatantSummary]] = defaultdict(list)
@@ -214,7 +217,7 @@ class SingleFightAggregator:
 
         skill_catalog = [
             SkillCatalogEntry(id=s.id, name=s.name)
-            for s in sorted(fight.skills, key=lambda s: s.id)
+            for s in sorted(fight.skills, key=attrgetter("id"))
         ]
 
         aggregate = FightAggregate(
@@ -248,8 +251,9 @@ class SingleFightAggregator:
                 f"skill_count ({agg.skill_count}) != len(skill_catalog) ({len(agg.skill_catalog)})"
             )
             raise ValueError(msg)
+        subgroup_counts = Counter(c.subgroup for c in agg.combatants)
         for g in agg.groups:
-            expected = sum(1 for c in agg.combatants if c.subgroup == g.subgroup)
+            expected = subgroup_counts.get(g.subgroup, 0)
             if g.combatant_count != expected:
                 msg = (
                     f"GroupSummary({g.subgroup!r}).combatant_count "

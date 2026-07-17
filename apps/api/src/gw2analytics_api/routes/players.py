@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -75,6 +76,50 @@ router = APIRouter(prefix="/api/v1/players", tags=["players"])
 # ---------------------------------------------------------------------------
 # Per-fight per-account contribution computation
 # ---------------------------------------------------------------------------
+
+
+def _load_merged_contributions(
+    db: Session,
+    *,
+    account_name: str,
+) -> tuple[list[FightContribution], dict[str, datetime]]:
+    """Load per-account contributions from SQL and merge with the slow-path fallback.
+
+    The SQL fast-path covers post-v0.8.4 fights with pre-materialised
+    :class:`OrmFightPlayerSummary` rows. The slow-path covers pre-v0.8.4
+    fights via blob-walking. Both paths converge on the same
+    ``(FightContribution, started_at)`` tuple shape; the merge step
+    sorts the combined result by ``(started_at DESC, fight_id ASC)`` to
+    match the routes' recency-first contract.
+
+    At 100% materialised-view coverage, the slow-path is dormant and
+    this helper is a single indexed query + a no-op merge.
+    """
+    pairs = get_account_contributions_from_sql(
+        db,
+        account_name=account_name,
+        limit=10**6,  # unbounded; bounded by account's fight count
+        offset=0,
+    )
+    own_contributions = [c for c, _ in pairs]
+    fight_id_to_started: dict[str, datetime] = {c.fight_id: started_at for c, started_at in pairs}
+
+    slow_contributions, slow_started_at = _load_slow_path_contributions(
+        db, account_name=account_name
+    )
+    own_contributions.extend(slow_contributions)
+    fight_id_to_started.update(slow_started_at)
+
+    # Re-sort the combined (SQL + slow-path) contributions recency-first.
+    # The SQL path is already sorted, but the slow-path rows are appended
+    # in their natural order, so a re-sort is required whenever the
+    # slow-path is non-empty. Sorting unconditionally is cheap and keeps
+    # the contract explicit.
+    own_contributions.sort(
+        key=lambda c: (fight_id_to_started[c.fight_id], c.fight_id),
+        reverse=True,
+    )
+    return own_contributions, fight_id_to_started
 
 
 def _load_slow_path_contributions(
@@ -136,7 +181,30 @@ def _load_slow_path_contributions(
     return contributions, started_at_map
 
 
-def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intentionally branchy (S3 + gzip + per-event dispatch) and the ``fight`` arg is the only state it needs (the pre-loaded agents live on the relationship)
+@dataclass(slots=True)
+class _ContributionBucket:
+    """Mutable per-account accumulator for the slow-path blob walk."""
+
+    name: str
+    prof: int
+    elite: int
+    damage: int = 0
+    healing: int = 0
+    strip: int = 0
+    power: int = 0
+    condi: int = 0
+
+
+@dataclass(slots=True)
+class _DayTotals:
+    """Mutable per-day accumulator for timeline day-bucketing."""
+
+    damage: int = 0
+    healing: int = 0
+    strip: int = 0
+
+
+def _contributions_from_blob_walk(  # noqa: PLR0912
     fight: OrmFight,
 ) -> list[FightContribution]:
     """Walk one fight's gzipped events blob and emit one
@@ -237,56 +305,47 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
         )
         return []
 
-    # Per-account accumulator: ``account_name -> {damage, healing, strip, name, prof, elite}``.
-    per_account: dict[str, dict[str, int | str]] = {}
+    # Per-account accumulator: ``account_name -> _ContributionBucket``.
+    per_account: dict[str, _ContributionBucket] = {}
+    # Local bindings avoid repeated attribute lookups in the hot loop.
+    agent_map_get = agent_map.get
+    skill_name_get = skill_name_for_event.get
     for event in events:
-        identity = agent_map.get(event.source_agent_id)
+        identity = agent_map_get(event.source_agent_id)
         if identity is None:
             continue
         account_name, name, prof_id, elite_id = identity
         # First-event / subsequent-event split (clean mirror of
-        # services.py::_persist_player_summaries). The previous
-        # setdefault + ``bucket["set"]`` sentinel was 2-state code
-        # that conflated "first" and "subsequent" in the same dict
-        # as the magnitudes; the explicit ``if account_name in
-        # per_account:`` guard is one-line and matches the services-
-        # side pattern. ``bucket["name"] = name`` runs on every event
-        # so the value is last-seen (the pre-v0.10.5 wire contract).
-        # The bucket's type is inferred from the literal (a
-        # ``dict[str, int | str]``) -- no explicit annotation needed
-        # (the per-v0.10.5 v0.10.5 review consolidated the
-        # per-event ``bucket`` annotation away to a single literal
-        # site, the same way services.py does it).
-        if account_name in per_account:
-            bucket = per_account[account_name]
-        else:
-            bucket = {
-                "damage": 0,
-                "healing": 0,
-                "strip": 0,
-                "power": 0,
-                "condi": 0,
-                "name": name,
-                "prof": prof_id,
-                "elite": elite_id,
-            }
-            per_account[account_name] = bucket
-        bucket["name"] = name
+        # services.py::_persist_player_summaries). The explicit
+        # ``if account_name in per_account:`` guard is one-line
+        # and matches the services-side pattern. ``bucket.name = name``
+        # runs on every event so the value is last-seen (the
+        # pre-v0.10.5 wire contract).
+        if account_name not in per_account:
+            per_account[account_name] = _ContributionBucket(
+                name=name,
+                prof=prof_id,
+                elite=elite_id,
+            )
+        bucket = per_account[account_name]
+        bucket.name = name
+        # Inline event application to avoid function-call overhead
+        # in the hot loop.
         if isinstance(event, DamageEvent):
-            bucket["damage"] = int(bucket["damage"]) + event.damage
+            bucket.damage += event.damage
             # v0.10.5 plan 135: inline condi/power split per
             # DamageEvent (skill-name lookup). NEW-build fights
             # (buff_dmg not on v2 DamageEvent) default to power;
             # see advisor-plans/006a for parser-side fix.
-            skill_name = skill_name_for_event.get(event.skill_id)
+            skill_name = skill_name_get(event.skill_id)
             if skill_name in KNOWN_CONDI_NAMES:
-                bucket["condi"] = int(bucket["condi"]) + event.damage
+                bucket.condi += event.damage
             else:
-                bucket["power"] = int(bucket["power"]) + event.damage
+                bucket.power += event.damage
         elif isinstance(event, HealingEvent):
-            bucket["healing"] = int(bucket["healing"]) + event.healing
+            bucket.healing += event.healing
         elif isinstance(event, BuffRemovalEvent):
-            bucket["strip"] = int(bucket["strip"]) + event.buff_removal
+            bucket.strip += event.buff_removal
 
     # v0.10.3 plan 083: the per-account loop also invokes
     # :func:`detect_role_lite` so the slow-path blob walk
@@ -303,22 +362,22 @@ def _contributions_from_blob_walk(  # noqa: PLR0912 -- the function is intention
     contributions: list[FightContribution] = []
     for account_name, bucket in per_account.items():
         detected_role, detected_tags = detect_role_lite(
-            total_damage=int(bucket["damage"]),
-            total_healing=int(bucket["healing"]),
-            total_buff_removal=int(bucket["strip"]),
-            profession_int=int(bucket["prof"]),
-            elite_spec_int=int(bucket["elite"]),
+            total_damage=bucket.damage,
+            total_healing=bucket.healing,
+            total_buff_removal=bucket.strip,
+            profession_int=bucket.prof,
+            elite_spec_int=bucket.elite,
         )
         contributions.append(
             FightContribution(
                 fight_id=fight.id,
                 account_name=account_name,
-                name=str(bucket["name"]),
-                profession=Profession(int(bucket["prof"])),
-                elite=EliteSpec(int(bucket["elite"])),
-                total_damage=int(bucket["damage"]),
-                total_healing=int(bucket["healing"]),
-                total_buff_removal=int(bucket["strip"]),
+                name=bucket.name,
+                profession=Profession(bucket.prof),
+                elite=EliteSpec(bucket.elite),
+                total_damage=bucket.damage,
+                total_healing=bucket.healing,
+                total_buff_removal=bucket.strip,
                 detected_role=detected_role,
                 detected_tags=detected_tags,
             ),
@@ -488,37 +547,9 @@ def get_player_timeline(
     # slow-path is dormant and the SQL path is the full
     # contribution set.
     bare_account_name = account_name.lstrip(":")
-    pairs = get_account_contributions_from_sql(
-        db,
-        account_name=bare_account_name,
-        limit=10**6,  # unbounded; bounded by account's fight count
-        offset=0,
-    )
-    own_contributions: list[FightContribution] = [c for c, _ in pairs]
-    # ``fight_id_to_started`` is built once from the SQL result
-    # and extended below with the slow-path fights (whose
-    # ``started_at`` comes from the loaded ``OrmFight`` rows).
-    fight_id_to_started: dict[str, Any] = {c.fight_id: started_at for c, started_at in pairs}
-
-    # Slow-path dispatch: pre-v0.8.4 fights where this account
-    # had an agent but no ``OrmFightPlayerSummary`` row. The
-    # helper is dormant in steady-state (post-v0.8.4) -- both
-    # return values are empty and no merge is needed. See
-    # :func:`_load_slow_path_contributions` for the dispatch
-    # contract.
-    slow_contributions, slow_started_at = _load_slow_path_contributions(
+    own_contributions, fight_id_to_started = _load_merged_contributions(
         db, account_name=bare_account_name
     )
-    own_contributions.extend(slow_contributions)
-    fight_id_to_started.update(slow_started_at)
-    # Re-sort the combined (SQL + slow-path) contributions
-    # recency-first. The SQL path was already sorted; the
-    # merge step appends slow-path rows out of order.
-    if slow_contributions:
-        own_contributions.sort(
-            key=lambda c: (fight_id_to_started[c.fight_id], c.fight_id),
-            reverse=True,
-        )
 
     if not own_contributions:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "player not found")
@@ -578,9 +609,7 @@ def get_player_timeline(
     # ``bucket=fight`` is unaffected -- the TZ only matters for
     # the day-bucketed grouping.
     if bucket == "day":
-        day_totals: dict[str, dict[str, int]] = defaultdict(
-            lambda: {"damage": 0, "healing": 0, "strip": 0},
-        )
+        day_totals: dict[str, _DayTotals] = defaultdict(_DayTotals)
         day_first_fight: dict[str, str] = {}
         day_first_started: dict[str, Any] = {}
         for c in sorted_contributions:
@@ -594,16 +623,17 @@ def get_player_timeline(
             day_key = aware_utc.astimezone(parsed_tz).date().isoformat()
             day_first_fight.setdefault(day_key, c.fight_id)
             day_first_started.setdefault(day_key, started_at)
-            day_totals[day_key]["damage"] += c.total_damage
-            day_totals[day_key]["healing"] += c.total_healing
-            day_totals[day_key]["strip"] += c.total_buff_removal
+            totals = day_totals[day_key]
+            totals.damage += c.total_damage
+            totals.healing += c.total_healing
+            totals.strip += c.total_buff_removal
         all_points = [
             PlayerTimelinePointOut(
                 fight_id=day_first_fight[day_key],
                 started_at=_combine_day_midnight(day_first_started[day_key], parsed_tz),
-                total_damage=day_totals[day_key]["damage"],
-                total_healing=day_totals[day_key]["healing"],
-                total_buff_removal=day_totals[day_key]["strip"],
+                total_damage=day_totals[day_key].damage,
+                total_healing=day_totals[day_key].healing,
+                total_buff_removal=day_totals[day_key].strip,
             )
             for day_key in day_totals  # preserves insertion order (most recent first)
         ]
@@ -691,40 +721,21 @@ def get_player(
     # merge step builds the ``fight_id_to_started`` dict from
     # both sources.
     bare_account_name = account_name.lstrip(":")
-    pairs = get_account_contributions_from_sql(
-        db,
-        account_name=bare_account_name,
-        limit=10**6,  # unbounded; bounded by account's fight count
-        offset=0,
-    )
-    own_contributions = [c for c, _ in pairs]
-    fight_id_to_started: dict[str, Any] = {c.fight_id: started_at for c, started_at in pairs}
-
-    # Slow-path dispatch: pre-v0.8.4 fights. Same helper as
-    # ``get_player_timeline``; the merge is identical (extend
-    # contributions, update started_at map).
-    slow_contributions, slow_started_at = _load_slow_path_contributions(
+    own_contributions, fight_id_to_started = _load_merged_contributions(
         db, account_name=bare_account_name
     )
-    own_contributions.extend(slow_contributions)
-    fight_id_to_started.update(slow_started_at)
 
     if not own_contributions:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "player not found")
     # The response echoes the canonical bare account_name, not
     # any colon-prefixed form the caller may have supplied.
     account_name = bare_account_name
-    # The cross-fight profile: first contribution's identity
-    # (the SQL sort order ensures the first SQL row is the most
-    # recent; the slow-path merge may have re-ordered the
-    # combined list, so we re-sort by recency-first to find the
-    # most-recent contribution's identity). The magnitudes +
-    # fights_attended are summed from ALL contributions to match
-    # the ``PlayerProfileAggregator`` contract.
-    own_contributions.sort(
-        key=lambda c: (fight_id_to_started[c.fight_id], c.fight_id),
-        reverse=True,
-    )
+    # The cross-fight profile: first contribution's identity.
+    # ``_load_merged_contributions`` already returns the
+    # contributions sorted recency-first, so the first row is
+    # the most recent. The magnitudes + fights_attended are
+    # summed from ALL contributions to match the
+    # ``PlayerProfileAggregator`` contract.
     first = own_contributions[0]
     profile = PlayerProfile(
         account_name=account_name,

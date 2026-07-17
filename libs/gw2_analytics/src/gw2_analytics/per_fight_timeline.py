@@ -100,6 +100,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, Final
 
@@ -112,6 +113,15 @@ from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 # event write rate is ~30Hz so 1s is a reasonable minimum). Strict
 # parallel of :class:`EventWindowAggregator`'s bound.
 _MIN_WINDOW_S: Final[int] = 1
+
+
+@dataclass(slots=True)
+class _BucketStats:
+    """Mutable per-bucket accumulator for damage, healing, and buff-removal."""
+
+    damage: int = 0
+    healing: int = 0
+    buff_removal: int = 0
 
 
 class PerFightTimelineRow(BaseModel):
@@ -169,10 +179,12 @@ class PerFightTimelineAggregator:
             raise ValueError(msg)
 
         window_ms = window_s * 1000
-        damage_by_bucket: dict[int, int] = defaultdict(int)
-        healing_by_bucket: dict[int, int] = defaultdict(int)
-        strip_by_bucket: dict[int, int] = defaultdict(int)
-        last_bucket_index = -1
+        # Consolidate the per-bucket accumulators into a single
+        # dictionary keyed by bucket index. Each value is a
+        # slotted dataclass, cutting the hot-loop hash lookups
+        # from 3 per event to 1 while keeping the metrics
+        # self-documenting.
+        buckets: dict[int, _BucketStats] = defaultdict(_BucketStats)
 
         # ``_ = (agents, duration_s)`` is the explicit
         # unused-parameter acknowledgment so mypy + ruff don't
@@ -181,42 +193,45 @@ class PerFightTimelineAggregator:
         # doesn't need them.
         _ = (agents, duration_s)
 
-        # v0.9.6 plan 021: accumulate expected sums in the first
-        # loop so the invariant check does NOT drain the input
-        # iterator twice. The route layer passes a ``list[Event]``
-        # today, but the aggregator's signature is
-        # ``Iterable[Event]``; a caller passing a generator would
-        # otherwise hit a ``ValueError`` when ``_check_invariants``
-        # tries to ``list(events)`` after the first loop already
-        # drained it.
-        expected_damage = 0
-        expected_healing = 0
-        expected_strip = 0
         for e in events:
             # ``e.time_ms`` is integers >= 0 (Pydantic-validated upstream),
             # so integer division yields a stable bucket index. Mirrors
             # the v0.6.0 :class:`EventWindowAggregator` loop exactly.
             bucket_index = e.time_ms // window_ms
-            last_bucket_index = max(last_bucket_index, bucket_index)
-            if isinstance(e, DamageEvent):
-                damage_by_bucket[bucket_index] += e.damage
-                expected_damage += e.damage
-            elif isinstance(e, HealingEvent):
-                healing_by_bucket[bucket_index] += e.healing
-                expected_healing += e.healing
-            elif isinstance(e, BuffRemovalEvent):
-                strip_by_bucket[bucket_index] += e.buff_removal
-                expected_strip += e.buff_removal
+            bucket = buckets[bucket_index]
+            match e:
+                case DamageEvent(damage=d):
+                    bucket.damage += d
+                case HealingEvent(healing=h):
+                    bucket.healing += h
+                case BuffRemovalEvent(buff_removal=b):
+                    bucket.buff_removal += b
+
+        # Derive the expected totals and the last bucket index
+        # from the accumulated buckets rather than tracking them
+        # inside the hot loop. This saves one ``max()`` call and
+        # three integer additions per input event.
+        expected_damage = sum(b.damage for b in buckets.values())
+        expected_healing = sum(b.healing for b in buckets.values())
+        expected_strip = sum(b.buff_removal for b in buckets.values())
+        last_bucket_index = max(buckets.keys(), default=-1)
 
         rows: list[PerFightTimelineRow] = []
         for idx in range(last_bucket_index + 1):
+            stats = buckets.get(idx)
+            if stats is None:
+                damage = healing = strip = 0
+            else:
+                damage = stats.damage
+                healing = stats.healing
+                strip = stats.buff_removal
             rows.append(
                 PerFightTimelineRow(
                     window_start_ms=idx * window_ms,
                     window_end_ms=(idx + 1) * window_ms,
-                    total_damage=damage_by_bucket[idx],
-                    total_healing=healing_by_bucket[idx],
-                    total_buff_removal=strip_by_bucket[idx],
+                    total_damage=damage,
+                    total_healing=healing,
+                    total_buff_removal=strip,
                 )
             )
 

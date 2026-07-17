@@ -50,6 +50,7 @@ result without changing the aggregator contract.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from itertools import pairwise
 from typing import Final
 
@@ -62,6 +63,19 @@ from gw2_core import EliteSpec, Profession
 # is exported for symmetry with :mod:`gw2_analytics.target_healing`
 # in case a future per-fight rate sub-field is added.
 _DEFAULT_RATE: Final[float] = 0.0
+
+
+@dataclass(slots=True)
+class _AccountState:
+    """Mutable per-account state for the cross-fight roll-up."""
+
+    profession: Profession
+    elite: EliteSpec
+    name: str = ""
+    attended_fight_ids: set[str] = field(default_factory=set)
+    total_damage: int = 0
+    total_healing: int = 0
+    total_buff_removal: int = 0
 
 
 class FightContribution(BaseModel):
@@ -168,13 +182,7 @@ class PlayerProfileAggregator:
         # Per-account state. Each account's first-seen profession/elite
         # is anchored to whichever pair appeared first; last-seen name
         # follows whichever contribution was most recent.
-        first_seen_profession: dict[str, Profession] = {}
-        first_seen_elite: dict[str, EliteSpec] = {}
-        last_seen_name: dict[str, str] = {}
-        attended_fight_ids: dict[str, set[str]] = {}
-        total_damage: dict[str, int] = {}
-        total_healing: dict[str, int] = {}
-        total_buff_removal: dict[str, int] = {}
+        state_by_account: dict[str, _AccountState] = {}
 
         for c in contributions:
             acct = c.account_name
@@ -183,35 +191,40 @@ class PlayerProfileAggregator:
             # character -- a class swap / squad move / reconnect emits a
             # new agent under the same ``account_name``). We ACCUMULATE
             # the per-character magnitudes; the ``attended_fight_ids``
-            # set below handles the dedup automatically (set semantics
+            # set handles the dedup automatically (set semantics
             # collapse the duplicates). The pre-plan-023
             # ``if key in seen_pairs: continue`` early-skip silently
             # dropped the second character's contribution; the fix
             # moves the per-magnitude accumulation OUTSIDE the
             # dedup check.
-            first_seen_profession.setdefault(acct, c.profession)
-            first_seen_elite.setdefault(acct, c.elite)
+            state = state_by_account.get(acct)
+            if state is None:
+                state = _AccountState(
+                    profession=c.profession,
+                    elite=c.elite,
+                )
+                state_by_account[acct] = state
             # Last-seen char-name: every contribution overwrites.
-            last_seen_name[acct] = c.name
-            attended_fight_ids.setdefault(acct, set()).add(c.fight_id)
-            total_damage[acct] = total_damage.get(acct, 0) + c.total_damage
-            total_healing[acct] = total_healing.get(acct, 0) + c.total_healing
-            total_buff_removal[acct] = total_buff_removal.get(acct, 0) + c.total_buff_removal
+            state.name = c.name
+            state.attended_fight_ids.add(c.fight_id)
+            state.total_damage += c.total_damage
+            state.total_healing += c.total_healing
+            state.total_buff_removal += c.total_buff_removal
 
         profiles = sorted(
             [
                 PlayerProfile(
                     account_name=acct,
-                    name=last_seen_name.get(acct, ""),
-                    profession=first_seen_profession[acct],
-                    elite=first_seen_elite[acct],
-                    fights_attended=len(attended_fight_ids[acct]),
-                    total_damage=total_damage.get(acct, 0),
-                    total_healing=total_healing.get(acct, 0),
-                    total_buff_removal=total_buff_removal.get(acct, 0),
-                    attended_fight_ids=sorted(attended_fight_ids[acct]),
+                    name=state.name,
+                    profession=state.profession,
+                    elite=state.elite,
+                    fights_attended=len(state.attended_fight_ids),
+                    total_damage=state.total_damage,
+                    total_healing=state.total_healing,
+                    total_buff_removal=state.total_buff_removal,
+                    attended_fight_ids=sorted(state.attended_fight_ids),
                 )
-                for acct in attended_fight_ids
+                for acct, state in state_by_account.items()
             ],
             key=lambda p: (-p.total_damage, p.account_name),
         )
@@ -230,12 +243,13 @@ class PlayerProfileAggregator:
                     f"({len(p.attended_fight_ids)})"
                 )
                 raise ValueError(msg)
-            if sorted(p.attended_fight_ids) != p.attended_fight_ids:
-                msg = (
-                    f"PlayerProfile({p.account_name!r}).attended_fight_ids "
-                    f"not strictly ascending: {p.attended_fight_ids!r}"
-                )
-                raise ValueError(msg)
+            for prev_id, curr_id in pairwise(p.attended_fight_ids):
+                if prev_id >= curr_id:
+                    msg = (
+                        f"PlayerProfile({p.account_name!r}).attended_fight_ids "
+                        f"not strictly ascending: {p.attended_fight_ids!r}"
+                    )
+                    raise ValueError(msg)
         # Cross-row ordering contract: descending total_damage with
         # ascending account_name tie-break. ``pairwise`` is the
         # canonical adjacent-pair idiom (ruff RUF007).

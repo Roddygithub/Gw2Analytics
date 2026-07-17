@@ -143,62 +143,149 @@ from gw2analytics_api.schemas import (
 )
 
 
+def _split_three_event_streams(
+    events: Iterable[Event],
+) -> tuple[list[DamageEvent], list[HealingEvent], list[BuffRemovalEvent]]:
+    """Split a heterogeneous event stream into the 3 core combat streams.
+
+    Returns typed ``(damage_events, healing_events, buff_removal_events)``
+    lists in a single O(N) pass. Unknown event subclasses are silently
+    dropped. This helper is shared by :func:`aggregate_squad_rollup` and
+    :func:`aggregate_skill_usage` so they avoid 3 repeated ``isinstance``
+    list comprehensions over the same input.
+    """
+    damage_events: list[DamageEvent] = []
+    healing_events: list[HealingEvent] = []
+    buff_removal_events: list[BuffRemovalEvent] = []
+
+    # Local bindings avoid repeated attribute lookups in the hot loop.
+    append_damage = damage_events.append
+    append_healing = healing_events.append
+    append_buff_removal = buff_removal_events.append
+
+    for event in events:
+        if isinstance(event, DamageEvent):
+            append_damage(event)
+        elif isinstance(event, HealingEvent):
+            append_healing(event)
+        elif isinstance(event, BuffRemovalEvent):
+            append_buff_removal(event)
+
+    return damage_events, healing_events, buff_removal_events
+
+
+def _split_combat_readout_events(
+    events: Iterable[Event],
+) -> tuple[
+    list[DamageEvent],
+    list[HealingEvent],
+    list[BoonApplyEvent],
+    list[CCEvent],
+    list[DeathEvent],
+    list[DodgeEvent],
+    list[BlockEvent],
+    list[InterruptEvent],
+    list[StunBreakEvent],
+]:
+    """Split a heterogeneous event stream into typed Combat-readout streams.
+
+    Returns 9 typed event lists in the canonical order consumed by
+    :func:`aggregate_combat_readout`. Unknown event subclasses are
+    silently dropped.
+
+    This is a single O(N) pass over ``events``; it replaces the 9
+    repeated ``isinstance`` list comprehensions that previously lived
+    in the route handler.
+    """
+    damage_events: list[DamageEvent] = []
+    healing_events: list[HealingEvent] = []
+    boon_apply_events: list[BoonApplyEvent] = []
+    cc_events: list[CCEvent] = []
+    death_events: list[DeathEvent] = []
+    dodge_events: list[DodgeEvent] = []
+    block_events: list[BlockEvent] = []
+    interrupt_events: list[InterruptEvent] = []
+    stun_break_events: list[StunBreakEvent] = []
+
+    # Local bindings avoid repeated attribute lookups in the hot loop.
+    append_damage = damage_events.append
+    append_healing = healing_events.append
+    append_boon_apply = boon_apply_events.append
+    append_cc = cc_events.append
+    append_death = death_events.append
+    append_dodge = dodge_events.append
+    append_block = block_events.append
+    append_interrupt = interrupt_events.append
+    append_stun_break = stun_break_events.append
+
+    for event in events:
+        if isinstance(event, DamageEvent):
+            append_damage(event)
+        elif isinstance(event, HealingEvent):
+            append_healing(event)
+        elif isinstance(event, BoonApplyEvent):
+            append_boon_apply(event)
+        elif isinstance(event, CCEvent):
+            append_cc(event)
+        elif isinstance(event, DeathEvent):
+            append_death(event)
+        elif isinstance(event, DodgeEvent):
+            append_dodge(event)
+        elif isinstance(event, BlockEvent):
+            append_block(event)
+        elif isinstance(event, InterruptEvent):
+            append_interrupt(event)
+        elif isinstance(event, StunBreakEvent):
+            append_stun_break(event)
+
+    return (
+        damage_events,
+        healing_events,
+        boon_apply_events,
+        cc_events,
+        death_events,
+        dodge_events,
+        block_events,
+        interrupt_events,
+        stun_break_events,
+    )
+
+
 def _aggregate_per_target_rollup(
     events: list[Event],
     agent_id_to_name_map: dict[int, str | None],
     duration_s: float,
     event_cls: type[Event],
 ) -> list[TargetDpsRow | TargetHealingRow | TargetBuffRemovalRow]:
-    """Compute one per-target roll-up branch (DPS / healing / buff-removal).
+    """Dispatch to the right per-target aggregator for ``event_cls``.
 
-    Centralises the 3 sibling roll-up branches in
-    :func:`get_fight_events` (the one structural change introduced
-    by Phase 8 v0.8.0 + v0.8.3 + v0.10.2 hotfix #12). Each branch was
-    3 lines: an ``isinstance`` filter, an aggregator call with
-    ``(events, duration_s, name_map=...)``, and a schema-validation
-    list comprehension. The helper picks the aggregator +
-    output-row-type by ``event_cls`` so the route layer wraps
-    schema validation in a thin comprehension with the right
-    ``RowOut`` subclass.
-
-    Mapping
-    -------
-    ``DamageEvent`` -> :class:`TargetDpsAggregator`
-    ``HealingEvent`` -> :class:`TargetHealingAggregator`
-    ``BuffRemovalEvent`` -> :class:`TargetBuffRemovalAggregator`
-
-    Any other ``event_cls`` (e.g. a Phase 9 ``ConditionDamageEvent``)
-    raises ``ValueError`` -- the dispatch table is explicitly
-    closed-form so a future addition is a single-line edit here.
-
-    Performance
-    ----------
-    The ``isinstance`` filter is one pass over ``events``.
-    For a multi-million-event fight (rare but possible in WvW)
-    the filter is still O(N) -- the cost is amortised across the
-    3 calls because the same event is filtered 3 times. The
-    aggregated shape (a few hundred rows) is small by comparison.
+    The caller is responsible for filtering ``events`` to the
+    matching event type; this helper only maps ``event_cls`` to
+    the corresponding aggregator instance and forwards the
+    pre-filtered stream. It remains the canonical dispatch table
+    for the per-target trio and is exercised directly by the
+    hermetic tests in ``apps/api/tests/routes/test_fights_per_target_helper.py``.
     """
     if event_cls is DamageEvent:
-        aggregator: TargetDpsAggregator | TargetHealingAggregator | TargetBuffRemovalAggregator = (
-            TargetDpsAggregator()
+        return cast(
+            list[TargetDpsRow],
+            TargetDpsAggregator().aggregate(events, duration_s, name_map=agent_id_to_name_map),
         )
-    elif event_cls is HealingEvent:
-        aggregator = TargetHealingAggregator()
-    elif event_cls is BuffRemovalEvent:
-        aggregator = TargetBuffRemovalAggregator()
-    else:
-        raise ValueError(
-            f"_aggregate_per_target_rollup: unknown event_cls {event_cls!r}; "
-            f"expected DamageEvent | HealingEvent | BuffRemovalEvent"
+    if event_cls is HealingEvent:
+        return cast(
+            list[TargetHealingRow],
+            TargetHealingAggregator().aggregate(events, duration_s, name_map=agent_id_to_name_map),
         )
-    return cast(
-        list[TargetDpsRow | TargetHealingRow | TargetBuffRemovalRow],
-        aggregator.aggregate(
-            [e for e in events if isinstance(e, event_cls)],  # type: ignore[misc]
-            duration_s,
-            name_map=agent_id_to_name_map,
-        ),
+    if event_cls is BuffRemovalEvent:
+        return cast(
+            list[TargetBuffRemovalRow],
+            TargetBuffRemovalAggregator().aggregate(
+                events, duration_s, name_map=agent_id_to_name_map
+            ),
+        )
+    raise ValueError(
+        f"_aggregate_per_target_rollup: unknown event_cls {event_cls!r}; "
+        f"expected DamageEvent | HealingEvent | BuffRemovalEvent"
     )
 
 
@@ -219,10 +306,11 @@ def aggregate_squad_rollup(
     return as ``list[SquadRollupRowOut]`` after filtering + mapping
     to the wire schema.
     """
+    damage_events, healing_events, buff_removal_events = _split_three_event_streams(events)
     return SquadRollupAggregator().aggregate(
-        [e for e in events if isinstance(e, DamageEvent)],
-        [e for e in events if isinstance(e, HealingEvent)],
-        [e for e in events if isinstance(e, BuffRemovalEvent)],
+        damage_events,
+        healing_events,
+        buff_removal_events,
         agent_id_to_subgroup_map,
         duration_s,
     )
@@ -242,24 +330,145 @@ def aggregate_skill_usage(
     shape -- only the ``total_damage/healing/buff_removal`` counts
     surface; per-second rates are NOT in the wire schema).
     """
+    damage_events, healing_events, buff_removal_events = _split_three_event_streams(events)
     return SkillUsageAggregator().aggregate(
-        [e for e in events if isinstance(e, DamageEvent)],
-        [e for e in events if isinstance(e, HealingEvent)],
-        [e for e in events if isinstance(e, BuffRemovalEvent)],
+        damage_events,
+        healing_events,
+        buff_removal_events,
         skill_id_to_name_map,
     )
 
 
+#: Module-level zero-default sentinels for the primitive-only aspect
+#: rows used by :func:`_build_player_readout`. These models contain only
+#: immutable scalar fields, so sharing a single instance is safe.
+#: ``PlayerBoonsRow`` is intentionally excluded because its
+#: ``other_boons_out`` field is a mutable dict.
+_ZERO_DAMAGE_ROW = PlayerDamageRow(
+    source_agent_id=0,
+    total_damage=0,
+    attack_count=1,
+    dps=0.0,
+    dps_power=0.0,
+    dps_condi=0.0,
+)
+_ZERO_HEAL_ROW = PlayerHealRow(
+    source_agent_id=0,
+    total_healing=0,
+    heal_count=1,
+    hps=0.0,
+    barrier_total=0,
+    barrier_ps=0.0,
+    stun_breaks=0,
+)
+_ZERO_DEFENSE_ROW = PlayerDefenseRow(
+    agent_id=0,
+    damage_taken=0,
+    cc_taken=0,
+    deaths=0,
+)
+
+
+def _build_player_readout(
+    agent_id: int,
+    identity: AgentIdentity,
+    damage_row: PlayerDamageRow | None,
+    heal_row: PlayerHealRow | None,
+    boons_row: PlayerBoonsRow | None,
+    defense_row: PlayerDefenseRow | None,
+) -> PlayerReadoutOut:
+    """Build a single :class:`PlayerReadoutOut` from aspect rows + identity.
+
+    Missing aspect rows are replaced with zero-default instances so a
+    player present in only one aspect still gets a complete envelope.
+    Primitive-only rows reuse module-level sentinels; ``PlayerBoonsRow``
+    is always instantiated fresh because its ``other_boons_out`` dict
+    is mutable and must not be shared.
+    """
+    d_row = damage_row or _ZERO_DAMAGE_ROW
+    h_row = heal_row or _ZERO_HEAL_ROW
+    b_row = boons_row or PlayerBoonsRow(
+        agent_id=0,
+        boons_out=0,
+        boons_in=0,
+        boons_out_rate=0.0,
+        boons_in_rate=0.0,
+        stability_out=0,
+        alacrity_out=0,
+        resistance_out=0,
+        aegis_out=0,
+        superspeed_out=0,
+        stealth_out=0,
+    )
+    def_row = defense_row or _ZERO_DEFENSE_ROW
+
+    return PlayerReadoutOut(
+        agent_id=agent_id,
+        subgroup=identity.subgroup,
+        name=identity.name,
+        account_name=identity.account_name,
+        profession=identity.profession,
+        elite_spec=identity.elite_spec,
+        is_commander=identity.is_commander,
+        roles=[],  # canonical Wave 2 SCAFFOLD default -- Blocker C deferred.
+        damage=PlayerReadoutDamageOut(
+            dps_total=d_row.dps,
+            # Phase 3 SCAFFOLD: power/condi split driven from
+            # the per-player row's rate columns. Pre-Phase-6-v2
+            # wireshape: ``dps_power=0.0 + dps_condi=dps``
+            # (because :func:`gw2_core.default_dps_split`
+            # returns ``(0, damage)`` -- the canonical
+            # "everything is power" SCAFFOLD fallback).
+            dps_power=d_row.dps_power,
+            dps_condi=d_row.dps_condi,
+            strips=0,  # awaits Phase 9 BuffRemovalEvent strip classification.
+            cc_applied=0,  # awaits CCEvent source attribution (Phase 9 v2 yields).
+            down_contribution_dps=0.0,  # awaits Phase 9 v2 'is target down' attribution.
+            kills=0,  # awaits DeathEvent + DPS stream cross-walk (Phase 9 v2).
+        ),
+        heal=PlayerReadoutHealOut(
+            heal_total=h_row.total_healing,
+            hps=h_row.hps,
+            # Phase 3 SCAFFOLD: heal-side barrier columns driven
+            # from the per-player row. Pre-Phase-6-v2 wireshape:
+            # ``barrier_total=0 + barrier_ps=0.0`` (because
+            # :func:`gw2_core.default_barrier_portion_from_healing`
+            # returns ``0`` -- the canonical no-barrier SCAFFOLD
+            # fallback).
+            barrier_total=h_row.barrier_total,
+            barrier_ps=h_row.barrier_ps,
+            cleanses=0,  # awaits ConditionRemoveEvent stream (Phase 6 v2 yields).
+            # Tour 6 v0.10.24 close-out: stun_breaks populated
+            # from the per-player row (actor-side attribution).
+            stun_breaks=h_row.stun_breaks,
+        ),
+        boons=PlayerReadoutBoonsOut(
+            boons_out_rate=b_row.boons_out_rate,
+            boons_in_rate=b_row.boons_in_rate,
+            stability_out=b_row.stability_out,
+            alacrity_out=b_row.alacrity_out,
+            resistance_out=b_row.resistance_out,
+            aegis_out=b_row.aegis_out,
+            superspeed_out=b_row.superspeed_out,
+            stealth_out=b_row.stealth_out,
+            other_boons_out=dict(b_row.other_boons_out),
+        ),
+        defense=PlayerReadoutDefenseOut(
+            damage_taken=def_row.damage_taken,
+            cc_taken=def_row.cc_taken,
+            deaths=def_row.deaths,
+            time_downed_ms=def_row.time_downed_ms,
+            dodges=def_row.dodges,
+            blocks=def_row.blocks,
+            interrupts=def_row.interrupts,
+            barrier_absorbed=def_row.barrier_absorbed,
+        ),
+    )
+
+
 def aggregate_combat_readout(
-    damage_events: Iterable[DamageEvent],
-    healing_events: Iterable[HealingEvent],
-    boon_apply_events: Iterable[BoonApplyEvent],
-    cc_events: Iterable[CCEvent],
-    death_events: Iterable[DeathEvent],
-    dodge_events: Iterable[DodgeEvent],
-    block_events: Iterable[BlockEvent],
-    interrupt_events: Iterable[InterruptEvent],
-    stun_break_events: Iterable[StunBreakEvent] = (),
+    events: list[Event],
+    *,
     skill_id_to_name_map: dict[int, str | None] | None = None,
     agent_id_to_identity_map: dict[int, AgentIdentity] | None = None,
     duration_s: float = 0.0,
@@ -278,13 +487,11 @@ def aggregate_combat_readout(
     unified :class:`FightReadoutOut` envelope (per design doc
     §5.1).
 
-    Why explicit pre-split streams (Option (b) per Wave 5 think):
-    the route handler splits the heterogeneous ``Iterable[Event]``
-    stream via isinstance at the call site; the dispatcher
-    accepts the 8 typed streams (damage + healing + boon-apply +
-    CC + death + dodge + block + interrupt) directly. The
-    per-player aggregators each accept their input as a single
-    typed iterable so the wire contract is uniform.
+    The dispatcher accepts the raw heterogeneous
+    ``Iterable[Event]`` stream and splits it internally via
+    :func:`_split_combat_readout_events`. This keeps the route
+    handler thin and avoids duplicating the 9 ``isinstance``
+    list comprehensions at the call site.
 
     Why a FightReadoutOut return (Option (a) per Wave 5 think):
     the wire-shape Pydantic IS the domain model after Wave 2
@@ -330,6 +537,17 @@ def aggregate_combat_readout(
     # (3 -> 1) and eliminates the asymmetric dispatch pattern the
     # previous review flagged. The None fallback preserves the
     # legacy ``agent_id_to_name_map=None`` call site contract.
+    (
+        damage_events,
+        healing_events,
+        boon_apply_events,
+        cc_events,
+        death_events,
+        dodge_events,
+        block_events,
+        interrupt_events,
+        stun_break_events,
+    ) = _split_combat_readout_events(events)
     _identity_name_map: dict[int, str | None] | None = (
         {aid: ident.name for aid, ident in (agent_id_to_identity_map or {}).items()}
         if agent_id_to_identity_map is not None
@@ -404,11 +622,6 @@ def aggregate_combat_readout(
     heal_by_id: dict[int, PlayerHealRow] = {r.source_agent_id: r for r in heal_rows}
     boons_by_id: dict[int, PlayerBoonsRow] = {r.agent_id: r for r in boons_rows}
     defense_by_id: dict[int, PlayerDefenseRow] = {r.agent_id: r for r in defense_rows}
-    # The union of all observed agent_ids in any aspect --
-    # union (not intersection) so an NPC that appeared only in
-    # the damage stream still surfaces (with empty Heal /
-    # Boons / Defense aspect blocks).
-    all_agent_ids = set(damage_by_id) | set(heal_by_id) | set(boons_by_id) | set(defense_by_id)
 
     # Single pass to build the per-agent PlayerReadoutOut envelope.
     # The 5 shared identity columns (per design doc §2) hydrate
@@ -425,53 +638,14 @@ def aggregate_combat_readout(
     # set without an is_player=True agent row in the DB) are
     # silently dropped from the envelope. This keeps the wire
     # shape strictly player-only.
-    all_agent_ids = (
-        set(damage_by_id) | set(heal_by_id) | set(boons_by_id) | set(defense_by_id)
-    ) & set(identity_map)
-    # Compose the per-aspect zero-row sentinels ONCE before the
-    # per-agent loop so a player present in ONE aspect (e.g.
-    # damage) but missing from ANOTHER (e.g. he never healed
-    # anyone) does NOT crash with a ``KeyError`` on the missing-
-    # aspect dict access. The zero-row ssoTiming is the canonical
-    # Wave 2 SCAFFOLD default. The row-builders accept the
-    # ``default`` argument directly via :func:`dict.get` -- no
-    # intermediate float / int default values need to be inline.
-    _zero_damage: PlayerDamageRow = PlayerDamageRow(
-        source_agent_id=0,
-        total_damage=0,
-        attack_count=1,
-        dps=0.0,
-        dps_power=0.0,
-        dps_condi=0.0,
-    )
-    _zero_heal: PlayerHealRow = PlayerHealRow(
-        source_agent_id=0,
-        total_healing=0,
-        heal_count=1,
-        hps=0.0,
-        barrier_total=0,
-        barrier_ps=0.0,
-        stun_breaks=0,
-    )
-    _zero_boons: PlayerBoonsRow = PlayerBoonsRow(
-        agent_id=0,
-        boons_out=0,
-        boons_in=0,
-        boons_out_rate=0.0,
-        boons_in_rate=0.0,
-        stability_out=0,
-        alacrity_out=0,
-        resistance_out=0,
-        aegis_out=0,
-        superspeed_out=0,
-        stealth_out=0,
-    )
-    _zero_defense: PlayerDefenseRow = PlayerDefenseRow(
-        agent_id=0,
-        damage_taken=0,
-        cc_taken=0,
-        deaths=0,
-    )
+    # Use dict key views to avoid temporary set allocations.
+    valid_agent_ids = (
+        damage_by_id.keys()
+        | heal_by_id.keys()
+        | boons_by_id.keys()
+        | defense_by_id.keys()
+    ) & identity_map.keys()
+
     # Tour 6 v0.10.24-pre follow-up wire-contract widening: the
     # truthy ``or ""`` collapse is GONE. ``PlayerReadoutOut.account_name``
     # is now ``str | None`` (the schema widening completed in lockstep
@@ -484,69 +658,15 @@ def aggregate_combat_readout(
     # framing (additive: the field was always nullable in the DB; the
     # wire schema now mirrors the DB).
     players: list[PlayerReadoutOut] = [
-        PlayerReadoutOut(
-            agent_id=agent_id,
-            subgroup=identity_map[agent_id].subgroup,
-            name=identity_map[agent_id].name,
-            account_name=identity_map[agent_id].account_name,
-            profession=identity_map[agent_id].profession,
-            elite_spec=identity_map[agent_id].elite_spec,
-            is_commander=identity_map[agent_id].is_commander,
-            roles=[],  # canonical Wave 2 SCAFFOLD default -- Blocker C deferred.
-            damage=PlayerReadoutDamageOut(
-                dps_total=damage_by_id.get(agent_id, _zero_damage).dps,
-                # Phase 3 SCAFFOLD: power/condi split driven from
-                # the per-player row's rate columns. Pre-Phase-6-v2
-                # wireshape: ``dps_power=0.0 + dps_condi=dps``
-                # (because :func:`gw2_core.default_dps_split`
-                # returns ``(0, damage)`` -- the canonical
-                # "everything is power" SCAFFOLD fallback).
-                dps_power=damage_by_id.get(agent_id, _zero_damage).dps_power,
-                dps_condi=damage_by_id.get(agent_id, _zero_damage).dps_condi,
-                strips=0,  # awaits Phase 9 BuffRemovalEvent strip classification.
-                cc_applied=0,  # awaits CCEvent source attribution (Phase 9 v2 yields).
-                down_contribution_dps=0.0,  # awaits Phase 9 v2 'is target down' attribution.
-                kills=0,  # awaits DeathEvent + DPS stream cross-walk (Phase 9 v2).
-            ),
-            heal=PlayerReadoutHealOut(
-                heal_total=heal_by_id.get(agent_id, _zero_heal).total_healing,
-                hps=heal_by_id.get(agent_id, _zero_heal).hps,
-                # Phase 3 SCAFFOLD: heal-side barrier columns driven
-                # from the per-player row. Pre-Phase-6-v2 wireshape:
-                # ``barrier_total=0 + barrier_ps=0.0`` (because
-                # :func:`gw2_core.default_barrier_portion_from_healing`
-                # returns ``0`` -- the canonical no-barrier SCAFFOLD
-                # fallback).
-                barrier_total=heal_by_id.get(agent_id, _zero_heal).barrier_total,
-                barrier_ps=heal_by_id.get(agent_id, _zero_heal).barrier_ps,
-                cleanses=0,  # awaits ConditionRemoveEvent stream (Phase 6 v2 yields).
-                # Tour 6 v0.10.24 close-out: stun_breaks populated
-                # from the per-player row (actor-side attribution).
-                stun_breaks=heal_by_id.get(agent_id, _zero_heal).stun_breaks,
-            ),
-            boons=PlayerReadoutBoonsOut(
-                boons_out_rate=boons_by_id.get(agent_id, _zero_boons).boons_out_rate,
-                boons_in_rate=boons_by_id.get(agent_id, _zero_boons).boons_in_rate,
-                stability_out=boons_by_id.get(agent_id, _zero_boons).stability_out,
-                alacrity_out=boons_by_id.get(agent_id, _zero_boons).alacrity_out,
-                resistance_out=boons_by_id.get(agent_id, _zero_boons).resistance_out,
-                aegis_out=boons_by_id.get(agent_id, _zero_boons).aegis_out,
-                superspeed_out=boons_by_id.get(agent_id, _zero_boons).superspeed_out,
-                stealth_out=boons_by_id.get(agent_id, _zero_boons).stealth_out,
-                other_boons_out=dict(boons_by_id.get(agent_id, _zero_boons).other_boons_out),
-            ),
-            defense=PlayerReadoutDefenseOut(
-                damage_taken=defense_by_id.get(agent_id, _zero_defense).damage_taken,
-                cc_taken=defense_by_id.get(agent_id, _zero_defense).cc_taken,
-                deaths=defense_by_id.get(agent_id, _zero_defense).deaths,
-                time_downed_ms=defense_by_id.get(agent_id, _zero_defense).time_downed_ms,
-                dodges=defense_by_id.get(agent_id, _zero_defense).dodges,
-                blocks=defense_by_id.get(agent_id, _zero_defense).blocks,
-                interrupts=defense_by_id.get(agent_id, _zero_defense).interrupts,
-                barrier_absorbed=defense_by_id.get(agent_id, _zero_defense).barrier_absorbed,
-            ),
+        _build_player_readout(
+            agent_id,
+            identity_map[agent_id],
+            damage_by_id.get(agent_id),
+            heal_by_id.get(agent_id),
+            boons_by_id.get(agent_id),
+            defense_by_id.get(agent_id),
         )
-        for agent_id in sorted(all_agent_ids)
+        for agent_id in sorted(valid_agent_ids)
     ]
 
     return FightReadoutOut(

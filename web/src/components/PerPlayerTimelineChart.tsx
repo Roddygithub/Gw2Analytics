@@ -82,7 +82,8 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
+import { formatSecondsLabel } from "@/lib/format";
 import type { PerPlayerTimelineSeries } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -163,25 +164,76 @@ const SECTION_STYLE: React.CSSProperties = {
   gap: 8,
 };
 
+const HEADER_STYLE: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  flexWrap: "wrap",
+  gap: 12,
+};
+
+const HEADER_LABEL_STYLE: React.CSSProperties = {
+  fontSize: 13,
+  opacity: 0.7,
+  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+};
+
+const CONTROLS_STYLE: React.CSSProperties = {
+  display: "inline-flex",
+  gap: 12,
+  alignItems: "center",
+  fontSize: 13,
+  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+};
+
+const RADIO_LABEL_STYLE: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+};
+
+const SELECT_STYLE: React.CSSProperties = {
+  padding: "2px 6px",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  background: "var(--surface)",
+  color: "var(--foreground)",
+  fontSize: 13,
+};
+
+const LEGEND_STYLE: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  fontSize: 12,
+  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+};
+
+const LEGEND_ITEM_STYLE: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+};
+
+const LEGEND_SWATCH_BASE_STYLE: React.CSSProperties = {
+  display: "inline-block",
+  width: 10,
+  height: 10,
+  borderRadius: 2,
+};
+
+const TOP_N_LABEL_STYLE: React.CSSProperties = {
+  opacity: 0.7,
+  marginLeft: 12,
+};
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
 export type PerPlayerMetric = "damage" | "healing" | "strip";
 
-/**
- * Format a bucket's ``window_start_ms`` as a ``M:SS`` label.
- * Mirror of :func:`formatSecondsLabel` in
- * :class:`PerFightTimelineChart` -- the per-player chart
- * shares the same X-axis format (relative time, the
- * "what happened in this fight" use case).
- */
-function formatSecondsLabel(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return `${m}:${rem.toString().padStart(2, "0")}`;
-}
+
 
 /**
  * Get the per-metric total for a single point.
@@ -233,6 +285,11 @@ function getMetricTotal(
 // Pure helpers (exported for unit tests)
 // ---------------------------------------------------------------------------
 
+export interface SelectedSeries {
+  series: PerPlayerTimelineSeries;
+  total: number;
+}
+
 /**
  * Select the top-N series by total of the selected metric.
  *
@@ -243,27 +300,225 @@ function getMetricTotal(
  * top-N, not the first N encountered in the input order.
  *
  * Returns the (possibly-empty) selected subset in the
- * same order. The caller is responsible for the
- * color-index mapping (so the chart legend is stable
- * across re-renders).
+ * same order, with the metric total pre-computed so the
+ * caller doesn't re-calculate it during render. The caller
+ * is responsible for the color-index mapping (so the chart
+ * legend is stable across re-renders).
  */
 export function selectTopNByMetric(
   series: PerPlayerTimelineSeries[],
   metric: PerPlayerMetric,
   n: number,
-): PerPlayerTimelineSeries[] {
-  const sorted = [...series].sort((a, b) => {
-    const totalDiff = getMetricTotal(b, metric) - getMetricTotal(a, metric);
-  if (totalDiff !== 0) return totalDiff;
-  // Tour 6 v0.10.24-pre follow-up null-safety: account_name is now
-  // string | null on the wire (the schema widening); the ``?? ""``
-  // fallbacks preserve stable ordering when either side is null
-  // (two-null series stay tied at 0; null-vs-non-null sorts after
-  // the non-null side without crashing the comparator).
-  return (a.account_name ?? "").localeCompare(b.account_name ?? "");
+): SelectedSeries[] {
+  const mapped: SelectedSeries[] = series.map((s) => ({
+    series: s,
+    total: getMetricTotal(s, metric),
+  }));
+  mapped.sort((a, b) => {
+    const totalDiff = b.total - a.total;
+    if (totalDiff !== 0) return totalDiff;
+    return (a.series.account_name ?? "").localeCompare(
+      b.series.account_name ?? "",
+    );
   });
-  return sorted.slice(0, n);
+  return mapped.slice(0, n);
 }
+
+// ---------------------------------------------------------------------------
+// Memoized sub-components
+// ---------------------------------------------------------------------------
+
+interface SeriesRenderData {
+  series: PerPlayerTimelineSeries;
+  total: number;
+  color: string;
+  lineD: string;
+  cyCoords: number[];
+  displayName: string;
+  title: string;
+}
+
+interface ChartSvgProps {
+  globalMax: number;
+  innerW: number;
+  innerH: number;
+  xFor: (i: number) => number;
+  seriesData: SeriesRenderData[];
+  xLabels: number[];
+}
+
+/**
+ * Memoized SVG chart body.
+ *
+ * Isolating the SVG prevents parent re-renders (e.g. hover
+ * states, time cursors, or unrelated dashboard updates) from
+ * diffing thousands of DOM nodes. The SVG only re-renders
+ * when its props change.
+ */
+const ChartSvg = memo(function ChartSvg({
+  globalMax,
+  innerW,
+  innerH,
+  xFor,
+  seriesData,
+  xLabels,
+}: ChartSvgProps) {
+  return (
+    <svg
+      viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+      width="100%"
+      style={{ display: "block" }}
+      role="img"
+      aria-label="Per-player timeline"
+    >
+      <g
+        transform={`translate(${CHART_PADDING.left}, ${CHART_PADDING.top})`}
+      >
+        {/* Y-axis baseline + max tick (shared single axis) */}
+        <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="var(--border)" />
+        <line x1={0} y1={0} x2={0} y2={innerH} stroke="var(--border)" />
+        <text
+          x={-8}
+          y={0}
+          textAnchor="end"
+          dominantBaseline="middle"
+          fontSize={10}
+          fill="var(--foreground)"
+          opacity={0.7}
+        >
+          {globalMax.toLocaleString("en-US")}
+        </text>
+        <text
+          x={-8}
+          y={innerH}
+          textAnchor="end"
+          dominantBaseline="middle"
+          fontSize={10}
+          fill="var(--foreground)"
+          opacity={0.7}
+        >
+          0
+        </text>
+
+        {/* N polylines: one per visible player, distinct color */}
+        {seriesData.map((d) => (
+          <g key={d.series.account_name}>
+            <title>{d.title}</title>
+            <path
+              d={d.lineD}
+              fill="none"
+              stroke={d.color}
+              strokeWidth={1.5}
+              opacity={0.85}
+            />
+            {/* Per-point dots: a single dot per player per
+                bucket (the 3 metrics of TimelineChart are
+                reduced to 1 here -- the per-player chart
+                shows 1 metric at a time). */}
+            {d.cyCoords.map((cy, i) => (
+              <circle
+                key={`${d.series.account_name}-${i}`}
+                cx={xFor(i)}
+                cy={cy}
+                r={POINT_RADIUS_PX}
+                fill={d.color}
+              />
+            ))}
+          </g>
+        ))}
+
+        {/* X-axis labels: sampled to keep the axis legible */}
+        {xLabels.map((i) => {
+          const p = seriesData[0]?.series.points[i];
+          if (!p) return null;
+          return (
+            <text
+              key={`x-${i}`}
+              x={xFor(i)}
+              y={innerH + 16}
+              textAnchor="middle"
+              fontSize={9}
+              fill="var(--foreground)"
+              opacity={0.6}
+            >
+              {formatSecondsLabel(p.window_start_ms)}
+            </text>
+          );
+        })}
+      </g>
+    </svg>
+  );
+});
+
+interface ControlBarProps {
+  metric: PerPlayerMetric;
+  setMetric: (m: PerPlayerMetric) => void;
+  topN: number;
+  setTopN: (n: number) => void;
+  visibleCount: number;
+  totalCount: number;
+  windowS: number;
+  durationS: number;
+}
+
+/**
+ * Memoized control bar.
+ *
+ * Isolating the metric/top-N controls prevents transient
+ * state updates (hover, focus) in the controls from
+ * triggering a re-render of the expensive SVG chart.
+ */
+const ControlBar = memo(function ControlBar({
+  metric,
+  setMetric,
+  topN,
+  setTopN,
+  visibleCount,
+  totalCount,
+  windowS,
+  durationS,
+}: ControlBarProps) {
+  return (
+    <div style={HEADER_STYLE}>
+      <span style={HEADER_LABEL_STYLE}>
+        Showing {visibleCount} of {totalCount} player
+        {totalCount === 1 ? "" : "s"} ({windowS}-second window,{" "}
+        {durationS.toFixed(2)} s duration)
+      </span>
+      <div style={CONTROLS_STYLE}>
+        <span style={{ opacity: 0.7 }}>Metric:</span>
+        {(["damage", "healing", "strip"] as const).map((m) => (
+          <label key={m} style={RADIO_LABEL_STYLE}>
+            <input
+              type="radio"
+              name="per-player-metric"
+              value={m}
+              checked={metric === m}
+              onChange={() => setMetric(m)}
+            />
+            {m.charAt(0).toUpperCase() + m.slice(1)}
+          </label>
+        ))}
+        <label htmlFor="per-player-top-n" style={TOP_N_LABEL_STYLE}>
+          Top N:
+        </label>
+        <select
+          id="per-player-top-n"
+          aria-label="Top N players to display"
+          value={topN}
+          onChange={(e) => setTopN(Number.parseInt(e.target.value, 10))}
+          style={SELECT_STYLE}
+        >
+          {TOP_N_OPTIONS.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+});
 
 // ---------------------------------------------------------------------------
 // The component
@@ -286,8 +541,9 @@ export function PerPlayerTimelineChart({
   // (series, metric, topN) tuple. The deterministic
   // ordering (sort by total, then by account_name) is the
   // same contract as the aggregated timeline's top-N
-  // helper.
-  const visibleSeries = useMemo(
+  // helper. Totals are pre-computed here so the render
+  // phase doesn't re-calculate them.
+  const visibleData = useMemo(
     () => selectTopNByMetric(series, metric, topN),
     [series, metric, topN],
   );
@@ -299,36 +555,23 @@ export function PerPlayerTimelineChart({
   // ``duration_s / window_s`` (typically 60-300 buckets
   // for a 5-min WvW fight at window_s=5).
   const labelStep = useMemo(() => {
-    if (visibleSeries.length === 0) return 1;
+    if (visibleData.length === 0) return 1;
     const innerW =
       CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
-    const pointCount = visibleSeries[0]?.points.length ?? 0;
+    const pointCount = visibleData[0]?.series.points.length ?? 0;
     return Math.max(1, Math.ceil(X_LABEL_SAMPLE_PX / (innerW / Math.max(1, pointCount))));
-  }, [visibleSeries]);
+  }, [visibleData]);
 
-  // Y-axis scale: the global max is the highest
-  // per-bucket value across all visible series in the
-  // selected metric. A single point's value is the metric
-  // total for that bucket. The Y axis is shared across
-  // all visible series so a high-magnitude player line
-  // doesn't dwarf a low-magnitude one.
+  // Y-axis scale + pre-computed per-series render data.
+  // The global max is the highest per-bucket value across
+  // all visible series in the selected metric. We also
+  // pre-build the SVG path ``d`` strings and dot Y
+  // coordinates so the render phase is pure JSX.
   const layout = useMemo(() => {
-    if (visibleSeries.length === 0) return null;
-    const pointCount = visibleSeries[0].points.length;
+    if (visibleData.length === 0) return null;
+    const pointCount = visibleData[0].series.points.length;
     if (pointCount === 0) return null;
-    let globalMax = 0;
-    for (const s of visibleSeries) {
-      for (const p of s.points) {
-        const v = getMetricValue(
-          p.total_damage,
-          p.total_healing,
-          p.total_buff_removal,
-          metric,
-        );
-        if (v > globalMax) globalMax = v;
-      }
-    }
-    if (globalMax <= 0) globalMax = 1;
+
     const innerW =
       CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
     const innerH =
@@ -337,264 +580,130 @@ export function PerPlayerTimelineChart({
       pointCount === 1
         ? innerW / 2
         : (innerW * i) / (pointCount - 1);
+
+    // Single-pass value extraction + global max computation.
+    // We materialise the raw values once, then build the
+    // scaled geometry with the final globalMax in a second
+    // pass. This avoids the previous double-build of lineD
+    // and cyCoords.
+    const rawValues: number[][] = visibleData.map(({ series: s }) =>
+      s.points.map((p) =>
+        getMetricValue(
+          p.total_damage,
+          p.total_healing,
+          p.total_buff_removal,
+          metric,
+        ),
+      ),
+    );
+    let globalMax = 0;
+    for (const values of rawValues) {
+      for (const v of values) {
+        if (v > globalMax) globalMax = v;
+      }
+    }
+    if (globalMax <= 0) globalMax = 1;
+
     const yFor = (v: number) => {
       if (!Number.isFinite(v)) return innerH;
       return Math.max(0, Math.min(innerH, innerH * (1 - v / globalMax)));
     };
-    return { globalMax, innerW, innerH, xFor, yFor, pointCount };
-  }, [visibleSeries, metric]);
 
-  if (series.length === 0) {
-    return (
-      <div style={EMPTY_STYLE}>No per-player timeline data available.</div>
+    const seriesData: SeriesRenderData[] = visibleData.map(
+      ({ series: s, total }, sIdx) => {
+        const values = rawValues[sIdx];
+        const displayName = s.name || s.account_name;
+        const startLabel = formatSecondsLabel(
+          s.points[0]?.window_start_ms ?? 0,
+        );
+        const endLabel = formatSecondsLabel(
+          s.points[s.points.length - 1]?.window_end_ms ?? 0,
+        );
+        return {
+          series: s,
+          total,
+          color: colorForIndex(sIdx),
+          lineD: values
+            .map(
+              (v, i) =>
+                `${i === 0 ? "M" : "L"}${xFor(i).toFixed(2)},${yFor(v).toFixed(2)}`,
+            )
+            .join(" "),
+          cyCoords: values.map(yFor),
+          displayName,
+          title: `${displayName} (${s.account_name})\nTotal ${metric}: ${total.toLocaleString("en-US")}\n${startLabel}–${endLabel}`,
+        };
+      },
     );
+
+    const xLabels = Array.from(
+      new Set<number>([
+        0,
+        pointCount - 1,
+        ...Array.from(
+          { length: Math.ceil(pointCount / labelStep) },
+          (_, k) => k * labelStep,
+        ),
+      ]),
+    )
+      .filter((i) => i >= 0 && i < pointCount)
+      .sort((a, b) => a - b);
+
+    return {
+      globalMax,
+      innerW,
+      innerH,
+      xFor,
+      pointCount,
+      seriesData,
+      xLabels,
+    };
+  }, [visibleData, metric, labelStep]);
+
+  if (series.length === 0 || !layout) {
+    return <div style={EMPTY_STYLE}>No per-player timeline data available.</div>;
   }
 
-  if (!layout) {
-    return (
-      <div style={EMPTY_STYLE}>No per-player timeline data available.</div>
-    );
-  }
-
-  const { globalMax, innerW, innerH, xFor, yFor, pointCount } = layout;
+  const { globalMax, innerW, innerH, xFor, seriesData, xLabels } = layout;
 
   return (
     <div style={SECTION_STYLE}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: 12,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 13,
-            opacity: 0.7,
-            fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-          }}
-        >
-          Showing {visibleSeries.length} of {series.length} player
-          {series.length === 1 ? "" : "s"} ({windowS}-second window,{" "}
-          {durationS.toFixed(2)} s duration)
-        </span>
-        <div
-          style={{
-            display: "inline-flex",
-            gap: 12,
-            alignItems: "center",
-            fontSize: 13,
-            fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-          }}
-        >
-          <span style={{ opacity: 0.7 }}>Metric:</span>
-          {(["damage", "healing", "strip"] as const).map((m) => (
-            <label
-              key={m}
-              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-            >
-              <input
-                type="radio"
-                name="per-player-metric"
-                value={m}
-                checked={metric === m}
-                onChange={() => setMetric(m)}
-              />
-              {m.charAt(0).toUpperCase() + m.slice(1)}
-            </label>
-          ))}
-          <label
-            htmlFor="per-player-top-n"
-            style={{ opacity: 0.7, marginLeft: 12 }}
+      <ControlBar
+        metric={metric}
+        setMetric={setMetric}
+        topN={topN}
+        setTopN={setTopN}
+        visibleCount={visibleData.length}
+        totalCount={series.length}
+        windowS={windowS}
+        durationS={durationS}
+      />
+      <ChartSvg
+        globalMax={globalMax}
+        innerW={innerW}
+        innerH={innerH}
+        xFor={xFor}
+        seriesData={seriesData}
+        xLabels={xLabels}
+      />
+      <div style={LEGEND_STYLE}>
+        {seriesData.map((d) => (
+          <span
+            key={d.series.account_name}
+            style={LEGEND_ITEM_STYLE}
           >
-            Top N:
-          </label>
-          <select
-            id="per-player-top-n"
-            aria-label="Top N players to display"
-            value={topN}
-            onChange={(e) => setTopN(Number.parseInt(e.target.value, 10))}
-            style={{
-              padding: "2px 6px",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              background: "var(--surface)",
-              color: "var(--foreground)",
-              fontSize: 13,
-            }}
-          >
-            {TOP_N_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <svg
-        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        width="100%"
-        style={{ display: "block" }}
-        role="img"
-        aria-label="Per-player timeline"
-      >
-        <g
-          transform={`translate(${CHART_PADDING.left}, ${CHART_PADDING.top})`}
-        >
-          {/* Y-axis baseline + max tick (shared single axis) */}
-          <line x1={0} y1={innerH} x2={innerW} y2={innerH} stroke="var(--border)" />
-          <line x1={0} y1={0} x2={0} y2={innerH} stroke="var(--border)" />
-          <text
-            x={-8}
-            y={0}
-            textAnchor="end"
-            dominantBaseline="middle"
-            fontSize={10}
-            fill="var(--foreground)"
-            opacity={0.7}
-          >
-            {globalMax.toLocaleString("en-US")}
-          </text>
-          <text
-            x={-8}
-            y={innerH}
-            textAnchor="end"
-            dominantBaseline="middle"
-            fontSize={10}
-            fill="var(--foreground)"
-            opacity={0.7}
-          >
-            0
-          </text>
-
-          {/* N polylines: one per visible player, distinct color */}
-          {visibleSeries.map((s, sIdx) => {
-            const color = colorForIndex(sIdx);
-            const total = getMetricTotal(s, metric);
-            const displayName = s.name || s.account_name;
-            const lineD = s.points
-              .map((p, i) => {
-                const v = getMetricValue(
-                  p.total_damage,
-                  p.total_healing,
-                  p.total_buff_removal,
-                  metric,
-                );
-                return `${i === 0 ? "M" : "L"}${xFor(i).toFixed(2)},${yFor(v).toFixed(2)}`;
-              })
-              .join(" ");
-            const startLabel = formatSecondsLabel(
-              s.points[0]?.window_start_ms ?? 0,
-            );
-            const endLabel = formatSecondsLabel(
-              s.points[s.points.length - 1]?.window_end_ms ?? 0,
-            );
-            return (
-              <g key={s.account_name}>
-                <title>
-                  {`${displayName} (${s.account_name})\n` +
-                    `Total ${metric}: ${total.toLocaleString("en-US")}\n` +
-                    `${startLabel}–${endLabel}`}
-                </title>
-                <path
-                  d={lineD}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={1.5}
-                  opacity={0.85}
-                />
-                {/* Per-point dots: a single dot per player per
-                    bucket (the 3 metrics of TimelineChart are
-                    reduced to 1 here -- the per-player chart
-                    shows 1 metric at a time). */}
-                {s.points.map((p, i) => {
-                  const v = getMetricValue(
-                    p.total_damage,
-                    p.total_healing,
-                    p.total_buff_removal,
-                    metric,
-                  );
-                  return (
-                    <circle
-                      key={`${s.account_name}-${i}`}
-                      cx={xFor(i)}
-                      cy={yFor(v)}
-                      r={POINT_RADIUS_PX}
-                      fill={color}
-                    />
-                  );
-                })}
-              </g>
-            );
-          })}
-
-          {/* X-axis labels: sampled to keep the axis legible */}
-          {Array.from(
-            new Set<number>([
-              0,
-              pointCount - 1,
-              ...Array.from(
-                { length: Math.ceil(pointCount / labelStep) },
-                (_, k) => k * labelStep,
-              ),
-            ]),
-          )
-            .filter((i) => i >= 0 && i < pointCount)
-            .sort((a, b) => a - b)
-            .map((i) => {
-              const p = visibleSeries[0]?.points[i];
-              if (!p) return null;
-              return (
-                <text
-                  key={`x-${i}`}
-                  x={xFor(i)}
-                  y={innerH + 16}
-                  textAnchor="middle"
-                  fontSize={9}
-                  fill="var(--foreground)"
-                  opacity={0.6}
-                >
-                  {formatSecondsLabel(p.window_start_ms)}
-                </text>
-              );
-            })}
-        </g>
-      </svg>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          fontSize: 12,
-          fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-        }}
-      >
-        {visibleSeries.map((s, sIdx) => {
-          const color = colorForIndex(sIdx);
-          const total = getMetricTotal(s, metric);
-          return (
             <span
-              key={s.account_name}
-              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-            >
-              <span
-                style={{
-                  display: "inline-block",
-                  width: 10,
-                  height: 10,
-                  background: color,
-                  borderRadius: 2,
-                }}
-              />
-              {s.name || s.account_name}
-              <span style={{ opacity: 0.7 }}>
-                ({total.toLocaleString("en-US")})
-              </span>
+              style={{
+                ...LEGEND_SWATCH_BASE_STYLE,
+                background: d.color,
+              }}
+            />
+            {d.displayName}
+            <span style={{ opacity: 0.7 }}>
+              ({d.total.toLocaleString("en-US")})
             </span>
-          );
-        })}
+          </span>
+        ))}
       </div>
     </div>
   );

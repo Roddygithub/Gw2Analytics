@@ -118,6 +118,10 @@ async def parse_job(
     start_time = time.monotonic()
     try:
         await asyncio.to_thread(process_parse, sf, parsed_upload_id, raw_bytes)
+        # The parser has consumed ``raw_bytes``; release the reference
+        # eagerly so the large upload payload can be garbage-collected
+        # before the (potentially long) webhook dispatch phase.
+        del raw_bytes
     except Exception:
         # Deliberately broad: any parse failure must be recorded as a
         # failed Arq job and then re-raised so Arq retries the job.

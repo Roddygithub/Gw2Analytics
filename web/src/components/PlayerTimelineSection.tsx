@@ -44,6 +44,16 @@ import { fetchPlayerTimeline, formatApiError, type PlayerTimeline } from "@/lib/
 import { PlayerTimelineChart, type TimelineScale } from "@/components/PlayerTimelineChart";
 import { TIMEZONE_OPTIONS } from "@/lib/timezones";
 import {
+  CAPTION_STYLE,
+  CONTROLS_ROW_STYLE,
+  HEADER_ROW_STYLE,
+  HEADING_STYLE,
+  LOAD_MORE_ROW_STYLE,
+  RADIO_GROUP_STYLE,
+  SECTION_STYLE,
+  SELECT_STYLE,
+} from "@/shared/styles";
+import {
   PLAYER_TIMELINE_ALL_LOADED_DAYS,
   PLAYER_TIMELINE_ALL_LOADED_FIGHTS,
   PLAYER_TIMELINE_BUCKET_PER_DAY,
@@ -82,12 +92,6 @@ const BUTTON_DISABLED_STYLE: React.CSSProperties = {
   ...BUTTON_STYLE,
   opacity: 0.5,
   cursor: "not-allowed",
-};
-
-const CAPTION_STYLE: React.CSSProperties = {
-  fontSize: 12,
-  opacity: 0.7,
-  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
 };
 
 const ERROR_STYLE: React.CSSProperties = {
@@ -340,20 +344,13 @@ export function PlayerTimelineSection({
 
   return (
     <section
-      style={{ display: "flex", flexDirection: "column", gap: 12 }}          aria-label={PLAYER_TIMELINE_SECTION_ARIA_LABEL}
+      style={SECTION_STYLE}
+      aria-label={PLAYER_TIMELINE_SECTION_ARIA_LABEL}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          flexWrap: "wrap",
-        }}
-      >
-        <h2 style={{ fontSize: 18, fontWeight: 600 }}>{PLAYER_TIMELINE_HEADING}</h2>
+      <div style={HEADER_ROW_STYLE}>
+        <h2 style={HEADING_STYLE}>{PLAYER_TIMELINE_HEADING}</h2>
         <div
-          style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}
+          style={CONTROLS_ROW_STYLE}
           role="group"
           aria-label={PLAYER_TIMELINE_CONTROLS_ARIA_LABEL}
         >
@@ -362,7 +359,7 @@ export function PlayerTimelineSection({
           </span>
           {/* v0.8.2 of web: bucketing toggle (Per fight / Per day). */}
           <div
-            style={{ display: "flex", alignItems: "center", gap: 4 }}
+            style={RADIO_GROUP_STYLE}
             role="group"
             aria-label={PLAYER_TIMELINE_BUCKETING_ARIA_LABEL}
           >
@@ -405,7 +402,7 @@ export function PlayerTimelineSection({
               (no loading state needed) because switching
               scale is a synchronous O(n) re-derivation. */}
           <div
-            style={{ display: "flex", alignItems: "center", gap: 4 }}
+            style={RADIO_GROUP_STYLE}
             role="group"
             aria-label={PLAYER_TIMELINE_Y_AXIS_SCALE_ARIA_LABEL}
           >
@@ -442,7 +439,7 @@ export function PlayerTimelineSection({
               Auto-switches bucket to "day" on selection
               (see changeTz above). */}
           <div
-            style={{ display: "flex", alignItems: "center", gap: 4 }}
+            style={RADIO_GROUP_STYLE}
             role="group"
             aria-label={PLAYER_TIMELINE_TIMEZONE_ARIA_LABEL}
           >
@@ -452,17 +449,7 @@ export function PlayerTimelineSection({
               value={tz}
               onChange={changeTz}
               disabled={isLoading}
-              style={{
-                padding: "4px 8px",
-                fontSize: 12,
-                border: "1px solid var(--accent)",
-                borderRadius: 4,
-                background: "transparent",
-                color: "var(--accent)",
-                fontFamily:
-                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-                cursor: "pointer",
-              }}
+              style={SELECT_STYLE}
             >
               {TIMEZONE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -474,13 +461,7 @@ export function PlayerTimelineSection({
         </div>
       </div>
       <PlayerTimelineChart points={timeline.points} scale={scale} />
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-        }}
-      >
+      <div style={LOAD_MORE_ROW_STYLE}>
         <button
           type="button"
           onClick={loadMore}

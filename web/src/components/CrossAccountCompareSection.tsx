@@ -68,6 +68,15 @@ import {
 } from "@/components/CrossAccountTimelineChart";
 import { TIMEZONE_OPTIONS } from "@/lib/timezones";
 import {
+  CAPTION_STYLE,
+  CONTROLS_ROW_STYLE,
+  HEADER_ROW_STYLE,
+  HEADING_STYLE,
+  RADIO_GROUP_STYLE,
+  SECTION_STYLE,
+  SELECT_STYLE,
+} from "@/shared/styles";
+import {
   CROSS_ACCOUNT_TIMELINE_BUCKET_PER_DAY,
   CROSS_ACCOUNT_TIMELINE_BUCKET_PER_DAY_ARIA_LABEL,
   CROSS_ACCOUNT_TIMELINE_BUCKET_PER_FIGHT,
@@ -127,15 +136,15 @@ const CHIP_STYLE: React.CSSProperties = {
   fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
 };
 
-const CAPTION_STYLE: React.CSSProperties = {
-  fontSize: 12,
-  opacity: 0.7,
-  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-};
-
 const ERROR_STYLE: React.CSSProperties = {
   fontSize: 13,
   color: "var(--accent)",
+};
+
+const CHIPS_CONTAINER_STYLE: React.CSSProperties = {
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
 };
 
 // Per-metric display-label + aria-label lookup tables. Restore the
@@ -229,19 +238,11 @@ export function CrossAccountCompareSection({
 
   return (
     <section
-      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+      style={SECTION_STYLE}
       aria-label={CROSS_ACCOUNT_TIMELINE_SECTION_ARIA_LABEL}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          flexWrap: "wrap",
-        }}
-      >
-        <h2 style={{ fontSize: 18, fontWeight: 600 }}>
+      <div style={HEADER_ROW_STYLE}>
+        <h2 style={HEADING_STYLE}>
           {CROSS_ACCOUNT_TIMELINE_HEADING}
         </h2>
         <span style={CAPTION_STYLE}>
@@ -259,7 +260,7 @@ export function CrossAccountCompareSection({
           indicators). The full in-page add/remove UX is
           ~50 LoC and is tracked as a v0.10.X followup. */}
       <div
-        style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
+        style={CHIPS_CONTAINER_STYLE}
         role="list"
         aria-label={CROSS_ACCOUNT_TIMELINE_CHIPS_ARIA_LABEL}
       >
@@ -276,18 +277,13 @@ export function CrossAccountCompareSection({
 
       {/* Toggles: metric (radio) + scale + bucket + tz */}
       <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
+        style={CONTROLS_ROW_STYLE}
         role="group"
         aria-label={CROSS_ACCOUNT_TIMELINE_CONTROLS_ARIA_LABEL}
       >
         {/* Metric radio: Damage / Healing / Buff removal */}
         <div
-          style={{ display: "flex", alignItems: "center", gap: 4 }}
+          style={RADIO_GROUP_STYLE}
           role="radiogroup"
           aria-label={CROSS_ACCOUNT_TIMELINE_METRIC_GROUP_ARIA_LABEL}
         >
@@ -314,7 +310,7 @@ export function CrossAccountCompareSection({
 
         {/* Scale toggle: Linear / Log */}
         <div
-          style={{ display: "flex", alignItems: "center", gap: 4 }}
+          style={RADIO_GROUP_STYLE}
           role="group"
           aria-label={CROSS_ACCOUNT_TIMELINE_SCALE_GROUP_ARIA_LABEL}
         >
@@ -342,7 +338,7 @@ export function CrossAccountCompareSection({
 
         {/* Bucket toggle: Per fight / Per day */}
         <div
-          style={{ display: "flex", alignItems: "center", gap: 4 }}
+          style={RADIO_GROUP_STYLE}
           role="group"
           aria-label={CROSS_ACCOUNT_TIMELINE_BUCKETING_GROUP_ARIA_LABEL}
         >
@@ -383,7 +379,7 @@ export function CrossAccountCompareSection({
         {/* TZ selector (only meaningful in day bucket; the
             changeTz handler auto-switches to day) */}
         <div
-          style={{ display: "flex", alignItems: "center", gap: 4 }}
+          style={RADIO_GROUP_STYLE}
           role="group"
           aria-label={CROSS_ACCOUNT_TIMELINE_TIMEZONE_GROUP_ARIA_LABEL}
         >
@@ -393,17 +389,7 @@ export function CrossAccountCompareSection({
             value={tz}
             onChange={changeTz}
             disabled={isLoading}
-            style={{
-              padding: "4px 8px",
-              fontSize: 12,
-              border: "1px solid var(--accent)",
-              borderRadius: 4,
-              background: "transparent",
-              color: "var(--accent)",
-              fontFamily:
-                "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-              cursor: "pointer",
-            }}
+            style={SELECT_STYLE}
           >
             {TIMEZONE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>

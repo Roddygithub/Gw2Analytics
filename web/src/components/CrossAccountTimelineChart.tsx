@@ -69,7 +69,7 @@
 
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   CROSS_ACCOUNT_TIMELINE_EMPTY_STATE,
   CROSS_ACCOUNT_TIMELINE_LEGEND_ARIA_LABEL,
@@ -263,60 +263,93 @@ export function CrossAccountTimelineChart({
     return Math.max(1, max);
   }, [aligned]);
 
-  if (allDates.length === 0) {
-  return (
-    <div style={EMPTY_STYLE}>
-      {CROSS_ACCOUNT_TIMELINE_EMPTY_STATE}
-    </div>
-  );
-  }
-
   const innerW = CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
   const innerH = CHART_HEIGHT - CHART_PADDING.top - CHART_PADDING.bottom;
 
-  const xFor = (i: number): number =>
-    allDates.length === 1
-      ? innerW / 2
-      : (innerW * i) / (allDates.length - 1);
-
   const isLog = scale === "log";
   const logMax = isLog ? Math.log10(globalMax + 1) : 1;
-  const yFor = (v: number): number => {
-    if (!Number.isFinite(v)) return innerH;
-    if (isLog) {
-      return Math.max(
-        0,
-        Math.min(innerH, innerH * (1 - Math.log10(v + 1) / logMax)),
-      );
-    }
-    return Math.max(0, Math.min(innerH, innerH * (1 - v / globalMax)));
-  };
 
   // Log Y-axis ticks: 0 baseline + each decade up to
   // globalMax, capped at MAX_LOG_TICKS so the 64px left
-  // padding can fit them.
-  const logTicks: number[] = isLog
-    ? (() => {
-        const ticks: number[] = [0];
-        const maxExp = Math.ceil(logMax);
-        for (let exp = 0; exp <= maxExp && ticks.length < MAX_LOG_TICKS; exp++) {
-          const v = Math.pow(10, exp);
-          if (v <= globalMax) ticks.push(v);
-        }
-        return ticks;
-      })()
-    : [0, globalMax];
+  // padding can fit them. Kept before the early return so
+  // the hook call order stays unconditional.
+  const logTicks: number[] = useMemo(() => {
+    if (!isLog) return [0, globalMax];
+    const ticks: number[] = [0];
+    const maxExp = Math.ceil(logMax);
+    for (let exp = 0; exp <= maxExp && ticks.length < MAX_LOG_TICKS; exp++) {
+      const v = Math.pow(10, exp);
+      if (v <= globalMax) ticks.push(v);
+    }
+    return ticks;
+  }, [isLog, globalMax, logMax]);
 
   // X-axis label sampling: first + last always drawn;
   // intermediates at roughly one-label-per-X_LABEL_SAMPLE_PX
-  // intervals.
-  const labelStep = Math.max(
-    1,
-    Math.ceil(X_LABEL_SAMPLE_PX / (innerW / Math.max(1, allDates.length))),
+  // intervals. Kept before the early return so the hook call
+  // order stays unconditional.
+  const xLabelIndices = useMemo(() => {
+    if (allDates.length === 0) return new Set<number>();
+    const labelStep = Math.max(
+      1,
+      Math.ceil(X_LABEL_SAMPLE_PX / (innerW / Math.max(1, allDates.length))),
+    );
+    const indices = new Set<number>([0, allDates.length - 1]);
+    for (let i = 0; i < allDates.length; i += labelStep) {
+      indices.add(i);
+    }
+    return indices;
+  }, [innerW, allDates.length]);
+
+  // Coordinate mappers. Memoised with useCallback so the render
+  // loop and the pre-build memo below share stable references.
+  const xFor = useCallback(
+    (i: number): number =>
+      allDates.length === 1
+        ? innerW / 2
+        : (innerW * i) / (allDates.length - 1),
+    [allDates.length, innerW],
   );
-  const xLabelIndices = new Set<number>([0, allDates.length - 1]);
-  for (let i = 0; i < allDates.length; i += labelStep) {
-    xLabelIndices.add(i);
+
+  const yFor = useCallback(
+    (v: number): number => {
+      if (!Number.isFinite(v)) return innerH;
+      if (isLog) {
+        return Math.max(
+          0,
+          Math.min(innerH, innerH * (1 - Math.log10(v + 1) / logMax)),
+        );
+      }
+      return Math.max(0, Math.min(innerH, innerH * (1 - v / globalMax)));
+    },
+    [innerH, isLog, logMax, globalMax],
+  );
+
+  // Pre-build per-series polyline segments and per-dot geometry so
+  // the render loop doesn't recompute path strings / coordinates on
+  // every frame (e.g. hover re-renders from a parent).
+  const seriesRenderData = useMemo(
+    () =>
+      aligned.map((a) => ({
+        ...a,
+        segments: buildPolylineSegments(a.values, xFor, yFor),
+        dots: a.values
+          .map((v, i) =>
+            v === null
+              ? null
+              : { index: i, cx: xFor(i), cy: yFor(v), value: v },
+          )
+          .filter((d): d is NonNullable<typeof d> => d !== null),
+      })),
+    [aligned, xFor, yFor],
+  );
+
+  if (allDates.length === 0) {
+    return (
+      <div style={EMPTY_STYLE}>
+        {CROSS_ACCOUNT_TIMELINE_EMPTY_STATE}
+      </div>
+    );
   }
 
   return (
@@ -439,36 +472,35 @@ export function CrossAccountTimelineChart({
               )}
 
           {/* N polylines (broken-line segments) */}
-          {aligned.map((a) => {
-            const segments = buildPolylineSegments(a.values, xFor, yFor);
-            return segments.map((d, i) => (
+          {seriesRenderData.map((a) =>
+            a.segments.map((d, i) => (
               <path
-                key={`${a.account_name ?? a.name ?? `acc:${i}`}-${i}`}
+                key={`${a.account_name ?? a.name ?? `seg:${i}`}-${i}`}
                 d={d}
                 fill="none"
                 stroke={a.color}
                 strokeWidth={1.5}
               />
-            ));
-          })}
+            )),
+          )}
 
           {/* Per-point dots (only for non-null values) + SVG
               tooltips with the account name + the metric value. */}
-          {aligned.map((a) =>
-            a.values.map((v, i) => {
-              if (v === null) return null;
+          {seriesRenderData.map((a) =>
+            a.dots.map((d) => {
+              const i = d.index;
               return (
                 <circle
-                  key={`${a.account_name ?? a.name ?? `acc:${i}`}-dot-${i}`}
-                  cx={xFor(i)}
-                  cy={yFor(v)}
+                  key={`${a.account_name ?? a.name ?? `dot:${i}`}-dot-${i}`}
+                  cx={d.cx}
+                  cy={d.cy}
                   r={POINT_RADIUS_PX}
                   fill={a.color}
                 >
                   <title>
                     {`${a.name || a.account_name} \u00b7 ${X_AXIS_FORMAT.format(
                       new Date(allDates[i] ?? ""),
-                    )}\n${METRIC_LABEL[metric]}: ${v.toLocaleString("en-US")}`}
+                    )}\n${METRIC_LABEL[metric]}: ${d.value.toLocaleString("en-US")}`}
                   </title>
                 </circle>
               );

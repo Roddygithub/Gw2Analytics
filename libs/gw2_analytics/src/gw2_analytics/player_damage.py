@@ -90,13 +90,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from itertools import pairwise
+from dataclasses import dataclass
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gw2_analytics._invariants import check_desc_asc_ordering
 from gw2_core import DamageEvent
-from gw2_core._scaffold import default_dps_split
 
 # DPS sentinel when ``duration_s <= 0``: invalid (zero/negative) duration
 # collapses to 0.0 rather than raising -- the canonical ``DamageEvent``
@@ -188,6 +188,16 @@ class PlayerDamageRow(BaseModel):
     name: str | None = None
 
 
+@dataclass(slots=True)
+class _DamageAccumulator:
+    """Mutable accumulator for one source agent's damage statistics."""
+
+    total_damage: int = 0
+    attack_count: int = 0
+    condi: int = 0
+    power: int = 0
+
+
 class PlayerDamageAggregator:
     """Stateless aggregator: damage events -> per-player DPS roll-up rows.
 
@@ -221,11 +231,11 @@ class PlayerDamageAggregator:
         ``(condi_damage, power_damage)`` split (mirrors
         :func:`gw2_analytics.condi_power_split.split_condi_power`'s
         RETURN shape). When ``None`` (the canonical v0.10.23
-        SCAFFOLD path), the substitute
-        :func:`gw2_core._scaffold.default_dps_split` returns
-        ``(0, damage)`` -- the "everything is power" fallback
-        that preserves the pre-Phase-6-v2 wire shape where
-        ``dps_power=0.0, dps_condi=dps``. Phase 6 v2 wires the
+        SCAFFOLD path), the hot loop skips the split call
+        entirely and both ``condi`` and ``power`` accumulators
+        stay at ``0`` -- the "everything is power" fallback that
+        preserves the pre-Phase-6-v2 wire shape where
+        ``dps_power=0.0, dps_condi=0.0``. Phase 6 v2 wires the
         parser-side ``condi_portion`` lookup; the SCAFFOLD absorbs
         the swap via one constructor change.
 
@@ -235,57 +245,53 @@ class PlayerDamageAggregator:
             msg = f"duration_s must be >= 0, got {duration_s!r}"
             raise ValueError(msg)
 
-        # SCAFFOLD substitution: when ``dps_split_getter is None``,
-        # substitute the canonical SCAFFOLD default so the
-        # aggregator's hot loop never branches on "did the caller
-        # wire the getter?". One-line substitute vs an if/else per
-        # event.
-        split = dps_split_getter if dps_split_getter is not None else default_dps_split
+        stats_by_source: dict[int, _DamageAccumulator] = defaultdict(_DamageAccumulator)
 
-        total_by_source: dict[int, int] = defaultdict(int)
-        count_by_source: dict[int, int] = defaultdict(int)
-        # Pre-Phase-6-v2 condi + power totals per source. SCAFFOLD
-        # path: ``condi_per_source == 0`` everywhere; power_rate
-        # equals dps. The conservation invariant
-        # ``condi_rate + power_rate == dps`` survives both paths
-        # (within ``1e-6`` slack for floating-point rounding).
-        condi_by_source: dict[int, int] = defaultdict(int)
-        power_by_source: dict[int, int] = defaultdict(int)
-        grand_total = 0
-        for e in events:
-            total_by_source[e.source_agent_id] += e.damage
-            count_by_source[e.source_agent_id] += 1
-            grand_total += e.damage
-            # Per-event SCAFFOLD split: the SCAFFOLD path consumes
-            # the hit once, returning the (condi, power) tuple;
-            # the post-Phase-6-v2 path queries the parser-side
-            # table. The hot-loop cost is one C-level function
-            # call per event (constant factor).
-            condi, power = split(e)
-            condi_by_source[e.source_agent_id] += condi
-            power_by_source[e.source_agent_id] += power
+        # Hoist the split-getter branch outside the hot loop so the
+        # canonical SCAFFOLD path (``dps_split_getter is None``) avoids
+        # a Python function call per event. The explicit getter path
+        # pays the call cost only when a real parser-side side-table
+        # is wired.
+        if dps_split_getter is not None:
+            split = dps_split_getter
+            for e in events:
+                acc = stats_by_source[e.source_agent_id]
+                acc.total_damage += e.damage
+                acc.attack_count += 1
+                condi, power = split(e)
+                acc.condi += condi
+                acc.power += power
+        else:
+            for e in events:
+                acc = stats_by_source[e.source_agent_id]
+                acc.total_damage += e.damage
+                acc.attack_count += 1
 
         dps_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_DPS
         # ``name_map.get(source)`` returns ``None`` for missing keys
         # AND for explicit ``None`` values -- both cases surface as
         # ``name=None`` on the row, which is the intended
         # "unresolved" sentinel. No need to distinguish.
+        safe_name_map = name_map or {}
         rows = [
             PlayerDamageRow(
                 source_agent_id=source,
-                total_damage=total_by_source[source],
-                attack_count=count_by_source[source],
-                dps=total_by_source[source] * dps_factor,
-                dps_power=power_by_source[source] * dps_factor,
-                dps_condi=condi_by_source[source] * dps_factor,
-                name=(name_map or {}).get(source),
+                total_damage=acc.total_damage,
+                attack_count=acc.attack_count,
+                dps=acc.total_damage * dps_factor,
+                dps_power=acc.power * dps_factor,
+                dps_condi=acc.condi * dps_factor,
+                name=safe_name_map.get(source),
             )
-            for source in total_by_source
+            for source, acc in stats_by_source.items()
         ]
         # Sort: highest total_damage first; ties broken by ascending source_agent_id.
         rows.sort(key=lambda r: (-r.total_damage, r.source_agent_id))
 
-        self._check_invariants(rows, grand_total, duration_s)
+        # The invariant total is derived from the aggregated rows
+        # rather than accumulated in the hot loop, saving one integer
+        # addition per input event.
+        self._check_invariants(rows, sum(r.total_damage for r in rows), duration_s)
         return rows
 
     @staticmethod
@@ -301,8 +307,8 @@ class PlayerDamageAggregator:
            dropped on the source side).
         2. ``attack_count >= 1`` (Pydantic field constraint;
            redundant but explicit).
-        3. Rows monotonic non-increasing by ``total_damage``; ties
-           broken by ascending ``source_agent_id``.
+        3. Rows monotonic non-increasing by ``total_damage``;
+           ties broken by ascending ``source_agent_id``.
 
         Split-getter conservation (``dps_power + dps_condi == dps``)
         is intentionally NOT enforced at the aggregator tier:
@@ -338,23 +344,13 @@ class PlayerDamageAggregator:
                 raise ValueError(msg)
         # Pydantic field constraints already guarantee ``ge=0`` for total_damage;
         # the cross-row ordering invariant is the only ordering contract.
-        # ``pairwise`` pairs each row with its immediate successor; the
-        # canonical idiom for adjacent-pair iteration (ruff RUF007).
-        for prev, curr in pairwise(rows):
-            if prev.total_damage < curr.total_damage:
-                msg = (
-                    f"rows not ordered by (total_damage DESC, "
-                    f"source_agent_id ASC): {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
-            if (
-                prev.total_damage == curr.total_damage
-                and prev.source_agent_id >= curr.source_agent_id
-            ):
-                msg = (
-                    f"tie on total_damage not broken by source_agent_id ASC: {prev!r} then {curr!r}"
-                )
-                raise ValueError(msg)
+        check_desc_asc_ordering(
+            rows,
+            primary_key=lambda r: r.total_damage,
+            secondary_key=lambda r: r.source_agent_id,
+            primary_label="total_damage",
+            secondary_label="source_agent_id",
+        )
 
 
 __all__ = ["DpsSplitGetter", "PlayerDamageAggregator", "PlayerDamageRow"]

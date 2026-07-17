@@ -53,6 +53,17 @@
  */
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { LABEL_STYLE, SELECT_STYLE } from "@/shared/styles";
+import React from "react";
+
+const TARGET_SELECT_STYLE: React.CSSProperties = {
+  ...SELECT_STYLE,
+  background: "var(--background)",
+  color: "var(--foreground)",
+  border: "1px solid var(--border)",
+  fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
+  fontSize: 14,
+};
 
 export interface TargetFilterProps {
   /** Unique target_agent_ids present in the combined roll-up data. */
@@ -101,7 +112,7 @@ function formatTargetLabel(
  * the param back via Next.js 15+ ``searchParams`` and filters the
  * three roll-up tables.
  */
-export function TargetFilter({
+function TargetFilterComponent({
   availableTargets,
   current,
   targetNameMap,
@@ -125,16 +136,7 @@ export function TargetFilter({
   };
 
   return (
-    <label
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        fontSize: 14,
-        color: "var(--foreground)",
-        opacity: 0.85,
-      }}
-    >
+    <label style={LABEL_STYLE}>
       <span>Target:</span>
       <select
         data-testid="target-filter"
@@ -143,15 +145,7 @@ export function TargetFilter({
           const value = e.target.value;
           router.push(buildUrl(value === "" ? null : Number(value)));
         }}
-        style={{
-          padding: "4px 8px",
-          background: "var(--background)",
-          color: "var(--foreground)",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
-          fontSize: 14,
-        }}
+        style={TARGET_SELECT_STYLE}
       >
         <option value="">All targets</option>
         {availableTargets.map((tid) => (
@@ -163,3 +157,5 @@ export function TargetFilter({
     </label>
   );
 }
+
+export const TargetFilter = React.memo(TargetFilterComponent);

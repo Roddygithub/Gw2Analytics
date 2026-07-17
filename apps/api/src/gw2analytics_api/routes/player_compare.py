@@ -74,8 +74,7 @@ from gw2_analytics.cross_account_timeline import (
 )
 from gw2_analytics.player_profile import FightContribution
 from gw2analytics_api.database import get_session
-from gw2analytics_api.routes.players import _load_slow_path_contributions
-from gw2analytics_api.services.player_profiles import get_account_contributions_from_sql
+from gw2analytics_api.routes.players import _load_merged_contributions
 
 router = APIRouter(prefix="/api/v1/players", tags=["players"])
 
@@ -191,29 +190,12 @@ def get_compare_timeline(
     pairs_by_account: dict[str, list[tuple[FightContribution, datetime]]] = {}
     fight_id_to_started: dict[str, datetime] = {}
     for account in deduped_accounts:
-        pairs = get_account_contributions_from_sql(
-            db,
-            account_name=account,
-            limit=10**6,  # unbounded; bounded by account's fight count
-            offset=0,
-        )
-        slow_contributions, slow_started_at = _load_slow_path_contributions(
+        contributions, account_started_at = _load_merged_contributions(
             db, account_name=account
         )
-        for c in slow_contributions:
-            pairs.append((c, slow_started_at[c.fight_id]))
-        # Re-sort the combined (SQL + slow-path) pairs recency-first
-        # after the merge (mirrors the per-account timeline route's
-        # post-merge re-sort). Without this, the day-bucketing's
-        # ``setdefault(day_first_fight, c.fight_id)`` in
-        # ``CrossAccountTimelineAggregator`` may pick a non-most-recent
-        # ``day_first_fight`` because the slow-path rows are appended
-        # in their natural order, not in recency-first order.
-        if slow_contributions:
-            pairs.sort(key=lambda p: (p[1], p[0].fight_id), reverse=True)
+        pairs = [(c, account_started_at[c.fight_id]) for c in contributions]
         pairs_by_account[account] = pairs
-        for c, started_at in pairs:
-            fight_id_to_started[c.fight_id] = started_at
+        fight_id_to_started.update(account_started_at)
     # The pre-seeded-by-deduped-accounts dict guarantees one
     # series per requested account (an account with no
     # contributions still gets an empty-``points`` series --

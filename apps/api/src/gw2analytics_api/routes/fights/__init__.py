@@ -54,14 +54,17 @@ one piece at a time without an avalanche.
   FastAPI coupling, no HTTPException translations).
 
 - :mod:`gw2analytics_api.routes.fights.aggregators` -- the
-  per-target trio dispatch helper :func:`_aggregate_per_target_rollup`
-  + the per-subgroup :func:`aggregate_squad_rollup` + the
-  per-skill :func:`aggregate_skill_usage` wrappers. Wraps the
-  library-side aggregators (``Target{Dps,Healing,BuffRemoval}Agg``
-  + ``SquadRollupAggregator`` + ``SkillUsageAggregator``) with
-  the shared 3-stream (damage + healing + buff-removal) fanout
-  so the route handlers stay thin (one wrapper call per
-  roll-up branch).
+  per-subgroup :func:`aggregate_squad_rollup` + the per-skill
+  :func:`aggregate_skill_usage` wrappers + the Combat-readout
+  :func:`aggregate_combat_readout` dispatcher. Wraps the
+  library-side aggregators (``SquadRollupAggregator`` +
+  ``SkillUsageAggregator`` + the 4 per-player aggregators)
+  with the shared 3-stream (damage + healing + buff-removal)
+  fanout so the route handlers stay thin. The per-target trio
+  dispatch helper :func:`_aggregate_per_target_rollup` is kept
+  for hermetic test coverage but no longer used by the hot
+  ``get_fight_events`` path, which splits the event stream once
+  and invokes the aggregators directly.
 
 Endpoints (registered via ``app.include_router(router)`` in main)
 =================================================================
@@ -92,6 +95,9 @@ from sqlalchemy.orm import Session, selectinload
 from gw2_analytics.event_window import EventWindowAggregator
 from gw2_analytics.per_fight_timeline import PerFightTimelineAggregator
 from gw2_analytics.per_player_timeline import PerPlayerTimelineAggregator
+from gw2_analytics.target_buff_removal import TargetBuffRemovalAggregator
+from gw2_analytics.target_dps import TargetDpsAggregator
+from gw2_analytics.target_healing import TargetHealingAggregator
 from gw2_core import (
     BlockEvent,
     BoonApplyEvent,
@@ -110,7 +116,7 @@ from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightAgent
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession
 from gw2analytics_api.routes.fights.aggregators import (
-    _aggregate_per_target_rollup,
+    _split_three_event_streams,
     aggregate_combat_readout,
     aggregate_skill_usage,
     aggregate_squad_rollup,
@@ -151,6 +157,17 @@ logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
+
+
+def _duration_s_from_events(events: list[Event]) -> float:
+    """Compute fight duration from the highest event timestamp.
+
+    The V1.3 EVTC header does not carry a wall-clock duration
+    scalar, so the canonical duration sentinel is
+    ``max(event.time_ms) / 1000.0``. Centralised here so every
+    fight endpoint uses the same computation.
+    """
+    return max(e.time_ms for e in events) / 1000.0
 
 
 # Module-level single-source-of-truth for window-S bounds.
@@ -307,7 +324,7 @@ def get_fight_timeline(
     # accepts it for signature parity but does not consume
     # it -- the per-bucket bucket count is derived from the
     # events stream directly.
-    duration_s = max(e.time_ms for e in events) / 1000.0
+    duration_s = _duration_s_from_events(events)
     rows = PerFightTimelineAggregator().aggregate(
         events,
         [],
@@ -319,7 +336,7 @@ def get_fight_timeline(
         fight_id=fight_id,
         window_s=window_s,
         duration_s=duration_s,
-        points=[PerFightTimelinePointOut.model_validate(r.model_dump()) for r in rows],
+        points=[PerFightTimelinePointOut.model_validate(r) for r in rows],
     )
 
 
@@ -425,7 +442,7 @@ def get_fight_player_timeline(
         .all()
     )
 
-    duration_s = max(e.time_ms for e in events) / 1000.0
+    duration_s = _duration_s_from_events(events)
     series = PerPlayerTimelineAggregator().aggregate(
         events,
         agents,
@@ -443,7 +460,7 @@ def get_fight_player_timeline(
         # The aggregator's field names match the wire
         # schema's field names 1:1, so the round-trip is
         # mechanical -- no manual field mapping.
-        series=[PerPlayerTimelineSeriesOut.model_validate(s.model_dump()) for s in series],
+        series=[PerPlayerTimelineSeriesOut.model_validate(s) for s in series],
     )
 
 
@@ -547,34 +564,31 @@ def get_fight_events(
     # the raw ``target_agent_id`` for).
     agent_id_to_name_map = agent_id_to_name(db, fight_id)
 
-    duration_s = max(e.time_ms for e in events) / 1000.0
-    # Plan 117: the 3 per-target roll-ups (DPS + Healing + BuffRemoval)
-    # share an isomorphic ``(isinstance filter, aggregator call,
-    # name_map=...)`` shape. The single ``_aggregate_per_target_rollup``
-    # helper centralises that shape and dispatches to the right
-    # aggregator + output-row-type via ``event_cls``. The schema
-    # validation step (per-rollup ``TargetXRowOut.model_validate``) +
-    # the 100-row cap (v0.10.2 hotfix followup #12) stay in the
-    # route handler because the right ``RowOut`` subclass + the
-    # cap policy are wire-format / payload-bound concerns, not
-    # aggregation concerns.
-    target_dps_rows = _aggregate_per_target_rollup(
-        events,
-        agent_id_to_name_map,
+    duration_s = _duration_s_from_events(events)
+    # Plan 117 follow-up: split the heterogeneous event stream into
+    # the 3 typed sub-streams in a single pass, then invoke each
+    # per-target aggregator directly. This avoids the 3 repeated
+    # ``isinstance`` list comprehensions that ``_aggregate_per_target_rollup``
+    # previously performed (one per roll-up branch), cutting the
+    # filtering work from 3 passes to 1 pass. The schema validation
+    # step + the 100-row cap stay in the route handler because the
+    # right ``RowOut`` subclass + the cap policy are wire-format /
+    # payload-bound concerns, not aggregation concerns.
+    damage_events, healing_events, buff_removal_events = _split_three_event_streams(events)
+    target_dps_rows = TargetDpsAggregator().aggregate(
+        damage_events,
         duration_s,
-        DamageEvent,
+        name_map=agent_id_to_name_map,
     )
-    target_healing_rows = _aggregate_per_target_rollup(
-        events,
-        agent_id_to_name_map,
+    target_healing_rows = TargetHealingAggregator().aggregate(
+        healing_events,
         duration_s,
-        HealingEvent,
+        name_map=agent_id_to_name_map,
     )
-    target_buff_removal_rows = _aggregate_per_target_rollup(
-        events,
-        agent_id_to_name_map,
+    target_buff_removal_rows = TargetBuffRemovalAggregator().aggregate(
+        buff_removal_events,
         duration_s,
-        BuffRemovalEvent,
+        name_map=agent_id_to_name_map,
     )
     # ``EventWindowAggregator`` accepts ``Iterable[Event]`` directly and
     # discriminates by isinstance internally (damage_total += damage,
@@ -599,15 +613,15 @@ def get_fight_events(
         # ``event_windows`` is NOT capped -- it groups by time bucket,
         # which is bounded by the fight duration, so the data volume
         # is naturally bounded.
-        target_dps=[TargetDpsRowOut.model_validate(r.model_dump()) for r in target_dps_rows[:100]],
+        target_dps=[TargetDpsRowOut.model_validate(r) for r in target_dps_rows[:100]],
         target_healing=[
-            TargetHealingRowOut.model_validate(r.model_dump()) for r in target_healing_rows[:100]
+            TargetHealingRowOut.model_validate(r) for r in target_healing_rows[:100]
         ],
         target_buff_removal=[
-            TargetBuffRemovalRowOut.model_validate(r.model_dump())
+            TargetBuffRemovalRowOut.model_validate(r)
             for r in target_buff_removal_rows[:100]
         ],
-        event_windows=[EventBucketOut.model_validate(b.model_dump()) for b in event_windows],
+        event_windows=[EventBucketOut.model_validate(b) for b in event_windows],
     )
 
 
@@ -657,7 +671,7 @@ def get_fight_squads(
     # surfaces in the empty-string bucket.
     agent_id_to_subgroup_map = agent_id_to_subgroup(db, fight_id)
 
-    duration_s = max(e.time_ms for e in events) / 1000.0
+    duration_s = _duration_s_from_events(events)
     squad_rows = aggregate_squad_rollup(events, agent_id_to_subgroup_map, duration_s)
 
     return FightSquadsOut(
@@ -670,7 +684,7 @@ def get_fight_squads(
         # emits a canonical dict via model_dump() -- the
         # SquadRollupRowOut schema's field names are 1:1 with
         # SquadRollupRow, so the round-trip is mechanical.
-        squads=[SquadRollupRowOut.model_validate(r.model_dump()) for r in squad_rows],
+        squads=[SquadRollupRowOut.model_validate(r) for r in squad_rows],
     )
 
 
@@ -715,7 +729,7 @@ def get_fight_skills(
         # leading to the same response explosion. The 100-row cap
         # preserves the top-N signal (ordered by total_damage
         # descending) while bounding the payload.
-        skills=[SkillUsageRowOut.model_validate(r.model_dump()) for r in skill_rows[:100]],
+        skills=[SkillUsageRowOut.model_validate(r) for r in skill_rows[:100]],
     )
 
 
@@ -873,7 +887,7 @@ def get_fight_player_skills(
         # can produce garbage values for). The cap preserves
         # the top-N analyst signal while bounding the
         # payload.
-        skills=[PlayerSkillUsageRowOut.model_validate(r.model_dump()) for r in skill_rows[:100]],
+        skills=[PlayerSkillUsageRowOut.model_validate(r) for r in skill_rows[:100]],
     )
 
 
@@ -918,7 +932,8 @@ def get_fight_readout(
     The 9 input streams are split from the canonical
     heterogeneous ``Iterable[Event]`` via ``isinstance`` at the
     call site (parallel to the per-target trio dispatch in
-    ``apps/api/routes/fights/aggregators.py::_aggregate_per_target_rollup``).
+    :func:`get_fight_events`, which now splits the event stream
+    once and invokes the aggregators directly).
 
     Response codes:
 
@@ -947,39 +962,16 @@ def get_fight_readout(
     # The per-skill name map for the Boons ``other_boons_out``
     # bucket (the per-player Boons aggregator reads it via the
     # ``name_map`` parameter to resolve skill_id -> string).
-    skill_id_to_name_map: dict[int, str | None] = dict(skill_id_to_name(db, fight_id))
+    skill_id_to_name_map = skill_id_to_name(db, fight_id)
 
     # Compute the duration sentinel from the events stream (the
     # same contract the per-target trio + per-fight timeline
     # endpoints use -- V1.3 EVTC header does not carry a
     # wall-clock duration scalar).
-    duration_s = max(e.time_ms for e in events) / 1000.0
-
-    # Split the heterogeneous stream into 9 single-typed inputs
-    # via ``isinstance`` at the call site (mirrors the
-    # ``_aggregate_per_target_rollup`` shape for consistency).
-    # The 9th stream (StunBreakEvent, Tour 6 close-out) feeds
-    # the per-row ``stun_breaks`` column on the Heal side.
-    damage_events = [e for e in events if isinstance(e, DamageEvent)]
-    healing_events = [e for e in events if isinstance(e, HealingEvent)]
-    boon_apply_events = [e for e in events if isinstance(e, BoonApplyEvent)]
-    cc_events = [e for e in events if isinstance(e, CCEvent)]
-    death_events = [e for e in events if isinstance(e, DeathEvent)]
-    dodge_events = [e for e in events if isinstance(e, DodgeEvent)]
-    block_events = [e for e in events if isinstance(e, BlockEvent)]
-    interrupt_events = [e for e in events if isinstance(e, InterruptEvent)]
-    stun_break_events = [e for e in events if isinstance(e, StunBreakEvent)]
+    duration_s = _duration_s_from_events(events)
 
     return aggregate_combat_readout(
-        damage_events=damage_events,
-        healing_events=healing_events,
-        boon_apply_events=boon_apply_events,
-        cc_events=cc_events,
-        death_events=death_events,
-        dodge_events=dodge_events,
-        block_events=block_events,
-        interrupt_events=interrupt_events,
-        stun_break_events=stun_break_events,
+        events,
         skill_id_to_name_map=skill_id_to_name_map,
         agent_id_to_identity_map=agent_id_to_identity_map,
         duration_s=duration_s,

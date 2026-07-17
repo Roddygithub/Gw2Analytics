@@ -128,12 +128,11 @@ def aggregate_player_profiles_from_sql(
     tiebreaker resolves the "5 MESMER + 5 NECROMANCER" case via
     alphabetical ordering on the enum value.
 
-    The profession filter is applied client-side (after the SQL
-    query returns) because the filter is on the MODAL profession
-    (the per-account aggregate), not on the per-fight profession.
-    A SQL-side filter would require a self-join on the
-    modal-profession CTE; the client-side filter is O(results)
-    which is bounded by ``limit``.
+    The profession filter is applied SQL-side on the modal
+    profession (the per-account aggregate). The modal profession
+    is already computed by the ``per_account_profession`` CTE and
+    joined into the main aggregation, so filtering before
+    ``LIMIT``/``OFFSET`` preserves pagination correctness.
 
     Parameters
     ----------
@@ -216,6 +215,11 @@ def aggregate_player_profiles_from_sql(
         .offset(offset)
     )
 
+    if profession_filter is not None:
+        main_stmt = main_stmt.where(
+            per_account_profession.c.profession == int(profession_filter),
+        )
+
     rows = db.execute(main_stmt).all()
 
     profiles: list[PlayerProfile] = []
@@ -232,9 +236,6 @@ def aggregate_player_profiles_from_sql(
             attended_fight_ids=[],  # not loaded by the SQL path
         )
         profiles.append(profile)
-
-    if profession_filter is not None:
-        profiles = [p for p in profiles if p.profession == profession_filter]
 
     return profiles
 

@@ -140,9 +140,26 @@ def process_scheduled_retries(session_factory: Callable[[], Session]) -> int:
             if not rows:
                 return 0
 
+            # Batch-fetch subscriptions once to avoid N+1 queries in the
+            # per-delivery retry loop. SQLAlchemy's identity map would
+            # deduplicate repeated ``db.get()`` calls for the same
+            # subscription, but a single IN query is cheaper when the
+            # scheduler processes many distinct failed deliveries.
+            sub_ids = {d.subscription_id for d in rows}
+            sub_map: dict[str, OrmWebhookSubscription] = {
+                s.id: s
+                for s in db.execute(
+                    select(OrmWebhookSubscription).where(
+                        OrmWebhookSubscription.id.in_(sub_ids),
+                    ),
+                )
+                .scalars()
+                .all()
+            }
+
             with httpx.Client(timeout=_REQUEST_TIMEOUT_S) as client:
                 for delivery in rows:
-                    if _attempt_retry(db, client, delivery):
+                    if _attempt_retry(client, delivery, sub_map.get(delivery.subscription_id)):
                         delivered_count += 1
                     else:
                         failed_count += 1
@@ -158,9 +175,9 @@ def process_scheduled_retries(session_factory: Callable[[], Session]) -> int:
 
 
 def _attempt_retry(
-    db: Session,
     client: httpx.Client,
     delivery: OrmWebhookDelivery,
+    subscription: OrmWebhookSubscription | None,
 ) -> bool:
     """Retry one delivery; increment attempt; record success/failure.
 
@@ -172,8 +189,11 @@ def _attempt_retry(
     the HMAC-SHA256 signature is byte-for-byte identical to the
     original POST -- the integrator's HMAC verification sees the
     same digest across all retry attempts.
+
+    ``subscription`` is the pre-fetched subscription row (or None if
+    missing/revoked). The caller batch-fetches all subscriptions in
+    one query to avoid N+1 lookups in the retry loop.
     """
-    subscription = db.get(OrmWebhookSubscription, delivery.subscription_id)
     if subscription is None or subscription.revoked_at is not None:
         logger.warning(
             "retry: subscription %s missing or revoked for delivery %s; "

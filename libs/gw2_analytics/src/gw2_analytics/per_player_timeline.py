@@ -105,7 +105,9 @@ the swap is mechanical.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, Final
 
@@ -118,6 +120,15 @@ from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 # event write rate is ~30Hz so 1s is a reasonable minimum). Strict
 # parallel of :class:`PerFightTimelineAggregator`'s bound.
 _MIN_WINDOW_S: Final[int] = 1
+
+
+@dataclass(slots=True)
+class _BucketStats:
+    """Mutable per-bucket accumulator for damage, healing, and buff-removal."""
+
+    damage: int = 0
+    healing: int = 0
+    buff_removal: int = 0
 
 
 class PerPlayerTimelinePoint(BaseModel):
@@ -185,6 +196,12 @@ class PerPlayerTimelineAggregator:
     second-layer ``account_name``-non-empty filter).
     """
 
+    _SUM_CHECK_FIELDS: tuple[tuple[str, str], ...] = (
+        ("total_damage", "damage"),
+        ("total_healing", "healing"),
+        ("total_buff_removal", "buff_removal"),
+    )
+
     def aggregate(
         self,
         events: Iterable[Event],
@@ -212,54 +229,24 @@ class PerPlayerTimelineAggregator:
 
         window_ms = window_s * 1000
 
-        # Build the source-side attribution map. Filter to
-        # player agents (is_player=True) with non-empty
-        # account_name (NPCs are dropped; missing account
-        # names are dropped to match the per-source-side
-        # contract in :func:`_persist_player_summaries`).
-        # Also build the player_name_map for the series'
-        # ``name`` field (last-seen char-name).
-        source_map: dict[int, str] = {}
-        # ``dict[account_name, last_seen_name]`` -- the
-        # char-name is OVERWRITTEN on every event for the
-        # same account (last-seen contract; mirrors
-        # :class:`PlayerProfileAggregator`).
-        player_name_map: dict[str, str] = {}
-        for agent in agents:
-            is_player = getattr(agent, "is_player", False)
-            if not is_player:
-                continue
-            account_name = getattr(agent, "account_name", None)
-            if not account_name:
-                # Missing or empty account name -> drop the
-                # agent. Matches the per-source-side
-                # contract: NPCs without a registered arcdps
-                # account_name are not attributed to any
-                # player.
-                continue
-            agent_id = getattr(agent, "agent_id", None)
-            if agent_id is None:
-                continue
-            source_map[agent_id] = account_name
-            # Pre-seed the last-seen name with the agent's
-            # ``name`` attribute (the arcdps char-name as
-            # recorded on the agent struct). Events may
-            # overwrite this with a later-seen name.
-            agent_name = getattr(agent, "name", None) or ""
-            player_name_map[account_name] = agent_name
+        source_map, player_name_map = self._build_source_map(agents)
 
         # Per-account per-bucket accumulator. The inner dict
-        # keys are bucket indices; the values are
-        # ``(damage, healing, strip)`` lists. The explicit
-        # ``setdefault`` chain lets us avoid a ``defaultdict``
-        # ``__missing__`` hook (the cost is one extra dict
-        # probe per event; the benefit is no module-level
-        # mutable default + a tighter type signature).
-        per_account: dict[str, dict[int, list[int]]] = {}
-        last_bucket_index = -1
+        # keys are bucket indices; the values are slotted
+        # ``_BucketStats`` dataclasses. A nested ``defaultdict``
+        # collapses the two-level lookup to a single
+        # ``__missing__`` chain per event and avoids the
+        # repeated ``setdefault`` method-call overhead in the
+        # hot loop.
+        per_account: defaultdict[str, defaultdict[int, _BucketStats]] = defaultdict(
+            lambda: defaultdict(_BucketStats)
+        )
+
+        # Hoist frequently-used lookups for the hot loop.
+        get_account = source_map.get
 
         for e in events:
-            account = source_map.get(e.source_agent_id)
+            account = get_account(e.source_agent_id)
             if account is None:
                 # NPC source (or unknown agent) -- silently
                 # skip. The per-target roll-ups still see the
@@ -268,17 +255,18 @@ class PerPlayerTimelineAggregator:
                 # counts player agents.
                 continue
             bucket_index = e.time_ms // window_ms
-            last_bucket_index = max(last_bucket_index, bucket_index)
-            bucket = per_account.setdefault(
-                account,
-                {},
-            ).setdefault(bucket_index, [0, 0, 0])
-            if isinstance(e, DamageEvent):
-                bucket[0] += e.damage
-            elif isinstance(e, HealingEvent):
-                bucket[1] += e.healing
-            elif isinstance(e, BuffRemovalEvent):
-                bucket[2] += e.buff_removal
+            bucket = per_account[account][bucket_index]
+            match e:
+                case DamageEvent(damage=d):
+                    bucket.damage += d
+                case HealingEvent(healing=h):
+                    bucket.healing += h
+                case BuffRemovalEvent(buff_removal=b):
+                    bucket.buff_removal += b
+
+        expected_per_account, last_bucket_index = (
+            PerPlayerTimelineAggregator._derive_expected_and_last_bucket(per_account)
+        )
             # No last-seen char-name update here: the
             # ``Event`` union does NOT carry ``source_name``
             # (the char-name is denormalised on
@@ -297,13 +285,14 @@ class PerPlayerTimelineAggregator:
         series: list[PerPlayerTimelineSeries] = []
         for account, buckets in per_account.items():
             points: list[PerPlayerTimelinePoint] = []
-            # Pre-compute the per-account totals for the
-            # sort key. The deterministic-ordering contract
-            # is ``(-total_damage, account_name)``.
-            total_damage_for_sort = 0
             for idx in range(last_bucket_index + 1):
-                damage, healing, strip = buckets.get(idx, [0, 0, 0])
-                total_damage_for_sort += damage
+                stats = buckets.get(idx)
+                if stats is None:
+                    damage = healing = strip = 0
+                else:
+                    damage = stats.damage
+                    healing = stats.healing
+                    strip = stats.buff_removal
                 points.append(
                     PerPlayerTimelinePoint(
                         window_start_ms=idx * window_ms,
@@ -322,17 +311,22 @@ class PerPlayerTimelineAggregator:
             )
 
         # Deterministic ordering: highest total_damage first;
-        # ties broken by ascending account_name.
-        series.sort(key=lambda s: (-sum(p.total_damage for p in s.points), s.account_name))
+        # ties broken by ascending account_name. Pre-compute the
+        # per-series total so the sort key does not re-sum on
+        # every comparison.
+        series_with_totals = [
+            (sum(p.total_damage for p in s.points), s) for s in series
+        ]
+        series_with_totals.sort(key=lambda t: (-t[0], t[1].account_name))
+        sorted_series = [s for _, s in series_with_totals]
 
-        self._check_invariants(series, events, source_map)
-        return series
+        self._check_invariants(sorted_series, expected_per_account)
+        return sorted_series
 
     @staticmethod
     def _check_invariants(
         series: list[PerPlayerTimelineSeries],
-        events: Iterable[Event],
-        source_map: dict[int, str],
+        expected_per_account: dict[str, _BucketStats],
     ) -> None:
         """Raise ``ValueError`` if any cross-field invariant is violated.
 
@@ -351,18 +345,58 @@ class PerPlayerTimelineAggregator:
         ``too-many-branches`` cap (12). The 3 sub-checks
         each carry 1-2 branches of logic.
         """
-        # Materialise the events once (the input is an
-        # Iterable; the consumer may pass a generator) so
-        # the per-kind sums don't drain the stream twice.
-        events_list = list(events)
         PerPlayerTimelineAggregator._check_equal_length(series)
-        expected = PerPlayerTimelineAggregator._compute_expected_per_account(
-            events_list,
-            source_map,
-            series,
-        )
-        PerPlayerTimelineAggregator._check_sum_preservation(series, expected)
+        PerPlayerTimelineAggregator._check_sum_preservation(series, expected_per_account)
         PerPlayerTimelineAggregator._check_contiguous_points(series)
+
+    @staticmethod
+    def _derive_expected_and_last_bucket(
+        per_account: defaultdict[str, defaultdict[int, _BucketStats]],
+    ) -> tuple[defaultdict[str, _BucketStats], int]:
+        """Derive expected totals and the last bucket index from accumulators.
+
+        Moving this work out of the hot event loop saves one
+        ``max()`` call, one dictionary lookup, and three integer
+        additions per input event.
+        """
+        expected_per_account: defaultdict[str, _BucketStats] = defaultdict(_BucketStats)
+        last_bucket_index = -1
+        for account, buckets in per_account.items():
+            exp = expected_per_account[account]
+            for idx, stats in buckets.items():
+                exp.damage += stats.damage
+                exp.healing += stats.healing
+                exp.buff_removal += stats.buff_removal
+                last_bucket_index = max(last_bucket_index, idx)
+        return expected_per_account, last_bucket_index
+
+    @staticmethod
+    def _build_source_map(agents: Iterable[Any]) -> tuple[dict[int, str], dict[str, str]]:
+        """Build the source-side attribution map from the agent iterable.
+
+        Filters to player agents (``is_player=True``) with
+        non-empty ``account_name``. NPCs and agents missing
+        either field are dropped. Also builds the
+        ``player_name_map`` for the series' ``name`` field
+        (last-seen char-name, pre-seeded from the agent's
+        ``name`` attribute).
+        """
+        source_map: dict[int, str] = {}
+        player_name_map: dict[str, str] = {}
+        for agent in agents:
+            is_player = getattr(agent, "is_player", False)
+            if not is_player:
+                continue
+            account_name = getattr(agent, "account_name", None)
+            if not account_name:
+                continue
+            agent_id = getattr(agent, "agent_id", None)
+            if agent_id is None:
+                continue
+            source_map[agent_id] = account_name
+            agent_name = getattr(agent, "name", None) or ""
+            player_name_map[account_name] = agent_name
+        return source_map, player_name_map
 
     @staticmethod
     def _check_equal_length(series: list[PerPlayerTimelineSeries]) -> None:
@@ -380,63 +414,28 @@ class PerPlayerTimelineAggregator:
                 raise ValueError(msg)
 
     @staticmethod
-    def _compute_expected_per_account(
-        events_list: list[Event],
-        source_map: dict[int, str],
-        series: list[PerPlayerTimelineSeries],
-    ) -> dict[str, list[int]]:
-        """Compute the expected per-account (damage, healing, strip) totals from the event stream.
-
-        Single O(N) pass over ``events_list`` (not 3 separate
-        passes) so the cost is bounded by the event count
-        (typically 10-30k events per WvW fight) rather than
-        3x that. The ``series_by_account`` index turns the
-        per-event check into O(1).
-        """
-        series_by_account: dict[str, PerPlayerTimelineSeries] = {s.account_name: s for s in series}
-        expected: dict[str, list[int]] = {s.account_name: [0, 0, 0] for s in series}
-        for e in events_list:
-            account = source_map.get(e.source_agent_id)
-            if account is None or account not in series_by_account:
-                continue
-            bucket_e = expected[account]
-            if isinstance(e, DamageEvent):
-                bucket_e[0] += e.damage
-            elif isinstance(e, HealingEvent):
-                bucket_e[1] += e.healing
-            elif isinstance(e, BuffRemovalEvent):
-                bucket_e[2] += e.buff_removal
-        return expected
-
-    @staticmethod
     def _check_sum_preservation(
         series: list[PerPlayerTimelineSeries],
-        expected: dict[str, list[int]],
+        expected: dict[str, _BucketStats],
     ) -> None:
         """Per-series sum of points MUST equal per-series event totals (no events dropped)."""
         for s in series:
             exp = expected[s.account_name]
-            actual_damage = sum(p.total_damage for p in s.points)
-            actual_healing = sum(p.total_healing for p in s.points)
-            actual_strip = sum(p.total_buff_removal for p in s.points)
-            if actual_damage != exp[0]:
-                msg = (
-                    f"series {s.account_name!r}: sum of points.total_damage "
-                    f"({actual_damage}) != sum of event.damage ({exp[0]})"
-                )
-                raise ValueError(msg)
-            if actual_healing != exp[1]:
-                msg = (
-                    f"series {s.account_name!r}: sum of points.total_healing "
-                    f"({actual_healing}) != sum of event.healing ({exp[1]})"
-                )
-                raise ValueError(msg)
-            if actual_strip != exp[2]:
-                msg = (
-                    f"series {s.account_name!r}: sum of points.total_buff_removal "
-                    f"({actual_strip}) != sum of event.buff_removal ({exp[2]})"
-                )
-                raise ValueError(msg)
+            actuals = (
+                sum(p.total_damage for p in s.points),
+                sum(p.total_healing for p in s.points),
+                sum(p.total_buff_removal for p in s.points),
+            )
+            expected_vals = (exp.damage, exp.healing, exp.buff_removal)
+            for actual, expected_val, (p_field, e_field) in zip(
+                actuals, expected_vals, PerPlayerTimelineAggregator._SUM_CHECK_FIELDS, strict=True
+            ):
+                if actual != expected_val:
+                    msg = (
+                        f"series {s.account_name!r}: sum of points.{p_field} "
+                        f"({actual}) != sum of event.{e_field} ({expected_val})"
+                    )
+                    raise ValueError(msg)
 
     @staticmethod
     def _check_contiguous_points(series: list[PerPlayerTimelineSeries]) -> None:

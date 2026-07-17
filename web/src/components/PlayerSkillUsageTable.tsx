@@ -107,6 +107,22 @@ const TD_STYLE: React.CSSProperties = {
   color: "var(--foreground)",
 };
 
+const TH_RIGHT_STYLE: React.CSSProperties = {
+  ...TH_STYLE,
+  textAlign: "right",
+};
+
+const TD_RIGHT_STYLE: React.CSSProperties = {
+  ...TD_STYLE,
+  textAlign: "right",
+};
+
+const TD_ACCENT_STYLE: React.CSSProperties = {
+  ...TD_STYLE,
+  textAlign: "right",
+  color: "var(--accent)",
+};
+
 const EMPTY_STYLE: React.CSSProperties = {
   padding: "12px 16px",
   border: "1px solid var(--border)",
@@ -194,10 +210,10 @@ export function PlayerSkillUsageTable({
             <tr>
               <th style={TH_STYLE}>Skill id</th>
               <th style={TH_STYLE}>Skill name</th>
-              <th style={{ ...TH_STYLE, textAlign: "right" }}>Hit count</th>
-              <th style={{ ...TH_STYLE, textAlign: "right" }}>Total damage</th>
-              <th style={{ ...TH_STYLE, textAlign: "right" }}>Total healing</th>
-              <th style={{ ...TH_STYLE, textAlign: "right" }}>Total strip</th>
+              <th style={TH_RIGHT_STYLE}>Hit count</th>
+              <th style={TH_RIGHT_STYLE}>Total damage</th>
+              <th style={TH_RIGHT_STYLE}>Total healing</th>
+              <th style={TH_RIGHT_STYLE}>Total strip</th>
             </tr>
           </thead>
           <tbody>
@@ -205,18 +221,10 @@ export function PlayerSkillUsageTable({
               <tr key={r.skill_id}>
                 <td style={TD_STYLE}>{r.skill_id}</td>
                 <td style={TD_STYLE}>{r.skill_name || "(unnamed)"}</td>
-                <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.hit_count.toLocaleString("en-US")}</td>
-                <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.total_damage.toLocaleString("en-US")}</td>
-                <td
-                  style={{
-                    ...TD_STYLE,
-                    textAlign: "right",
-                    color: "var(--accent)",
-                  }}
-                >
-                  {r.total_healing.toLocaleString("en-US")}
-                </td>
-                <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.total_buff_removal.toLocaleString("en-US")}</td>
+                <td style={TD_RIGHT_STYLE}>{r.hit_count.toLocaleString("en-US")}</td>
+                <td style={TD_RIGHT_STYLE}>{r.total_damage.toLocaleString("en-US")}</td>
+                <td style={TD_ACCENT_STYLE}>{r.total_healing.toLocaleString("en-US")}</td>
+                <td style={TD_RIGHT_STYLE}>{r.total_buff_removal.toLocaleString("en-US")}</td>
               </tr>
             ))}
           </tbody>

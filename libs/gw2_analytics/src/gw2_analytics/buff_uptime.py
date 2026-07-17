@@ -44,7 +44,9 @@ came from a real event") without affecting the uptime arithmetic.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable
+from itertools import pairwise
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -143,9 +145,10 @@ def total_uptime_ms(state: BuffState, fight_end_ms: int) -> int:
         )
 
     total = 0
-    for i in range(len(history) - 1):
-        t_i, s_i = history[i]
-        t_next = history[i + 1][0]
+    # ``pairwise`` avoids the bound-check + double-indexing overhead
+    # of ``range(len(history) - 1)`` while expressing the same
+    # adjacent-interval semantics.
+    for (t_i, s_i), (t_next, _) in pairwise(history):
         total += s_i * (t_next - t_i)
     total += history[-1][1] * (fight_end_ms - history[-1][0])
     return total
@@ -216,18 +219,22 @@ def accumulate_buff_events(
     ----------
     ``O(len(events) + distinct_skill_ids)``.
     """
-    per_skill: dict[int, BuffState] = {}
+    per_skill_history: defaultdict[int, list[tuple[int, int]]] = defaultdict(list)
+    # Track current stacks separately so the hot loop avoids the
+    # ``history[-1][1]`` tuple-indexing overhead on every event.
+    # ``defaultdict(int)`` removes the ``.get(..., 0)`` method call
+    # overhead on every event.
+    current_stacks_by_skill: defaultdict[int, int] = defaultdict(int)
     for event in events:
         skill_id = event.skill_id
-        if skill_id not in per_skill:
-            per_skill[skill_id] = BuffState()
-        state = per_skill[skill_id]
-        current_stacks = state.history[-1][1] if state.history else 0
-        if event.kind == "apply":
+        history = per_skill_history[skill_id]
+        current_stacks = current_stacks_by_skill[skill_id]
+        kind = event.kind
+        if kind == "apply":
             new_stacks = current_stacks + event.stacks
-        elif event.kind == "remove_single":
+        elif kind == "remove_single":
             new_stacks = max(0, current_stacks - 1)
-        elif event.kind == "remove_all":
+        elif kind == "remove_all":
             new_stacks = 0
         else:
             # Forward-compat fallback for any future ``kind`` literal
@@ -238,8 +245,12 @@ def accumulate_buff_events(
             # would also catch any future ``kind`` Pydantic accepts but
             # the aggregator doesn't yet know about.
             new_stacks = current_stacks + event.stacks
-        per_skill[skill_id] = state.append_stacks(event.time_ms, new_stacks)
-    return per_skill
+        current_stacks_by_skill[skill_id] = new_stacks
+        history.append((event.time_ms, new_stacks))
+    return {
+        skill_id: BuffState(history=history)
+        for skill_id, history in per_skill_history.items()
+    }
 
 
 __all__ = [

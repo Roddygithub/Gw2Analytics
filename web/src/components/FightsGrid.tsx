@@ -42,6 +42,9 @@ import {
 // re-registering the module on its own -- the module graph
 // guarantees a single evaluation of the import side-effect.
 import { appGridTheme } from "./ag-grid-setup";
+import { gridContainerStyle } from "@/shared/styles";
+
+const GRID_CONTAINER_STYLE = gridContainerStyle(600);
 
 export function FightsGrid({ rows }: { rows: FightRow[] }) {
   const columnDefs = useMemo<ColDef<FightRow>[]>(
@@ -112,13 +115,20 @@ export function FightsGrid({ rows }: { rows: FightRow[] }) {
   const defaultColDef = useMemo<ColDef>(
     () => ({
       resizable: true,
-      suppressMenu: true,
+      // ``suppressMenu`` was removed in AG Grid 34.x (the
+      // legacy column menu was dropped; the modern header
+      // doesn't render a menu button by default). The
+      // property used to hide the kebab menu in the legacy
+      // header; today it's a no-op (and a console warning)
+      // so we omit it. If a future AG Grid release adds a
+      // new "show menu" affordance, the right replacement
+      // is ``suppressHeaderMenuButton: true``.
     }),
     [],
   );
 
   return (
-    <div style={{ height: 600, width: "100%" }}>
+    <div style={GRID_CONTAINER_STYLE}>
       <AgGridReact<FightRow>
         theme={appGridTheme}
         rowData={rows}

@@ -10,10 +10,9 @@
  *
  * NOT a React Component
  * =====================
- * Pure TS module (no JSX, no ``"use client"``). Each per-aspect
- * component embeds the SHARED_COLUMNS in its own AG Grid
- * ``columnDefs`` array. Subgroup / name / roles formatters live here
- * too so the 4 components don't divergent-fork the rendering.
+ * Pure TS module (no JSX, no ``"use client"``). The shared grid
+ * wrapper lives in :class:`PlayerReadoutGrid` so this file stays
+ * free of React Refresh component-export warnings.
  *
  * Subgroup type-drift note
  * ========================
@@ -172,4 +171,3 @@ export const AG_GRID_PROPS = {
   // wire a drill-in yet).
   rowSelection: { mode: "singleRow" } as const,
 } as const;
-
