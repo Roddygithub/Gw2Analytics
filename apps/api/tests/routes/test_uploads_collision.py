@@ -74,6 +74,9 @@ import time
 import uuid as _uuid
 from unittest.mock import patch
 
+# NOTE: _uuid.UUID is still used for upload_id parsing below
+# but fight_id is now SHA-256 hex (gw2_core Fight.id).
+
 from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
@@ -162,16 +165,19 @@ def test_fight_id_collision_marks_upload_failed_with_pivot_id() -> None:
     assert "The content is already analyzed as fight" in (final["error_message"] or ""), (
         f"error_message must include the pivot phrase; got {final['error_message']!r}"
     )
-    # The pivot id at the end of the message must parse as a UUID.
+    # The pivot id at the end of the message must be a valid
+    # fight_id.  gw2_core Fight.id is a SHA-256 hex digest
+    # (64 hex chars), not a UUID.
     pivot_match = re.search(
-        r"fight ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+        r"fight ([0-9a-fA-F]{64})",
         final["error_message"] or "",
     )
     assert pivot_match is not None, (
-        f"error_message must contain a fight_id UUID; got {final['error_message']!r}"
+        f"error_message must contain a 64-char hex fight_id; "
+        f"got {final['error_message']!r}"
     )
-    parsed_pivot_id = _uuid.UUID(pivot_match.group(1))
-    assert str(parsed_pivot_id) == pivot_match.group(1)
+    # Sanity: the matched string is valid lowercase hex.
+    assert len(pivot_match.group(1)) == 64
 
     # Audit trail preservation: the upload row must STILL exist in
     # the DB (no DELETE). Operators can re-inspect the failed

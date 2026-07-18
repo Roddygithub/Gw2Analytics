@@ -47,12 +47,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
-
-from gw2analytics_api import config as _config
 
 # ---------------------------------------------------------------------
 # Layer 3: post-read len check (the canonical 413 defense)
@@ -76,15 +75,29 @@ def test_oversized_body_returns_413(
     oversized without needing to actually construct a 100 MiB
     payload (which would OOM the test runner).
     """
-    monkeypatch.setenv("MAX_UPLOAD_SIZE_BYTES", "1024")
-    _config.get_settings.cache_clear()
-    # Fixture-sized blob is ~5 KB, well above the 1024-byte cap.
-    blob = make_minimal_zevtc(
-        agents=[(200_001, 2, 18, "V10 Warrior OVERSIZE", True)],
-        build="20251021",
+    # Settings.max_upload_size_bytes has ge=1048576 (1 MiB) so we
+    # cannot lower it via env var.  Monkeypatch get_settings to
+    # return a mock with the desired 1024-byte cap instead.
+    # The conftest autouse ``_get_settings_no_dotenv`` fixture
+    # already replaces gw2analytics_api.config.get_settings;
+    # we re-replace it here with a mock that returns the small cap.
+    mock_settings = MagicMock()
+    mock_settings.max_upload_size_bytes = 1024
+    mock_settings.allow_inrequest_parse_fallback = True
+    monkeypatch.setattr(
+        "gw2analytics_api.config.get_settings",
+        lambda: mock_settings,
     )
+    # Generate enough agents so the ZIP blob exceeds the 1024-byte
+    # cap (each 96-byte agent record + ZIP overhead ≈ 110 bytes).
+    agents = [
+        (200_001 + i, 2, 18, f"V10 Warrior OVERSIZE {i}", True)
+        for i in range(12)
+    ]
+    blob = make_minimal_zevtc(agents=agents, build="20251021")
     assert len(blob) > 1024, (
-        "fixture blob must be > 1024 bytes for the oversized-body test to be meaningful"
+        f"fixture blob ({len(blob)} bytes) must be > 1024 bytes "
+        f"for the oversized-body test to be meaningful"
     )
 
     resp = client.post(
@@ -117,8 +130,8 @@ def test_undersized_body_with_small_cap_succeeds(
     A regression that flipped ``>`` to ``>=`` would break this
     test (or the boundary case it implicitly covers).
     """
-    monkeypatch.setenv("MAX_UPLOAD_SIZE_BYTES", "1048576")  # 1 MiB
-    _config.get_settings.cache_clear()
+    # 1 MiB cap is within Settings' ge=1048576 constraint so the
+    # env var path works here.
 
     blob = make_minimal_zevtc(
         agents=[(200_002, 2, 18, "V10 Warrior UNDERSIZE", True)],

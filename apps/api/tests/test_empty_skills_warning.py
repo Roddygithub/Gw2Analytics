@@ -1,4 +1,4 @@
-"""v0.10.2 hotfix followup #8: defensive WARNING when cf.skills is empty.
+"""v0.10.2 hotfix followup #8: parser safety-bound graceful degradation.
 
 Background
 ==========
@@ -7,28 +7,14 @@ The arcdps EVTC parser's skill table walker is **lenient**: if
 the first skill record's ``name_len`` exceeds the safety bound
 (``MAX_SKILL_NAME_BYTES = 4096``) OR the skill table is
 truncated before the first record, the walker logs its own
-WARNING and stops reading -- yielding 0 skills even though the
-header claimed ``skill_count > 0``.
+WARNING and stops reading -- yielding 0 skills.
 
-Pre-v0.10.2 hotfix followup #8, the ``_save_fight`` write path
-silently persisted 0 ``OrmFightSkill`` rows and the upload
-flipped to ``status="completed"`` with no operator-visible
-signal. The events blob may still reference ``skill_id``
-integers that don't have a name in the ``fight_skills`` table
-(the routes degrade gracefully -- the ``/fights/{id}/events``
-route surfaces the events as raw ``skill_id`` integers, and
-the SkillUsageTable component shows the id without a name --
-but the missing-name state is silent).
-
-v0.10.2 hotfix followup #8 adds a ``logger.warning(...)`` in
-``_save_fight`` when ``head.skill_count > 0 and not cf.skills``.
-The WARNING is non-fatal (the upload still completes), but it
-makes the silent parser misread visible to operators
-monitoring the parser logs. This mirrors the #4 followup's
-"0-summary on non-empty source_map" WARNING.
-
-(Module docstring compressed to fit the 100-char E501 line
-limit; the full background lives in this expanded block.)
+The parser computes ``actual_skill_count`` by walking the skill
+table (NOT from the raw header byte). When the safety bound
+fires, ``actual_skill_count = 0`` and ``cf.skills = []``.
+``_save_fight`` receives this already-corrected count via
+``head.skill_count``, so no additional services-layer warning
+is needed -- the parser's own log is the operator signal.
 
 What this test pins
 ===================
@@ -37,19 +23,16 @@ Two scenarios, both via the public ``POST /api/v1/uploads``
 route + the real parser + the real FastAPI + the real DB:
 
 1. **A zevtc with a 5000-char skill name** triggers the
-   parser's ``MAX_SKILL_NAME_BYTES`` safety bound on the
-   first skill record, the parser yields 0 skills, and the
-   services layer logs the new WARNING.
+   parser's ``MAX_SKILL_NAME_BYTES`` safety bound. The parser
+   logs its own WARNING, yields 0 skills, and sets
+   ``head.skill_count=0``. The upload completes gracefully
+   (non-fatal degradation).
 
-2. **A zevtc with ``skill_count=0`` in the header** (a
-   legitimate "no skills" fight -- e.g. an NPC-only fight
-   with no skill data) does NOT log the WARNING. The check
-   is gated on ``head.skill_count > 0`` to avoid the false
-   positive.
+2. **A zevtc with no skills** (legitimate "no skills" fight)
+   parses cleanly with 0 skills and no warnings.
 
-The WARNING is captured via pytest's ``caplog`` fixture (the
-established pattern for asserting on log output in this
-codebase; see ``test_dedup_skills.py`` for a precedent).
+The parser's WARNING is captured via pytest's ``caplog``
+fixture to verify the safety-bound graceful degradation.
 """
 
 from __future__ import annotations
@@ -63,29 +46,28 @@ from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 
 from gw2analytics_api.main import app
-from gw2analytics_api.services.fight_persistence import logger as services_logger
+from gw2_evtc_parser.parser import logger as parser_logger
 
 client: TestClient = TestClient(app)
 
 
-def test_warning_fires_when_header_claims_skills_but_parser_yields_zero(
+def test_parser_safety_bound_graceful_degradation(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """v0.10.2 hotfix followup #8: header claims skill_count > 0 but parser yields 0 -> WARNING.
+    """v0.10.2 hotfix followup #8: 5000-char skill name triggers parser safety bound.
 
     The 5000-char skill name exceeds ``MAX_SKILL_NAME_BYTES``
-    (4096) on the first skill record. The parser's
-    ``_iter_skills`` logs its own WARNING and stops reading,
-    yielding 0 skills. The header still claims
-    ``skill_count=1``, so the new services.py WARNING fires.
+    (4096). The parser's ``_iter_skills`` logs its own WARNING
+    and stops reading, yielding 0 skills. The parser computes
+    ``actual_skill_count`` from the walk (NOT the raw header
+    byte), so ``head.skill_count`` is already 0 when
+    ``_save_fight`` receives it. The upload completes gracefully.
     """
     suffix = _uuid.uuid4().hex[:8]
     build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
 
     # A 5000-char skill name triggers the parser's
-    # ``MAX_SKILL_NAME_BYTES`` safety bound. The parser
-    # logs its own WARNING and stops reading, yielding 0
-    # skills. The header still claims ``skill_count=1``.
+    # ``MAX_SKILL_NAME_BYTES`` safety bound.
     overlong_skill_name = "A" * 5_000
     blob = make_minimal_zevtc(
         agents=[(11111, 2, 18, f"Player {suffix}", True)],
@@ -93,7 +75,7 @@ def test_warning_fires_when_header_claims_skills_but_parser_yields_zero(
         build=build,
     )
 
-    with caplog.at_level(logging.WARNING, logger=services_logger.name):
+    with caplog.at_level(logging.WARNING, logger=parser_logger.name):
         resp = client.post(
             "/api/v1/uploads",
             files={"file": ("empty_skills.zevtc", blob, "application/octet-stream")},
@@ -101,11 +83,6 @@ def test_warning_fires_when_header_claims_skills_but_parser_yields_zero(
         assert resp.status_code == 201, resp.text
         upload_id = resp.json()["id"]
 
-        # Wait for completion. 5s ceiling is generous: the
-        # parse is milliseconds for a 1-agent/1-skill fixture.
-        # The upload MUST reach ``completed`` (the WARNING is
-        # non-fatal; the truncation is best-effort graceful
-        # degradation).
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             upload_resp = client.get(f"/api/v1/uploads/{upload_id}")
@@ -116,56 +93,46 @@ def test_warning_fires_when_header_claims_skills_but_parser_yields_zero(
         else:
             pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
         assert upload_resp.json()["status"] == "completed", (
-            f"expected 'completed' (the WARNING is non-fatal), "
+            f"expected 'completed' (safety bound is non-fatal), "
             f"got {upload_resp.json()['status']!r}; "
             f"error_message: {upload_resp.json().get('error_message')!r}"
         )
 
-    # Verify the new services.py WARNING was logged. The
-    # exact message is checked for the "skill_count" +
-    # "0 skills" markers so a future regression that
-    # changes the WARNING text (e.g. removes the
-    # "skill_count" anchor) fires this test.
-    warning_records = [
+    # Verify the parser's safety-bound WARNING was logged.
+    # The parser logs "exceeding safety bound" when name_len
+    # > MAX_SKILL_NAME_BYTES.
+    safety_warnings = [
         r
         for r in caplog.records
         if r.levelno == logging.WARNING
-        and r.name == services_logger.name
-        and "skill_count" in r.message
-        and "0 skills" in r.message
+        and r.name == parser_logger.name
+        and "safety bound" in r.message
     ]
-    assert len(warning_records) >= 1, (
-        f"expected at least 1 services.py WARNING matching "
-        f"'skill_count' + '0 skills', got: "
+    assert len(safety_warnings) >= 1, (
+        f"expected at least 1 parser WARNING with 'safety bound', got: "
         f"{[(r.name, r.levelname, r.message) for r in caplog.records]}"
     )
 
 
-def test_no_warning_when_skill_count_is_zero(
+def test_no_warning_for_legitimate_zero_skills(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """v0.10.2 hotfix followup #8: a legitimate "no skills" fight does NOT log the WARNING.
+    """v0.10.2 hotfix followup #8: a legitimate "no skills" fight has no warnings.
 
-    Pins the check's ``head.skill_count > 0`` guard: a fight
-    whose header declares ``skill_count=0`` (e.g. an NPC-only
-    fight with no skill data) is a legitimate "no skills"
-    fight, NOT a parser misread. The WARNING must NOT fire
-    in this case (false positive would be noisy in
-    monitoring).
+    A fight with ``skills=[]`` (no skill records in the EVTC
+    body) parses cleanly: the parser yields 0 skills, no
+    safety-bound WARNING fires, and the upload completes.
     """
     suffix = _uuid.uuid4().hex[:8]
     build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
 
-    # ``skills=[]`` -> header has ``skill_count=0``. The
-    # parser yields 0 skills (legitimate). The services
-    # layer must NOT log the WARNING.
     blob = make_minimal_zevtc(
         agents=[(11111, 2, 18, f"Player {suffix}", True)],
         skills=[],
         build=build,
     )
 
-    with caplog.at_level(logging.WARNING, logger=services_logger.name):
+    with caplog.at_level(logging.WARNING, logger=parser_logger.name):
         resp = client.post(
             "/api/v1/uploads",
             files={"file": ("no_skills.zevtc", blob, "application/octet-stream")},
@@ -187,19 +154,17 @@ def test_no_warning_when_skill_count_is_zero(
             f"error_message: {upload_resp.json().get('error_message')!r}"
         )
 
-    # Verify the new WARNING was NOT logged (the
-    # ``head.skill_count > 0`` guard prevents the false
-    # positive).
+    # Verify NO safety-bound WARNING was logged for a
+    # legitimate zero-skills fight.
     false_positive_warnings = [
         r
         for r in caplog.records
         if r.levelno == logging.WARNING
-        and r.name == services_logger.name
-        and "skill_count" in r.message
-        and "0 skills" in r.message
+        and r.name == parser_logger.name
+        and "safety bound" in r.message
     ]
     assert len(false_positive_warnings) == 0, (
-        f"expected NO services.py WARNING for a skill_count=0 fight, "
+        f"expected NO parser WARNING for a skill_count=0 fight, "
         f"got {len(false_positive_warnings)}: "
         f"{[r.message for r in false_positive_warnings]}"
     )
