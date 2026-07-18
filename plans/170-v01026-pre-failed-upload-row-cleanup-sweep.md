@@ -146,3 +146,37 @@ The implementation shipped 3 reviewer-flagged NICE-to-HAVE followups that ride n
 - **`_BATCH_DELETE_SIZE = 1000` magic constant** (reviewer's NICE-to-HAVE on the F5 sweeper commit). Thread through `Settings.stuck_sweeper_failed_batch_size` (env `STUCK_SWEEPER_FAILED_BATCH_SIZE`, default 1000, `ge=10`, `le=100_000`).
 - **`STUCK_SWEEPER_ITERATION_DURATION` conflation** (reviewer's NICE-to-HAVE). Split into `_pending_` + `_failed_` per-sweep histograms so operators can attribute SLA breaches per sweep.
 - **CHANGELOG `### Fixed` subsection** (v0.10.26 release reviewer's NICE-to-HAVE). The 2 `fix(web)` commits (SectionErrorChip import placement + comment trim + explicit React import to SectionErrorChip) shipped inside their feature `### Added` blocks; a future retro-split could move them into a dedicated `### Fixed` block under v0.10.26.
+
+## Resolved during cycle (F-series — commits 12d3fdf + 0e6d20a + F7 polish)
+
+The v0.10.26 cycle's reviewer-flagged NICE-to-HAVE on the F5 sweeper commit (`bce9675`) was the `_BATCH_DELETE_SIZE = 1000` magic constant. The F-series polish commits closed it across 3 atomic moves:
+
+### Closed: thread `_BATCH_DELETE_SIZE` through `Settings` (F7)
+
+**Commit `12d3fdf`** (`feat api: plan 170 follower -- operator-tunable failed-upload sweep batch size`):
+
+- Added `Settings.stuck_sweeper_failed_batch_size: int = Field(default=1000, validation_alias="STUCK_SWEEPER_FAILED_BATCH_SIZE", ge=100, le=100_000)`.
+- Added module-level `_BATCH_DELETE_SIZE: int = 1000` constant in `stuck_upload_sweeper.py` (after the logger; reference default for the helper's Python signature).
+- Updated `_sweep_failed_once(session_factory, retention_days, batch_size: int = _BATCH_DELETE_SIZE)` signature. The default-arg injection keeps the existing 5 pytest cases backward-compatible (they don't pass `batch_size`).
+- Wired lifespan ticker to pass `settings.stuck_sweeper_failed_batch_size` on every sweep tick.
+- Added `test_failed_sweep_respects_explicit_batch_size_override` pytest case seeding 3 eligible rows + sweeping with `batch_size=2` + asserting exactly 2 deleted + 1 survivor (set-membership) + sweeping again with default to verify across-tick completeness.
+- Cross-reference comments in both spots (Settings field + module constant) flag the intentional `1000` duplication so a future default change touches both.
+
+### Closed: defensive polish on F7 (F7 polish)
+
+**Latest F-series commit** (`chore api: F7 polish -- raise floor to ge=100 + add test teardown guard`):
+
+- Raised `stuck_sweeper_failed_batch_size` floor from `ge=10` to `ge=100` (closes the F7 reviewer's NICE-to-HAVE flagging the original `ge=10` as too low -- batches below ~100 rows barely amortize FK lock costs and approach per-row DELETE territory). Updated docstring with the new rationale (1-2 orders-of-magnitude cost reduction at the floor).
+- Wrapped `test_failed_sweep_respects_explicit_batch_size_override` body in try/finally. The finally block hard-deletes any seeded row still present (idempotent: no-op on the happy path when all 3 are already deleted by the 2nd sweep tick; cleans up leaked rows on any assertion failure). Added `delete` to the existing `from sqlalchemy import select` import line.
+
+### Closed: F8 audit re-run leftover + cosmetic verification
+
+**Commit `0e6d20a`** (`chore web: F6 audit re-run leftover -- explicit React import in 7 missed files`):
+
+- 7 files (`web/src/app/_styles.ts` + 4 error pages + 2 page.tsx) gained `import React from "react";` as the first import. Files landed after the original F6 audit commit `2cd4048` (4 Next.js error pages from the v0.10.25 error-page rollout + 2 page.tsx + 1 styles helper).
+- Defensive regex collapse (same F6 pattern from `2cd4048`) applied to the 7 files: zero files modified (all 7 already had exactly 1 blank line after the React import). F8 audit re-run confirms zero remaining misses.
+
+### Forward-blockers remaining (2 items, ride next cycle)
+
+- **`STUCK_SWEEPER_ITERATION_DURATION` conflation** -- still OPEN. Split into `_pending_` + `_failed_` per-sweep histograms so operators can attribute SLA breaches per sweep (the current conflated histogram measures BOTH sweeps + sleep).
+- **CHANGELOG `### Fixed` subsection** -- still OPEN. The 2 `fix(web)` commits (SectionErrorChip import placement + comment trim + explicit React import to SectionErrorChip) shipped inside their feature `### Added` blocks; a future retro-split could move them into a dedicated `### Fixed` block under v0.10.26.
