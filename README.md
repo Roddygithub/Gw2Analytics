@@ -18,7 +18,7 @@
 - 📊 **Per-player timeline overlay** — one per-bucket series per player agent for multi-line chart overlays.
 - 🎨 **GW2Mists-inspired frontend** — dark palette, sticky glass header, inline SVG logo, favicon, and Next.js `<Link>` navigation.
 - ⚔️ **Combat-readout UI** — per-player Damage / Heal / Boons / Defense 4-table roll-up via `/fights/[id]?tab=readout`.
-- 🧪 **~1,080+ automated tests** across `pytest` (~772) and `vitest` (~310) — all green on every PR.
+- 🧪 **Comprehensive multi-layer test suite** — `pytest` (libs + apps) + `vitest` (web components) + Playwright e2e (web flows), all gated and green on every PR.
 - 🛡️ **Audit hardening** — Caddyfile HSTS/CSP, CI `pip-audit`/`pnpm-audit`, Next.js error boundaries, headers() defense-in-depth.
 - 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js).
 
