@@ -134,6 +134,20 @@ class Settings(BaseSettings):
         default=300,
         validation_alias="STUCK_SWEEPER_THRESHOLD_S",
     )
+    # v0.10.26-pre plan 170: failed-upload retention window (days)
+    # for the cleanup DELETE sweep. Scoped to ``error_message LIKE
+    # 'Duplicate fight:%'`` rows (the plan/160 idempotency collision
+    # path) that ALSO have zero dependent :class:`OrmFight` rows
+    # (the FK cascade would otherwise orphan fight data -- the
+    # cascade is 4 levels deep: Upload -> OrmFight -> {OrmFightAgent,
+    # OrmFightSkill, OrmFightPlayerSummary}). Default 90 days;
+    # ``ge=1`` so an operator typo of 0 cannot silently become
+    # "delete immediately".
+    stuck_sweeper_failed_retention_days: int = Field(
+        default=90,
+        validation_alias="STUCK_SWEEPER_FAILED_RETENTION_DAYS",
+        ge=1,
+    )
     # v0.10.25: hard cap on the compressed ``.zevtc`` upload body.
     # Real WvW logs are ~5-40 MB compressed; the cap gives headroom
     # for the largest known files while preventing OOM from malicious

@@ -139,6 +139,23 @@ STUCK_SWEEPER_MARKED_FAILED = Counter(
     _STUCK_SWEEPER_MARKED_FAILED_HELP,
 )
 
+#: v0.10.26-pre plan 170: cumulative count of failed-upload rows
+#: hard-deleted by the cleanup sweep. Strictly scoped to rows
+#: whose ``error_message`` matches the plan/160 idempotency
+#: collision signature (``Duplicate fight: ...``) AND that have
+#: zero dependent :class:`OrmFight` rows. The NOT EXISTS subquery
+#: gates the FK CASCADE (Upload.fight is ``all, delete-orphan`` at
+#: the ORM layer, ``ondelete="CASCADE"`` at the DB layer; the
+#: guard prevents orphaning 4-deep cascade: fights -> fight_agents
+#: -> fight_skills -> fight_player_summaries). Diff before/after
+#: a sweep to confirm pick-up; non-delta means either no eligible
+#: rows OR the sweep is silently broken (correlate with the
+#: iteration-duration histogram).
+STUCK_SWEEPER_FAILED_SWEPT = Counter(
+    "stuck_sweeper_failed_swept_total",
+    "Total failed-upload rows hard-deleted by the cleanup sweep",
+)
+
 __all__ = [
     "ARQ_JOBS_COMPLETED",
     "ARQ_JOBS_FAILED",
@@ -149,6 +166,7 @@ __all__ = [
     "ARQ_QUEUE_DEPTH",
     "ARQ_WORKERS_ACTIVE",
     "HEALTH_DRIFT_COUNT",
+    "STUCK_SWEEPER_FAILED_SWEPT",
     "STUCK_SWEEPER_ITERATION_DURATION",
     "STUCK_SWEEPER_MARKED_FAILED",
     "UPLOADS_PENDING_COUNT",
