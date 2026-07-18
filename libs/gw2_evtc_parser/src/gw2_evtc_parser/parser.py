@@ -760,7 +760,7 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     if len(data) < HEADER_SIZE:
         raise EvtcParseError(f"EVTC blob is {len(data)} bytes, header needs {HEADER_SIZE}")
 
-    magic, build, _rev, encounter_id, _unused, agent_count, skill_count_hdr, _lang = (
+    magic, build, _rev, encounter_id, _unused, agent_count, _skill_count_hdr, _lang = (
         _HEADER_STRUCT.unpack_from(data, 0)
     )
 
