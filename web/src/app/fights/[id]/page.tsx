@@ -390,6 +390,14 @@ export default async function FightEventsPage({
   // 60s; the per-player fetch is keyed on the (fight_id,
   // account_name) tuple so concurrent analyst navigations
   // between players stay cache-warm.
+  // v0.10.26-pre plan 169 polish: try/catch invariant --
+  // ``fightDetails === null`` is reachable ONLY when
+  // ``fightDetailsError !== null`` (the catch path). The
+  // chip + filter gate pair below relies on this invariant
+  // to TS-narrow cleanly; do NOT decouple the two without
+  // updating both branches together (the split-into-2 shape
+  // depends on it). Reaching the theoretical null-null state
+  // surfaces a silent-empty per-player section.
   let fightDetails: import("@/lib/api").FightOut | null = null;
   let fightDetailsError: string | null = null;
   try {
@@ -1012,12 +1020,13 @@ export default async function FightEventsPage({
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>
           Per-player (SkillUsage attribution)
         </h2>
-        {fightDetails === null ? (
+        {fightDetails === null && fightDetailsError !== null && (
           <SectionErrorChip
             testid="player-skill-agents-section-error"
-            message={`${FAILED_TO_LOAD_PLAYER_LIST} ${fightDetailsError ?? ""}`}
+            message={`${FAILED_TO_LOAD_PLAYER_LIST} ${fightDetailsError}`}
           />
-        ) : (
+        )}
+        {fightDetails !== null && (
           <PlayerSkillUsageFilter
             currentValue={accountFilter}
             playerAgents={fightDetails.agents
