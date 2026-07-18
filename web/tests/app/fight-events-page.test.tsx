@@ -35,7 +35,7 @@
  * first, so ``/timeline/players`` matches before ``/timeline``).
  */
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { vi } from "vitest";
 
 // Mock the actual runtime substrate (``fetchCached``), NOT the
@@ -54,6 +54,7 @@ vi.mock("@/lib/fetchCached", async (importActual) => {
 
 import FightEventsPage from "@/app/fights/[id]/page";
 import { fetchCached } from "@/lib/fetchCached";
+import { renderWithSession } from "./_helpers/renderWithSession";
 import { ApiError } from "@/lib/api/errors";
 import { UPSTREAM_ERROR_PREFIX } from "@/lib/copy/error-messages";
 import {
@@ -323,7 +324,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ tab: "overview" }),
     });
-    render(tree);
+    renderWithSession(tree);
     expect(
       screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
     ).toBeInTheDocument();
@@ -354,7 +355,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({}),
     });
-    render(tree);
+    renderWithSession(tree);
     expect(
       screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
     ).toBeInTheDocument();
@@ -369,7 +370,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ tab: "overview" }),
     });
-    render(tree);
+    renderWithSession(tree);
     expect(
       screen.getByRole("heading", { level: 1, name: `Fight ${FIGHT_ID}` }),
     ).toBeInTheDocument();
@@ -444,7 +445,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ target: "1", tab: "overview" }),
     });
-    render(tree);
+    renderWithSession(tree);
     expect(screen.getByText(/filtered to target 1/)).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { level: 2, name: "Per-target damage" }),
@@ -469,7 +470,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ target: "not-a-number", tab: "overview" }),
     });
-    render(tree);
+    renderWithSession(tree);
     expect(screen.queryByText(/filtered to target/)).not.toBeInTheDocument();
     expect(screen.getByText(/Duration: 12.50 s/)).toBeInTheDocument();
   });
@@ -492,7 +493,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ tab: "overview" }),
     });
-    render(tree);
+    renderWithSession(tree);
     expect(
       screen.getByRole("heading", {
         level: 2,
@@ -521,7 +522,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ account: "UnknownAccount.9999", tab: "overview" }),
     });
-    render(tree);
+    renderWithSession(tree);
     // The per-player section still renders (the prompt
     // placeholder is NOT shown when ``accountFilter !== null``
     // AND ``accountSkills === null``).
@@ -560,7 +561,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ account: "TestAccount.1234", tab: "overview" }),
     });
-    render(tree);
+    renderWithSession(tree);
     expect(screen.getByTestId("player-skill-error")).toBeInTheDocument();
     expect(screen.getByText(/events blob corrupt/i)).toBeInTheDocument();
   });
@@ -579,7 +580,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ account: "TestAccount.1234", tab: "overview" }),
     });
-    render(tree);
+    renderWithSession(tree);
     // The agents-fetch-specific chip carries the
     // ``player-skill-agents-error`` testid; the per-player
     // section chip carries ``player-skill-error`` (the latter
@@ -629,7 +630,7 @@ describe("FightEventsPage", () => {
       params: Promise.resolve({ id: FIGHT_ID }),
       searchParams: Promise.resolve({ account: "TestAccount.1234", tab: "overview" }),
     });
-    render(tree);
+    renderWithSession(tree);
     // BOTH chips are present.
     expect(
       screen.getByTestId("player-skill-agents-error"),

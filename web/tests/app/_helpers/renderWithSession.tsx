@@ -63,6 +63,17 @@ export function resetFetchCachedMock(): void {
  *   queries against the freshly-mounted DOM
  */
 export function renderWithSession(ui: ReactElement): RenderResult {
-  resetFetchCachedMock();
+  // Thin alias for ``render`` today. The companion
+  // :func:`resetFetchCachedMock` is exported separately so tests
+  // that need an explicit mid-test reset (between ``act(() => ...)``
+  // assertions in the same ``it`` body) can opt-in. Auto-resetting
+  // on every ``renderWithSession`` call would collide with the
+  // project's per-test ``mockFightFetch({ ... })`` override pattern
+  // in :file:`web/tests/app/fight-events-page.test.tsx` (the
+  // override is set BEFORE ``renderWithSession(tree)`` and must
+  // stay in place when the page calls ``fetchCached``); an
+  // unconditional reset would wipe the override, leaving the page
+  // with no mock implementation. Manual explicit reset is the
+  // safer contract.
   return render(ui);
 }
