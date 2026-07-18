@@ -190,9 +190,7 @@ def get_compare_timeline(
     pairs_by_account: dict[str, list[tuple[FightContribution, datetime]]] = {}
     fight_id_to_started: dict[str, datetime] = {}
     for account in deduped_accounts:
-        contributions, account_started_at = _load_merged_contributions(
-            db, account_name=account
-        )
+        contributions, account_started_at = _load_merged_contributions(db, account_name=account)
         pairs = [(c, account_started_at[c.fight_id]) for c in contributions]
         pairs_by_account[account] = pairs
         fight_id_to_started.update(account_started_at)

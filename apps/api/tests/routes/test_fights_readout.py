@@ -153,7 +153,6 @@ def test_readout_200_default_empty_players_when_no_player_agents(client: TestCli
 
     # ``make_minimal_zevtc`` writes ``account = b""`` for NPC agents.
     blob = make_minimal_zevtc(
-
         [(npc_a, 2, 18, f"NPC {suffix}", False)],
         build=f"2025{suffix[:4]}",
         skills=[(sk, "Dmg")],

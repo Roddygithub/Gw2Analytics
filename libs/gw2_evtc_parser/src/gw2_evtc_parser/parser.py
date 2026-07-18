@@ -220,9 +220,7 @@ _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 #: positions are identical to the legacy 22-field struct above;
 #: this variant avoids allocating / assigning 12 unused values
 #: per event in the hot loop.
-_EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct(
-    "<QQQii 4x I 7x bbb 2x b 11x"
-)
+_EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct("<QQQii 4x I 7x bbb 2x b 11x")
 
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
 #: byte values 1, 2, 3 ↔ ``BoonApplyEvent.kind: Literal["remove_all",
@@ -980,8 +978,8 @@ def _compute_post_skills_offset(data: bytes) -> int:
 
 def _decode_agent(data: bytes, offset: int) -> Agent:
     """Decode a single 96-byte agent record at ``offset``."""
-    aid, prof_raw, elite_raw, _tough, _conc, _heal, _width, name_buf = (
-        _AGENT_STRUCT.unpack_from(data, offset)
+    aid, prof_raw, elite_raw, _tough, _conc, _heal, _width, name_buf = _AGENT_STRUCT.unpack_from(
+        data, offset
     )
 
     # Split the 72-byte name buffer on null bytes. arcdps writes the

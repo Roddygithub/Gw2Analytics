@@ -98,8 +98,7 @@ def _make_healing_events(count: int) -> list[HealingEvent]:
 
 def _make_strip_events(count: int) -> list[BuffRemovalEvent]:
     return [
-        _strip_event(source=i % 50, target=i % 30, time_ms=i * 100, value=100)
-        for i in range(count)
+        _strip_event(source=i % 50, target=i % 30, time_ms=i * 100, value=100) for i in range(count)
     ]
 
 

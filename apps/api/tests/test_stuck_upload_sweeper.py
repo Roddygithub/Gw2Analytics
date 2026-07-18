@@ -309,9 +309,7 @@ def test_failed_sweep_skips_collisions_with_dependents(
         select(OrmFight).where(OrmFight.id == fight_id)
     ).scalar_one_or_none()
     verify_session.close()
-    assert fight_after is not None, (
-        "dependent OrmFight must remain intact post-sweep"
-    )
+    assert fight_after is not None, "dependent OrmFight must remain intact post-sweep"
     assert fight_after.upload_id == upload_id, (
         "FK reference must still point at the surviving upload"
     )
@@ -331,9 +329,7 @@ def test_failed_sweep_skips_non_collision_failures(
     _sweep_failed_once(session_factory, retention_days=90)
 
     upload_after = _get_upload(upload_id)
-    assert upload_after is not None, (
-        "non-collision failure mode must NOT be deleted"
-    )
+    assert upload_after is not None, "non-collision failure mode must NOT be deleted"
 
 
 def test_failed_sweep_skips_fresh_collisions(
@@ -350,9 +346,7 @@ def test_failed_sweep_skips_fresh_collisions(
     _sweep_failed_once(session_factory, retention_days=90)
 
     upload_after = _get_upload(upload_id)
-    assert upload_after is not None, (
-        "fresh collision inside retention window must NOT be deleted"
-    )
+    assert upload_after is not None, "fresh collision inside retention window must NOT be deleted"
 
 
 # ---------------------------------------------------------------------------
@@ -430,14 +424,9 @@ def test_failed_sweep_respects_explicit_batch_size_override(
         # WHICH one Postgres returns from the DELETE-with-IN-subquery
         # (the IN subquery order is implementation-defined), so we assert
         # set membership: exactly one of {a, b, c} survives.
-        survivors = [
-            uid
-            for uid in (id_a, id_b, id_c)
-            if _get_upload(uid) is not None
-        ]
+        survivors = [uid for uid in (id_a, id_b, id_c) if _get_upload(uid) is not None]
         assert len(survivors) == 1, (
-            f"exactly 1 row must survive a batch_size=2 sweep of 3 rows; "
-            f"survivors={survivors}"
+            f"exactly 1 row must survive a batch_size=2 sweep of 3 rows; survivors={survivors}"
         )
 
         # Tick 2: default batch_size (the module-level _BATCH_DELETE_SIZE
@@ -445,8 +434,7 @@ def test_failed_sweep_respects_explicit_batch_size_override(
         # completeness invariant (no permanent stranding).
         deleted_second = _sweep_failed_once(session_factory, retention_days=90)
         assert deleted_second == 1, (
-            f"followup default-batch sweep must delete the surviving row; "
-            f"got {deleted_second}"
+            f"followup default-batch sweep must delete the surviving row; got {deleted_second}"
         )
 
         # All 3 seeded rows are now hard-deleted.
@@ -464,9 +452,7 @@ def test_failed_sweep_respects_explicit_batch_size_override(
         try:
             for uid in (id_a, id_b, id_c):
                 if _get_upload(uid) is not None:
-                    teardown_session.execute(
-                        delete(Upload).where(Upload.id == uid)
-                    )
+                    teardown_session.execute(delete(Upload).where(Upload.id == uid))
             teardown_session.commit()
         finally:
             teardown_session.close()

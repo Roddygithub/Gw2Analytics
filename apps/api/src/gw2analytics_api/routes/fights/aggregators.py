@@ -96,7 +96,7 @@ fixtures.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from typing import cast
 
 from gw2_analytics.player_boons import PlayerBoonsAggregator, PlayerBoonsRow
@@ -256,7 +256,7 @@ def _aggregate_per_target_rollup(
     agent_id_to_name_map: dict[int, str | None],
     duration_s: float,
     event_cls: type[Event],
-) -> list[TargetDpsRow | TargetHealingRow | TargetBuffRemovalRow]:
+) -> Sequence[TargetDpsRow | TargetHealingRow | TargetBuffRemovalRow]:
     """Dispatch to the right per-target aggregator for ``event_cls``.
 
     The caller is responsible for filtering ``events`` to the
@@ -266,22 +266,31 @@ def _aggregate_per_target_rollup(
     for the per-target trio and is exercised directly by the
     hermetic tests in ``apps/api/tests/routes/test_fights_per_target_helper.py``.
     """
+    # Reviewer NICE-to-HAVE: defensive runtime assert enforcing the
+    # "caller pre-filters events to event_cls" contract. Surfaces contract
+    # violations at the helper boundary rather than letting the downstream
+    # aggregator silently miscount non-matching event subclasses.
+    assert all(isinstance(e, event_cls) for e in events), (
+        f"_aggregate_per_target_rollup: caller must pre-filter events to "
+        f"{event_cls.__name__}; got mixed event stream"
+    )
     if event_cls is DamageEvent:
-        return cast(
-            list[TargetDpsRow],
-            TargetDpsAggregator().aggregate(events, duration_s, name_map=agent_id_to_name_map),
+        return TargetDpsAggregator().aggregate(
+            cast(Iterable[DamageEvent], events),
+            duration_s,
+            name_map=agent_id_to_name_map,
         )
     if event_cls is HealingEvent:
-        return cast(
-            list[TargetHealingRow],
-            TargetHealingAggregator().aggregate(events, duration_s, name_map=agent_id_to_name_map),
+        return TargetHealingAggregator().aggregate(
+            cast(Iterable[HealingEvent], events),
+            duration_s,
+            name_map=agent_id_to_name_map,
         )
     if event_cls is BuffRemovalEvent:
-        return cast(
-            list[TargetBuffRemovalRow],
-            TargetBuffRemovalAggregator().aggregate(
-                events, duration_s, name_map=agent_id_to_name_map
-            ),
+        return TargetBuffRemovalAggregator().aggregate(
+            cast(Iterable[BuffRemovalEvent], events),
+            duration_s,
+            name_map=agent_id_to_name_map,
         )
     raise ValueError(
         f"_aggregate_per_target_rollup: unknown event_cls {event_cls!r}; "
@@ -469,7 +478,7 @@ def _build_player_readout(
 def aggregate_combat_readout(
     events: list[Event],
     *,
-    skill_id_to_name_map: dict[int, str | None] | None = None,
+    skill_id_to_name_map: Mapping[int, str | None] | None = None,
     agent_id_to_identity_map: dict[int, AgentIdentity] | None = None,
     duration_s: float = 0.0,
     fight_id: str = "",
@@ -588,7 +597,11 @@ def aggregate_combat_readout(
     boons_rows: list[PlayerBoonsRow] = PlayerBoonsAggregator().aggregate(
         boon_apply_events,
         duration_s,
-        name_map=skill_id_to_name_map,
+        # Library-side PlayerBoonsAggregator.aggregate expects dict[int, str | None]
+        # (invariant). aggregate_combat_readout accepts the covariant Mapping[int, str | None]
+        # to let callers pass dict[int, str] (a Mapping subtype); we cast at the
+        # aggregator boundary to honor the library's invariant contract.
+        name_map=cast(dict[int, str | None], skill_id_to_name_map),
         # Phase 3 SCAFFOLD: forward the optional buff-removal
         # stream. When ``None``, the per-player aggregator treats
         # it as an empty iterable -- the canonical
@@ -640,10 +653,7 @@ def aggregate_combat_readout(
     # shape strictly player-only.
     # Use dict key views to avoid temporary set allocations.
     valid_agent_ids = (
-        damage_by_id.keys()
-        | heal_by_id.keys()
-        | boons_by_id.keys()
-        | defense_by_id.keys()
+        damage_by_id.keys() | heal_by_id.keys() | boons_by_id.keys() | defense_by_id.keys()
     ) & identity_map.keys()
 
     # Tour 6 v0.10.24-pre follow-up wire-contract widening: the

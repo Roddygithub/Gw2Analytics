@@ -267,13 +267,13 @@ class PerPlayerTimelineAggregator:
         expected_per_account, last_bucket_index = (
             PerPlayerTimelineAggregator._derive_expected_and_last_bucket(per_account)
         )
-            # No last-seen char-name update here: the
-            # ``Event`` union does NOT carry ``source_name``
-            # (the char-name is denormalised on
-            # ``OrmFightAgent.name`` and pre-seeded into
-            # ``player_name_map`` above). The pre-seeded
-            # value is the per-series ``name`` for the
-            # lifetime of the aggregation.
+        # No last-seen char-name update here: the
+        # ``Event`` union does NOT carry ``source_name``
+        # (the char-name is denormalised on
+        # ``OrmFightAgent.name`` and pre-seeded into
+        # ``player_name_map`` above). The pre-seeded
+        # value is the per-series ``name`` for the
+        # lifetime of the aggregation.
 
         # Build the series list with zero-fill. Every player
         # gets a point at every bucket index from 0 to
@@ -314,9 +314,7 @@ class PerPlayerTimelineAggregator:
         # ties broken by ascending account_name. Pre-compute the
         # per-series total so the sort key does not re-sum on
         # every comparison.
-        series_with_totals = [
-            (sum(p.total_damage for p in s.points), s) for s in series
-        ]
+        series_with_totals = [(sum(p.total_damage for p in s.points), s) for s in series]
         series_with_totals.sort(key=lambda t: (-t[0], t[1].account_name))
         sorted_series = [s for _, s in series_with_totals]
 

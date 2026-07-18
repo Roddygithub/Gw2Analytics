@@ -611,12 +611,9 @@ def get_fight_events(
         # which is bounded by the fight duration, so the data volume
         # is naturally bounded.
         target_dps=[TargetDpsRowOut.model_validate(r) for r in target_dps_rows[:100]],
-        target_healing=[
-            TargetHealingRowOut.model_validate(r) for r in target_healing_rows[:100]
-        ],
+        target_healing=[TargetHealingRowOut.model_validate(r) for r in target_healing_rows[:100]],
         target_buff_removal=[
-            TargetBuffRemovalRowOut.model_validate(r)
-            for r in target_buff_removal_rows[:100]
+            TargetBuffRemovalRowOut.model_validate(r) for r in target_buff_removal_rows[:100]
         ],
         event_windows=[EventBucketOut.model_validate(b) for b in event_windows],
     )

@@ -524,6 +524,7 @@ class StunBreakEvent(BaseEvent):
 
     event_type: Literal[EventType.STUN_BREAK] = EventType.STUN_BREAK
 
+
 # WAVE-8 v0.11.0 Blocker A.3 part 2: 1 NEW subclass (BarrierEvent); the 7
 # other WAVE-8 backlog subclasses (ConditionRemoveEvent + CCEvent +
 # DownEvent + DeathEvent + DodgeEvent + BlockEvent + InterruptEvent)

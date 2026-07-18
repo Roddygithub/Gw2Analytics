@@ -297,7 +297,8 @@ def test_parse_events_dispatch_does_not_break_damage_path() -> None:
         [(1, 1, 1, "Src", True)],
         skills=[(101, "Skill")],
         events=[
-            _build_event_record(                time_ms=1_000,
+            _build_event_record(
+                time_ms=1_000,
                 src_agent=1,
                 dst_agent=2,
                 value=500,

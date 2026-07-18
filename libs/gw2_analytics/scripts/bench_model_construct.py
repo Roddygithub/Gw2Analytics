@@ -26,45 +26,57 @@ def main() -> None:
     print(f"\n=== PerFightTimelineRow x {count} ===")
     _bench(
         "__init__",
-        lambda: [PerFightTimelineRow(
-            window_start_ms=i * 5000,
-            window_end_ms=(i + 1) * 5000,
-            total_damage=i,
-            total_healing=i,
-            total_buff_removal=i,
-        ) for i in range(count)],
+        lambda: [
+            PerFightTimelineRow(
+                window_start_ms=i * 5000,
+                window_end_ms=(i + 1) * 5000,
+                total_damage=i,
+                total_healing=i,
+                total_buff_removal=i,
+            )
+            for i in range(count)
+        ],
     )
     _bench(
         "model_construct",
-        lambda: [PerFightTimelineRow.model_construct(
-            window_start_ms=i * 5000,
-            window_end_ms=(i + 1) * 5000,
-            total_damage=i,
-            total_healing=i,
-            total_buff_removal=i,
-        ) for i in range(count)],
+        lambda: [
+            PerFightTimelineRow.model_construct(
+                window_start_ms=i * 5000,
+                window_end_ms=(i + 1) * 5000,
+                total_damage=i,
+                total_healing=i,
+                total_buff_removal=i,
+            )
+            for i in range(count)
+        ],
     )
 
     print(f"\n=== PerPlayerTimelinePoint x {count} ===")
     _bench(
         "__init__",
-        lambda: [PerPlayerTimelinePoint(
-            window_start_ms=i * 5000,
-            window_end_ms=(i + 1) * 5000,
-            total_damage=i,
-            total_healing=i,
-            total_buff_removal=i,
-        ) for i in range(count)],
+        lambda: [
+            PerPlayerTimelinePoint(
+                window_start_ms=i * 5000,
+                window_end_ms=(i + 1) * 5000,
+                total_damage=i,
+                total_healing=i,
+                total_buff_removal=i,
+            )
+            for i in range(count)
+        ],
     )
     _bench(
         "model_construct",
-        lambda: [PerPlayerTimelinePoint.model_construct(
-            window_start_ms=i * 5000,
-            window_end_ms=(i + 1) * 5000,
-            total_damage=i,
-            total_healing=i,
-            total_buff_removal=i,
-        ) for i in range(count)],
+        lambda: [
+            PerPlayerTimelinePoint.model_construct(
+                window_start_ms=i * 5000,
+                window_end_ms=(i + 1) * 5000,
+                total_damage=i,
+                total_healing=i,
+                total_buff_removal=i,
+            )
+            for i in range(count)
+        ],
     )
 
 

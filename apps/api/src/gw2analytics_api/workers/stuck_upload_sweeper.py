@@ -344,9 +344,7 @@ def _sweep_failed_once(
                         Upload.status == UPLOAD_STATUS_FAILED,
                         Upload.uploaded_at < cutoff,
                         Upload.error_message.like("Duplicate fight:%"),
-                        ~select(OrmFight.id)
-                        .where(OrmFight.upload_id == Upload.id)
-                        .exists(),
+                        ~select(OrmFight.id).where(OrmFight.upload_id == Upload.id).exists(),
                     )
                     .limit(batch_size)
                 )

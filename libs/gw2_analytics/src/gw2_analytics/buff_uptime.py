@@ -247,10 +247,7 @@ def accumulate_buff_events(
             new_stacks = current_stacks + event.stacks
         current_stacks_by_skill[skill_id] = new_stacks
         history.append((event.time_ms, new_stacks))
-    return {
-        skill_id: BuffState(history=history)
-        for skill_id, history in per_skill_history.items()
-    }
+    return {skill_id: BuffState(history=history) for skill_id, history in per_skill_history.items()}
 
 
 __all__ = [
