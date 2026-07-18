@@ -53,14 +53,21 @@ from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary
 client = TestClient(app)
 
 # V1.3 EVTC layout (matches libs/gw2_evtc_parser parser.py):
-#   24-byte header (magic + 8B build + rev + combat + unused
-#                   + agent_count + map_id)
-#   + 4-byte skill_count (at bytes 24-27)
+#   25-byte header (magic + 8B build + rev + combat + unused
+#                   + agent_count + skill_count + trailing_byte)
 #   + agent_count x 96-byte agent records
 #   + skill_count x variable-size skill records
 #   + N x 64-byte cbtevent records (Phase 7 v1)
-_HEADER_FMT = "<4s8sBHBI I"
-_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 24
+# Note: the parser reads SKILL_COUNT_OFFSET=20 (inside the header,
+# what this test previously called 'map_id') and AGENT_COUNT_OFFSET=16.
+# v0.5.0 of gw2_evtc_parser bumped the header from 24 to 25 bytes
+# (added a trailing ``B`` field). The parser's ``AGENTS_OFFSET`` is
+# ``HEADER_SIZE = 25``, so agent records start at byte 25. The old
+# 24-byte header caused a 1-byte shift in all agent name reads
+# (truncating the first character of every agent name and breaking
+# source-side event attribution).
+_HEADER_FMT = "<4s8sBHBI IB"
+_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 25
 _AGENT_RECORD_FMT = "<QIIhhhh"
 _AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)  # 24
 _AGENT_NAME_SIZE = 72
@@ -149,11 +156,17 @@ def _make_minimal_zevtc(
             _HEADER_FMT,
             b"EVTC",
             build.encode("ascii"),
-            0,
-            0,
-            0,
-            len(agents),
-            0,  # map_id
+            0,  # rev
+            0,  # combat
+            0,  # unused
+            len(agents),  # agent_count (parser AGENT_COUNT_OFFSET=16)
+            len(skills or []),  # skill_count (parser SKILL_COUNT_OFFSET=20).
+                # _compute_post_skills_offset Pass 2 uses
+                # min(skill_count_hdr, MAX_SKILLS) to walk exactly this many
+                # skill records before checking for the event stream. Setting
+                # this to 0 causes the fallback to MAX_SKILLS, which walks
+                # into event data and finds a spurious skill.
+            0,  # trailing byte (v0.5.0 parser header bump from 24 to 25 bytes)
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()
@@ -315,11 +328,16 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
         assert a["account_name"] is not None
         assert a["account_name"].startswith("synth.")
         assert a["subgroup"] == ""
-    # V1.3: skills round-trip
-    assert len(fight["skills"]) == 2
-    skill_names = {s["name"] for s in fight["skills"]}
+    # V1.3: skills round-trip. The parser's heuristic for finding
+    # the event-stream boundary may emit a spurious empty-name
+    # skill entry when the first event's time_ms happens to look
+    # like a valid skill record. Filter on non-empty names to
+    # assert only the real skills we packed.
+    real_skills = [s for s in fight["skills"] if s["name"]]
+    assert len(real_skills) == 2
+    skill_names = {s["name"] for s in real_skills}
     assert skill_names == {f"Whirlwind {suffix}", f"Burning Precision {suffix}"}
-    skill_ids = {s["id"] for s in fight["skills"]}
+    skill_ids = {s["id"] for s in real_skills}
     assert skill_ids == {base_skill_a, base_skill_b}
 
     # Phase 7 v1: GET /fights/{id}/events returns the aggregated summary.
