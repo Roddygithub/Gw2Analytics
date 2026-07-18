@@ -29,14 +29,13 @@ from gw2analytics_api.main import app
 client: Final = TestClient(app)
 
 # V1.3 EVTC layout (matches libs/gw2_evtc_parser parser.py):
-#   24-byte header (magic + 8B build + rev + combat + unused
-#                   + agent_count + map_id)
-#   + 4-byte skill_count (at bytes 24-27)
+#   25-byte header (magic + 8B build + rev + combat + unused
+#                   + agent_count + skill_count + lang)
 #   + agent_count x 96-byte agent records
 #   + skill_count x variable-size skill records
 #   + N x 64-byte cbtevent records (Phase 7 v1)
-_HEADER_FMT: Final = "<4s8sBHBI I"
-_HEADER_SIZE: Final = struct.calcsize(_HEADER_FMT)  # 24
+_HEADER_FMT: Final = "<4s8sBHBI IB"
+_HEADER_SIZE: Final = struct.calcsize(_HEADER_FMT)  # 25
 _AGENT_RECORD_FMT: Final = "<QIIhhhh"
 _AGENT_PREFIX_SIZE: Final = struct.calcsize(_AGENT_RECORD_FMT)  # 24
 _AGENT_NAME_SIZE: Final = 72
@@ -105,7 +104,7 @@ def make_minimal_zevtc(
 ) -> bytes:
     """Build a synthetic ``.zevtc`` blob (zip wrapper around EVTC).
 
-    Uses the V1.3 24-byte header + 96-byte agent records +
+    Uses the V1.3 25-byte header + 96-byte agent records +
     variable skill records. For player agents the combo string
     ``name\\0:synth.<id>\\0`` is null-padded to 72 bytes; NPCs
     get a single null-terminated name null-padded to 72 bytes.
@@ -129,7 +128,8 @@ def make_minimal_zevtc(
             0,
             0,
             len(agents),
-            0,  # map_id
+            len(skills),
+            0,  # lang
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()

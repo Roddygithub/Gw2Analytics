@@ -116,7 +116,7 @@ def _make_minimal_zevtc(
         skills = []
     if events is None:
         events = []
-    header_fmt = "<4s8sBHBI I"
+    header_fmt = "<4s8sBHBI IB"
     header_size = _struct.calcsize(header_fmt)
     agent_record_fmt = "<QIIhhhh"
     agent_name_size = 72
@@ -131,7 +131,8 @@ def _make_minimal_zevtc(
             0,
             0,
             len(agents),
-            0,  # map_id
+            len(skills),
+            0,  # lang
         )
         assert len(header) == header_size
         body = bytearray()

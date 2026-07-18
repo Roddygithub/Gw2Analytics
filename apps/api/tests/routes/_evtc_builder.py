@@ -9,7 +9,7 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 
-_HEADER_FMT = "<4s8sBHBI I"
+_HEADER_FMT = "<4s8sBHBI IB"
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)
 _AGENT_RECORD_FMT = "<QIIhhhh"
 _AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)
@@ -78,7 +78,8 @@ def make_minimal_zevtc(
             0,
             0,
             len(agents),
-            0,  # map_id
+            len(skills),
+            0,  # lang
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()
