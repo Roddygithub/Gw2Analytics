@@ -64,44 +64,58 @@ _BATCH_DELETE_SIZE: int = 1000
 
 def _observe_sweep_durations(
     iteration_start: float,
-    pending_start: float,
     failed_start: float,
     iteration_end: float,
-) -> None:
-    """Observe the 3 sweeper duration histograms in one call.
+) -> tuple[float, float, float]:
+    """Observe the 3 sweeper duration histograms + return the computed durations.
 
     Pure helper extracted from :func:`lifespan_stuck_upload_sweeper`
     so the per-sweep histogram attribution is unit-testable without
-    the asyncio loop / DB dependency. The 4 input timestamps come
+    the asyncio loop / DB dependency. The 3 input timestamps come
     from ``time.monotonic()`` captures at the iteration boundaries:
 
     - ``iteration_start`` -- captured BEFORE the iteration's first
       work (BEFORE the pending sweep's ``try`` block).
-    - ``pending_start`` -- currently identical to ``iteration_start``
-      (the pending sweep is the iteration's first work). Kept as a
-      separate parameter so a future ordering change (e.g. inserting
-      a pre-sweep probe) doesn't require a helper signature update.
     - ``failed_start`` -- captured BETWEEN the pending and failed
-      sweeps (AFTER the pending sweep returns). The pending duration
-      is therefore ``failed_start - pending_start``.
+      sweeps (AFTER the pending sweep returns, BEFORE the failed
+      sweep's ``try`` block). The elapsed time captures the pending
+      sweep's real wallclock even if it raised (the ``except``
+      clause logs and continues).
     - ``iteration_end`` -- captured AFTER the failed sweep returns
       (and AFTER any caught ``SQLAlchemyError`` exceptions from
       either sweep, so even slow-but-failing sweeps still report a
-      duration). The failed duration is therefore
-      ``iteration_end - failed_start``. The combined iteration
-      duration is ``iteration_end - iteration_start`` and is
-      observed on the backward-compatible
-      :data:`STUCK_SWEEPER_ITERATION_DURATION` histogram (kept for
-      existing PromQL dashboards / alerts).
+      duration).
+
+    Returns a ``(pending_dur, failed_dur, combined_dur)`` tuple so
+    the unit test can assert against the computed durations
+    directly (without relying on the prometheus_client private
+    ``_sum.get()`` accessor). The helper ALSO calls ``.observe()``
+    on the 3 histograms as a side effect -- the returned tuple
+    and the histogram observations are computed from the same
+    source timestamps so they cannot diverge.
+
+    The helper is intentionally dual-purpose: it computes the
+    durations (for testability via the return value) AND records
+    them on the 3 histograms (the production side effect). Future
+    maintainers MUST preserve both -- removing the .observe()
+    calls would silently break production observability (operators
+    lose per-sweep SLA visibility) while the unit test would still
+    pass (the return values would be correct).
 
     The two new histograms (:data:`STUCK_SWEEPER_PENDING_ITERATION_DURATION`
     + :data:`STUCK_SWEEPER_FAILED_ITERATION_DURATION`) let operators
     attribute SLA breaches per sweep instead of attributing the
     whole-iteration latency to one or the other sweep.
+    :data:`STUCK_SWEEPER_ITERATION_DURATION` is the backward-compat
+    combined histogram (kept for existing PromQL dashboards/alerts).
     """
-    STUCK_SWEEPER_PENDING_ITERATION_DURATION.observe(failed_start - pending_start)
-    STUCK_SWEEPER_FAILED_ITERATION_DURATION.observe(iteration_end - failed_start)
-    STUCK_SWEEPER_ITERATION_DURATION.observe(iteration_end - iteration_start)
+    pending_dur = failed_start - iteration_start
+    failed_dur = iteration_end - failed_start
+    combined_dur = iteration_end - iteration_start
+    STUCK_SWEEPER_PENDING_ITERATION_DURATION.observe(pending_dur)
+    STUCK_SWEEPER_FAILED_ITERATION_DURATION.observe(failed_dur)
+    STUCK_SWEEPER_ITERATION_DURATION.observe(combined_dur)
+    return pending_dur, failed_dur, combined_dur
 
 
 async def lifespan_stuck_upload_sweeper(
@@ -136,15 +150,18 @@ async def lifespan_stuck_upload_sweeper(
             # the sweep raises).
             iteration_start = time.monotonic()
             # v0.10.26-pre plan 170 follower: per-sweep duration
-            # attribution. ``pending_start`` is captured before
-            # the pending sweep's ``try`` block so a slow pending
-            # sweep is measured against the right starting point.
-            # ``failed_start`` is captured BETWEEN the two sweeps
-            # (after the pending sweep returns, before the failed
-            # sweep's ``try`` block); the elapsed time captures
-            # the pending sweep's real wallclock even if it
-            # raised (the ``except`` clause logs and continues).
-            pending_start = time.monotonic()
+            # attribution. ``failed_start`` is captured BETWEEN
+            # the two sweeps (after the pending sweep returns,
+            # before the failed sweep's ``try`` block); the
+            # elapsed time from ``iteration_start`` to
+            # ``failed_start`` captures the pending sweep's real
+            # wallclock even if it raised (the ``except`` clause
+            # logs and continues). The pending-sweep duration
+            # uses ``iteration_start`` directly -- a separate
+            # ``pending_start`` capture was YAGNI since the
+            # pending sweep is the iteration's first work (no
+            # gap between ``iteration_start`` and the pending
+            # sweep's start time).
             try:
                 await asyncio.to_thread(
                     _sweep_once,
@@ -177,9 +194,14 @@ async def lifespan_stuck_upload_sweeper(
             # AFTER both ``except`` clauses so even slow-but-failing
             # sweeps report a duration.
             iteration_end = time.monotonic()
-            _observe_sweep_durations(
-                iteration_start, pending_start, failed_start, iteration_end
-            )
+            # The call IS the side effect -- the helper observes the
+            # 3 histograms internally and the return value is
+            # discarded. The unit test asserts on the return value
+            # directly (with ``unittest.mock.patch`` on the histograms
+            # to verify the .observe() calls fire with the right
+            # values), so the lifespan ticker doesn't need to thread
+            # the durations through.
+            _observe_sweep_durations(iteration_start, failed_start, iteration_end)
             await asyncio.sleep(interval_s)
     except asyncio.CancelledError:
         logger.info("stuck-upload sweeper cancelled; shutting down cleanly")

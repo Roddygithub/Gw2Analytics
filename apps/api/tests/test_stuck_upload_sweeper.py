@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import delete, select
 
 from gw2analytics_api.database import get_sessionmaker
-from gw2analytics_api.metrics import (
-    STUCK_SWEEPER_FAILED_ITERATION_DURATION,
-    STUCK_SWEEPER_ITERATION_DURATION,
-    STUCK_SWEEPER_PENDING_ITERATION_DURATION,
-)
 from gw2analytics_api.models import (
     UPLOAD_STATUS_FAILED,
     UPLOAD_STATUS_PENDING,
@@ -495,30 +491,56 @@ def test_failed_sweep_respects_explicit_batch_size_override(
 
 
 def test_observe_sweep_durations_helper() -> None:
-    """Pure helper correctly routes 4 timestamps to 3 histograms.
+    """Pure helper correctly computes 3 durations AND fires .observe() on the 3 histograms.
 
-    Synthetic timestamps: pending took 2s, failed took 3s, total iteration
-    5s (the 2 sweeps don't overlap, so the gap between pending_start and
-    failed_start is exactly the pending duration, and the gap between
-    failed_start and iteration_end is exactly the failed duration).
+    v0.10.27-pre polish: the helper now returns the computed
+    durations as a ``(pending_dur, failed_dur, combined_dur)``
+    tuple (eliminating the prometheus_client private ``_sum.get()``
+    dependency from the test). The test ALSO uses
+    ``unittest.mock.patch`` on the 3 histogram objects to assert
+    that ``.observe()`` was called with the right values -- this
+    restores the implicit coverage the old ``_sum.get()`` assertion
+    provided (proving the .observe() side effect fired).
+
+    A future refactor that accidentally drops the ``.observe()``
+    calls would still return the right tuple (the return value
+    proves the COMPUTATION is correct), but the mock assertion
+    would fail -- so the side-effect regression is caught.
+
+    Synthetic timestamps: pending took 2s (failed_start - iteration_start
+    = 102.0 - 100.0 = 2.0), failed took 3s (iteration_end - failed_start
+    = 105.0 - 102.0 = 3.0), total iteration 5s (iteration_end -
+    iteration_start = 105.0 - 100.0 = 5.0).
     """
-    pending_before = STUCK_SWEEPER_PENDING_ITERATION_DURATION._sum.get()
-    failed_before = STUCK_SWEEPER_FAILED_ITERATION_DURATION._sum.get()
-    combined_before = STUCK_SWEEPER_ITERATION_DURATION._sum.get()
+    with (
+        patch(
+            "gw2analytics_api.workers.stuck_upload_sweeper.STUCK_SWEEPER_PENDING_ITERATION_DURATION"
+        ) as pending_mock,
+        patch(
+            "gw2analytics_api.workers.stuck_upload_sweeper.STUCK_SWEEPER_FAILED_ITERATION_DURATION"
+        ) as failed_mock,
+        patch(
+            "gw2analytics_api.workers.stuck_upload_sweeper.STUCK_SWEEPER_ITERATION_DURATION"
+        ) as combined_mock,
+    ):
+        pending_dur, failed_dur, combined_dur = _observe_sweep_durations(
+            iteration_start=100.0,
+            failed_start=102.0,
+            iteration_end=105.0,
+        )
 
-    _observe_sweep_durations(
-        iteration_start=100.0,
-        pending_start=100.0,
-        failed_start=102.0,
-        iteration_end=105.0,
-    )
+        # Assert the return values (the COMPUTATION contract).
+        assert pending_dur == 2.0, (
+            "pending duration must be the 2s gap between iteration_start and failed_start"
+        )
+        assert failed_dur == 3.0, (
+            "failed duration must be the 3s gap between failed_start and iteration_end"
+        )
+        assert combined_dur == 5.0, (
+            "combined duration must be the 5s gap between iteration_start and iteration_end"
+        )
 
-    assert STUCK_SWEEPER_PENDING_ITERATION_DURATION._sum.get() == pending_before + 2.0, (
-        "pending histogram must observe the 2s gap between pending_start and failed_start"
-    )
-    assert STUCK_SWEEPER_FAILED_ITERATION_DURATION._sum.get() == failed_before + 3.0, (
-        "failed histogram must observe the 3s gap between failed_start and iteration_end"
-    )
-    assert STUCK_SWEEPER_ITERATION_DURATION._sum.get() == combined_before + 5.0, (
-        "combined histogram must observe the 5s gap between iteration_start and iteration_end"
-    )
+        # Assert the .observe() side effects (the OBSERVATION contract).
+        pending_mock.observe.assert_called_once_with(2.0)
+        failed_mock.observe.assert_called_once_with(3.0)
+        combined_mock.observe.assert_called_once_with(5.0)
