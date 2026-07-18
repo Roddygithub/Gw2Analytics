@@ -67,6 +67,22 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Proxy gateway-bound client requests through the Next.js server.
+  // Server Components still fetch ``API_BASE_URL`` directly; this
+  // rewrite only handles same-origin browser requests (notably the
+  // upload wizard's Client Component). Keeping the gateway URL out
+  // of the browser bundle avoids leaking backend addresses and
+  // sidesteps CSP connect-src restrictions in tests.
+  async rewrites() {
+    const apiBaseUrl = process.env.API_BASE_URL?.replace(/\/+$/, "") ??
+      "http://localhost:8000";
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${apiBaseUrl}/api/v1/:path*`,
+      },
+    ];
+  },
 };
 
 export default withBundleAnalyzer(nextConfig);

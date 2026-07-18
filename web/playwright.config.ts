@@ -111,7 +111,9 @@ export default defineConfig({
         // server on the loopback. ``.replace(/\\/+$/, "")`` in
         // ``src/lib/env.ts`` is a no-op here (no trailing
         // slash) but the convention is to keep the env var
-        // canonical.
+        // canonical. Client-side ``/api/v1/*`` requests are
+        // rewritten to this same gateway URL via
+        // ``next.config.ts`` rewrites.
         API_BASE_URL: "http://127.0.0.1:8080",
       },
     },

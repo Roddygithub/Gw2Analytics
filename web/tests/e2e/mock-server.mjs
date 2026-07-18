@@ -191,6 +191,35 @@ const server = createServer(async (req, res) => {
     );
   }
 
+  // GET /api/v1/uploads/:id (v0.3.0-web) -- polling endpoint for
+  // the upload wizard. Returns a completed status with a known
+  // fight id so the user-journey E2E can exercise the full
+  // Pick -> Upload -> Parse -> Done flow and drill down into
+  // ``/fights/:fight_id``.
+  const uploadMatch = path.match(/^\/api\/v1\/uploads\/([^/]+)$/);
+  if (method === "GET" && uploadMatch) {
+    const uploadId = decodeURIComponent(uploadMatch[1]);
+    if (uploadId !== "00000000-0000-0000-0000-000000000001") {
+      return jsonResponse(res, 404, JSON.stringify({ error: "upload not found" }));
+    }
+    return jsonResponse(
+      res,
+      200,
+      JSON.stringify({
+        id: uploadId,
+        sha256:
+          "0000000000000000000000000000000000000000000000000000000000000000",
+        original_filename: "test.zevtc",
+        size_bytes: 1024,
+        uploaded_at: "2026-07-18T12:00:00Z",
+        status: "completed",
+        error_message: null,
+        parser_version: "1.3.0",
+        fight_id: "fixture-fight-001",
+      }),
+    );
+  }
+
   if (method !== "GET") {
     return jsonResponse(res, 405, JSON.stringify({ error: "method not allowed" }));
   }

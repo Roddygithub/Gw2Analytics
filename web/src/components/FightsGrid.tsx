@@ -42,9 +42,6 @@ import {
 // re-registering the module on its own -- the module graph
 // guarantees a single evaluation of the import side-effect.
 import { appGridTheme } from "./ag-grid-setup";
-import { gridContainerStyle } from "@/shared/styles";
-
-const GRID_CONTAINER_STYLE = gridContainerStyle(600);
 
 export function FightsGrid({ rows }: { rows: FightRow[] }) {
   const columnDefs = useMemo<ColDef<FightRow>[]>(

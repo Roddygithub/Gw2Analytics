@@ -1,4 +1,3 @@
-import { API_BASE_URL } from "../env";
 import { ApiError } from "./errors";
 
 export interface UploadCreatedRow {
@@ -19,10 +18,19 @@ export interface UploadStatusRow {
   fight_id: string | null;
 }
 
+/**
+ * Client-side upload fetcher.
+ *
+ * Uses a relative URL so the request stays same-origin in the
+ * browser. Next.js rewrites ``/api/v1/*`` to the gateway at
+ * ``API_BASE_URL`` (see ``next.config.ts``), which keeps the
+ * gateway base URL out of the client bundle and avoids CSP/CORS
+ * issues during E2E and in production.
+ */
 export async function uploadLog(file: File): Promise<UploadCreatedRow> {
   const fd = new FormData();
   fd.append("file", file);
-  const resp = await fetch(`${API_BASE_URL}/api/v1/uploads`, {
+  const resp = await fetch("/api/v1/uploads", {
     method: "POST",
     body: fd,
     cache: "no-store",
@@ -34,7 +42,7 @@ export async function uploadLog(file: File): Promise<UploadCreatedRow> {
 }
 
 export async function fetchUploadStatus(uploadId: string): Promise<UploadStatusRow> {
-  const url = `${API_BASE_URL}/api/v1/uploads/${encodeURIComponent(uploadId)}`;
+  const url = `/api/v1/uploads/${encodeURIComponent(uploadId)}`;
   const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
