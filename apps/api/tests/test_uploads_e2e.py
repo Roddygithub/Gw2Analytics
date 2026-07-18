@@ -53,16 +53,17 @@ from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary
 client = TestClient(app)
 
 # V1.3 EVTC layout (matches libs/gw2_evtc_parser parser.py):
-#   25-byte header (magic + 8B build + rev + encounter + unused
-#                   + agent_count + skill_count + language)
+#   24-byte header (magic + 8B build + rev + combat + unused
+#                   + agent_count + map_id)
+#   + 4-byte skill_count (at bytes 24-27)
 #   + agent_count x 96-byte agent records
 #   + skill_count x variable-size skill records
 #   + N x 64-byte cbtevent records (Phase 7 v1)
-_HEADER_FMT = "<4s8sBHBI IB"
-_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 25
-_AGENT_RECORD_FMT = "<QIIhhhhhh"
-_AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)  # 28
-_AGENT_NAME_SIZE = 68
+_HEADER_FMT = "<4s8sBHBI I"
+_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 24
+_AGENT_RECORD_FMT = "<QIIhhhh"
+_AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)  # 24
+_AGENT_NAME_SIZE = 72
 _AGENT_SIZE = _AGENT_PREFIX_SIZE + _AGENT_NAME_SIZE  # 96
 _SKILL_HEADER_FMT = "<II"
 _SKILL_HEADER_SIZE = struct.calcsize(_SKILL_HEADER_FMT)  # 8
@@ -128,10 +129,10 @@ def _make_minimal_zevtc(
 ) -> bytes:
     """Build a synthetic .zevtc blob (zip wrapper around EVTC).
 
-    Uses the V1.3 25-byte header + 96-byte agent records + variable
+    Uses the V1.3 24-byte header + 96-byte agent records + variable
     skill records. For player agents the combo string
-    ``name\\\\0:synth.<id>\\\\0`` is null-padded to 68 bytes; NPCs get a
-    single null-terminated name null-padded to 68 bytes. Skill records
+    ``name\\\\0:synth.<id>\\\\0`` is null-padded to 72 bytes; NPCs get a
+    single null-terminated name null-padded to 72 bytes. Skill records
     are ``<II`` (skill_id + name_len) + UTF-8 name + 1 byte null.
 
     ``events`` is an optional list of pre-packed 64-byte cbtevent
@@ -152,8 +153,7 @@ def _make_minimal_zevtc(
             0,
             0,
             len(agents),
-            len(skills),
-            0,  # language
+            0,  # map_id
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()
@@ -163,8 +163,6 @@ def _make_minimal_zevtc(
                 aid,
                 prof,
                 elite,
-                0,
-                0,
                 0,
                 0,
                 0,

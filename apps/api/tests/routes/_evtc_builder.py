@@ -9,11 +9,11 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 
-_HEADER_FMT = "<4s8sBHBI IB"
+_HEADER_FMT = "<4s8sBHBI I"
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)
-_AGENT_RECORD_FMT = "<QIIhhhhhh"
+_AGENT_RECORD_FMT = "<QIIhhhh"
 _AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)
-_AGENT_NAME_SIZE = 68
+_AGENT_NAME_SIZE = 72
 _SKILL_HEADER_FMT = "<II"
 _SKILL_HEADER_SIZE = struct.calcsize(_SKILL_HEADER_FMT)
 _EVENT_FMT = "<QQQiiIIHHHbbbbbbbbIIbb"
@@ -78,13 +78,12 @@ def make_minimal_zevtc(
             0,
             0,
             len(agents),
-            len(skills),
-            0,
+            0,  # map_id
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()
         for aid, prof, elite, name, is_player in agents:
-            prefix = struct.pack(_AGENT_RECORD_FMT, aid, prof, elite, 0, 0, 0, 0, 0, 0)
+            prefix = struct.pack(_AGENT_RECORD_FMT, aid, prof, elite, 0, 0, 0, 0)
             account = f":synth.{aid}".encode() if is_player else b""
             raw = name.encode() + b"\x00" + account + (b"\x00\x00" if is_player else b"\x00")
             name_buf = raw + b"\x00" * (_AGENT_NAME_SIZE - len(raw))

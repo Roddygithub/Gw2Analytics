@@ -75,16 +75,17 @@ from io import BytesIO
 import httpx
 
 # V1.3 EVTC layout (matches ``libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py``):
-#   25-byte header (magic + 8B build + rev + encounter + unused
-#                  + agent_count + skill_count + language)
+#   24-byte header (magic + 8B build + rev + combat + unused
+#                  + agent_count + map_id)
+#   + 4-byte skill_count (at bytes 24-27)
 #   + ``agent_count`` x 96-byte agent records
 #   + ``skill_count`` x variable-size skill records
 #   + ``N`` x 64-byte cbtevent records (Phase 7 v1)
-_HEADER_FMT = "<4s8sBHBI IB"
-_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 25
-_AGENT_RECORD_FMT = "<QIIhhhhhh"
-_AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)  # 28
-_AGENT_NAME_SIZE = 68
+_HEADER_FMT = "<4s8sBHBI I"
+_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 24
+_AGENT_RECORD_FMT = "<QIIhhhh"
+_AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)  # 24
+_AGENT_NAME_SIZE = 72
 _AGENT_SIZE = _AGENT_PREFIX_SIZE + _AGENT_NAME_SIZE  # 96
 _SKILL_HEADER_FMT = "<II"
 _SKILL_HEADER_SIZE = struct.calcsize(_SKILL_HEADER_FMT)  # 8
@@ -153,7 +154,7 @@ def make_minimal_zevtc(
     ``:demo.`` prefix mirrors the test fixture's ``:synth.`` prefix
     but the tag distinguishes seeded data from uploaded data on a
     debugging walkthrough). NPCs carry a single null-terminated
-    name null-padded to 68 bytes.
+    name null-padded to 72 bytes.
     """
     if skills is None:
         skills = []
@@ -169,8 +170,7 @@ def make_minimal_zevtc(
             0,
             0,
             len(agents),
-            len(skills),
-            0,  # language
+            0,  # map_id
         )
         if len(header) != _HEADER_SIZE:
             msg = f"header size {len(header)} != {_HEADER_SIZE}"
@@ -182,8 +182,6 @@ def make_minimal_zevtc(
                 aid,
                 prof,
                 elite,
-                0,
-                0,
                 0,
                 0,
                 0,

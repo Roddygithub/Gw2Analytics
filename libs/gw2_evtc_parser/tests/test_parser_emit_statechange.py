@@ -59,7 +59,7 @@ from gw2_evtc_parser.statechange_dispatch import (
 
 #: Reused struct format -- mirrors the parser's ``_EVENT_STRUCT`` literal 1:1.
 _CBTEVENT_FMT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
-_AGENT_NAME_SIZE: Final[int] = 68
+_AGENT_NAME_SIZE: Final[int] = 72
 
 
 def _build_event_record(
@@ -123,7 +123,7 @@ def _build_minimal_evtc(
 
     Mirrors the helper in :file:`test_parser.py` -- duplicated here
     so this test file stays self-contained (no cross-test imports).
-    The agent-record 68-byte name buffer is filled entirely with
+    The agent-record 72-byte name buffer is filled entirely with
     nulls; this test file does NOT exercise the player / NPC split
     (the dispatch-boundary tests don't depend on agent decode). The
     fixture builder still produces structurally-valid 96-byte agent
@@ -145,15 +145,15 @@ def _build_minimal_evtc(
         0,
         len(agents),
         len(skills),
-        0,  # language
+        0,  # lang
     )
-    prefix_fmt = struct.Struct("<QIIhhhhhh")
+    prefix_fmt = struct.Struct("<QIIhhhh")
     name_buf = b"\x00" * _AGENT_NAME_SIZE
     body = bytearray()
     for aid, prof, elite, _name, _is_player in agents:
-        # 28-byte prefix + 68-byte all-null name buffer = 96 bytes
+        # 24-byte prefix + 72-byte all-null name buffer = 96 bytes
         # (struct ag size) per agent record.
-        body += prefix_fmt.pack(aid, prof, elite, 0, 0, 0, 0, 0, 0) + name_buf
+        body += prefix_fmt.pack(aid, prof, elite, 0, 0, 0, 0) + name_buf
     for skill_id, skill_name in skills:
         name_bytes = skill_name.encode("utf-8")
         skill_header = struct.pack("<II", skill_id, len(name_bytes))

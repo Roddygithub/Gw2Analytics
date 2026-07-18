@@ -116,13 +116,11 @@ def _make_minimal_zevtc(
         skills = []
     if events is None:
         events = []
-    header_fmt = "<4s8sBHBI IB"
+    header_fmt = "<4s8sBHBI I"
     header_size = _struct.calcsize(header_fmt)
-    agent_record_fmt = "<QIIhhhhhh"
-    _struct.calcsize(agent_record_fmt)
-    agent_name_size = 68
+    agent_record_fmt = "<QIIhhhh"
+    agent_name_size = 72
     skill_header_fmt = "<II"
-    _struct.calcsize(skill_header_fmt)
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
         header = _struct.pack(
@@ -133,8 +131,7 @@ def _make_minimal_zevtc(
             0,
             0,
             len(agents),
-            len(skills),
-            0,
+            0,  # map_id
         )
         assert len(header) == header_size
         body = bytearray()
@@ -144,8 +141,6 @@ def _make_minimal_zevtc(
                 aid,
                 prof,
                 elite,
-                0,
-                0,
                 0,
                 0,
                 0,

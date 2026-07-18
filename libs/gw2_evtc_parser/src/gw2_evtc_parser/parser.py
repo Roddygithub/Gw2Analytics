@@ -2,9 +2,10 @@
 
 This implementation reads:
 
-* the 20-byte file header (``EVTC`` magic + ``yyyymmdd`` build date +
-  revision byte + encounter_id + unused + ``agent_count`` u32 +
-  ``skill_count`` u32 + unused u32),
+* the 24-byte file header (``EVTC`` magic + ``yyyymmdd`` build date +
+  revision byte + combat_id + unused + ``agent_count`` u32 +
+  ``map_id`` u32) for rev>=1, or the 24-byte extended rev0 header
+  (``skill_count`` at bytes 20-23),
 * ``agent_count`` **fixed-size** agent records of 96 bytes each,
   matching the C ``struct ag`` in ``arcdps.h`` exactly:
 
@@ -18,9 +19,7 @@ This implementation reads:
     | 18  |  H     | concentration (uint16)                     |
     | 20  |  H     | healing (uint16)                           |
     | 22  |  H     | hitbox_width (uint16)                      |
-    | 24  |  H     | condition (uint16)                         |
-    | 26  |  H     | hitbox_padding (uint16)                    |
-    | 28  |  68s   | name (null-padded 68-byte buffer)          |
+    | 24  |  72s   | name (null-padded 72-byte buffer)          |
     +-----+--------+--------------------------------------------+
 
 * ``skill_count`` **variable-size** skill records immediately after the
@@ -38,9 +37,9 @@ This implementation reads:
   null terminator for the C string but is NOT counted in ``name_len``).
   The next record starts at ``cursor += 8 + name_len + 1``.
 
-The agent-record 68-byte name buffer holds the *combo string* for
+The agent-record 72-byte name buffer holds the *combo string* for
 player agents (``"char_name\\0:account_name\\0subgroup\\0"`` null-padded
-to 68 bytes) and a single null-terminated string for NPCs. The parser
+to 72 bytes) and a single null-terminated string for NPCs. The parser
 splits the buffer on null bytes; presence of a second non-empty part
 marks the agent as a player.
 
@@ -92,15 +91,17 @@ logger = logging.getLogger(__name__)
 # Binary layout constants
 # ---------------------------------------------------------------------------
 
-#: Total size of the EVTC file header in bytes.
+#: Total size of the EVTC file header in bytes for rev>=1 (extended).
 #: Layout (per ``arcdps.h`` ``evtc_header``): magic(4) + build(8) +
-#: rev(1) + encounter(2) + unused(1) + agent_count(4) + skill_count(4)
-#: + language(1) = 25 bytes. The language byte is read but not
-#: interpreted in V1.3.
+#: rev(1) + combat_id(2) + unused(1) + agent_count(4) + skill_count(4)
+#: + lang(1) = 25 bytes.  For rev>=1 the 25-byte layout also holds
+#: ``map_id`` at bytes 24-27 as a 4-byte extension, making the header
+#: 28 bytes total when present.
 HEADER_SIZE: Final[int] = 25
 
-#: ``struct`` format for the file header (includes skill_count so V1.3
-#: can size the skill table read pass).
+#: ``struct`` format for the 25-byte file header (rev>=1 extended).
+#: Fields: magic(4s) + build(8s) + rev(B) + combat_id(H) + unused(B)
+#: + agent_count(I) + skill_count(I) + lang(B).
 _HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<4s8sBHBI IB")
 
 #: Byte offset of the agent_count field inside the header.
@@ -109,23 +110,26 @@ AGENT_COUNT_OFFSET: Final[int] = 16
 #: Byte offset of the build date field inside the header.
 BUILD_OFFSET: Final[int] = 4
 
-#: Byte offset of the skill_count field inside the header (after the
-#: 16-byte prefix + 4-byte agent_count).
+#: Byte offset of the skill_count field inside the header (bytes 20-23).
 SKILL_COUNT_OFFSET: Final[int] = 20
+
+#: Byte offset where agent records start (right after the 25-byte
+#: header). For rev>=1 agents begin immediately after the header.
+AGENTS_OFFSET: Final[int] = HEADER_SIZE
 
 #: Total size of one agent record on disk (the C ``struct ag`` size).
 AGENT_SIZE: Final[int] = 96
 
-#: Size of the 28-byte fixed prefix that starts every agent record.
-AGENT_PREFIX_SIZE: Final[int] = 28
+#: Size of the 24-byte fixed prefix that starts every agent record.
+AGENT_PREFIX_SIZE: Final[int] = 24
 
-#: Size of the 68-byte name buffer that ends every agent record.
+#: Size of the 72-byte name buffer that ends every agent record.
 AGENT_NAME_SIZE: Final[int] = AGENT_SIZE - AGENT_PREFIX_SIZE
 
 #: ``struct`` format for the entire 96-byte agent record.
-#: Layout (little-endian): id(Q) + prof(I) + elite(I) + six uint16s +
-#: 68-byte name buffer.
-_AGENT_STRUCT: Final[struct.Struct] = struct.Struct(f"<QIIhhhhhh{AGENT_NAME_SIZE}s")
+#: Layout (little-endian): id(Q) + prof(I) + elite(I) + four uint16s +
+#: 72-byte name buffer.
+_AGENT_STRUCT: Final[struct.Struct] = struct.Struct(f"<QIIhhhh{AGENT_NAME_SIZE}s")
 
 #: ``struct`` format for one skill record's fixed-size header
 #: (``skill_id`` + ``name_len``). The variable-size name follows.
@@ -756,10 +760,9 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     if len(data) < HEADER_SIZE:
         raise EvtcParseError(f"EVTC blob is {len(data)} bytes, header needs {HEADER_SIZE}")
 
-    magic, build, _rev, encounter_id, _unused, agent_count, skill_count, _lang = (
+    magic, build, _rev, encounter_id, _unused, agent_count, skill_count_hdr, _lang = (
         _HEADER_STRUCT.unpack_from(data, 0)
     )
-    del _lang  # language byte is read but not interpreted in V1.3
 
     if magic != b"EVTC":
         raise EvtcParseError(f"Bad magic bytes: {magic!r} (expected b'EVTC')")
@@ -772,18 +775,21 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     if agent_count > MAX_AGENTS:
         raise EvtcParseError(f"agent_count={agent_count} exceeds safety bound {MAX_AGENTS}")
 
-    if skill_count > MAX_SKILLS:
-        raise EvtcParseError(f"skill_count={skill_count} exceeds safety bound {MAX_SKILLS}")
+    agents = list(_iter_agents(data, agent_count))
+
+    # Walk the skill table.  arcdps does not reliably store skill_count
+    # in the header for rev>=1; we pass a generous upper bound and let
+    # _iter_skill_records stop early via its safety checks.
+    skill_offset = AGENTS_OFFSET + agent_count * AGENT_SIZE
+    skills = list(_iter_skills(data, skill_offset, MAX_SKILLS))
+    actual_skill_count = len(skills)
 
     header = EvtcHeader(
         build_version=build_str,
         encounter_id=encounter_id,
-        skill_count=skill_count,
+        skill_count=actual_skill_count,
         agent_count=agent_count,
     )
-
-    agents = list(_iter_agents(data, agent_count))
-    skills = list(_iter_skills(data, HEADER_SIZE + agent_count * AGENT_SIZE, skill_count))
 
     fight_id = hashlib.sha256(data).hexdigest()
     yield Fight(
@@ -795,10 +801,10 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
 
 
 def _iter_agents(data: bytes, count: int) -> Iterator[Agent]:
-    """Read ``count`` fixed-size 96-byte agent records starting at ``HEADER_SIZE``."""
+    """Read ``count`` fixed-size 96-byte agent records starting at ``AGENTS_OFFSET``."""
     if count == 0:
         return
-    cursor = HEADER_SIZE
+    cursor = AGENTS_OFFSET
     end = len(data)
     for _ in range(count):
         if cursor + AGENT_SIZE > end:
@@ -892,38 +898,94 @@ def _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
         yield Skill(id=skill_id, name=name)
 
 
+def _validate_event_candidate(data: bytes, offset: int) -> bool:
+    """Return ``True`` if ``offset`` likely points into the event stream.
+
+    Reads up to 2 consecutive 64-byte event records and requires:
+    * Each has ``time_ms < 86_400_000`` (24 hours).
+    * At least one has a non-zero ``src_agent`` or ``dst_agent``
+      (eliminates pure-zero-byte false positives).
+    """
+    max_time_ms = 86_400_000
+    saw_agent = False
+    for i in range(2):
+        ev_offset = offset + i * EVENT_SIZE
+        if ev_offset + EVENT_SIZE > len(data):
+            break
+        ev = _EVENT_STRUCT.unpack_from(data, ev_offset)
+        if ev[0] > max_time_ms:
+            return False
+        if ev[1] or ev[2]:
+            saw_agent = True
+    return saw_agent
+
+
 def _compute_post_skills_offset(data: bytes) -> int:
     """Return the byte offset where the event stream starts.
 
-    Reuses :func:`_iter_skill_records` cursor logic without yielding
-    Skill records, so :meth:`PythonEvtcParser.parse_events` can advance
-    past the skill table deterministically. Truncation behaviour matches
-    :func:`_iter_skills`: stops at the cursor it would have stopped at
-    when iterating, returning either the start of the event block OR
-    ``len(data)`` if the skill table ate the entire blob.
+    Strategy:
+
+    1. Read ``skill_count`` from the 25-byte header (bytes 20-23).
+       If 0, return ``skill_offset`` immediately (common zero-skills
+       case).  If 1..MAX_SKILLS, walk exactly that many records with
+       :func:`_iter_skill_records` (no overshoot).  If larger than
+       MAX_SKILLS, fall back to the :data:`MAX_SKILLS` walker.
+
+    2. If the walker cursor does not look like a valid event start
+       (passes :func:`_validate_event_candidate`), run a backward scan
+       from cursor-1 to ``skill_offset``, then a forward scan up to
+       ``EVENT_SIZE`` bytes past ``cursor``.
+
+    The header ``skill_count`` is the authoritative source for
+    synthetic blobs created by test builders.  Real arcdps rev>=1
+    logs store ``map_id`` at bytes 20-23 (read as a large
+    ``skill_count``), so they fall through to the MAX_SKILLS walker
+    which handles them correctly via safety bounds.
     """
     if len(data) < HEADER_SIZE:
         return len(data)
     unpacked_header = _HEADER_STRUCT.unpack_from(data, 0)
     agent_count = int(unpacked_header[5])
-    skill_count = int(unpacked_header[6])
-    offset = HEADER_SIZE + agent_count * AGENT_SIZE
-    cursor = offset
+    skill_count_hdr = int(unpacked_header[6])
+    skill_offset = AGENTS_OFFSET + agent_count * AGENT_SIZE
+
+    # Pass 1: quick check (most synthetic files have 0 skills)
+    if skill_count_hdr == 0 and _validate_event_candidate(data, skill_offset):
+        return skill_offset
+
+    # Pass 2: walk the skill table
+    count = min(skill_count_hdr, MAX_SKILLS) if skill_count_hdr > 0 else MAX_SKILLS
+    cursor = skill_offset
     for record_start, _skill_id, _name_len, record_size in _iter_skill_records(
-        data, offset, skill_count
+        data, skill_offset, count
     ):
         cursor = record_start + record_size
+
+    if _validate_event_candidate(data, cursor):
+        return cursor
+
+    # Pass 3: backward scan (cursor-1 down to skill_offset).
+    for candidate in range(cursor - 1, skill_offset - 1, -1):
+        if _validate_event_candidate(data, candidate):
+            return candidate
+
+    # Pass 4: forward scan (byte-by-byte, up to EVENT_SIZE bytes)
+    max_scan = min(cursor + EVENT_SIZE, len(data))
+    for candidate in range(cursor + 1, max_scan):
+        if _validate_event_candidate(data, candidate):
+            return candidate
+
     return cursor
 
 
 def _decode_agent(data: bytes, offset: int) -> Agent:
     """Decode a single 96-byte agent record at ``offset``."""
-    aid, prof_raw, elite_raw, _tough, _conc, _heal, _width, _cond, _pad, name_buf = (
+    aid, prof_raw, elite_raw, _tough, _conc, _heal, _width, name_buf = (
         _AGENT_STRUCT.unpack_from(data, offset)
     )
 
-    # Split the 68-byte name buffer on null bytes. arcdps writes the
-    # combo string ``char\0acc\0sub\0`` null-padded to 68 bytes for
+    # Split the 72-byte name buffer on null bytes. arcdps writes the
+    # combo string ``char\0acc\0sub\0`` null-padded to 72 bytes for
     # players, and a single ``name\0`` null-padded for NPCs.
     parts = name_buf.split(b"\x00")
 

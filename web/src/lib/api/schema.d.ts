@@ -224,7 +224,8 @@ export interface paths {
          *     The 9 input streams are split from the canonical
          *     heterogeneous ``Iterable[Event]`` via ``isinstance`` at the
          *     call site (parallel to the per-target trio dispatch in
-         *     ``apps/api/routes/fights/aggregators.py::_aggregate_per_target_rollup``).
+         *     :func:`get_fight_events`, which now splits the event stream
+         *     once and invokes the aggregators directly).
          *
          *     Response codes:
          *
