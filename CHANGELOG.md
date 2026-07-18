@@ -194,6 +194,68 @@ All 4 v0.10.26 reviewer NICE-to-HAVEs closed by this cycle (see v0.10.27-pre sec
 - New operator-facing tuning surfaced by the v0.10.26 review-cycle audit
 - E2E tooling expansions (per-fight timeline guard fix from plan 159 already shipped in v0.10.26)
 
+## [0.10.28] - 2026-07-18
+
+The v0.10.28 release closes the v0.10.27-pre + v0.10.27 cycle's 4 reviewer NICE-to-HAVEs (CI unblock + the player_search hydration fix + the fight_id collision handler + the upload-size docstring tightening) + 2 E2E-deferred bug fixes from the 2026-07-11 journey (Plan 160 fight_id collision + Plan 162 per-player timeline lazy-load + Plan 163 PlayerSearchBar hydration). 14 cycle commits since v0.10.26 release tag (ab48cda), plus 1 lint cleanup + 1 CHANGELOG bump.
+
+### Added
+
+- **Plan 162: lazy-load per-player timeline on /fights/[id]** (`web/src/components/LazyTabbedTimelineSection.tsx` + `web/src/app/fights/[id]/page.tsx`). The /timeline/players endpoint takes ~10s; pre-fix this blocked the SSR critical path on the entire /fights/[id] page. Fix: a new Client Component wrapper with a discriminated union state machine ({loading} | {success, data} | {error, message}) lazy-fetches the data on mount via useEffect with an active flag (prevents setState-on-unmounted race). The page now renders instantly + the per-player view streams in 0-10s later without blocking the initial paint. The PerFightTimelineSection (tabbed Aggregated/Per-player UI) is unchanged; the lazy wrapper preserves the tabbed UX + lets users flip to the Aggregated tab (which IS populated server-side) during the lazy fetch. Trade-off: the per-player view requires JS to load (acceptable for the 10s SSR perf gain). Closes the [E2E-JOURNEY-2026-07-11](/plans/E2E-JOURNEY-2026-07-11.md) bug #6 (timeline/players perf).
+
+- **Plan 160: fight_id collision handler** (`apps/api/src/gw2analytics_api/services/parse.py` + `apps/api/tests/routes/test_uploads_collision.py`). The content-derived `OrmFight.id` was firing Postgres's unique constraint violation when 2 distinct uploads contained the same parsed fight content; the IntegrityError propagated to process_parse's generic exception handler with a bare "IntegrityError: ..." message and operators had no way to pivot to the existing successful parse. Fix: TWO narrow try/except IntegrityError blocks (one per call site: _save_fight + _persist_event_blob) preserve defense-in-depth with DISTINCT error messages per the constraint that fired:
+  - fight_id collision -> "The content is already analyzed as fight X" (pivots operator to the existing successful parse via /fights/{existing_id})
+  - event_blob collision -> "Event blob persistence collision for fight X" (distinct layer-specific message)
+  Both handlers rollback + re-fetch upload (DetachedInstanceError gotcha after rollback() expires session objects) + set status='failed' + commit + return. The audit row is preserved (no DELETE) so the duplicate upload is still inspectable via GET /api/v1/uploads/{id}. Closes plan 160 + the [E2E-JOURNEY-2026-07-11](/plans/E2E-JOURNEY-2026-07-11.md) bug #3 (fight_id collision 500).
+
+- **Plan 163: PlayerSearchBar hydration fix** (`web/src/components/PlayerSearchBar.tsx` + `web/src/components/PlayerSearchBar.module.css` NEW). Root cause: React's inline-style renderer expands CSS shorthand properties (e.g. `border: '1px solid var(--border)'`) into longhand properties (borderWidth + borderStyle + borderColor) on the client DOM while the server-rendered HTML keeps the shorthand; React's hydration reconciliation sees the mismatch and logs a hydration warning. Fix: migrate the 4 React.CSSProperties inline-style objects (FORM_STYLE + INPUT_STYLE + BUTTON_STYLE + LABEL_STYLE) to a CSS module. CSS modules are server-rendered as plain class-name selectors; the styles are applied via the stylesheet (no inline-style expansion), so SSR + CSR render identically. The disabled-state styling uses the native :disabled pseudo-class (no inline cursor/opacity overrides needed at the JSX level). Closes plan 163 + the [E2E-JOURNEY-2026-07-11](/plans/E2E-JOURNEY-2026-07-11.md) bug #7 (search-bar hydration mismatch).
+
+### Fixed
+
+- **CI unblock: ruff format 15 files + mypy 10 errors in routes/fights/** (`b59db96` chore lint+types). Pre-fix: the main branch's CI gate was red on the ruff format step (15 files: fights routes, stuck_upload_sweeper, gw2_analytics aggregators, gw2_core models, gw2_evtc_parser, etc.) + the mypy strict check (10 errors in routes/fights/aggregators.py + __init__.py). Fix:
+  - `ruff format` applied to 15 files (whitespace only).
+  - `aggregators.py`: change `_aggregate_per_target_rollup` return type from `list[X | Y | Z]` to `Sequence[X | Y | Z]` (covariant; fixes list-invariance return-value errors). Widen `aggregate_combat_readout`'s `skill_id_to_name_map` param from `dict[int, str | None] | None` to `Mapping[int, str | None] | None` (covariant; lets callers pass `dict[int, str]` cleanly). Drop 3 redundant `cast(list[X], ...)` wrappers around `.aggregate()` returns (redundant once Sequence is covariant). Add 3 `cast(Iterable[SpecificEvent], events)` calls to narrow `list[Event]` to the aggregator's specific `Iterable[SpecificEvent]` param. Add 1 `cast(dict[int, str | None], skill_id_to_name_map)` at the PlayerBoonsAggregator call site (Mapping -> dict cast for library invariant contract). Add a defensive runtime assert in `_aggregate_per_target_rollup` enforcing the "caller pre-filters events" contract (per reviewer NICE-to-HAVE). Add `# noqa: PLR0915, PLR0911` on the function signature (the dual collision handlers + 5 generic failure paths legitimately push the function above the 50-statement / 6-return thresholds). CI gate expected to flip green on the next run.
+
+- **Plan 163 hydration fix** (see Added section above).
+
+- **Plan 160 fight_id collision fix** (see Added section above).
+
+- **ruff S101 noqa on defensive runtime assert** (`2c5b8bc` feat api+web). The defensive runtime assert added in the v0.10.27 cycle's process_parse refactor triggered the ruff S101 (use of assert) rule. Added `# noqa: S101` to the assert line -- legitimate defensive assert usage (the assert fires on a contract violation that would otherwise silently miscount in production).
+
+### Docs
+
+- **plans/E2E-JOURNEY-2026-07-11.md** findings document + harness usage doc (pre-existing v0.10.27 cycle).
+
+- **CHANGELOG retro-split of 2 fix(web) commits** (pre-existing v0.10.27 cycle).
+
+### Forward-blockers (rider-next-cycle)
+
+- **Plan 161 partial closeout: extract the remaining 5 sections into inline async Server Components with per-section try/catch** (per the [E2E-JOURNEY-2026-07-11](/plans/E2E-JOURNEY-2026-07-11.md) plan). The lazy wrapper handles its own error state for the timeline/players section; the remaining 5 sections (events + squads + skills + player-skill + player-skill-agents) still need their own try/catch wrappers around the Promise.allSettled results processing. The existing 6 SectionErrorChip sites + the sectionErrors object handle the common cases today, but a unified inline Server Component pattern would make the isolation contract explicit + testable.
+
+- **WAVE-8 parser-side extension** (XL effort, multi-cycle). The 8 SCAFFOLD-zero readout columns (damages + heals + defenses) await the Blocker A parser extension (9 new Event subclasses: BarrierEvent + DownEvent + DodgeEvent + ...) + Blocker B Skills DB catalog (libs/gw2_skills). See plans/WAVE-8-parser-side.md + plans/RELEASE-v0.11.0-wave-8-parser.md.
+
+- **BLOCKER-C-role-classifier C.2 offline calibration** (separate workstream). The roles column stays at the canonical Wave 2 SCAFFOLD default (`[]`) until the offline calibration is complete.
+
+- **Reusable Skeleton component** (reviewer NICE-to-HAVE on the v0.10.28 LazyTabbedTimelineSection). The inline <div style={SKELETON_STYLE}> pattern will be reused for other slow endpoints; extracting it into web/src/components/Skeleton.tsx with a configurable height prop would benefit both this commit and future ones.
+
+- **Helper extraction for process_parse** (reviewer NICE-to-HAVE on the v0.10.28 parse.py IntegrityError handler). Extracting the 2 collision handlers into _mark_fight_id_collision(db, upload_id, core_fight_id) + _mark_event_blob_collision(db, upload_id, core_fight_id) helpers would drop process_parse below the PLR0915 + PLR0911 thresholds naturally (no noqa suppression needed).
+
+### Validation
+
+  uv run ruff format --check               -> clean (200 files)
+  uv run ruff check libs apps              -> 0 errors (1 stylistic noqa warning on the defensive assert)
+  uv run mypy libs apps                    -> 0 errors (was 10 pre-fix)
+  python -m py_compile                     -> OK (all modified files)
+  pnpm tsc --noEmit --skipLibCheck         -> 0 errors (web clean)
+  brace balance (page.tsx)                 -> 0 (open == close)
+  fightDetails + accountSkills preserved   -> yes (no accidental deletion)
+
+### Cycle commits
+
+  b59db96  chore lint+types: ruff format 15 files + fix 10 mypy errors in routes/fights/
+  2c5b8bc  feat api+web: plan 160 fight_id collision + plan 163 PlayerSearchBar hydration + noqa fix
+  b0e44ad  feat web: plan 162 lazy-load per-player timeline + plan 161 section isolation
+
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
