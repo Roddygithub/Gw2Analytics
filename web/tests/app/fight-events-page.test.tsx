@@ -510,7 +510,7 @@ describe("FightEventsPage", () => {
   it("renders the section-level error chip when ?account= points at an account NOT in the fight's agents", async () => {
     // Lenient contract: an analyst mistyping ``?account=`` to a
     // value that's not in the fight's agent list surfaces a
-    // section-level diagnostic chimp (``player-skill-error``)
+    // section-level diagnostic chimp (``player-skill-section-error``)
     // rather than the page-level 404 card. The page.tsx agent
     // lookup filters for ``is_player === true && account_name
     // === accountFilter``; an unmatched account raises the
@@ -533,8 +533,8 @@ describe("FightEventsPage", () => {
       }),
     ).toBeInTheDocument();
     // The section-level error chip carries the
-    // ``player-skill-error`` testid.
-    expect(screen.getByTestId("player-skill-error")).toBeInTheDocument();
+    // ``player-skill-section-error`` testid.
+    expect(screen.getByTestId("player-skill-section-error")).toBeInTheDocument();
     expect(screen.getByText(/not found in this fight/i)).toBeInTheDocument();
     // The prompt placeholder is NOT shown when an account is set
     // (the per-player-section body has only 3 valid states:
@@ -548,7 +548,7 @@ describe("FightEventsPage", () => {
   it("renders the upstream error chip when the per-player fetch throws (accountSkillsError !== null from the page's fetch catch)", async () => {
     // The page.tsx cascades an upstream error from the per-player
     // fetch into the section's ``accountSkillsError`` field.
-    // The page renders the ``player-skill-error`` chimp with
+    // The page renders the ``player-skill-section-error`` chimp with
     // the upstream error message. This test pins the
     // error-propagation contract independently from the
     // agent-not-found path (a different error class -- gateway
@@ -562,7 +562,7 @@ describe("FightEventsPage", () => {
       searchParams: Promise.resolve({ account: "TestAccount.1234", tab: "overview" }),
     });
     renderWithSession(tree);
-    expect(screen.getByTestId("player-skill-error")).toBeInTheDocument();
+    expect(screen.getByTestId("player-skill-section-error")).toBeInTheDocument();
     expect(screen.getByText(/events blob corrupt/i)).toBeInTheDocument();
   });
 
@@ -582,8 +582,8 @@ describe("FightEventsPage", () => {
     });
     renderWithSession(tree);
     // The agents-fetch-specific chip carries the
-    // ``player-skill-agents-error`` testid; the per-player
-    // section chip carries ``player-skill-error`` (the latter
+    // ``player-skill-agents-section-error`` testid; the per-player
+    // section chip carries ``player-skill-section-error`` (the latter
     // is the user-facing one because it explains the per-player
     // section's failure mode). We scope the text-content
     // assertion to the agents-error chip (NOT a document-wide
@@ -591,10 +591,10 @@ describe("FightEventsPage", () => {
     // cascades to the per-player chip too -- a document-wide
     // query would throw ``getMultipleElementsFoundError``.
     expect(
-      screen.getByTestId("player-skill-agents-error"),
+      screen.getByTestId("player-skill-agents-section-error"),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId("player-skill-agents-error"),
+      screen.getByTestId("player-skill-agents-section-error"),
     ).toHaveTextContent(/fight unavailable/i);
   });
 
@@ -602,8 +602,8 @@ describe("FightEventsPage", () => {
   // v0.10.18 regression-locking test: the dual-banner cascade
   // contract. When the bare ``/fights/:id`` (agents-list) fetch
   // throws 502, the page.tsx cascades the upstream error into
-  // BOTH chips: ``player-skill-agents-error`` (the agents-
-  // dropdown diagnostic) AND ``player-skill-error`` (the
+  // BOTH chips: ``player-skill-agents-section-error`` (the agents-
+  // dropdown diagnostic) AND ``player-skill-section-error`` (the
   // per-player-section diagnostic). The same substring "fight
   // unavailable" appears in 2 places. The pre-fix test used
   // ``screen.getByText(/fight unavailable/i)`` which threw
@@ -633,17 +633,17 @@ describe("FightEventsPage", () => {
     renderWithSession(tree);
     // BOTH chips are present.
     expect(
-      screen.getByTestId("player-skill-agents-error"),
+      screen.getByTestId("player-skill-agents-section-error"),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("player-skill-error")).toBeInTheDocument();
+    expect(screen.getByTestId("player-skill-section-error")).toBeInTheDocument();
     // BOTH chips cascade the upstream error substring. Testid-
     // scoped (NOT `screen.getByText` which would throw
     // MultipleElementsFoundError on the 2-match case).
     expect(
-      screen.getByTestId("player-skill-agents-error"),
+      screen.getByTestId("player-skill-agents-section-error"),
     ).toHaveTextContent(/fight unavailable/i);
     expect(
-      screen.getByTestId("player-skill-error"),
+      screen.getByTestId("player-skill-section-error"),
     ).toHaveTextContent(/fight unavailable/i);
     // The per-player chip carries the canonical user-facing
     // prefix (FAILED_TO_LOAD_PER_PLAYER_SKILLS) that
@@ -659,10 +659,10 @@ describe("FightEventsPage", () => {
     // sole English-coupling point (a future i18n refactor
     // edits only that module).
     expect(
-      screen.getByTestId("player-skill-error"),
+      screen.getByTestId("player-skill-section-error"),
     ).toHaveTextContent(FAILED_TO_LOAD_PER_PLAYER_SKILLS);
     expect(
-      screen.getByTestId("player-skill-agents-error"),
+      screen.getByTestId("player-skill-agents-section-error"),
     ).toHaveTextContent(FAILED_TO_LOAD_PLAYER_LIST);
     // Exactly 2 elements match the cascade substring -- forbids
     // a 3rd duplicate chip. RTL counts matches by element (1

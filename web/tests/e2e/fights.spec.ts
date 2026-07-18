@@ -163,7 +163,7 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     // (a value NOT in the mock-server's agent list, NOT in
     // the playerSkillsMatch handle) exercises the lenient
     // contract: the page surfaces a SECTION-level diagnostic
-    // chimp (``player-skill-error``), not a page-level 404.
+    // chimp (``player-skill-section-error``), not a page-level 404.
     // The agents fetch resolves (mock-server inline stub
     // returns the canonical 2-agent FightOut), but the
     // agent.matched-the-account-name check fails.
@@ -171,7 +171,7 @@ test.describe("/fights/[id] (v0.7.1)", () => {
       "/fights/fixture-fight-001?account=UnknownAccount.0000",
     );
     await expect(
-      page.locator('[data-testid="player-skill-error"]'),
+      page.locator('[data-testid="player-skill-section-error"]'),
     ).toBeVisible();
     await expect(page.getByText(/not found in this fight/i)).toBeVisible();
     // The prompt placeholder is NOT shown when an account is

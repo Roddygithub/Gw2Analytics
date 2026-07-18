@@ -69,7 +69,7 @@
  */
 
 /**
- * Prefix string for the ``player-skill-agents-error`` chip --
+ * Prefix string for the ``player-skill-agents-section-error`` chip --
  * surfaced when the bare ``/fights/:id`` (agents-list) fetch
  * throws ApiError(4xx/5xx). The chip reads
  * "``Failed to load player list: <formatApiError>``".
@@ -77,7 +77,7 @@
 export const FAILED_TO_LOAD_PLAYER_LIST = "Failed to load player list:";
 
 /**
- * Prefix string for the ``player-skill-error`` chip --
+ * Prefix string for the ``player-skill-section-error`` chip --
  * surfaced when the per-player skills fetch throws OR when
  * ``?account=`` points at an account not in the fight's
  * agents list. The chip reads

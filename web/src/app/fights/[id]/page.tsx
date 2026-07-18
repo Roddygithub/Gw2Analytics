@@ -987,12 +987,10 @@ export default async function FightEventsPage({
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Per-skill</h2>
         {sectionErrors.skills && (
-          <p
-            data-testid="skills-error"
-            style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
-          >
-            Failed to load skills: {sectionErrors.skills}
-          </p>
+          <SectionErrorChip
+            testid="skills-section-error"
+            message={`Failed to load skills: ${sectionErrors.skills}`}
+          />
         )}
         <SkillUsageTable rows={skills?.skills ?? []} filename={`${id}-skills.csv`} />
       </section>
@@ -1015,12 +1013,10 @@ export default async function FightEventsPage({
           Per-player (SkillUsage attribution)
         </h2>
         {fightDetails === null ? (
-          <p
-            data-testid="player-skill-agents-error"
-            style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
-          >
-            {FAILED_TO_LOAD_PLAYER_LIST} {fightDetailsError}
-          </p>
+          <SectionErrorChip
+            testid="player-skill-agents-section-error"
+            message={`${FAILED_TO_LOAD_PLAYER_LIST} ${fightDetailsError ?? ""}`}
+          />
         ) : (
           <PlayerSkillUsageFilter
             currentValue={accountFilter}
@@ -1037,12 +1033,10 @@ export default async function FightEventsPage({
           />
         )}
         {accountFilter !== null && accountSkillsError !== null ? (
-          <p
-            data-testid="player-skill-error"
-            style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
-          >
-            {FAILED_TO_LOAD_PER_PLAYER_SKILLS} {accountSkillsError}
-          </p>
+          <SectionErrorChip
+            testid="player-skill-section-error"
+            message={`${FAILED_TO_LOAD_PER_PLAYER_SKILLS} ${accountSkillsError}`}
+          />
         ) : null}
         {accountFilter === null ? (
           <p
@@ -1075,20 +1069,16 @@ export default async function FightEventsPage({
           lets the analyst correlate the absolute bucket
           magnitudes with the per-series trend lines. */}
       {sectionErrors.timeline && (
-        <p
-          data-testid="timeline-error"
-          style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
-        >
-          Failed to load timeline: {sectionErrors.timeline}
-        </p>
+        <SectionErrorChip
+          testid="timeline-section-error"
+          message={`Failed to load timeline: ${sectionErrors.timeline}`}
+        />
       )}
       {sectionErrors.playerTimeline && (
-        <p
-          data-testid="player-timeline-error"
-          style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
-        >
-          Failed to load per-player timeline: {sectionErrors.playerTimeline}
-        </p>
+        <SectionErrorChip
+          testid="player-timeline-section-error"
+          message={`Failed to load per-player timeline: ${sectionErrors.playerTimeline}`}
+        />
       )}
       <PerFightTimelineSection timeline={timeline} playerTimeline={playerTimeline} />
     </main>
