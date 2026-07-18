@@ -75,7 +75,14 @@ The 2 `fix(web)` SectionErrorChip commits shipped during the v0.10.26 review cyc
 
 ## [0.10.27-pre] - 2026-07-18
 
-The v0.10.27-pre cycle closes ALL 3 forward-blockers the v0.10.26 release reviewer flagged on the F5 sweeper commit (`bce9675`): the F-series polish queue (F7 batch_size Settings threading + F8 audit re-run leftover + F7 polish) + per-sweep histogram attribution (plans/170 forward-blocker #1) + CHANGELOG retro-split (plans/170 forward-blocker #2). Plus an upload-size defense-in-depth audit cycle that surfaced a critical Caddyfile unit-mismatch bug (the Caddyfile `100MB` decimal cap was 4.85% smaller than the API's `100 * 1024 * 1024` binary cap, creating a proxy-layer false-reject window for valid `.zevtc` uploads). **9 commits** total since the v0.10.26 release tag (`ab48cda`). Tag moves from `ab48cda` + 9 followup commits at HEAD.
+The v0.10.27-pre cycle closes **4 reviewer-flagged items** from the v0.10.26 review (all 3 items in v0.10.26's `### Forward-blockers (rider-next-cycle)` subsection + the v0.10.26 release reviewer's separate CHANGELOG retro-split NICE-to-HAVE):
+
+- **plans/170 implementation refinement doc update** (closed by `b0989f6`) -- the F5 reviewer NICE-to-HAVE on documenting the FK cascade 4-deep + option matrix reinterpretation + LIKE signature correction.
+- **`_BATCH_DELETE_SIZE` -> `Settings.stuck_sweeper_failed_batch_size` threading** (closed by `12d3fdf` + `6e27c19`) -- the F5 reviewer NICE-to-HAVE on the magic constant.
+- **Per-sweep histogram attribution** (closed by `c11fc5d`) -- the F5 reviewer NICE-to-HAVE on the conflated `STUCK_SWEEPER_ITERATION_DURATION` histogram (plans/170 forward-blocker #1).
+- **CHANGELOG `### Fixed` retro-split** (closed by `166a467`) -- the v0.10.26 release reviewer's NICE-to-HAVE on moving the 2 `fix(web)` SectionErrorChip commits out of the Plan 169 `### Added` block (plans/170 forward-blocker #2).
+
+Plus an upload-size defense-in-depth audit cycle that surfaced a critical Caddyfile unit-mismatch bug (the Caddyfile `100MB` decimal cap was 4.85% smaller than the API's `100 * 1024 * 1024` binary cap, creating a proxy-layer false-reject window for valid `.zevtc` uploads). **9 commits** total since the v0.10.26 release tag (`ab48cda`). Tag moves from `ab48cda` + 9 followup commits at HEAD.
 
 ### Added (F-series polish — operator-tunable failed-upload sweep + F7 polish, 5 commits)
 
