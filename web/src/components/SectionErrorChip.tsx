@@ -55,28 +55,19 @@
  * :file:`web/tests/app/fight-events-page.test.tsx` (the chip is
  * passed as a delegate).
  */
-import React from "react";
+import { SECTION_ERROR_CHIP_STYLE } from "@/shared/styles";
 
 export interface SectionErrorChipProps {
   testid: string;
   message: string;
 }
 
-// Required for the React.CSSProperties type annotation below
-// (mirrors web/src/components/PlayerSkillUsageFilter.tsx precedent).
-const CHIP_STYLE: React.CSSProperties = {
-  color: "var(--accent)",
-  fontSize: 14,
-  margin: 0,
-  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-};
-
 export function SectionErrorChip({
   testid,
   message,
 }: SectionErrorChipProps) {
   return (
-    <p role="alert" data-testid={testid} style={CHIP_STYLE}>
+    <p role="alert" data-testid={testid} style={SECTION_ERROR_CHIP_STYLE}>
       {message}
     </p>
   );

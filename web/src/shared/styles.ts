@@ -66,6 +66,19 @@ export const HEADING_STYLE: React.CSSProperties = {
   fontWeight: 600,
 };
 
+/** v0.10.26-pre plan 169: per-section error chip.
+ *  Centralises the accent-coloured ``<p>`` style previously
+ *  hardcoded inside ``web/src/components/SectionErrorChip.tsx``.
+ *  6 page.tsx sites share this constant (squads / skills / timeline /
+ *  playerTimeline / player-skill / player-skill-agents + the
+ *  pre-existing tab-level errors). */
+export const SECTION_ERROR_CHIP_STYLE: React.CSSProperties = {
+  color: "var(--accent)",
+  fontSize: 14,
+  margin: 0,
+  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+};
+
 /** Horizontal row of controls (buttons, selects, captions). */
 export const CONTROLS_ROW_STYLE: React.CSSProperties = {
   display: "flex",
