@@ -45,6 +45,20 @@ from gw2analytics_api.models import UPLOAD_STATUS_FAILED, OrmFight, Upload
 
 logger = logging.getLogger(__name__)
 
+# v0.10.26-pre plan 170: default batch size for the failed-upload
+# cleanup sweep. Operator-tunable at runtime via
+# ``STUCK_SWEEPER_FAILED_BATCH_SIZE`` (Settings.stuck_sweeper_failed_batch_size);
+# this module-level constant is the reference default for the
+# ``_sweep_failed_once`` Python signature so the helper stays
+# directly callable from pytest without going through ``get_settings()``
+# (the test fixture monkey-patches ``retention_days`` per case and
+# uses the constant for ``batch_size``). The literal ``1000`` is
+# duplicated between this constant and the Settings field default
+# to avoid the cyclic import the worker -> config dependency would
+# create if the Settings field read this constant directly; any
+# future change to the default MUST touch BOTH spots.
+_BATCH_DELETE_SIZE: int = 1000
+
 
 async def lifespan_stuck_upload_sweeper(
     session_factory: Callable[[], Session],
@@ -96,6 +110,7 @@ async def lifespan_stuck_upload_sweeper(
                     _sweep_failed_once,
                     session_factory,
                     settings.stuck_sweeper_failed_retention_days,
+                    settings.stuck_sweeper_failed_batch_size,
                 )
             except SQLAlchemyError:
                 logger.exception(
@@ -207,12 +222,12 @@ def _sweep_once(
 # fight row. The fold closes the window because Postgres plans the
 # DELETE-with-IN-subquery as a single anti-join over the FK index
 # -- the dependent check is re-applied per outer row at plan time.
-_BATCH_DELETE_SIZE = 1000
 
 
 def _sweep_failed_once(
     session_factory: Callable[[], Session],
     retention_days: int,
+    batch_size: int = _BATCH_DELETE_SIZE,
 ) -> int:
     """One failed-upload cleanup iteration. DB-blocking; called via
     ``asyncio.to_thread`` from :func:`lifespan_stuck_upload_sweeper`.
@@ -248,7 +263,7 @@ def _sweep_failed_once(
                         .where(OrmFight.upload_id == Upload.id)
                         .exists(),
                     )
-                    .limit(_BATCH_DELETE_SIZE)
+                    .limit(batch_size)
                 )
             )
         )

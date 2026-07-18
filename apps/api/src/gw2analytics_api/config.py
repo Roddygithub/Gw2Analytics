@@ -148,6 +148,27 @@ class Settings(BaseSettings):
         validation_alias="STUCK_SWEEPER_FAILED_RETENTION_DAYS",
         ge=1,
     )
+    # v0.10.26-pre plan 170 follower: operator-tunable batch size for
+    # the failed-upload cleanup sweep. Default 1000 (matches the prior
+    # module-level _BATCH_DELETE_SIZE constant in
+    # ``gw2analytics_api.workers.stuck_upload_sweeper`` -- the literal
+    # is duplicated between the two on purpose to avoid the cyclic
+    # import the worker -> config dependency would create if this
+    # Settings field read the constant directly). Floor at 10 so an
+    # operator typo of 0 cannot silently become a per-row DELETE
+    # (which would re-introduce the FK lock surface this sweep was
+    # designed to amortize); ceiling at 100_000 so a future tuning
+    # cannot accidentally pin a multi-minute transaction. Operators
+    # setting tight sweep intervals (e.g. STUCK_SWEEPER_INTERVAL_S=30s)
+    # should NOT raise this proportionally -- a 1000-row batch per
+    # tick is the empirical sweet spot across the v0.10.26-pre
+    # benchmark runs.
+    stuck_sweeper_failed_batch_size: int = Field(
+        default=1000,
+        validation_alias="STUCK_SWEEPER_FAILED_BATCH_SIZE",
+        ge=10,
+        le=100_000,
+    )
     # v0.10.25: hard cap on the compressed ``.zevtc`` upload body.
     # Real WvW logs are ~5-40 MB compressed; the cap gives headroom
     # for the largest known files while preventing OOM from malicious

@@ -351,3 +351,96 @@ def test_failed_sweep_skips_fresh_collisions(
     assert upload_after is not None, (
         "fresh collision inside retention window must NOT be deleted"
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.10.26-pre plan 170 follower: operator-tunable batch size.
+#
+# Settings.stuck_sweeper_failed_batch_size (env STUCK_SWEEPER_FAILED_BATCH_SIZE,
+# default 1000, ge=10, le=100_000) threads through lifespan_stuck_upload_sweeper
+# into _sweep_failed_once(session_factory, retention_days, batch_size). The
+# default module-level _BATCH_DELETE_SIZE (1000) is the helper's Python
+# signature default so direct-from-pytest callers (this file's 5 prior tests)
+# stay backward-compatible. This 6th test exercises the threading: seed 3
+# eligible rows, sweep with batch_size=2, assert exactly 2 deleted + 1
+# survivor, then sweep again with the default to confirm the survivor IS
+# picked up on the next tick.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _seed_three_eligible_collisions() -> list[uuid.UUID]:
+    """Seed 3 stale collision rows (no dependents, same error signature).
+    All three would be eligible for the default sweep in a single tick;
+    passing batch_size=2 should leave the 3rd for a subsequent tick.
+    """
+    session = get_sessionmaker()()
+    ids: list[uuid.UUID] = []
+    for i in range(3):
+        upload = Upload(
+            id=uuid.uuid4(),
+            sha256=f"batch-{i}-{uuid.uuid4().hex[:16]}",
+            original_filename=f"batch{i}.zevtc",
+            size_bytes=4096,
+            status=UPLOAD_STATUS_FAILED,
+            uploaded_at=datetime.now(UTC) - timedelta(days=91),
+            parser_version="0.5.0",
+            error_message=f"Duplicate fight: batch-{i}-hash...",
+        )
+        session.add(upload)
+        ids.append(upload.id)
+    session.commit()
+    session.close()
+    return ids
+
+
+def test_failed_sweep_respects_explicit_batch_size_override(
+    _seed_three_eligible_collisions: list[uuid.UUID],
+) -> None:
+    """Operator-tunable batch size threading: 3 eligible rows seeded,
+    sweep with batch_size=2 deletes exactly 2, the 3rd survives until
+    the next sweep (with default batch_size) cleans it up. Verifies
+    both the per-tick LIMIT cap AND the across-tick completeness
+    invariant (no row is permanently stranded by the batch cap).
+    """
+    [id_a, id_b, id_c] = _seed_three_eligible_collisions
+    session_factory = get_sessionmaker()
+
+    # Tick 1: explicit batch_size=2 should hard-delete exactly 2 of 3.
+    deleted_first = _sweep_failed_once(
+        session_factory,
+        retention_days=90,
+        batch_size=2,
+    )
+    assert deleted_first == 2, (
+        f"batch_size=2 must cap the per-tick delete at 2; got {deleted_first}"
+    )
+
+    # Exactly 1 of the 3 must survive (the 3rd). We can't predict
+    # WHICH one Postgres returns from the DELETE-with-IN-subquery
+    # (the IN subquery order is implementation-defined), so we assert
+    # set membership: exactly one of {a, b, c} survives.
+    survivors = [
+        uid
+        for uid in (id_a, id_b, id_c)
+        if _get_upload(uid) is not None
+    ]
+    assert len(survivors) == 1, (
+        f"exactly 1 row must survive a batch_size=2 sweep of 3 rows; "
+        f"survivors={survivors}"
+    )
+
+    # Tick 2: default batch_size (the module-level _BATCH_DELETE_SIZE
+    # constant) must clean up the survivor — verifies the across-tick
+    # completeness invariant (no permanent stranding).
+    deleted_second = _sweep_failed_once(session_factory, retention_days=90)
+    assert deleted_second == 1, (
+        f"followup default-batch sweep must delete the surviving row; "
+        f"got {deleted_second}"
+    )
+
+    # All 3 seeded rows are now hard-deleted.
+    for uid in (id_a, id_b, id_c):
+        assert _get_upload(uid) is None, (
+            f"row {uid} must be hard-deleted after the 2nd sweep tick"
+        )
