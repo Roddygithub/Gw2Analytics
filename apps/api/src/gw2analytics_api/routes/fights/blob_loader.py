@@ -43,6 +43,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import OrderedDict
+from typing import Final
 
 from fastapi import HTTPException, status
 from minio.error import S3Error
@@ -91,7 +92,13 @@ def _get_parsed_events_lock(blob_uri: str) -> threading.Lock:
 # 24 hours (86_400_000 ms) — this avoids breaking synthetic test
 # fixtures (which use small time_ms values like 0, 500, 1500) while
 # fixing the production crash on real arcdps logs.
-_ARCDPS_TIME_NORMALIZATION_THRESHOLD: int = 86_400_000  # 24h in ms
+_ARCDPS_TIME_NORMALIZATION_THRESHOLD: Final[int] = 86_400_000  # 24h in ms
+
+# Sentinel ceiling: arcdps writes -1 (cast to uint64 max ≈ 2^64-1)
+# for "unknown timestamp" events. Even after subtracting a real base
+# the result is still enormous and crashes aggregators. Events with
+# time_ms above this ceiling are treated as metadata (time_ms → 0).
+_SENTINEL_CEILING: Final[int] = 1 << 63  # 9_223_372_036_854_775_808
 
 
 def _cached_parse_events(blob_uri: str, gz_bytes: bytes) -> tuple[Event, ...]:
@@ -128,9 +135,40 @@ def _cached_parse_events(blob_uri: str, gz_bytes: bytes) -> tuple[Event, ...]:
         # test fixtures use small values (0, 500, 1500) and are NOT
         # normalized, preserving existing test expectations.
         if events:
-            base = min(e.time_ms for e in events)
-            if base >= _ARCDPS_TIME_NORMALIZATION_THRESHOLD:
-                events = tuple(e.model_copy(update={"time_ms": e.time_ms - base}) for e in events)
+            # Two independent fixes applied to the events stream:
+            #
+            # 1. SENTINEL NEUTRALIZATION (always active):
+            #    arcdps writes -1 (cast to uint64 max ≈ 2^64-1) for
+            #    "unknown timestamp" events.  These sentinel values
+            #    crash time-bucketed aggregators (EventWindowAggregator,
+            #    PerFightTimelineAggregator) by requesting quintillions
+            #    of buckets.  We clamp them to 0 unconditionally.
+            #
+            # 2. GETTICKCOUNT64 NORMALIZATION (conditional):
+            #    arcdps writes GetTickCount64() (ms since Windows boot)
+            #    as the time field.  For a PC up for days, this can be
+            #    in the billions.  We normalize to fight-relative ONLY
+            #    when the minimum real time_ms exceeds 24 hours, to
+            #    avoid breaking synthetic test fixtures.
+            has_sentinel = any(e.time_ms >= _SENTINEL_CEILING for e in events)
+            base = min(
+                (e.time_ms for e in events if 0 < e.time_ms < _SENTINEL_CEILING),
+                default=0,
+            )
+            needs_tick_normalization = base >= _ARCDPS_TIME_NORMALIZATION_THRESHOLD
+            if has_sentinel or needs_tick_normalization:
+                events = tuple(
+                    e.model_copy(
+                        update={
+                            "time_ms": (
+                                (e.time_ms - base)
+                                if (needs_tick_normalization and 0 < e.time_ms < _SENTINEL_CEILING)
+                                else 0
+                            )
+                        }
+                    )
+                    for e in events
+                )
         # LRU eviction: remove oldest entry if at capacity.
         # NOTE: we intentionally do NOT clean up the per-URI lock for
         # the evicted entry. Removing it creates a race where a thread
