@@ -1,0 +1,59 @@
+/* PlayerSearchBar styles (CSS module).
+ *
+ * Migrated from React.CSSProperties inline styles (web/src/shared/styles.ts
+ * FORM_STYLE + INPUT_STYLE + BUTTON_STYLE + LABEL_STYLE) to a CSS module
+ * to fix the SSR/CSR hydration mismatch (plan 163).
+ *
+ * Root cause of the prior hydration error: React's inline-style renderer
+ * expands CSS shorthand properties (e.g. ``border: '1px solid var(--border)'``)
+ * into longhand properties (``borderWidth``, ``borderStyle``,
+ * ``borderColor``) on the client DOM, while the server-rendered HTML keeps
+ * the shorthand. React's hydration reconciliation then sees a mismatch and
+ * logs a hydration warning to the console + rerenders the affected subtree.
+ *
+ * CSS modules are server-rendered as plain class-name selectors; the styles
+ * are applied via the stylesheet (no inline-style expansion), so SSR and
+ * CSR render identically.
+ *
+ * The disabled-state styling for the search button is handled via the
+ * native ``:disabled`` pseudo-class (no inline ``cursor: not-allowed`` or
+ * ``opacity: 0.5`` overrides needed).
+ */
+
+.form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--foreground);
+  opacity: 0.7;
+}
+
+.input {
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  min-width: 200px;
+}
+
+.button {
+  padding: 4px 12px;
+  font-size: 13px;
+  background: var(--accent);
+  color: var(--background);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

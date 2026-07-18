@@ -270,7 +270,7 @@ def _aggregate_per_target_rollup(
     # "caller pre-filters events to event_cls" contract. Surfaces contract
     # violations at the helper boundary rather than letting the downstream
     # aggregator silently miscount non-matching event subclasses.
-    assert all(isinstance(e, event_cls) for e in events), (
+    assert all(isinstance(e, event_cls) for e in events), (  # noqa: S101
         f"_aggregate_per_target_rollup: caller must pre-filter events to "
         f"{event_cls.__name__}; got mixed event stream"
     )

@@ -4,13 +4,32 @@
  * Small Client Component for the global player search bar.
  *
  * Lives in the root layout's header bar (above every page) so
- * the analyst can pivot to a player profile from anywhere on the
- * site without first navigating to ``/players``. The submit
+ * the analyst can pivot to a player profile from anywhere on
+ * the site without first navigating to ``/players``. The submit
  * handler does a client-side ``router.push`` to
  * ``/players/${encodeURIComponent(raw.trim())}`` so the
  * gateway's ``:path`` converter receives the URL-encoded form
  * (the route accepts ``/``-bearing account names; the input
  * itself accepts any trimmed string).
+ *
+ * v0.10.28 plan 163 migration: dropped the React.CSSProperties
+ * inline-style objects (FORM_STYLE / INPUT_STYLE / BUTTON_STYLE /
+ * LABEL_STYLE imports from ``@/shared/styles``) in favour of
+ * a CSS module. Root cause of the prior SSR/CSR hydration
+ * mismatch was React's inline-style renderer expanding CSS
+ * shorthand properties (e.g. ``border: '1px solid var(--border)'``)
+ * into longhand properties (``borderWidth`` + ``borderStyle``
+ * + ``borderColor``) on the client DOM while the server-rendered
+ * HTML kept the shorthand -- React's hydration reconciliation
+ * then saw the mismatch and logged a hydration warning.
+ * CSS modules are server-rendered as plain class-name selectors;
+ * the styles are applied via the stylesheet (no inline-style
+ * expansion), so SSR and CSR render identically.
+ *
+ * The disabled-state styling for the search button is now
+ * handled via the native ``:disabled`` pseudo-class in the
+ * CSS module (no inline ``cursor: not-allowed`` or
+ * ``opacity: 0.5`` overrides needed at the JSX level).
  *
  * Why a global header bar (vs a /players-scoped search only)
  * ==========================================================
@@ -41,17 +60,8 @@ import React from "react";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  BUTTON_STYLE,
-  FORM_STYLE,
-  INPUT_STYLE,
-} from "@/shared/styles";
 
-const LABEL_STYLE: React.CSSProperties = {
-  fontSize: 12,
-  color: "var(--foreground)",
-  opacity: 0.7,
-};
+import styles from "./PlayerSearchBar.module.css";
 
 export function PlayerSearchBar() {
   const router = useRouter();
@@ -69,12 +79,9 @@ export function PlayerSearchBar() {
       onSubmit={onSubmit}
       role="search"
       data-testid="player-search-form"
-      style={FORM_STYLE}
+      className={styles.form}
     >
-      <label
-        htmlFor="player-search"
-        style={LABEL_STYLE}
-      >
+      <label htmlFor="player-search" className={styles.label}>
         Player
       </label>
       <input
@@ -84,17 +91,9 @@ export function PlayerSearchBar() {
         placeholder=":account.1234"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        style={INPUT_STYLE}
+        className={styles.input}
       />
-      <button
-        type="submit"
-        disabled={!value.trim()}
-        style={{
-          ...BUTTON_STYLE,
-          cursor: value.trim() ? "pointer" : "not-allowed",
-          opacity: value.trim() ? 1 : 0.5,
-        }}
-      >
+      <button type="submit" disabled={!value.trim()} className={styles.button}>
         Search
       </button>
     </form>
