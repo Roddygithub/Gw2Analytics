@@ -85,3 +85,64 @@ The plan 160 contract has the client polling `GET /uploads/{id}` to discover a `
 - Sweeper extension: ~40 LoC Python (select + delete + metrics counter).
 - Pytest: ~60 LoC (3-4 cases covering empty/stale/fresh/non-collision).
 - Total: ~100 LoC + 0 LoC Alembic.
+
+## Implementation refinement during cycle (commit bce9675)
+
+The v0.10.26 cycle refined this design during implementation because the ground-truth FK relationships discovered during the pre-implementation audit constrained the option matrix.
+
+### FK cascade 4-deep discovery
+
+The pre-implementation reader of this plan assumed the simple ORM cascade via `Upload.fight` (`back_populates="upload"`, `cascade="all, delete-orphan"`). The actual ORM + DB relationship is deeper:
+
+- `OrmFight.upload_id`: `ForeignKey("uploads.id", ondelete="CASCADE")` — DB-level CASCADE deletes dependent `OrmFight` rows when the parent `Upload` row is deleted.
+- `OrmFight` → `OrmFightAgent` / `OrmFightSkill` / `OrmFightPlayerSummary` — 3 downstream FKs each with `ondelete="CASCADE"`.
+
+A naive `DELETE` of an `Upload` row would orphan 4 levels of analytical summary data (fights + per-fight agents + per-fight skills + per-player summaries).
+
+### Option matrix reinterpretation
+
+The 4 candidate options from this plan's "Optional Alembic migration" section were evaluated against the FK reality:
+
+| Option | Status | Reason |
+| --- | --- | --- |
+| (a) hard DELETE | not viable | Cascades 4 levels of analytical summary data |
+| (b) soft delete via `status` field flip | not viable | Blocked by `CheckConstraint("status IN ('pending', 'completed', 'failed')", name="ck_uploads_status")` — flipping status to `"archived"` violates the CHECK |
+| (c) hard DELETE with `NOT EXISTS` subquery guard | chosen | Safe + no schema change + atomic at the SQL level |
+| (d) archival table | not viable | Requires Alembic migration (banned for v0.10.26-pre cycle per plans/160) |
+
+Option (c) was implemented via a TOCTOU-safe single-statement DELETE WHERE id IN (SELECT ... AND NOT EXISTS (...) LIMIT 1000) — see `apps/api/src/gw2analytics_api/workers/stuck_upload_sweeper.py::_sweep_failed_once` for the canonical implementation reference.
+
+### LIKE signature correction: `'Duplicate fight:%'` (not `'duplicate fight%'`)
+
+The plan's "Implementation outline" SQL example used `'duplicate fight%'` (lowercase, no colon). The actual implementation uses `error_message.like("Duplicate fight:%")` (capital D + colon + percent) because the plan/160 idempotency layer writes the canonical collision string as:
+
+```
+error_message = "Duplicate fight: <canonical_fight_id>"
+```
+
+Any future correction in plan/160's error-message string format must be mirrored here.
+
+### Test coverage expanded from 3 to 5 cases
+
+The plan's "Acceptance criterion" specifies 3 pytest cases (empty table / 1 stale / 1 fresh). The actual implementation shipped 5 cases to lock down all 5 logical branches of the helper:
+
+1. no-eligible rows (huge retention window) → 0 deletes
+2. stale collision without dependents → 1 delete (happy path)
+3. stale collision WITH dependent `OrmFight` → NOT deleted (safety guard verification)
+4. stale non-collision failure → NOT deleted (LIKE clause verification)
+5. fresh collision (inside retention window) → NOT deleted (cutoff gate verification)
+
+UUID-keyed assertions sidestep count brittleness against pre-existing test DB rows.
+
+### New config + metrics instrumentation
+
+- `Settings.stuck_sweeper_failed_retention_days` — default 90 days, env `STUCK_SWEEPER_FAILED_RETENTION_DAYS`, Pydantic `ge=1` floor (an operator typo of 0 cannot silently become "delete immediately").
+- `STUCK_SWEEPER_FAILED_SWEPT` Prometheus counter — `stuck_sweeper_failed_swept_total` cumulative count of hard-deleted rows.
+
+### Forward-blockers (rider-next-cycle)
+
+The implementation shipped 3 reviewer-flagged NICE-to-HAVE followups that ride next cycle:
+
+- **`_BATCH_DELETE_SIZE = 1000` magic constant** (reviewer's NICE-to-HAVE on the F5 sweeper commit). Thread through `Settings.stuck_sweeper_failed_batch_size` (env `STUCK_SWEEPER_FAILED_BATCH_SIZE`, default 1000, `ge=10`, `le=100_000`).
+- **`STUCK_SWEEPER_ITERATION_DURATION` conflation** (reviewer's NICE-to-HAVE). Split into `_pending_` + `_failed_` per-sweep histograms so operators can attribute SLA breaches per sweep.
+- **CHANGELOG `### Fixed` subsection** (v0.10.26 release reviewer's NICE-to-HAVE). The 2 `fix(web)` commits (SectionErrorChip import placement + comment trim + explicit React import to SectionErrorChip) shipped inside their feature `### Added` blocks; a future retro-split could move them into a dedicated `### Fixed` block under v0.10.26.
