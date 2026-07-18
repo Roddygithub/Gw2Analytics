@@ -114,6 +114,15 @@ from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 # parallel of :class:`EventWindowAggregator`'s bound.
 _MIN_WINDOW_S: Final[int] = 1
 
+# Maximum number of buckets before the aggregator fails fast. Strict
+# parallel of :class:`EventWindowAggregator`'s ``_MAX_BUCKETS`` guard:
+# without it, non-normalized ``time_ms`` (e.g. a parser that leaks raw
+# arcdps GetTickCount64 values in the billions/quintillions) makes the
+# zero-fill ``range(last_bucket_index + 1)`` below allocate an
+# effectively unbounded list -> the request hangs / OOMs the worker.
+# 50_000 buckets = a 2-hour raid at 1s resolution with generous margin.
+_MAX_BUCKETS: Final[int] = 50_000
+
 
 @dataclass(slots=True)
 class _BucketStats:
@@ -215,6 +224,23 @@ class PerFightTimelineAggregator:
         expected_healing = sum(b.healing for b in buckets.values())
         expected_strip = sum(b.buff_removal for b in buckets.values())
         last_bucket_index = max(buckets.keys(), default=-1)
+
+        # Safety cap (mirrors EventWindowAggregator): if the last bucket
+        # index blows past _MAX_BUCKETS the time_ms values are almost
+        # certainly un-normalized (raw arcdps timestamps). Fail fast with
+        # a clear message instead of hanging the request on a multi-quadrillion
+        # zero-fill loop. Surfaced by the 2026-07 E2E on a mis-parsed fixture
+        # (time_ms leaked as ~1.4e19); /events already guarded, /timeline did not.
+        num_buckets = last_bucket_index + 1
+        if num_buckets > _MAX_BUCKETS:
+            msg = (
+                f"PerFightTimelineAggregator would produce {num_buckets} buckets "
+                f"(max {_MAX_BUCKETS}); time_ms values may not be normalized "
+                f"to fight-relative (last time_ms={last_bucket_index * window_ms}, "
+                f"window_s={window_s}). Consider checking the parser's time_ms "
+                f"normalization."
+            )
+            raise ValueError(msg)
 
         rows: list[PerFightTimelineRow] = []
         for idx in range(last_bucket_index + 1):

@@ -273,3 +273,16 @@ class TestPerFightTimelineAggregator:
         assert rows[2].total_buff_removal == 0
         assert rows[3].total_healing == 50
         assert rows[3].total_buff_removal == 5
+
+
+def test_aggregate_fails_fast_on_non_normalized_time_ms() -> None:
+    """Regression (2026-07 E2E, plan 159): a mis-parsed fixture leaked a raw
+    arcdps timestamp (~1.4e19) as ``time_ms``. Without the ``_MAX_BUCKETS``
+    guard the zero-fill ``range(last_bucket_index + 1)`` tried to build
+    ~2.9e15 buckets and hung the /timeline request. The aggregator must
+    fail fast with a ValueError (mirroring EventWindowAggregator) instead.
+    """
+    with pytest.raises(ValueError, match="would produce"):
+        PerFightTimelineAggregator().aggregate(
+            [_damage(time_ms=14_555_633_995_661_440_000, damage=1)],
+        )
