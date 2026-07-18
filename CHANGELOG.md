@@ -139,6 +139,61 @@ Closes the upload-size audit gap from the v0.10.25 hardening commit. The audit f
 - **Polish histogram NICE-to-HAVEs** (from `c11fc5d` review): (1) refactor `_observe_sweep_durations` to return `tuple[float, float, float]` instead of relying on `_sum.get()` private API for the test assertions, (2) drop the YAGNI `pending_start` parameter (3-param signature), (3) mock the histograms in the pytest case for tighter defense against future concurrent test runners.
 - **Tighten upload-size docstring** (from `8728bd2` review): reference `web/e2e/README.md` for the Layer 1 (Content-Length) eventual E2E coverage + drop the inlined 40-line httpx limitation explanation (the test module's rationale for skipping Layer 1 + Layer 2 dedicated tests is verbose; a tighter version could be ~15 lines).
 
+## [0.10.27] - 2026-07-18
+
+The v0.10.27 release ships the F-series polish queue (plan 170 follower + F8 audit re-run leftover + F7 polish), per-sweep histogram attribution (plans/170 forward-blocker #1), CHANGELOG retro-split (plans/170 forward-blocker #2), the upload-size defense-in-depth test coverage + the critical Caddyfile `100MB` -> `100MiB` bug fix, plus 3 polish commits. Tag moves from `v0.10.27-pre` (`db643e8`) -> `v0.10.27` at this commit. **14 commits** total since the v0.10.26 release tag (`ab48cda`).
+
+### Added (F-series polish -- operator-tunable failed-upload sweep + F7 polish, 5 commits)
+
+The F-series followups to the v0.10.26 F5 sweeper commit. Closes the F5 reviewer NICE-to-HAVE on the `_BATCH_DELETE_SIZE = 1000` magic constant + the F6 audit re-run leftover for files that landed after the original audit.
+
+- **`stuck_sweeper_failed_batch_size` Settings field** (`12d3fdf`, `apps/api/src/gw2analytics_api/config.py`) -- operator-tunable batch size for the v0.10.26-pre plan 170 failed-upload cleanup sweep. Env `STUCK_SWEEPER_FAILED_BATCH_SIZE`, default 1000, Pydantic `ge=100` (the F7-polish raise from `ge=10`) + `le=100_000`.
+- **`_sweep_failed_once` helper signature threaded with `batch_size: int = _BATCH_DELETE_SIZE`** (`12d3fdf`) -- default-arg injection keeps the existing 5 pytest cases backward-compatible. Lifespan ticker passes `settings.stuck_sweeper_failed_batch_size` at every tick.
+- **F8 audit re-run leftover** (`0e6d20a`) -- 7 files (4 Next.js error pages + 2 page.tsx + 1 styles helper) gained `import React from "react";`. Defensive regex collapse verified zero files needed cosmetic fix.
+- **F7 polish** (`6e27c19`) -- raised floor `ge=10` -> `ge=100` + try/finally teardown on the new batch_size override test.
+- **plans/170 implementation refinement docs** (`b0989f6`) + **F-series docs close-out** (`f1a06f8`) -- CHANGELOG [Unreleased] F-series subsection + plans/170 "Resolved during cycle" section.
+
+### Added (Per-sweep histogram attribution, 1 commit)
+
+Closes plans/170 forward-blocker #1.
+
+- **2 NEW per-sweep histograms + pure observation helper** (`c11fc5d`): `STUCK_SWEEPER_PENDING_ITERATION_DURATION` + `STUCK_SWEEPER_FAILED_ITERATION_DURATION`. `STUCK_SWEEPER_ITERATION_DURATION` kept for backward-compat. NEW `_observe_sweep_durations(...)` pure helper extracted from the lifespan ticker so the per-sweep attribution is unit-testable. 1 NEW pytest case `test_observe_sweep_durations_helper`.
+- **Histogram polish** (`a3ef953`) -- refactored the helper to return `tuple[float, float, float]` (eliminating the prometheus_client private `_sum.get()` dependency) + dropped the YAGNI `pending_start` parameter (3-param signature) + added `unittest.mock.patch` on the 3 histogram objects in the pytest case to restore the implicit `.observe()` side-effect coverage the prior `_sum.get()` assertion provided.
+
+### Docs (CHANGELOG retro-split, 1 commit)
+
+Closes plans/170 forward-blocker #2.
+
+- **NEW `### Fixed (SectionErrorChip followups -- review-cycle fixups, retro-split)` subsection** (`166a467`) under v0.10.26 listing commit `4340feb` (explicit React import to SectionErrorChip, closes MUST-FIX #1 latent type error) + commit `422e256` (import placement + comment trim, NICE-TO-HAVE).
+
+### Added (Upload-size defense-in-depth coverage, 2 commits)
+
+Closes the upload-size audit gap. The audit found that the 3 layers of defense-in-depth in `apps/api/src/gw2analytics_api/routes/uploads.py::create_upload` + the Caddyfile proxy layer had **ZERO dedicated pytest cases**.
+
+- **NEW `apps/api/tests/test_upload_size_limits.py`** (`8728bd2`) with 3 tests: `test_oversized_body_returns_413` (Layer 3 happy path) + `test_undersized_body_with_small_cap_succeeds` (Layer 3 boundary) + `test_caddyfile_request_body_limit_matches_api_cap` (drift guard via regex + bytes math).
+- **Caddyfile `100MB` -> `100MiB` fix + brittle assertion drop** (`f6351b5`) -- **CRITICAL BUG FIX**: the original Caddyfile had `100MB` (decimal = 100,000,000 bytes) but the API's `MAX_UPLOAD_SIZE_BYTES` default is `100 * 1024 * 1024` = 104,857,600 bytes (binary). The 4.85% mismatch created a proxy-layer false-reject window for valid `.zevtc` uploads between 100,000,000 and 104,857,600 bytes. Changed to `100MiB` (binary) to match the API cap exactly.
+
+### Docs (v0.10.27-pre CHANGELOG bump + polish, 4 commits)
+
+- **`db643e8`** -- `v0.10.27-pre` CHANGELOG section listing the cycle's 9 substantive commits at the time + Forward-blockers subsection.
+- **`f1117bd`** -- tightened v0.10.27-pre intro wording for review precision (explicit "4 reviewer-flagged items closed" enumeration + cross-references to the closing commit hashes).
+- **`c0a8e7f`** -- tightened the upload-size test docstring (45 -> 24 lines, web/e2e/README.md cross-reference for the real-stack E2E coverage of the 4th defense layer).
+- **`d72137a`** -- restored the forward-looking note in the upload-size docstring + resolved the 100MiB duplication with the test docstring (deferred to the more-specific location).
+
+### Validation
+
+- `ruff check libs apps`: GREEN (0 violations; F811 `BarrierEvent` dedup invariant preserved across the cycle).
+- `pnpm tsc --noEmit --skipLibCheck` on `web/`: GREEN.
+- `pnpm vitest run` on `web/`: GREEN (carries forward the v0.10.26 baseline; no regression from the F8 audit re-run leftover + the cosmetic polish).
+- `uv run pytest` on `apps/api/`: unable to run in sandbox (no Postgres) but the test code is structurally sound (the 3 upload-size tests + the new `_observe_sweep_durations` helper test follow existing patterns).
+
+### Forward-blockers (rider-next-cycle)
+
+All 4 v0.10.26 reviewer NICE-to-HAVEs closed by this cycle (see v0.10.27-pre section for the closing commits). Next cycle focus areas:
+- Wave 6 PART-2 SCAFFOLD-getter plumbing wire-up (when Phase 6 v2 parser-stream lands)
+- New operator-facing tuning surfaced by the v0.10.26 review-cycle audit
+- E2E tooling expansions (per-fight timeline guard fix from plan 159 already shipped in v0.10.26)
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
