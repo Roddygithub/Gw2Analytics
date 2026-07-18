@@ -84,6 +84,7 @@ import { EventWindowsChart } from "@/components/EventWindowsChart";
 import { SkillUsageTable } from "@/components/SkillUsageTable";
 import { PlayerSkillUsageTable } from "@/components/PlayerSkillUsageTable";
 import { PlayerSkillUsageFilter } from "@/components/PlayerSkillUsageFilter";
+import { LazyTabbedTimelineSection } from "@/components/LazyTabbedTimelineSection";
 import { PerFightTimelineSection } from "@/components/PerFightTimelineSection";
 import { ReplayPlayer } from "@/components/ReplayPlayer";
 // v0.10.26-pre plan 169 commit #1: per-section error indicator.
@@ -312,7 +313,6 @@ export default async function FightEventsPage({
   let squads: import("@/lib/api").FightSquads | null = null;
   let skills: import("@/lib/api").FightSkills | null = null;
   let timeline: FightTimeline | null = null;
-  let playerTimeline: FightPlayerTimeline | null = null;
   // ``fetchError`` is the BLOCKING fetch failure (events endpoint:
   // the per-target roll-ups + per-bucket event_windows all derive
   // from the same blob upstream, so a missing events call means
@@ -346,7 +346,6 @@ export default async function FightEventsPage({
     // construction), so the cache key + the hit ratio are
     // identical to the inline call it replaced.
     fetchReplayTimeline(id, API_BASE_URL, { windowS }),
-    fetchCached<FightPlayerTimeline>(`${base}/timeline/players${qs}`),
   ]);
   if (results[0].status === "fulfilled") {
     summary = results[0].value;
@@ -367,11 +366,6 @@ export default async function FightEventsPage({
     timeline = results[3].value;
   } else {
     sectionErrors.timeline = formatApiError(results[3].reason);
-  }
-  if (results[4].status === "fulfilled") {
-    playerTimeline = results[4].value;
-  } else {
-    sectionErrors.playerTimeline = formatApiError(results[4].reason);
   }
 
   // Tour 4 v0.10.13 plan 044 (Skill build analyser): per-player
@@ -1083,13 +1077,11 @@ export default async function FightEventsPage({
           message={`Failed to load timeline: ${sectionErrors.timeline}`}
         />
       )}
-      {sectionErrors.playerTimeline && (
-        <SectionErrorChip
-          testid="player-timeline-section-error"
-          message={`Failed to load per-player timeline: ${sectionErrors.playerTimeline}`}
+        <LazyTabbedTimelineSection
+          timeline={timeline}
+          fightId={id}
+          windowS={windowS}
         />
-      )}
-      <PerFightTimelineSection timeline={timeline} playerTimeline={playerTimeline} />
     </main>
   );
 }
