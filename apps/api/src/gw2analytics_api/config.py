@@ -154,19 +154,22 @@ class Settings(BaseSettings):
     # ``gw2analytics_api.workers.stuck_upload_sweeper`` -- the literal
     # is duplicated between the two on purpose to avoid the cyclic
     # import the worker -> config dependency would create if this
-    # Settings field read the constant directly). Floor at 10 so an
-    # operator typo of 0 cannot silently become a per-row DELETE
-    # (which would re-introduce the FK lock surface this sweep was
-    # designed to amortize); ceiling at 100_000 so a future tuning
-    # cannot accidentally pin a multi-minute transaction. Operators
-    # setting tight sweep intervals (e.g. STUCK_SWEEPER_INTERVAL_S=30s)
-    # should NOT raise this proportionally -- a 1000-row batch per
-    # tick is the empirical sweet spot across the v0.10.26-pre
-    # benchmark runs.
+    # Settings field read the constant directly). Floor at 100 so the
+    # "this is a batch amortizer" invariant holds -- batches below ~100
+    # rows barely amortize the FK lock costs and approach per-row
+    # DELETE territory (the very surface this sweep was designed to
+    # fix); 100 rows/tick preserves a 1-2 orders-of-magnitude cost
+    # reduction over a per-row DELETE even at the floor. Ceiling at
+    # 100_000 so a future tuning cannot accidentally pin a
+    # multi-minute transaction that holds the FK lock for the entire
+    # batch. Operators setting tight sweep intervals (e.g.
+    # STUCK_SWEEPER_INTERVAL_S=30s) should NOT raise this
+    # proportionally -- 1000 rows/tick is the empirical sweet spot
+    # across the v0.10.26-pre benchmark runs.
     stuck_sweeper_failed_batch_size: int = Field(
         default=1000,
         validation_alias="STUCK_SWEEPER_FAILED_BATCH_SIZE",
-        ge=10,
+        ge=100,
         le=100_000,
     )
     # v0.10.25: hard cap on the compressed ``.zevtc`` upload body.

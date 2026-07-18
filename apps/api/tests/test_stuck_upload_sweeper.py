@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (
@@ -405,42 +405,66 @@ def test_failed_sweep_respects_explicit_batch_size_override(
     """
     [id_a, id_b, id_c] = _seed_three_eligible_collisions
     session_factory = get_sessionmaker()
-
-    # Tick 1: explicit batch_size=2 should hard-delete exactly 2 of 3.
-    deleted_first = _sweep_failed_once(
-        session_factory,
-        retention_days=90,
-        batch_size=2,
-    )
-    assert deleted_first == 2, (
-        f"batch_size=2 must cap the per-tick delete at 2; got {deleted_first}"
-    )
-
-    # Exactly 1 of the 3 must survive (the 3rd). We can't predict
-    # WHICH one Postgres returns from the DELETE-with-IN-subquery
-    # (the IN subquery order is implementation-defined), so we assert
-    # set membership: exactly one of {a, b, c} survives.
-    survivors = [
-        uid
-        for uid in (id_a, id_b, id_c)
-        if _get_upload(uid) is not None
-    ]
-    assert len(survivors) == 1, (
-        f"exactly 1 row must survive a batch_size=2 sweep of 3 rows; "
-        f"survivors={survivors}"
-    )
-
-    # Tick 2: default batch_size (the module-level _BATCH_DELETE_SIZE
-    # constant) must clean up the survivor — verifies the across-tick
-    # completeness invariant (no permanent stranding).
-    deleted_second = _sweep_failed_once(session_factory, retention_days=90)
-    assert deleted_second == 1, (
-        f"followup default-batch sweep must delete the surviving row; "
-        f"got {deleted_second}"
-    )
-
-    # All 3 seeded rows are now hard-deleted.
-    for uid in (id_a, id_b, id_c):
-        assert _get_upload(uid) is None, (
-            f"row {uid} must be hard-deleted after the 2nd sweep tick"
+    # Teardown guard: if any assertion fails between the seed and the
+    # final sweep tick, the 3 seeded rows would otherwise leak into
+    # the shared test DB and pollute downstream tests (the sweep is
+    # global -- any other test seeding sha256 collisions would race
+    # against the leaked rows). The finally block hard-deletes any
+    # seeded row still present, regardless of which sweep tick
+    # failed. On the happy path the block is a no-op (all 3 are
+    # already deleted by the 2nd sweep tick).
+    try:
+        # Tick 1: explicit batch_size=2 should hard-delete exactly 2 of 3.
+        deleted_first = _sweep_failed_once(
+            session_factory,
+            retention_days=90,
+            batch_size=2,
         )
+        assert deleted_first == 2, (
+            f"batch_size=2 must cap the per-tick delete at 2; got {deleted_first}"
+        )
+
+        # Exactly 1 of the 3 must survive (the 3rd). We can't predict
+        # WHICH one Postgres returns from the DELETE-with-IN-subquery
+        # (the IN subquery order is implementation-defined), so we assert
+        # set membership: exactly one of {a, b, c} survives.
+        survivors = [
+            uid
+            for uid in (id_a, id_b, id_c)
+            if _get_upload(uid) is not None
+        ]
+        assert len(survivors) == 1, (
+            f"exactly 1 row must survive a batch_size=2 sweep of 3 rows; "
+            f"survivors={survivors}"
+        )
+
+        # Tick 2: default batch_size (the module-level _BATCH_DELETE_SIZE
+        # constant) must clean up the survivor — verifies the across-tick
+        # completeness invariant (no permanent stranding).
+        deleted_second = _sweep_failed_once(session_factory, retention_days=90)
+        assert deleted_second == 1, (
+            f"followup default-batch sweep must delete the surviving row; "
+            f"got {deleted_second}"
+        )
+
+        # All 3 seeded rows are now hard-deleted.
+        for uid in (id_a, id_b, id_c):
+            assert _get_upload(uid) is None, (
+                f"row {uid} must be hard-deleted after the 2nd sweep tick"
+            )
+    finally:
+        # Hard-delete any seeded row still present. The DELETE is a
+        # no-op for already-deleted rows (rowcount=0), so the finally
+        # block is idempotent against the happy path AND partial
+        # failures (e.g. assertion failure after tick 1 leaves the
+        # survivor behind).
+        teardown_session = get_sessionmaker()()
+        try:
+            for uid in (id_a, id_b, id_c):
+                if _get_upload(uid) is not None:
+                    teardown_session.execute(
+                        delete(Upload).where(Upload.id == uid)
+                    )
+            teardown_session.commit()
+        finally:
+            teardown_session.close()
