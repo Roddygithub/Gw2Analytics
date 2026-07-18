@@ -81,6 +81,8 @@ Thumbs.db
 #   --reporter=html``).
 web/test-results/
 web/playwright-report/
+# Real-stack E2E journey screenshots + diagnostics (web/e2e/user-journey.spec.ts).
+web/playwright-e2e-screenshots/
 
 # Visual-baseline diff artifacts (web/tests/e2e/visual-regression.spec.ts output).
 # Generated on failure (the spec's dimension-mismatch + diff step
