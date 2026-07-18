@@ -36,9 +36,11 @@ from sqlalchemy.orm import Session
 
 from gw2analytics_api.config import get_settings
 from gw2analytics_api.metrics import (
+    STUCK_SWEEPER_FAILED_ITERATION_DURATION,
     STUCK_SWEEPER_FAILED_SWEPT,
     STUCK_SWEEPER_ITERATION_DURATION,
     STUCK_SWEEPER_MARKED_FAILED,
+    STUCK_SWEEPER_PENDING_ITERATION_DURATION,
     UPLOADS_PENDING_COUNT,
 )
 from gw2analytics_api.models import UPLOAD_STATUS_FAILED, OrmFight, Upload
@@ -58,6 +60,48 @@ logger = logging.getLogger(__name__)
 # create if the Settings field read this constant directly; any
 # future change to the default MUST touch BOTH spots.
 _BATCH_DELETE_SIZE: int = 1000
+
+
+def _observe_sweep_durations(
+    iteration_start: float,
+    pending_start: float,
+    failed_start: float,
+    iteration_end: float,
+) -> None:
+    """Observe the 3 sweeper duration histograms in one call.
+
+    Pure helper extracted from :func:`lifespan_stuck_upload_sweeper`
+    so the per-sweep histogram attribution is unit-testable without
+    the asyncio loop / DB dependency. The 4 input timestamps come
+    from ``time.monotonic()`` captures at the iteration boundaries:
+
+    - ``iteration_start`` -- captured BEFORE the iteration's first
+      work (BEFORE the pending sweep's ``try`` block).
+    - ``pending_start`` -- currently identical to ``iteration_start``
+      (the pending sweep is the iteration's first work). Kept as a
+      separate parameter so a future ordering change (e.g. inserting
+      a pre-sweep probe) doesn't require a helper signature update.
+    - ``failed_start`` -- captured BETWEEN the pending and failed
+      sweeps (AFTER the pending sweep returns). The pending duration
+      is therefore ``failed_start - pending_start``.
+    - ``iteration_end`` -- captured AFTER the failed sweep returns
+      (and AFTER any caught ``SQLAlchemyError`` exceptions from
+      either sweep, so even slow-but-failing sweeps still report a
+      duration). The failed duration is therefore
+      ``iteration_end - failed_start``. The combined iteration
+      duration is ``iteration_end - iteration_start`` and is
+      observed on the backward-compatible
+      :data:`STUCK_SWEEPER_ITERATION_DURATION` histogram (kept for
+      existing PromQL dashboards / alerts).
+
+    The two new histograms (:data:`STUCK_SWEEPER_PENDING_ITERATION_DURATION`
+    + :data:`STUCK_SWEEPER_FAILED_ITERATION_DURATION`) let operators
+    attribute SLA breaches per sweep instead of attributing the
+    whole-iteration latency to one or the other sweep.
+    """
+    STUCK_SWEEPER_PENDING_ITERATION_DURATION.observe(failed_start - pending_start)
+    STUCK_SWEEPER_FAILED_ITERATION_DURATION.observe(iteration_end - failed_start)
+    STUCK_SWEEPER_ITERATION_DURATION.observe(iteration_end - iteration_start)
 
 
 async def lifespan_stuck_upload_sweeper(
@@ -91,6 +135,16 @@ async def lifespan_stuck_upload_sweeper(
             # the per-row counter attribution is skipped when
             # the sweep raises).
             iteration_start = time.monotonic()
+            # v0.10.26-pre plan 170 follower: per-sweep duration
+            # attribution. ``pending_start`` is captured before
+            # the pending sweep's ``try`` block so a slow pending
+            # sweep is measured against the right starting point.
+            # ``failed_start`` is captured BETWEEN the two sweeps
+            # (after the pending sweep returns, before the failed
+            # sweep's ``try`` block); the elapsed time captures
+            # the pending sweep's real wallclock even if it
+            # raised (the ``except`` clause logs and continues).
+            pending_start = time.monotonic()
             try:
                 await asyncio.to_thread(
                     _sweep_once,
@@ -99,6 +153,7 @@ async def lifespan_stuck_upload_sweeper(
                 )
             except SQLAlchemyError:
                 logger.exception("stuck-upload sweeper tick failed; continuing to next interval")
+            failed_start = time.monotonic()
             # v0.10.26-pre plan 170: failed-upload cleanup sweep.
             # Composes with the existing pending->failed promotion
             # in the SAME tick; the two sweeps are independent and
@@ -116,7 +171,15 @@ async def lifespan_stuck_upload_sweeper(
                 logger.exception(
                     "failed-upload cleanup sweep tick failed; continuing to next interval"
                 )
-            STUCK_SWEEPER_ITERATION_DURATION.observe(time.monotonic() - iteration_start)
+            # v0.10.26-pre plan 170 follower: observe the 3 duration
+            # histograms via the pure helper (testable without the
+            # asyncio loop / DB dependency). The observation happens
+            # AFTER both ``except`` clauses so even slow-but-failing
+            # sweeps report a duration.
+            iteration_end = time.monotonic()
+            _observe_sweep_durations(
+                iteration_start, pending_start, failed_start, iteration_end
+            )
             await asyncio.sleep(interval_s)
     except asyncio.CancelledError:
         logger.info("stuck-upload sweeper cancelled; shutting down cleanly")

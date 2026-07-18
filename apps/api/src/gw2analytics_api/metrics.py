@@ -126,6 +126,33 @@ STUCK_SWEEPER_ITERATION_DURATION = Histogram(
     buckets=(0.05, 0.25, 1.0, 5.0, 30.0, 60.0, 300.0),
 )
 
+#: v0.10.26-pre plan 170 follower: per-sweep duration histograms so
+#: operators can attribute SLA breaches to a specific sweep (pending
+#: promotion vs failed TTL cleanup) instead of the conflated
+#: combined ``stuck_sweeper_iteration_duration_seconds`` above
+#: which measured BOTH sweeps + sleep. Same bucket profile as the
+#: parent for operator familiarity (the buckets safely span both
+#: fast pending sweeps and potentially slow failed-batch sweeps).
+#: Use the ``.observe(elapsed_seconds)`` contract via the
+#: :func:`_observe_sweep_durations` helper in
+#: ``gw2analytics_api.workers.stuck_upload_sweeper``.
+STUCK_SWEEPER_PENDING_ITERATION_DURATION = Histogram(
+    "stuck_sweeper_pending_iteration_duration_seconds",
+    "Wallclock time of the stuck-upload pending promotion sweep",
+    buckets=(0.05, 0.25, 1.0, 5.0, 30.0, 60.0, 300.0),
+)
+
+#: v0.10.26-pre plan 170 follower: failed TTL cleanup sweep duration
+#: counterpart to :data:`STUCK_SWEEPER_PENDING_ITERATION_DURATION`.
+#: Captures the per-iteration wallclock of the hard-delete sweep
+#: so an operator can alert on `histogram_quantile(0.95, ...) > 60s`
+#: for the failed sweep independently of the pending sweep.
+STUCK_SWEEPER_FAILED_ITERATION_DURATION = Histogram(
+    "stuck_sweeper_failed_iteration_duration_seconds",
+    "Wallclock time of the failed-upload cleanup sweep",
+    buckets=(0.05, 0.25, 1.0, 5.0, 30.0, 60.0, 300.0),
+)
+
 #: Plan 017 close-out: cumulative count of uploads promoted from
 #: ``pending`` to ``failed`` by the stuck-upload sweeper. Diff
 #: before/after a sweeper run to confirm the sweeper picked up
@@ -166,8 +193,10 @@ __all__ = [
     "ARQ_QUEUE_DEPTH",
     "ARQ_WORKERS_ACTIVE",
     "HEALTH_DRIFT_COUNT",
+    "STUCK_SWEEPER_FAILED_ITERATION_DURATION",
     "STUCK_SWEEPER_FAILED_SWEPT",
     "STUCK_SWEEPER_ITERATION_DURATION",
     "STUCK_SWEEPER_MARKED_FAILED",
+    "STUCK_SWEEPER_PENDING_ITERATION_DURATION",
     "UPLOADS_PENDING_COUNT",
 ]

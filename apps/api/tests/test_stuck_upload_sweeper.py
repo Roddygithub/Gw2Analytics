@@ -9,6 +9,11 @@ import pytest
 from sqlalchemy import delete, select
 
 from gw2analytics_api.database import get_sessionmaker
+from gw2analytics_api.metrics import (
+    STUCK_SWEEPER_FAILED_ITERATION_DURATION,
+    STUCK_SWEEPER_ITERATION_DURATION,
+    STUCK_SWEEPER_PENDING_ITERATION_DURATION,
+)
 from gw2analytics_api.models import (
     UPLOAD_STATUS_FAILED,
     UPLOAD_STATUS_PENDING,
@@ -16,6 +21,7 @@ from gw2analytics_api.models import (
     Upload,
 )
 from gw2analytics_api.workers.stuck_upload_sweeper import (
+    _observe_sweep_durations,
     _sweep_failed_once,
     _sweep_once,
 )
@@ -468,3 +474,51 @@ def test_failed_sweep_respects_explicit_batch_size_override(
             teardown_session.commit()
         finally:
             teardown_session.close()
+
+
+# ---------------------------------------------------------------------------
+# v0.10.26-pre plan 170 follower: per-sweep histogram attribution.
+#
+# The pure ``_observe_sweep_durations`` helper extracted from the lifespan
+# ticker is unit-tested directly here. The helper is responsible for
+# routing the per-iteration timestamps to the 3 histograms:
+#   - STUCK_SWEEPER_PENDING_ITERATION_DURATION: pending sweep only
+#   - STUCK_SWEEPER_FAILED_ITERATION_DURATION: failed sweep only
+#   - STUCK_SWEEPER_ITERATION_DURATION: backward-compat combined
+#
+# The helper observes via prometheus_client's documented public
+# ``.observe(seconds)`` contract; the test asserts via the histogram's
+# ``_sum`` accessor (private but stable in the prometheus_client library)
+# to verify the helper correctly splits the durations without standing up
+# the asyncio loop / DB dependency.
+# ---------------------------------------------------------------------------
+
+
+def test_observe_sweep_durations_helper() -> None:
+    """Pure helper correctly routes 4 timestamps to 3 histograms.
+
+    Synthetic timestamps: pending took 2s, failed took 3s, total iteration
+    5s (the 2 sweeps don't overlap, so the gap between pending_start and
+    failed_start is exactly the pending duration, and the gap between
+    failed_start and iteration_end is exactly the failed duration).
+    """
+    pending_before = STUCK_SWEEPER_PENDING_ITERATION_DURATION._sum.get()
+    failed_before = STUCK_SWEEPER_FAILED_ITERATION_DURATION._sum.get()
+    combined_before = STUCK_SWEEPER_ITERATION_DURATION._sum.get()
+
+    _observe_sweep_durations(
+        iteration_start=100.0,
+        pending_start=100.0,
+        failed_start=102.0,
+        iteration_end=105.0,
+    )
+
+    assert STUCK_SWEEPER_PENDING_ITERATION_DURATION._sum.get() == pending_before + 2.0, (
+        "pending histogram must observe the 2s gap between pending_start and failed_start"
+    )
+    assert STUCK_SWEEPER_FAILED_ITERATION_DURATION._sum.get() == failed_before + 3.0, (
+        "failed histogram must observe the 3s gap between failed_start and iteration_end"
+    )
+    assert STUCK_SWEEPER_ITERATION_DURATION._sum.get() == combined_before + 5.0, (
+        "combined histogram must observe the 5s gap between iteration_start and iteration_end"
+    )
