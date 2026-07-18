@@ -39,8 +39,13 @@ api.{placeholder.tld} {
     # v0.10.25: cap request body size at the same 100 MiB the API
     # accepts for .zevtc uploads. Caddy returns 413 before the bytes
     # reach the backend, giving defense-in-depth against OOM.
+    # Uses ``100MiB`` (binary, 104,857,600 bytes) to match the API's
+    # ``MAX_UPLOAD_SIZE_BYTES`` default of ``100 * 1024 * 1024``.
+    # The decimal ``100MB`` (100,000,000 bytes) would be 4.85% smaller
+    # than the API cap and create a proxy-layer false-reject for
+    # valid .zevtc uploads between 100,000,000 and 104,857,600 bytes.
     request_body {
-        max_size 100MB
+        max_size 100MiB
     }
     reverse_proxy localhost:8000
 }
