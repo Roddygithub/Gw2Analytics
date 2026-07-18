@@ -127,15 +127,6 @@ export function LazyTabbedTimelineSection({
     };
   }, [fightId, windowS]);
 
-  if (state.status === "error") {
-    return (
-      <SectionErrorChip
-        testid="player-timeline-section-error"
-        message={state.error}
-      />
-    );
-  }
-
   // The PerFightTimelineSection is ALWAYS rendered (no display:none
   // wrapper). During loading we pass playerTimeline=null which lets
   // the section show its built-in "Per-player timeline unavailable"
@@ -144,6 +135,13 @@ export function LazyTabbedTimelineSection({
   // while the lazy fetch resolves. This is a strictly better UX
   // than hiding the section during loading + avoids the extra
   // DOM wrapper node.
+  //
+  // On error, the section is ALSO rendered (with
+  // playerTimeline=null so the Per-player tab shows the built-in
+  // unavailable caption). The error chip is shown as supplementary
+  // diagnostic info ABOVE the section so the analyst still sees the
+  // aggregated timeline (the primary surface) + a hint that the
+  // per-player view failed to load.
   return (
     <>
       {state.status === "loading" ? (
@@ -154,6 +152,12 @@ export function LazyTabbedTimelineSection({
         >
           Loading player timeline…
         </div>
+      ) : null}
+      {state.status === "error" ? (
+        <SectionErrorChip
+          testid="player-timeline-section-error"
+          message={state.error}
+        />
       ) : null}
       <PerFightTimelineSection
         timeline={timeline}

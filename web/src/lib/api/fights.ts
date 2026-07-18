@@ -379,7 +379,16 @@ export async function fetchFightPlayerTimeline(
     params.set("window_s", String(opts.windowS));
   }
   const qs = params.toString();
-  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/timeline/players${
+  // On the client side, use a relative URL so the Next.js rewrite
+  // proxy (``next.config.ts`` rewrites ``/api/v1/:path*``) handles
+  // the request. Using ``API_BASE_URL`` directly on the client would
+  // bypass the rewrite and hit the wrong host/port (the env var is
+  // server-side only -- not NEXT_PUBLIC_ prefixed -- so it falls back
+  // to ``http://localhost:8000`` in dev, which is not the mock server
+  // port). This matches the pattern used by other Client Component
+  // fetches (e.g. the upload wizard).
+  const base = typeof window === "undefined" ? API_BASE_URL : "";
+  const url = `${base}/api/v1/fights/${encodeURIComponent(fightId)}/timeline/players${
     qs ? `?${qs}` : ""
   }`;
   const resp = await fetch(url, { cache: "no-store" });

@@ -179,6 +179,13 @@ const server = createServer(async (req, res) => {
   // here). Status 201 because the real route returns 201 on a
   // successful envelope create.
   if (method === "POST" && path === "/api/v1/uploads") {
+    // Artificial delay: the mock server responds so fast that the
+    // wizard's "upload" step (a transient spinner) flashes by
+    // before Playwright can observe it. A 300ms delay simulates
+    // realistic network latency and makes the
+    // ``data-testid="step-upload"`` assertion deterministic in the
+    // user-journey E2E spec.
+    await new Promise((r) => setTimeout(r, 300));
     return jsonResponse(
       res,
       201,
@@ -260,6 +267,21 @@ const server = createServer(async (req, res) => {
         return jsonResponse(res, 404, JSON.stringify({ error: "fight not found" }));
       }
       const body = await loadFixture("fight-skills.json");
+      return jsonResponse(res, 200, body);
+    }
+
+    // /api/v1/fights/:id/timeline/players?window_s=N (v0.10.28 plan 162).
+    // Per-player timeline: N stacked line series, one per player.
+    // MUST be matched BEFORE the catch-all /timeline handler below
+    // so the regex doesn't consume ``/timeline/players`` as part of
+    // the timeline path.
+    const fightPlayerTimelineMatch = path.match(/^\/api\/v1\/fights\/([^/]+)\/timeline\/players$/);
+    if (fightPlayerTimelineMatch) {
+      const fightId = decodeURIComponent(fightPlayerTimelineMatch[1]);
+      if (!KNOWN_FIGHTS.has(fightId)) {
+        return jsonResponse(res, 404, JSON.stringify({ error: "fight not found" }));
+      }
+      const body = await loadFixture("fight-player-timeline.json");
       return jsonResponse(res, 200, body);
     }
 

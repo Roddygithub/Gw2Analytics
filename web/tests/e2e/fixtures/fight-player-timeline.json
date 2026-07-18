@@ -1,0 +1,61 @@
+{
+  "fight_id": "fixture-fight-001",
+  "window_s": 5,
+  "duration_s": 15.0,
+  "series": [
+    {
+      "account_name": "TestAccount.1234",
+      "name": "Fighty McFight",
+      "points": [
+        {
+          "window_start_ms": 0,
+          "window_end_ms": 5000,
+          "total_damage": 600,
+          "total_healing": 100,
+          "total_buff_removal": 20
+        },
+        {
+          "window_start_ms": 5000,
+          "window_end_ms": 10000,
+          "total_damage": 1800,
+          "total_healing": 50,
+          "total_buff_removal": 40
+        },
+        {
+          "window_start_ms": 10000,
+          "window_end_ms": 15000,
+          "total_damage": 1200,
+          "total_healing": 150,
+          "total_buff_removal": 10
+        }
+      ]
+    },
+    {
+      "account_name": "TestAccount.5678",
+      "name": "Heal Bot",
+      "points": [
+        {
+          "window_start_ms": 0,
+          "window_end_ms": 5000,
+          "total_damage": 200,
+          "total_healing": 800,
+          "total_buff_removal": 15
+        },
+        {
+          "window_start_ms": 5000,
+          "window_end_ms": 10000,
+          "total_damage": 500,
+          "total_healing": 300,
+          "total_buff_removal": 25
+        },
+        {
+          "window_start_ms": 10000,
+          "window_end_ms": 15000,
+          "total_damage": 300,
+          "total_healing": 1200,
+          "total_buff_removal": 10
+        }
+      ]
+    }
+  ]
+}
