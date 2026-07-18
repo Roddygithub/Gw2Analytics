@@ -1,3 +1,5 @@
+import React from "react";
+
 /**
  * Colour legend for the per-account :class:`PlayerTimelineChart`.
  *

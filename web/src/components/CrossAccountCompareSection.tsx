@@ -54,6 +54,7 @@
  * affordances are OWNED by this constant set, not the
  * kitchen-sink module.
  */
+import React from "react";
 
 import { useState } from "react";
 import {

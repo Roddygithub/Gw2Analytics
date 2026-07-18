@@ -27,6 +27,7 @@
  * var(--foreground) + var(--accent) for emphasis) keeps the
  * read-out visually cohesive.
  */
+import React from "react";
 
 import type { EventBucket } from "@/lib/api";
 

@@ -79,6 +79,7 @@
  */
 
 "use client";
+import React from "react";
 
 import { memo, useMemo, useState } from "react";
 import { formatSecondsLabel } from "@/lib/format";

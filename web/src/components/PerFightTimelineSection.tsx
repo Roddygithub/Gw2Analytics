@@ -78,6 +78,7 @@
  */
 
 "use client";
+import React from "react";
 
 import { useState } from "react";
 import { PerFightTimelineChart } from "@/components/PerFightTimelineChart";

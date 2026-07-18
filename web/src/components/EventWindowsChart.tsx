@@ -38,6 +38,7 @@
  *   labels but the bars have zero height (visible as a flat
  *   baseline). The legend still shows damage + healing.
  */
+import React from "react";
 
 import { memo, useMemo } from "react";
 import type { EventBucket } from "@/lib/api";

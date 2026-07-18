@@ -49,6 +49,7 @@
  * ``force-dynamic`` + ``cache: "no-store"``), so the history
  * bloat is negligible.
  */
+import React from "react";
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { LABEL_STYLE, SELECT_STYLE } from "@/shared/styles";

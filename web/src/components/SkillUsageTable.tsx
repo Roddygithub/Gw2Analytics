@@ -29,6 +29,7 @@
  * var(--accent) for emphasis) keeps the read-out visually
  * cohesive.
  */
+import React from "react";
 
 import type { SkillUsageRow } from "@/lib/api";
 import type { CsvColumn } from "@/lib/csv";

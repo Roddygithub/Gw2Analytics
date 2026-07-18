@@ -16,6 +16,7 @@
  * Hidden when ``rows`` is empty (the typical "no data to
  * export" affordance).
  */
+import React from "react";
 
 import type { CsvColumn } from "@/lib/csv";
 import { toCsv, downloadCsv } from "@/lib/csv";

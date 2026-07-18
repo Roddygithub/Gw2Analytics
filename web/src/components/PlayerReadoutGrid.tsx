@@ -7,6 +7,7 @@
  * so each aspect component only supplies its domain-specific
  * columns + default sort.
  */
+import React from "react";
 
 import { useMemo } from "react";
 import { AgGridReact } from "ag-grid-react";

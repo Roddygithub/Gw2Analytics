@@ -42,6 +42,8 @@
  * is a forward-compat marker for any future interactions
  * (sortable columns, "Lock to player" sticky toggle).
  */
+import React from "react";
+
 import type { PlayerSkills, PlayerSkillUsageRow } from "@/lib/api";
 import type { CsvColumn } from "@/lib/csv";
 import { CsvDownloadButton } from "./CsvDownloadButton";

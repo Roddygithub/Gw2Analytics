@@ -38,6 +38,7 @@
  *   user already loaded the last page) -> the section
  *   hides the "Load more" button via the ``hasMore`` flag.
  */
+import React from "react";
 
 import { useEffect, useState } from "react";
 import { fetchPlayerTimeline, formatApiError, type PlayerTimeline } from "@/lib/api";

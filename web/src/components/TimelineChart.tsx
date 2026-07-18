@@ -75,6 +75,7 @@
  */
 
 /* eslint-disable react-refresh/only-export-components */
+import React from "react";
 
 import { memo, useMemo } from "react";
 import { PlayerTimelineLegend } from "@/components/PlayerTimelineLegend";

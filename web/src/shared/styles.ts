@@ -1,3 +1,5 @@
+import React from "react";
+
 /**
  * Shared React.CSSProperties constants used across the web UI.
  *

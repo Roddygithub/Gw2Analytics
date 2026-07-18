@@ -37,6 +37,7 @@
  * navigation; the client-side ``router.push`` carries the
  * analyst to the player page.
  */
+import React from "react";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";

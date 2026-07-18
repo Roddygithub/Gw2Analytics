@@ -104,6 +104,7 @@
  */
 
 "use client";
+import React from "react";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { FightTimeline, PerFightTimelinePoint } from "@/lib/api/fights";
