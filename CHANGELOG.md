@@ -48,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MinIO blob storage failure handling** (`apps/api/src/gw2analytics_api/routes/uploads.py`): if `put_zevtc` raises, the upload endpoint now returns `HTTP 503 Service Unavailable` instead of silently accepting an un-stored blob. Transaction flow fixed to use `db.flush()` before the blob write and `db.commit()` only after success, with `db.rollback()` on failure, preventing orphaned `Upload` rows.
 - **Lint/type errors in tests and scripts** (`apps/api/tests/`, `apps/api/scripts/`): resolved Ruff and Mypy violations across test helpers and the cycle-closeout doc-applier script so the CI lint/type gates stay green.
 
+### Added (E2E tooling)
+
+- **web/e2e** — real-stack E2E user journey harness (`web/e2e/user-journey.spec.ts`). Drives a no-mocks flow (upload real `.zevtc` → parse → fights list → fight detail → players → 100 MiB cap) against a live stack. Skippable via env vars (self-skips unless the stack is reachable and `E2E_ZEVTC_SMALL_PATH` is set), so CI stays green — see `web/e2e/README.md` for setup.
+
+### Docs (E2E journey)
+
+- **plans** — added `plans/E2E-JOURNEY-2026-07-11.md` documenting the real-stack E2E journey findings (7 bugs: 1 fixed inline — plan 159 timeline hang — and 6 deferred with reasons + prioritized UX recos). Companion plans 160–163 opened for the 4 non-WAVE-8 deferred bugs.
+
 ### Added (Wave 6 PART-2 — Tour 5 close-out Phase 3 SCAFFOLD-getter plumbing: wire-shape-fidelity SCAFFOLD across all 4 per-player aggregators + the apps/api glue layer)
 
 Wave 6 PART-1 (the Phase 2 dispatch-table WrapValidator refactor) shipped earlier in `[0.10.23-pre]` and resolved the FORBIDDEN-on-13th-member clause for the 12-member `Event` discriminated union. Wave 6 PART-2 closes the remaining Phase 3 SCAFFOLD-getter plumbing so a future Phase 6 v2 parser-stream switch materialises condi-power splits + barrier portions + buff-removal streams without a wire-shape or schema migration. The 9 NEW public surface pieces (5 SCAFFOLD defaults in `gw2_core._scaffold` + 2 NEW row columns on `PlayerDamageRow` + 2 NEW row columns on `PlayerHealRow` + 1 NEW row column on `PlayerBoonsRow`) + the 3 NEW optional aggregator params (`dps_split_getter` + `barrier_portion_getter` heal-side + `buff_removal_events`) + the 3 NEW glue-layer params on `aggregate_combat_readout` + the Boons `PlayerBoonsAggregator` row-builder union-key fix land in this PART-2. Wire-compat is preserved byte-for-byte (`dps_power=0.0 + dps_condi=0.0 + barrier_total=0 + barrier_ps=0.0 + strips_received_in=0` for pre-Phase-6-v2 streams, matching the pre-PART-2 hardcoded zero values).
