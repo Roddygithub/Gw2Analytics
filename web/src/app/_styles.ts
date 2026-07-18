@@ -1,3 +1,5 @@
+import React from "react";
+
 export const PANEL_STYLE: React.CSSProperties = {
   padding: "32px",
   maxWidth: "560px",

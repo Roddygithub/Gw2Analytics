@@ -41,6 +41,7 @@
  * Next.js's static caching so the comparison reflects the
  * latest parsed fight state on every request.
  */
+import React from "react";
 
 import {
   fetchPlayerCompareTimeline,

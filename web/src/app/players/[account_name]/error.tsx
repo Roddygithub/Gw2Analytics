@@ -20,6 +20,7 @@
  * subtree gets the boundary. The page-level promise resolution above
  * keeps the surviving sections visible.
  */
+import React from "react";
 
 import { useEffect } from "react";
 import Link from "next/link";

@@ -12,6 +12,7 @@
  * declared in app/globals.css. Future design system changes propagate
  * automatically.
  */
+import React from "react";
 
 import Link from "next/link";
 

@@ -10,6 +10,7 @@
  * subtree. Operators can route the `console.error` to Sentry/etc. by
  * extending the `useEffect` below — no other side effects.
  */
+import React from "react";
 
 import { useEffect } from "react";
 import Link from "next/link";

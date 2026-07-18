@@ -20,6 +20,7 @@
  * the page above keeps the sibling sections alive, so the analyst sees
  * a partial view + a retry here, never a fully blank page).
  */
+import React from "react";
 
 import { useEffect } from "react";
 import Link from "next/link";
