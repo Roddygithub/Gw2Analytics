@@ -9,6 +9,15 @@
 > WvW combat logs (`.zevtc`) are parsed locally and stored in a stable
 > internal model from which all analytics, API, and frontend derive.
 
+## What's new in v0.10.28
+
+- ⚡ **/fights/[id] page renders instantly** — the `/timeline/players` endpoint (10 s SSR blocker) now lazy-loads on the client after hydration via the new `LazyTabbedTimelineSection` component. The Aggregated tab still renders server-side; the Per-player tab streams in 0–10 s later without blocking the initial paint.
+- 🛡️ **Duplicate fight uploads handled gracefully** — when 2 distinct uploads contain the same parsed fight, the duplicate now surfaces as `status='failed'` with the existing fight_id surfaced (`The content is already analyzed as fight <id>`) so operators can pivot to the prior successful parse via `/fights/{existing_id}`. The audit row is preserved (no DELETE).
+- 🎨 **PlayerSearchBar hydration mismatch fixed** — migrated from inline `React.CSSProperties` objects to a CSS module; SSR + CSR now render identically (no more React hydration warnings on the global header search bar).
+- ✅ **CI gate flipped green** — `ruff format` applied to 15 files + 10 `mypy` errors in `routes/fights/` resolved via `Sequence`/`Mapping` covariance swaps. `ruff check` + `mypy` + `tsc` all 0 errors.
+
+See [CHANGELOG.md](./CHANGELOG.md) for the full per-commit history.
+
 ## Highlights
 
 - 🎯 **Per-target / per-subgroup / per-skill roll-ups** on every fight — DPS, healing, and buff removals via stable pydantic aggregations with deterministic ordering + cross-field invariants.
