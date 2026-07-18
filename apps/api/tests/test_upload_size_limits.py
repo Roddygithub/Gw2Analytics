@@ -3,51 +3,38 @@
 The upload route (``apps/api/src/gw2analytics_api/routes/uploads.py::create_upload``)
 implements 3 layers of defense against oversized uploads:
 
-1. **Content-Length header check** (line ~165): rejects oversized
-   bodies BEFORE reading them into memory. Short-circuits the
-   OOM risk when the client provides a Content-Length header
-   (the common case for non-chunked uploads).
-2. **Starlette UploadFile.size check** (line ~178): rejects
-   before read when Starlette's multipart parser already knows
-   the file size from the multipart metadata.
-3. **Post-read len check** (line ~196): the canonical
-   defense -- rejects after reading the raw bytes. Catches
-   every case Layer 1 + Layer 2 might miss (chunked encoding,
-   missing Content-Length, pre-0.30 Starlette without the
-   ``size`` attribute).
+1. **Content-Length header check** (Layer 1): rejects oversized
+   bodies BEFORE reading them into memory.
+2. **Starlette UploadFile.size check** (Layer 2): rejects before
+   read when Starlette's multipart parser knows the file size.
+3. **Post-read len check** (Layer 3): the canonical defense --
+   rejects after reading the raw bytes. Catches every case
+   Layer 1 + Layer 2 might miss (chunked encoding, missing
+   Content-Length, pre-0.30 Starlette without the ``size`` attr).
 
-Plus a 4th layer at the Caddy reverse-proxy:
-``Caddyfile`` has ``request_body { max_size 100MB }`` which
-rejects oversized requests at the edge BEFORE the bytes reach
-the API.
+Plus a 4th layer at the Caddy reverse-proxy: ``Caddyfile`` has
+``request_body { max_size ... }`` which rejects oversized requests
+at the edge BEFORE the bytes reach the API. The Caddyfile cap is
+100 MiB (``100MiB``) to match the API's ``MAX_UPLOAD_SIZE_BYTES``
+default exactly -- a smaller decimal ``100MB`` cap would create
+a proxy-layer false-reject window.
 
 These tests pin the contract for Layer 3 + the Caddyfile layer.
+Layer 1 (Content-Length) + Layer 2 (UploadFile.size) are NOT
+separately unit-tested because both require spoofing the
+TestClient's request-state which ``httpx`` does not expose
+(Layer 1 auto-computes Content-Length from the body; Layer 2
+is Starlette multipart parser internal state). Layer 3 shares
+the same ``> max_size`` threshold + 413 response as Layer 1,
+so testing Layer 3 verifies the same logic. The full 4-layer
+defense-in-depth is exercised end-to-end by the real-stack harness
+(see ``web/e2e/README.md`` for setup).
 
-Why Layer 1 is NOT separately tested
-====================================
-
-Layer 1 (Content-Length header check) is hard to test via
-``fastapi.testclient.TestClient`` because ``httpx`` (the
-underlying transport) auto-computes the Content-Length header
-from the multipart body, overriding any value passed via the
-``headers={"content-length": ...}`` argument. The reliable test
-target is Layer 3 (the post-read len check) because it has the
-SAME threshold condition (``> max_size``) and the SAME 413
-response. If Layer 3 works (which this test verifies), Layer
-1's same logic also works (the only difference is WHEN the
-check fires: before vs after the body read).
-
-Layer 2 (UploadFile.size) is Starlette implementation detail;
-testing it requires spoofing Starlette's internal multipart
-parser state, which the TestClient does not expose. Layer 3
-is the contract-level guarantee regardless.
-
-If a future Starlette release exposes a reliable way to
-spoof Content-Length in tests (e.g. a dedicated httpx kwarg
-or a TestClient middleware), consider adding Layer 1 +
-Layer 2 dedicated tests for completeness. Until then, the
-contract is verified through Layer 3 + the Caddyfile drift
-guard below.
+Drift guard rationale: a regression that lowers the Caddyfile
+cap below the API cap would cause client uploads to fail at the
+proxy with a generic 413 for payloads the API would otherwise
+accept. ``test_caddyfile_request_body_limit_matches_api_cap``
+catches this misconfiguration cheaply via regex + bytes math.
 """
 
 from __future__ import annotations
