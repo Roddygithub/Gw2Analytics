@@ -124,13 +124,12 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
             ),
         )
 
-    if head.skill_count > 0 and not cf.skills:
-        logger.warning(
-            "fight %s: header claims skill_count=%d but parser yielded 0 skills; "
-            "skill table likely truncated or corrupted (see MAX_SKILL_NAME_BYTES "
-            "warning in gw2_evtc_parser.parser)",
-            cf.id,
-            head.skill_count,
-        )
+    # NOTE: the v0.10.2 followup #8 warning (``head.skill_count > 0
+    # and not cf.skills``) was removed in v0.10.29.  The parser now
+    # computes ``actual_skill_count`` from walking the skill table
+    # (NOT the raw header byte), so when the safety bound fires
+    # (name_len > MAX_SKILL_NAME_BYTES) ``head.skill_count`` is
+    # already 0 -- the condition was dead code.  The parser's own
+    # WARNING log is the operator signal.
 
     db.flush()
