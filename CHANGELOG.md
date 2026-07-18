@@ -52,6 +52,13 @@ Per-cycle chore that hardens the web component files against future TypeScript c
 - **STYLE CONSISTENCY** — the new `import React from "react";` line follows the project's existing convention (default import, placed FIRST in the imports block above named imports). The shared `web/src/shared/styles.ts` file's 19 `React.CSSProperties` references are now anchored to an explicit import rather than the `@types/react` ambient global.
 - **COSMETIC POLISH** — 21 of the 23 files received a targeted regex collapse of the double blank line the initial insertion introduced (anchored on the literal `import React from "react";` line so legitimate multi-blank separators between other import groups are preserved). The 2 files that landed with single-blank separators were not touched.
 
+### Fixed (SectionErrorChip followups — review-cycle fixups, retro-split)
+
+The 2 `fix(web)` SectionErrorChip commits shipped during the v0.10.26 review cycle (closing 2 reviewer-flagged items on the Plan 169 frontend consolidation) but were originally documented inside the "MULTI-FILE REVIEW POLISH" bullet of the Plan 169 `### Added` subsection. Retro-splitting them here for discoverability + grep-ability — these are the canonical references for the reviewer-flagged MUST-FIX #1 latent type error + the NICE-TO-HAVE import placement. Closes plans/170 forward-blocker item #2 (the v0.10.26 release reviewer's NICE-to-HAVE).
+
+- **`fix(web): add explicit React import to SectionErrorChip`** (commit `4340feb`) — closes the reviewer's MUST-FIX #1 latent type error. `SectionErrorChip.tsx` referenced `React.CSSProperties` but didn't import `React` (relied on the `@types/react` ambient global registration). Explicit `import React from "react";` added as the first import; preserves `'use client';` directive ordering. This commit was the canonicalization that the F6 React-import audit (`2cd4048`) extended to 25 more files in the cycle.
+- **`fix(web): SectionErrorChip import placement + comment trim`** (commit `422e256`) — reviewer's NICE-TO-HAVE: tighten the import placement (one blank line between `'use client';` and the first named import, no double-blank) + trim a verbose comment block down to the load-bearing invariant documentation only. Same `'use client';` ordering invariant as the prior commit; preserves the chip's Server-Component contract.
+
 ### Validation
 
 - `ruff check libs apps`: GREEN (0 violations; F811 `BarrierEvent` dedup invariant preserved across the cycle — the F5 + F6 changes touched only `apps/api/workers/stuck_upload_sweeper.py` + `web/components/` files + `web/app/` files, never `libs/gw2_core/models.py`).
