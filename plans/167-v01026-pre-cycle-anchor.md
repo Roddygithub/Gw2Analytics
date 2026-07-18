@@ -30,18 +30,23 @@ cross-plan dependency graph from scratch.
 ```
 e250623 (head)
   |
-  +-- [M-1] plan 164 (parser time_ms + skill-table, L)   ──┐
-  |                                                          │
-  +-- [M-1] plan 163 (PlayerSearchBar hydration, S)       │ parallel
-  |                                                          │
-  +-- [M-2] plan 161 (section isolation, M)   ◄────────────┤ depends on 164
-  |                                                          │
-  +-- [M-2] plan 162 (timeline/players perf, M)  ◄─────────┤ parallel to 161
-  |                                                          │
-  +-- [M-3] plan 165 (vitest migration, M)   ───── independent
+  +-- [Wave 1] plan 164 (parser time_ms + skill-table, L)   ──┐
+  |                                                                │
+  +-- [Wave 1] plan 163 (PlayerSearchBar hydration, S)       │ parallel
+  |                                                                │
+  +-- [Wave 2] plan 161 (section isolation, M)   ◄────────────┤ depends on 164
+  |                                                                │
+  +-- [Wave 2] plan 162 (timeline/players perf, M)  ◄─────────┤ parallel to 161
+  |                                                                │
+  +-- [Wave 3] plan 165 (vitest migration, M)   ───── independent
   |
-  +-- [M-3] plan 160 (fight_id collision, S)   ◄──── depends on operator (a or b)
+  +-- [Wave 3] plan 160 (fight_id collision, S)   ◄──── depends on operator (a or b)
 ```
+
+**Legend.** `[Wave N]` denotes the N-th mimo-half cycle window in this
+cal-quarter (per GW2 release rhythm). The 3 waves map to
+v0.10.26-pre (Wave 1) / v0.10.26 (Wave 2) / v0.10.27-pre (Wave 3)
+cal-tags. Each wave is a self-contained 1-iteration mimo-half budget.
 
 (`159` is shipped; `166` is analysis-only already shipped.)
 
@@ -49,24 +54,24 @@ e250623 (head)
 
 ### Wave 1 — v0.10.26-pre
 
-- **[M-1] plan 164** — parser-side `time_ms` normalization +
+- **[Wave 1] plan 164** — parser-side `time_ms` normalization +
   skill-table re-read (closes the root cause bug #2 of
   E2E-JOURNEY findings; unblocks `plan 161` non-empty rendering).
-- **[M-1] plan 163** — `PlayerSearchBar` hydration mismatch
+- **[Wave 1] plan 163** — `PlayerSearchBar` hydration mismatch
   (frontend-only S effort).
 
 ### Wave 2 — v0.10.26
 
-- **[M-2] plan 161** — per-section error isolation on
+- **[Wave 2] plan 161** — per-section error isolation on
   `/fights/[id]` (frontend-only M effort; `web/src/app/fights/[id]/page.tsx`).
-- **[M-2] plan 162** — `/fights/{id}/timeline/players` lazy-load
+- **[Wave 2] plan 162** — `/fights/{id}/timeline/players` lazy-load
   (M effort; backend+frontend split).
 
 ### Wave 3 — v0.10.27-pre
 
-- **[M-3] plan 165** — carryforward vitest migration (`plans/168`
+- **[Wave 3] plan 165** — carryforward vitest migration (`plans/168`
   carries the 5-bullet recipe).
-- **[M-3] plan 160** — `fight_id` collision (operator picks (a)
+- **[Wave 3] plan 160** — `fight_id` collision (operator picks (a)
   idempotent or (b) 409 — see `plans/160` §"Suggested fix" + §"Decision needed").
 
 ## Operator handoff checklist

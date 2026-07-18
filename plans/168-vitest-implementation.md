@@ -91,24 +91,24 @@ before each test. The migration:
 - Replace `render(tree)` calls with `renderWithSession(tree, { initialFetchMocks: () => mockFightFetch() })`
   for each test (~11 test bodies × ~5 LoC each = ~55 LoC delta).
 
-### Bullet 3 — Spot-fix the 6 carryforward failure classes
+### Bullet 3 — Spot-fix the verified carryforward failure classes
 
-The migration is expected to resolve the documented 6 failure
-classes that ship on fight-events-page:
-- (a) Server Component boundary mismatch (state hydrates on client
-  only; the helper seeds initial state per test).
-- (b) `fetchCached` lifecycle race (helper clears between tests).
-- (c) `UPSTREAM_ERROR_PREFIX` rendering position (no behavior change,
-  but tests now find elements robustly because `initialRoute`
-  is stable).
-- (d) `PlayerSkillUsageFilter` dropdown hydration (no behavior
-  change; SSR pass renders the static shell cleanly with the
-  helper's seeded router).
-- (e) `?account=` URL filter on first render (helper seeds the
-  initial URL via `initialRoute`).
-- (f) dual-banner cascade contract regression test (no behavior
-  change; the helper's pre-warmed fetch cache returns the
-  expected 502 cascade deterministically).
+Inspect the ``pnpm vitest run web/tests/app/fight-events-page.test.tsx``
+output AT EXECUTION TIME before scoping. The referenced audit (the
+master debt backlog pre-`1813881`) cited 6 failure classes, but the
+``fight-events-page-error.test.tsx`` file returns
+``[FILE_DOES_NOT_EXIST]`` at the post-pull HEAD. The actual fail-cluster
+is likely smaller (1-2 classes) and addresses:
+
+- Server Component boundary mismatch (``fetchCached` state hydrates on
+  client only; the helper seeds initial state per test).
+- ``fetchCached`` lifecycle race (helper clears between tests).
+
+Address each verified failure in order of cheapest-to-fix first
+(mocks wiring → lifecycle race → hydration boundary → cascade contract).
+Re-run ``pnpm vitest run`` after each cluster is fixed to confirm
+the count drops; defer the closing commit until ``pnpm vitest run``
+returns 0 failing tests on the ``fight-events-page*`` glob.
 
 ### Bullet 4 — Add a regression-guard test
 
