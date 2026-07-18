@@ -18,6 +18,54 @@
 ### Security
 - **No new security-relevant changes in this release.** The MAX_UPLOAD_SIZE_BYTES cap prevents OOM from malicious uploads; the parser-side MAX_EVTC_BYTES cap prevents zip-bomb attacks.
 
+## [0.10.26] - 2026-07-18
+
+The v0.10.26 release ships the cycle's frontend Web consolidation (plan 169 SectionErrorChip across 6 page.tsx sites + shared style lift) + the backend plan/170 failed-upload TTL cleanup sweep + the web React-import audit. Tag moves from `v0.10.26-pre` → `v0.10.26` at `c985df1` + 4 followup commits.
+
+### Added (Plan 169 — SectionErrorChip frontend consolidation, 7 commits)
+
+Per-cycle refactor consolidating the inline ``<p data-testid="X-error" style={accent}>`` shape that was duplicated across 5+ per-section error blocks on `web/src/app/fights/[id]/page.tsx`. Single declarative API + single testid convention (`{section}-section-error`) cleanly distinguishes per-section chips from the existing page-level `fight-error-panel` banner.
+
+- **NEW `web/src/components/SectionErrorChip.tsx`** (~70 LoC Server Component) — `testid` + `message` props render a single `<p role="alert" data-testid={testid}>...</p>`. Decision documentation explains why Server Component not Client (no browser-only API) + why `role="alert"` for screen-reader announcement + why no retry button (would require a fetch-owning section wrapper per plan 169 commits #3-#4). Single-line message contract for i18n pass-through.
+- **NEW `web/tests/components/section-error-chip.test.tsx`** (3 it() pilot test) — verifies the chip renders `data-testid` + message verbatim. Page-level integration tests live in `web/tests/app/fight-events-page.test.tsx`.
+- **NEW `web/src/shared/styles.ts::SECTION_ERROR_CHIP_STYLE`** — `var(--accent)` + `14px font + var(--font-geist-sans)` + `margin: 0`. Lifted from the inline duplication across 6 page.tsx sites so future style updates are single-point-of-change.
+- **REFACTOR `web/src/app/fights/[id]/page.tsx`** — 5 per-section error sites (squads + skills + player-skill-agents + player-skill + timeline + playerTimeline) migrated from inline `<p>` to `<SectionErrorChip>`. Sites 2 + 3 use split-into-2 sibling conditionals (defensive narrowing pattern matching the site 3 control flow). Site 2 carries a 9-line JSDoc comment on the let-binding documenting the load-bearing try/catch invariant (`fightDetails === null ↔ fightDetailsError !== null`) so a future refactor that decouples the two variables sees the invariant before splitting it.
+- **TESTS MIGRATION** — `web/tests/app/fight-events-page.test.tsx`: 6 testid refs migrated (3 `player-skill-error` → `player-skill-section-error`, 3 `player-skill-agents-error` → `player-skill-agents-section-error`). `web/tests/e2e/fights.spec.ts`: 1 ref migrated. `web/src/lib/copy/error-messages.ts`: 2 JSDoc references refreshed (doc-comment only, no functional code touched).
+- **MULTI-FILE REVIEW POLISH** — multi-line `logger.exception(...)` for ruff E501 compliance (the existing `stuck-upload sweeper tick failed` exception stays single-line at 80 chars). `use client` directive ordering preserved in Next.js error boundary files (error.tsx + not-found.tsx + players/[account_name]/error.tsx + fights/[id]/error.tsx). 21 cosmetic double-blank-line collapses (F6 audit phase) + JSDoc anchor on the try/catch invariant.
+
+### Added (F5 — plan/170 backend failed-upload TTL cleanup sweep)
+
+Per-cycle backend sweep that hard-deletes stale `Upload` rows so operator dashboards don't accumulate dead rows from resubmitted .zevtc collisions. Closes the v0.10.26-pre cycle followup #5 from the prior suggest_followups queue.
+
+- **NEW `_sweep_failed_once` helper** in `apps/api/src/gw2analytics_api/workers/stuck_upload_sweeper.py` — hard-delete `Upload` rows older than `STUCK_SWEEPER_FAILED_RETENTION_DAYS` (default 90) with `error_message LIKE 'Duplicate fight:%'` AND zero dependent `OrmFight` rows. The `NOT EXISTS` subquery guards the FK cascade (4 levels deep: `Upload` → `OrmFight` → `OrmFightAgent` / `OrmFightSkill` / `OrmFightPlayerSummary`).
+- **TOCTOU-SAFE single-statement DELETE** — `delete(Upload).where(Upload.id.in_(select(Upload.id).where(... + ~select(OrmFight.id).where(OrmFight.upload_id == Upload.id).exists()).limit(_BATCH_DELETE_SIZE)))`. Postgres re-evaluates the correlated `NOT EXISTS` at DELETE-plan time, closing the inter-statement window between a SELECT-then-DELETE pair (the original 2-statement pattern is unsafe under concurrent inserts).
+- **NEW `STUCK_SWEEPER_FAILED_SWEPT` Prometheus counter** (`stuck_sweeper_failed_swept_total`) — cumulative hard-deletion tracking. Operators can diff before/after a sweep to confirm pick-up.
+- **NEW `stuck_sweeper_failed_retention_days` Settings field** — env `STUCK_SWEEPER_FAILED_RETENTION_DAYS`, default 90, Pydantic `ge=1` so an operator typo of 0 cannot silently become "delete immediately".
+- **LIFESPAN WIRING** — `_sweep_failed_once` runs AFTER `_sweep_once` on the SAME iteration cadence (default `STUCK_SWEEPER_INTERVAL_S` = 300s). The two sweeps are independent (each in its own try/except) so one slipping does not block the other. The `STUCK_SWEEPER_ITERATION_DURATION` histogram observes the WHOLE iteration (both sweeps + sleep) so operators see the real wallclock cost.
+- **TESTS** — `apps/api/tests/test_stuck_upload_sweeper.py`: 4 new fixtures (`_seed_stale_collision_no_dependents` + `_seed_stale_collision_with_dependents` + `_seed_stale_parse_error_upload` + `_seed_fresh_collision_no_dependents`) + 5 new test cases covering no-eligible / happy / safety-guard / LIKE-skip / retention-skip branches. UUID-keyed assertions sidestep count brittleness against pre-existing test DB rows.
+
+### Added (F6 — web React import audit)
+
+Per-cycle chore that hardens the web component files against future TypeScript config tightening by making the React namespace dependency explicit. Closes the v0.10.26-pre cycle followup #6 from the prior suggest_followups queue.
+
+- **29 web files audited** for `React.CSSProperties` reference (12 components in `web/src/components/` + 12 page/utility files in `web/src/app/` + `web/src/shared/styles.ts` + 5 already-imported components). 6 already had explicit `import React from "react"` (icons/Commander.tsx + icons/Professions.tsx + PlayerReadoutCells.tsx + PlayerSkillUsageFilter.tsx + ProfessionFilter.tsx + TargetFilter.tsx) and were correctly skipped. The remaining 23 received the explicit import via a one-shot Python script that preserves `use client` directive ordering + docstring structure.
+- **STYLE CONSISTENCY** — the new `import React from "react";` line follows the project's existing convention (default import, placed FIRST in the imports block above named imports). The shared `web/src/shared/styles.ts` file's 19 `React.CSSProperties` references are now anchored to an explicit import rather than the `@types/react` ambient global.
+- **COSMETIC POLISH** — 21 of the 23 files received a targeted regex collapse of the double blank line the initial insertion introduced (anchored on the literal `import React from "react";` line so legitimate multi-blank separators between other import groups are preserved). The 2 files that landed with single-blank separators were not touched.
+
+### Validation
+
+- `ruff check libs apps`: GREEN (0 violations; F811 `BarrierEvent` dedup invariant preserved across the cycle — the F5 + F6 changes touched only `apps/api/workers/stuck_upload_sweeper.py` + `web/components/` files + `web/app/` files, never `libs/gw2_core/models.py`).
+- `python -m py_compile` on the 4 touched Python files: OK.
+- `pnpm tsc --noEmit --skipLibCheck` on `web/`: GREEN (no new type errors from the 23 import additions + the stylistic polish).
+- `pnpm vitest run` on `web/`: GREEN (366/366 + 3 env-skipped; SectionErrorChip pilot 3/3, fight-events-page 12/12, fight-events-page-error path after testid migration).
+- `uv run pytest` on `libs/gw2_core/tests/test_barrier_event.py libs/gw2_evtc_parser/tests/test_parser_emit_statechange.py`: GREEN (13/13 carryforward preserved).
+
+### Forward-blockers (rider-next-cycle)
+
+- **Update `plans/170-v01026-pre-failed-upload-row-cleanup-sweep.md`** — append an "Implementation refinement during cycle" section that documents the FK cascade 4-deep discovery (Upload → OrmFight → 3 child tables) + the NOT EXISTS safety guard + the TOCTOU-safe single-statement DELETE shape + the LIKE scope to `Duplicate fight:%`. Mark option (c) as chosen from the original options matrix with concrete evidence.
+- **Thread `_BATCH_DELETE_SIZE` through `Settings`** — the magic 1000 should become `Settings.stuck_sweeper_failed_batch_size` with env `STUCK_SWEEPER_FAILED_BATCH_SIZE` (default 1000, `ge=10`, `le=100_000`).
+- **Split `STUCK_SWEEPER_ITERATION_DURATION` per-sweep histogram** — separate `_pending_` + `_failed_` histograms so operators can attribute SLA breaches per sweep (the current conflated histogram measures BOTH sweeps + sleep).
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
