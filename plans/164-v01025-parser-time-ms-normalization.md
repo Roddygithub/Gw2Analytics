@@ -54,6 +54,17 @@ In the same parser pass, when `len(skill_table) == 0` but
 and **synthesize a placeholder skill table** (`Skill(id=0, name="UNKNOWN")`)
 so downstream aggregators don't divide by zero / iterate 0 times.
 
+Stage 2 overlaps with the ``libs/gw2_skills`` v0.11.0 SCAFFOLD
+catalog population (Blocker B per ``plans/WAVE-8-parser-side.md``
+§B.1-B.7): once the catalog lands at
+``libs/gw2_skills/src/gw2_skills/data/gw2_skills.ndjson``, the
+placeholder synthesis here is replaced by a seeded lookup (the
+``SkillCatalog.__contains__(skill_id)`` path); until then this
+synthesis is the canonical fallback and emits a WARN log so a
+catalog reviewer can see the gap on the per-fight diagnostics
+page. The WAVE-8 reader can trace the linkage without grepping
+this plan against the Skills DB catalog.
+
 ### Stage 3 — Hermetic regression tests
 
 `libs/gw2_evtc_parser/tests/test_parser_emit_statechange.py`:
