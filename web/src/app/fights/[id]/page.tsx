@@ -86,6 +86,16 @@ import { PlayerSkillUsageTable } from "@/components/PlayerSkillUsageTable";
 import { PlayerSkillUsageFilter } from "@/components/PlayerSkillUsageFilter";
 import { PerFightTimelineSection } from "@/components/PerFightTimelineSection";
 import { ReplayPlayer } from "@/components/ReplayPlayer";
+// v0.10.26-pre plan 169 commit #1: per-section error indicator.
+//
+// Consolidates the inline ``<p data-testid="{section}-error"
+//
+//   style={accent}>` shape that was duplicated across 5+ per-section
+//
+// error blocks on this page. Pilot-tested at
+//
+// :file:`web/tests/components/section-error-chip.test.tsx`.
+import { SectionErrorChip } from "@/components/SectionErrorChip";
 import { PlayerReadoutDamage } from "@/components/PlayerReadoutDamage";
 import { PlayerReadoutHeal } from "@/components/PlayerReadoutHeal";
 import { PlayerReadoutBoons } from "@/components/PlayerReadoutBoons";
@@ -962,12 +972,10 @@ export default async function FightEventsPage({
           Per-subgroup (squad)
         </h2>
         {sectionErrors.squads && (
-          <p
-            data-testid="squads-error"
-            style={{ color: "var(--accent)", fontSize: 14, margin: 0 }}
-          >
-            Failed to load squads: {sectionErrors.squads}
-          </p>
+          <SectionErrorChip
+            testid="squads-section-error"
+            message={`Failed to load squads: ${sectionErrors.squads}`}
+          />
         )}
         <SquadRollupsGrid
           rows={squads?.squads ?? []}
