@@ -14,10 +14,7 @@ implements 3 layers of defense against oversized uploads:
 
 Plus a 4th layer at the Caddy reverse-proxy: ``Caddyfile`` has
 ``request_body { max_size ... }`` which rejects oversized requests
-at the edge BEFORE the bytes reach the API. The Caddyfile cap is
-100 MiB (``100MiB``) to match the API's ``MAX_UPLOAD_SIZE_BYTES``
-default exactly -- a smaller decimal ``100MB`` cap would create
-a proxy-layer false-reject window.
+at the edge BEFORE the bytes reach the API.
 
 These tests pin the contract for Layer 3 + the Caddyfile layer.
 Layer 1 (Content-Length) + Layer 2 (UploadFile.size) are NOT
@@ -33,8 +30,17 @@ defense-in-depth is exercised end-to-end by the real-stack harness
 Drift guard rationale: a regression that lowers the Caddyfile
 cap below the API cap would cause client uploads to fail at the
 proxy with a generic 413 for payloads the API would otherwise
-accept. ``test_caddyfile_request_body_limit_matches_api_cap``
-catches this misconfiguration cheaply via regex + bytes math.
+accept (see the ``test_caddyfile_request_body_limit_matches_api_cap``
+docstring for the unit-mismatch details + the proxy-layer
+false-reject window explanation).
+
+Forward-looking: if a future Starlette/httpx release exposes a
+reliable way to spoof Content-Length in tests (e.g. a dedicated
+httpx kwarg or a TestClient middleware for multipart parser
+state inspection), consider adding Layer 1+2 dedicated tests
+for completeness. The current tests pin the contract via Layer
+3's same-condition verification; Layer 1+2 dedicated tests would
+add defense-in-depth to the test suite itself.
 """
 
 from __future__ import annotations
