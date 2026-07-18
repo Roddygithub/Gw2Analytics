@@ -555,6 +555,8 @@ class BarrierEvent(BaseEvent):
     (the ``ge=0`` constraint accepts ``0`` as a valid null sentinel).
     """
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     event_type: Literal[EventType.BARRIER] = EventType.BARRIER
     barrier_amount: int = Field(default=0, ge=0)
     duration_ms: int = Field(default=0, ge=0)
