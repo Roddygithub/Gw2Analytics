@@ -60,6 +60,21 @@ export interface SectionErrorChipProps {
   message: string;
 }
 
+// Project-wide React import is required for the
+// ``React.CSSProperties`` type annotation below (the project does
+// NOT expose ``React`` as a global namespace in its tsconfig).
+// Mirrors the precedent in
+// :file:`web/src/components/PlayerSkillUsageFilter.tsx` (line ~30:
+// ``const PLAYER_SKILL_SELECT_STYLE: React.CSSProperties = {...}``)
+// which unconditionally ``import React from "react"`` for the same
+// reason. Without this import, a strict-mode ``ts-loader`` or a
+// Vite build with ``verbatimModuleSyntax: true`` would fail at
+// the ``React.CSSProperties`` reference even though ``--skipLibCheck
+// tsc`` succeeds (the basher-run gate passed because the type is
+// satisfied via transitive resolution, but the consumer chain is
+// latent).
+import React from "react";
+
 const CHIP_STYLE: React.CSSProperties = {
   color: "var(--accent)",
   fontSize: 14,
