@@ -555,6 +555,7 @@ class BarrierEvent(BaseEvent):
     (the ``ge=0`` constraint accepts ``0`` as a valid null sentinel).
     """
 
+    # Explicit (not implicit BaseEvent inheritance) — sibling-class parity.
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_type: Literal[EventType.BARRIER] = EventType.BARRIER
