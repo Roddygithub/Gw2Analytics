@@ -53,7 +53,6 @@ from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 
 from gw2analytics_api import config as _config
-from gw2analytics_api.main import app
 
 # ---------------------------------------------------------------------
 # Layer 3: post-read len check (the canonical 413 defense)
@@ -185,7 +184,15 @@ def test_caddyfile_request_body_limit_matches_api_cap() -> None:
     # Parse the cap value (bytes).
     value = int(match.group(1))
     unit = (match.group(2) or "").upper()
-    multipliers = {"": 1, "KB": 1000, "KIB": 1024, "MB": 1_000_000, "MIB": 1024**2, "GB": 1_000_000_000, "GIB": 1024**3}
+    multipliers = {
+        "": 1,
+        "KB": 1000,
+        "KIB": 1024,
+        "MB": 1_000_000,
+        "MIB": 1024**2,
+        "GB": 1_000_000_000,
+        "GIB": 1024**3,
+    }
     caddy_cap_bytes = value * multipliers.get(unit, 1)
 
     # API cap defaults to 100 MiB (104857600 bytes) per Settings.max_upload_size_bytes.
