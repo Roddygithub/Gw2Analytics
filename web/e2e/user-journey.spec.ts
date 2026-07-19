@@ -26,6 +26,8 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 
 import { expect, test } from "@playwright/test";
 
+import { parseLargeZevtcPaths } from "./helpers/env";
+import { safeFileLabel } from "./helpers/string";
 import { bypassNextJsProxyForLargeUploads } from "./helpers/proxy";
 
 const STACK_URL = process.env.E2E_STACK_URL ?? "http://localhost:3000";
@@ -33,7 +35,7 @@ const API_URL = process.env.E2E_API_URL ?? "http://localhost:8000";
 const SHOTS = process.env.E2E_SCREENSHOT_DIR ?? "./playwright-e2e-screenshots";
 const SMALL = process.env.E2E_ZEVTC_SMALL_PATH ?? "";
 const MEDIUM = process.env.E2E_ZEVTC_MEDIUM_PATH ?? "";
-const LARGE = process.env.E2E_ZEVTC_LARGE_PATH ?? "";
+const LARGE_PATHS = parseLargeZevtcPaths();
 const GW2_API_KEY = process.env.E2E_GW2_API_KEY ?? "";
 
 type Diag = { console: string[]; pageerrors: string[]; http4xx5xx: string[] };
@@ -196,15 +198,21 @@ test("full user journey (small + medium + large .zevtc)", async ({ page }) => {
   });
 
   await test.step("30 large upload + browse", async () => {
-    if (!LARGE || !existsSync(LARGE)) {
+    if (LARGE_PATHS.length === 0) {
       test.info().annotations.push({ type: "skip-step", description: "no large .zevtc" });
       return;
     }
-    await bypassNextJsProxyForLargeUploads(page, API_URL);
-    const r = await uploadThrough(LARGE, "30-large");
-    expect.soft(r.rejected, "large should not be client-rejected").toBeNull();
-    expect.soft(r.fightId, "large upload should produce a fight id").toBeTruthy();
-    if (r.fightId) await browseFightDetail(r.fightId, "30-large");
+    for (let i = 0; i < LARGE_PATHS.length; i++) {
+      const filePath = LARGE_PATHS[i];
+      const fileLabel = safeFileLabel(filePath);
+      await test.step(`large upload ${i + 1}/${LARGE_PATHS.length}: ${fileLabel}`, async () => {
+        await bypassNextJsProxyForLargeUploads(page, API_URL);
+        const r = await uploadThrough(filePath, `30-large-${fileLabel}`);
+        expect.soft(r.rejected, "large should not be client-rejected").toBeNull();
+        expect.soft(r.fightId, "large upload should produce a fight id").toBeTruthy();
+        if (r.fightId) await browseFightDetail(r.fightId, `30-large-${fileLabel}`);
+      });
+    }
   });
 
   await test.step("31 account / API key", async () => {
