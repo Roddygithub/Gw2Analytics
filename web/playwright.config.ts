@@ -90,7 +90,11 @@ export default defineConfig({
     {
       command: "node tests/e2e/mock-server.mjs",
       port: 8080,
-      reuseExistingServer: !isCI,
+      // Always spawn fresh: a stale mock-server on the port would
+      // silently serve stale fixtures and produce misleading test
+      // results.  The start-up cost is ~200 ms so the fast-local-
+      // loop impact is negligible.
+      reuseExistingServer: false,
       timeout: 30_000,
     },
     {
@@ -104,7 +108,15 @@ export default defineConfig({
         ? "pnpm run build && PORT=3000 node .next/standalone/server.js"
         : "pnpm run dev",
       port: 3000,
-      reuseExistingServer: !isCI,
+      // Always spawn fresh: a stale Next.js dev server on port
+      // 3000 (e.g. from a manual ``make dev-web-bg``) would NOT
+      // have API_BASE_URL set to the mock server, causing all
+      // SSR fetches to hit the real backend (localhost:8000)
+      // instead.  This is the root cause of the 19 E2E failures:
+      // fixture-fight-001 doesn't exist on the real API, so the
+      // fight-detail page renders the error card instead of the
+      // roll-up sections.
+      reuseExistingServer: false,
       timeout: 180_000,
       env: {
         // Tell the Next.js server to fetch from the mock
