@@ -121,6 +121,16 @@ from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
 # parallel of :class:`PerFightTimelineAggregator`'s bound.
 _MIN_WINDOW_S: Final[int] = 1
 
+# Maximum buckets before failing fast. Defense-in-depth parity with
+# :class:`EventWindowAggregator` + :class:`PerFightTimelineAggregator`
+# (both already guard this): a non-normalized ``time_ms`` would make the
+# per-account zero-fill ``range(last_bucket_index + 1)`` allocate an
+# unbounded list PER PLAYER and hang the worker. The v0.10.x blob_loader
+# now neutralizes the arcdps uint64-max sentinel `time_ms`, so this is a
+# belt-and-suspenders guard closing the per-player/per-fight asymmetry
+# (plan 171).
+_MAX_BUCKETS: Final[int] = 50_000
+
 
 @dataclass(slots=True)
 class _BucketStats:
@@ -267,6 +277,20 @@ class PerPlayerTimelineAggregator:
         expected_per_account, last_bucket_index = (
             PerPlayerTimelineAggregator._derive_expected_and_last_bucket(per_account)
         )
+
+        # Safety cap (parity with PerFightTimeline / EventWindow): fail fast
+        # on non-normalized time_ms instead of zero-filling ~quadrillions of
+        # buckets PER account and hanging the worker (plan 171).
+        num_buckets = last_bucket_index + 1
+        if num_buckets > _MAX_BUCKETS:
+            msg = (
+                f"PerPlayerTimelineAggregator would produce {num_buckets} buckets "
+                f"per account (max {_MAX_BUCKETS}); time_ms values may not be "
+                f"normalized to fight-relative (last time_ms="
+                f"{last_bucket_index * window_ms}, window_s={window_s}). "
+                f"Consider checking the parser's time_ms normalization."
+            )
+            raise ValueError(msg)
         # No last-seen char-name update here: the
         # ``Event`` union does NOT carry ``source_name``
         # (the char-name is denormalised on
