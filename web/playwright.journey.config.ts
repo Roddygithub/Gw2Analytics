@@ -21,6 +21,10 @@ const STACK_URL = process.env.E2E_STACK_URL ?? "http://localhost:3000";
 
 export default defineConfig({
   testDir: "./e2e",
+  // Ignore Vitest unit tests that live alongside the Playwright specs
+  // (e.g. e2e/helpers/*.test.ts). Playwright's default testMatch picks
+  // up *.test.ts files, which would fail because they import vitest.
+  testIgnore: ["e2e/helpers/**/*.test.ts"],
   fullyParallel: false,
   workers: 1,
   reporter: "list",

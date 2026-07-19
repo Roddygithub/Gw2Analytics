@@ -39,8 +39,8 @@ HTTP >=400 responses.
 | `E2E_STACK_URL` | `http://localhost:3000` | Next.js frontend base URL |
 | `E2E_API_URL` | `http://localhost:8000` | FastAPI base URL (direct 413 cap probe) |
 | `E2E_ZEVTC_SMALL_PATH` | *(unset → suite skips)* | real small `.zevtc` (the core journey) |
-| `E2E_ZEVTC_MEDIUM_PATH` | *(unset → step skips)* | medium `.zevtc` |
-| `E2E_ZEVTC_LARGE_PATH` | *(unset → step skips)* | large `.zevtc` to exercise parse + browse |
+| `E2E_ZEVTC_MEDIUM_PATH` | *(unset → step skips)* | medium `.zevtc` || `E2E_ZEVTC_LARGE_PATH`   | *(unset → step skips)* | large `.zevtc` to exercise parse + browse (legacy single-file alias) |
+| `E2E_ZEVTC_LARGE_PATHS`  | *(unset → falls back to `LARGE_PATH`)* | comma-separated list of large `.zevtc` files; each file runs as its own test, so you can stress-test several real file sizes in one run |
 | `E2E_GW2_API_KEY` | *(unset → uses dummy key)* | real GW2 API key for the `/account` step |
 | `E2E_SCREENSHOT_DIR` | `./playwright-e2e-screenshots` | screenshot output (gitignored) |
 
@@ -84,7 +84,7 @@ To run all real-stack specs at once:
 cd web
 E2E_ZEVTC_SMALL_PATH=/abs/path/small.zevtc \
 E2E_ZEVTC_MEDIUM_PATH=/abs/path/medium.zevtc \
-E2E_ZEVTC_LARGE_PATH=/abs/path/large.zevtc \
+E2E_ZEVTC_LARGE_PATHS="/abs/path/large1.zevtc,/abs/path/large2.zevtc" \
 E2E_GW2_API_KEY="<your-gw2-api-key>" \
 pnpm exec playwright test --config playwright.journey.config.ts
 ```
@@ -123,10 +123,15 @@ avoiding the dev-server payload cap. In production, a real reverse proxy such
 as Caddy/NGINX handles large uploads natively and does not need this
 interception.
 
-The shared helper lives in `web/e2e/helpers/proxy.ts` and is reused by both
-`user-journey.spec.ts` and `large-upload.spec.ts`. It uses Playwright's
-`route.continue({ url })`, which preserves the original multipart body and
-headers while changing only the destination URL.
+The shared helpers live in `web/e2e/helpers/`:
+
+* `proxy.ts` — `bypassNextJsProxyForLargeUploads()` is reused by both
+  `user-journey.spec.ts` and `large-upload.spec.ts`. It uses Playwright's
+  `route.continue({ url })`, which preserves the original multipart body and
+  headers while changing only the destination URL.
+* `env.ts` — `parseLargeZevtcPaths()` parses `E2E_ZEVTC_LARGE_PATHS`.
+* `string.ts` — `safeFileLabel()` sanitizes file paths for screenshot names
+  and test step titles.
 
 `large-upload.spec.ts` isolates this behavior: it uploads the file provided by
 `E2E_ZEVTC_LARGE_PATH` through the wizard with the interceptor enabled and

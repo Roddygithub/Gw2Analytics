@@ -17,9 +17,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  *   real build.
  * - css: false — Next.js owns stylable output; the unit tests don't
  *   need vitest's CSS pipeline.
- * - include: only files under tests/** matching *.test.{ts,tsx} so
- *   we ignore example.spec.ts-like accidents and the Next.js
- *   typecheck include path remains unaffected.
+ * - include: files under tests/** and e2e/helpers/** matching
+ *   *.test.{ts,tsx}. The e2e/helpers tests are pure unit tests for
+ *   the real-stack E2E helpers; Playwright specs under e2e/*.spec.ts
+ *   are intentionally excluded so Vitest does not try to run them.
  */
 export default defineConfig({
   resolve: {
@@ -31,7 +32,7 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
     css: false,
-    include: ["tests/**/*.test.{ts,tsx}"],
+    include: ["tests/**/*.test.{ts,tsx}", "e2e/helpers/**/*.test.{ts,tsx}"],
     clearMocks: true,
     // ``globals: true`` makes ``describe`` / ``it`` / ``expect`` /
     // ``beforeEach`` / ``afterEach`` available without per-test
