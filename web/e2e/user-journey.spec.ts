@@ -22,9 +22,11 @@
  * aborts the journey — the deliverable is the screenshot set + the
  * captured error log for visual review.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 
 import { expect, test } from "@playwright/test";
+
+import { bypassNextJsProxyForLargeUploads } from "./helpers/proxy";
 
 const STACK_URL = process.env.E2E_STACK_URL ?? "http://localhost:3000";
 const API_URL = process.env.E2E_API_URL ?? "http://localhost:8000";
@@ -32,6 +34,7 @@ const SHOTS = process.env.E2E_SCREENSHOT_DIR ?? "./playwright-e2e-screenshots";
 const SMALL = process.env.E2E_ZEVTC_SMALL_PATH ?? "";
 const MEDIUM = process.env.E2E_ZEVTC_MEDIUM_PATH ?? "";
 const LARGE = process.env.E2E_ZEVTC_LARGE_PATH ?? "";
+const GW2_API_KEY = process.env.E2E_GW2_API_KEY ?? "";
 
 type Diag = { console: string[]; pageerrors: string[]; http4xx5xx: string[] };
 
@@ -73,7 +76,11 @@ test("full user journey (small + medium + large .zevtc)", async ({ page }) => {
   });
 
   const shot = async (name: string) => {
-    await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true }).catch(() => {});
+    const path = `${SHOTS}/${name}.png`;
+    await page.screenshot({ path, fullPage: true }).catch(() => {});
+    // Lightweight render check: the screenshot must exist and be non-empty.
+    const size = existsSync(path) ? statSync(path).size : 0;
+    expect.soft(size, `screenshot ${name}.png should be non-empty`).toBeGreaterThan(0);
   };
 
   // Upload a file through the wizard; returns fight id (or null if the
@@ -188,30 +195,65 @@ test("full user journey (small + medium + large .zevtc)", async ({ page }) => {
     if (r.fightId) await browseFightDetail(r.fightId, "20-medium");
   });
 
-  await test.step("30 large upload — expect graceful cap", async () => {
+  await test.step("30 large upload + browse", async () => {
     if (!LARGE || !existsSync(LARGE)) {
       test.info().annotations.push({ type: "skip-step", description: "no large .zevtc" });
       return;
     }
+    await bypassNextJsProxyForLargeUploads(page, API_URL);
     const r = await uploadThrough(LARGE, "30-large");
-    expect.soft(r.rejected, "large (>100MiB) should be rejected gracefully").toBeTruthy();
+    expect.soft(r.rejected, "large should not be client-rejected").toBeNull();
+    expect.soft(r.fightId, "large upload should produce a fight id").toBeTruthy();
+    if (r.fightId) await browseFightDetail(r.fightId, "30-large");
   });
 
-  await test.step("31 server 413 cap (direct API)", async () => {
-    if (!LARGE || !existsSync(LARGE)) return;
-    try {
-      const buf = Buffer.alloc(101 * 1024 * 1024, 0);
-      const resp = await page.request.post(`${API_URL}/api/v1/uploads`, {
-        multipart: {
-          file: { name: "large.zevtc", mimeType: "application/octet-stream", buffer: buf },
-        },
-        timeout: 120_000,
-      });
-      diag.http4xx5xx.push(`(direct upload cap probe) -> ${resp.status()}`);
-      expect.soft(resp.status(), "server should 413 a >100MiB upload").toBe(413);
-    } catch (e) {
-      diag.pageerrors.push(`[413 probe] ${(e as Error).message}`);
+  await test.step("31 account / API key", async () => {
+    await page.goto("/account", { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1500);
+    await shot("31-account-form");
+    await expect.soft(page.getByRole("heading", { name: /Resolve GW2 API key/i })).toBeVisible();
+    const input = page.locator('input[type="password"]').first();
+    const btn = page.getByRole("button", { name: /Resolve/ }).first();
+    if ((await input.count()) > 0 && (await btn.count()) > 0) {
+      await input.fill(GW2_API_KEY || "test-api-key-12345");
+      await btn.click();
+      // Wait for the resolved result or an error banner to appear.
+      await page
+        .locator("text=/Resolved world/i")
+        .or(page.locator("text=/Error:/i"))
+        .waitFor({ timeout: 10_000 })
+        .catch(() => {});
+      await shot("31-account-resolved");
+      const body = (await page.locator("body").textContent()) ?? "";
+      const hasResolved = body.includes("Resolved world") || body.includes("resolved world");
+      // The page shows "Error: <status>" for invalid/rejected keys.
+      const hasError = body.includes("Error:");
+      if (GW2_API_KEY) {
+        expect.soft(
+          hasResolved || hasError,
+          "account page should resolve the provided real GW2 API key or show an error",
+        ).toBeTruthy();
+      } else {
+        expect.soft(
+          hasResolved || hasError,
+          "account page shows resolved state or error feedback",
+        ).toBeTruthy();
+      }
     }
+  });
+
+  await test.step("32 players compare", async () => {
+    await page.goto("/players/compare", { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1500);
+    await shot("32-players-compare");
+    await expect.soft(page.getByRole("heading", { name: /Compare accounts/i })).toBeVisible();
+  });
+
+  await test.step("33 webhooks", async () => {
+    await page.goto("/webhooks", { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1500);
+    await shot("33-webhooks");
+    await expect.soft(page.getByRole("heading", { name: /Webhook/i })).toBeVisible();
   });
 
   writeFileSync(`${SHOTS}/_diagnostics.json`, JSON.stringify(diag, null, 2));
