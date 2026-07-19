@@ -438,3 +438,17 @@ def test_module_exports() -> None:
         PerPlayerTimelineSeries(account_name=":a.1", name="Alice", points=[]),
         PerPlayerTimelineSeries,
     )
+
+
+def test_aggregate_fails_fast_on_non_normalized_time_ms() -> None:
+    """Defense-in-depth (plan 171): a non-normalized `time_ms` (raw arcdps
+    timestamp ~1.8e19) must fail fast instead of zero-filling ~quadrillions
+    of buckets PER player and hanging the worker. Parity with the guards
+    already on PerFightTimeline + EventWindow. (The v0.10.x blob_loader now
+    neutralizes the uint64-max sentinel upstream; this guards the aggregator
+    boundary regardless.)
+    """
+    agents = [_FakeAgent(agent_id=1, account_name=":a.1", is_player=True, name="Alice")]
+    events: list[Event] = [_dmg(18_302_628_885_633_695_000, 1, 100)]
+    with pytest.raises(ValueError, match="would produce"):
+        PerPlayerTimelineAggregator().aggregate(events, agents, window_s=5)
