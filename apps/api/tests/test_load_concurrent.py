@@ -82,7 +82,7 @@ def _worker_round_trip(
     sk = 4_000_000 + worker_index
     blob = make_minimal_zevtc(
         [(aid, 2, 18, f"W {suffix}", True)],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(sk, f"Dmg {suffix}")],
         events=[],
     )

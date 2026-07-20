@@ -1272,19 +1272,22 @@ def _validate_event_candidate(
       ``dst_agent`` (eliminates pure-zero-byte false positives).
     * When ``known_agents`` is provided, at least 2 readable records
       have a ``src_agent`` or ``dst_agent`` that exists in the agent
-      table.  This is the strongest rejection: random data in skill
+      table, OR 1 such match when fewer than 2 full records can be
+      read.  This is the strongest rejection: random data in skill
       name regions rarely produces values that match real agent IDs.
     """
     max_time_ms = 86_400_000
     saw_agent = False
     prev_time = -1
     matched_agents = 0
+    readable_records = 0
     event_struct = _EVENT_STRUCT_2025 if is_evtc_2025 else _EVENT_STRUCT
     for i in range(4):
         ev_offset = offset + i * EVENT_SIZE
         if ev_offset + EVENT_SIZE > len(data):
             break
         ev = event_struct.unpack_from(data, ev_offset)
+        readable_records += 1
         time_ms, src_agent, dst_agent = ev[0], ev[1], ev[2]
         if time_ms > max_time_ms or time_ms < 0:
             return False
@@ -1298,7 +1301,12 @@ def _validate_event_candidate(
         if not any(ev[j] for j in range(3, len(ev))):
             return False
     if known_agents is not None:
-        return saw_agent and matched_agents >= 2
+        # EVTC2025+ files with a single trailing event cannot satisfy
+        # the original >=2 match requirement, but one match in the
+        # single readable record is still strong evidence we are at
+        # the event boundary.
+        required_matches = min(2, readable_records)
+        return saw_agent and matched_agents >= required_matches
     return saw_agent
 
 

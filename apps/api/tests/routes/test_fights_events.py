@@ -40,7 +40,7 @@ def _post_fight_and_events(
     ]
     blob = make_minimal_zevtc(
         agents,
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(base_skill + i, f"Skill_{i}") for i in range(max(n_events, 1))],
         events=cbtevents,
     )

@@ -1005,7 +1005,7 @@ def test_player_timeline_returns_paginated_recency_first_points() -> None:
             (base_id_a, 2, 18, f"V08 Warrior {suffix_b}", True),
             (base_id_b, 1, 27, f"V08 Guard {suffix_b}", True),
         ],
-        build=f"2025{suffix_b[:4]}",
+        build=f"2025{int(suffix_b[:4], 16) % 10000:04d}",
         skills=[
             (base_skill_c, f"Whirlwind B {suffix_b}"),
             (base_skill_d, f"Burning B {suffix_b}"),
@@ -1272,7 +1272,7 @@ def test_player_timeline_day_bucket_splits_across_days() -> None:
             (base_id_a, 2, 18, f"V81 Warrior {suffix_2}", True),
             (base_id_b, 1, 27, f"V81 Guard {suffix_2}", True),
         ],
-        build=f"2025{suffix_2[:4]}",
+        build=f"2025{int(suffix_2[:4], 16) % 10000:04d}",
         skills=[(base_skill_b, f"V81 Skill {suffix_2}")],
         events=events_2,
     )

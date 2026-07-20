@@ -57,7 +57,7 @@ def test_player_skills_200_with_damage_attribution(
             (a, 2, 18, f"W {suffix}", True),
             (b, 1, 27, f"G {suffix}", True),
         ],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(sk, "TestSkill")],
         events=[
             make_cbtevent(1_000, src=a, dst=b, value=1000, skill_id=sk),
@@ -125,7 +125,7 @@ def test_player_skills_200_idle_player_empty_skills(
             (a, 2, 18, f"W {suffix}", True),
             (b, 1, 27, f"G {suffix}", True),
         ],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(sk, "TestSkill")],
         events=[
             # Only ``a`` issues damage; ``b`` is only the target.
@@ -160,7 +160,7 @@ def test_player_skills_404_unknown_account(
             (a, 2, 18, f"W {suffix}", True),
             (b, 1, 27, f"G {suffix}", True),
         ],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
     )
     fight_id = post_upload(client, blob)
 

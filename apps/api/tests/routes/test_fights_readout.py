@@ -57,7 +57,7 @@ def test_readout_200_happy_path_with_player(client: TestClient) -> None:
 
     blob = make_minimal_zevtc(
         [(a, 2, 18, f"W {suffix}", True), (b, 1, 27, f"G {suffix}", True)],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(sk, "DmgSkill"), (heal_sk, "HealSkill")],
         events=[
             make_cbtevent(1_000, src=a, dst=b, value=1000, skill_id=sk),
@@ -117,7 +117,7 @@ def test_readout_200_is_commander_derived_from_name_tag(client: TestClient) -> N
             (a, 2, 18, f"W {suffix} [CMDR]", True),  # commander-flagged via name-tag
             (b, 1, 27, f"G {suffix}", True),
         ],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(sk, "Dmg")],
         events=[make_cbtevent(1_000, src=a, dst=b, value=100, skill_id=sk)],
     )
@@ -154,7 +154,7 @@ def test_readout_200_default_empty_players_when_no_player_agents(client: TestCli
     # ``make_minimal_zevtc`` writes ``account = b""`` for NPC agents.
     blob = make_minimal_zevtc(
         [(npc_a, 2, 18, f"NPC {suffix}", False)],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(sk, "Dmg")],
         events=[make_cbtevent(1_000, src=npc_a, dst=0, value=42, skill_id=sk)],
     )
@@ -201,7 +201,7 @@ def test_readout_get_with_legacy_dry_run_param_still_works(client: TestClient) -
     sk = 3_500_000 + int(suffix[:4], 16)
     blob = make_minimal_zevtc(
         [(a, 2, 18, f"W {suffix}", True)],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(sk, "Dmg")],
         events=[make_cbtevent(1_000, src=a, dst=a + 1, value=100, skill_id=sk)],
     )
