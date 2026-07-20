@@ -49,7 +49,6 @@ function buildPlayer(extra: Partial<PlayerReadoutOut> = {}): PlayerReadoutOut {
       barrier_ps: 0,
       cleanses: 150,
       stun_breaks: 5,
-      resurrects: 0,
     },
     boons: {
       boons_out_rate: 45.2,
@@ -71,7 +70,6 @@ function buildPlayer(extra: Partial<PlayerReadoutOut> = {}): PlayerReadoutOut {
       blocks: 45,
       interrupts: 1,
       barrier_absorbed: 15015,
-      presence_pct: 0,
     },
     ...extra,
   };

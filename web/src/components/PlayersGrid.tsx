@@ -61,6 +61,8 @@ const CSV_COLUMNS: CsvColumn<PlayerListRow>[] = [
   { field: "name", headerName: "Character" },
   { field: "profession", headerName: "Profession" },
   { field: "elite_spec", headerName: "Elite spec" },
+  { field: "detected_role", headerName: "Role" },
+  { field: "detected_tags", headerName: "Tags" },
   { field: "fights_attended", headerName: "Fights" },
   { field: "total_damage", headerName: "Total damage" },
   { field: "total_healing", headerName: "Total healing" },
@@ -103,6 +105,24 @@ export function PlayersGrid({
       { field: "name", headerName: "Character", width: 200 },
       { field: "profession", headerName: "Profession", width: 140 },
       { field: "elite_spec", headerName: "Elite spec", width: 140 },
+      {
+        field: "detected_role",
+        headerName: "Role",
+        width: 100,
+        valueFormatter: (params: ValueFormatterParams) => {
+          const v = params.value;
+          return typeof v === "string" ? v : "—";
+        },
+      },
+      {
+        field: "detected_tags",
+        headerName: "Tags",
+        width: 180,
+        valueFormatter: (params: ValueFormatterParams) => {
+          const v = params.value;
+          return Array.isArray(v) ? v.join(", ") : "—";
+        },
+      },
       {
         field: "fights_attended",
         headerName: "Fights",

@@ -38,9 +38,9 @@ describe("formatLarge", () => {
 
 describe("TopListCard", () => {
   const mockPlayers = [
-    { account_name: "alpha.1", name: "Alpha", profession: "PROF(1)", elite_spec: "ELITE(27)", fights_attended: 10, total_damage: 5000, total_healing: 3000, total_buff_removal: 100 },
-    { account_name: "beta.2", name: "Beta", profession: "PROF(2)", elite_spec: "BASE", fights_attended: 8, total_damage: 8000, total_healing: 1000, total_buff_removal: 200 },
-    { account_name: "gamma.3", name: "Gamma", profession: "PROF(3)", elite_spec: "ELITE(43)", fights_attended: 12, total_damage: 3000, total_healing: 5000, total_buff_removal: 50 },
+    { account_name: "alpha.1", name: "Alpha", profession: "PROF(1)", elite_spec: "ELITE(27)", fights_attended: 10, total_damage: 5000, total_healing: 3000, total_buff_removal: 100, detected_role: "DPS", detected_tags: null },
+    { account_name: "beta.2", name: "Beta", profession: "PROF(2)", elite_spec: "BASE", fights_attended: 8, total_damage: 8000, total_healing: 1000, total_buff_removal: 200, detected_role: "DPS", detected_tags: null },
+    { account_name: "gamma.3", name: "Gamma", profession: "PROF(3)", elite_spec: "ELITE(43)", fights_attended: 12, total_damage: 3000, total_healing: 5000, total_buff_removal: 50, detected_role: "HEAL", detected_tags: null },
   ];
 
   it("renders title and top 3 sorted by getValue descending", () => {

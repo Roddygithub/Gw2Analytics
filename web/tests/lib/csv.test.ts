@@ -239,6 +239,8 @@ describe("csvEscape formula injection guard (v0.10.0)", () => {
         total_damage: 1000,
         total_healing: 500,
         total_buff_removal: 10,
+        detected_role: "DPS",
+        detected_tags: null,
       },
     ];
     const columns: CsvColumn<Pr>[] = [

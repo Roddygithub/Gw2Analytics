@@ -37,6 +37,8 @@ export type {
   PlayerReadoutDefenseOut,
   PlayerReadoutOut,
   FightReadoutOut,
+  PlayerPositionOut,
+  FightPositionsOut,
 } from "./fights";
 export {
   fetchFights,
@@ -48,6 +50,7 @@ export {
   fetchFightPlayerTimeline,
   fetchFightPlayerSkills,
   fetchFightReadout,
+  fetchFightPositions,
 } from "./fights";
 
 export type {

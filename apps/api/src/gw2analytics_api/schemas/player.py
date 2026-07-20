@@ -17,6 +17,9 @@ class PlayerListRowOut(BaseModel):
     total_damage: int
     total_healing: int
     total_buff_removal: int
+    # Phase 3 (AI-CONTINUATION-PLAN): detected role shown in the players list.
+    detected_role: str | None = None
+    detected_tags: list[str] | None = None
 
 
 class PerFightBreakdownRowOut(BaseModel):
@@ -96,5 +99,8 @@ class PlayerProfileOut(BaseModel):
     total_damage: int
     total_healing: int
     total_buff_removal: int
+    # Phase 3 (AI-CONTINUATION-PLAN): cross-fight detected role/tags.
+    detected_role: str | None = None
+    detected_tags: list[str] | None = None
     attended_fight_ids: list[str] = []
     per_fight_breakdown: list[PerFightBreakdownRowOut] = []
