@@ -18,6 +18,10 @@ from typing import Final
 
 from fastapi.testclient import TestClient
 
+from apps.api.tests.routes._evtc_builder import (
+    _is_evtc2025,
+    build_2025_string,
+)
 from gw2analytics_api.main import app
 
 client: Final = TestClient(app)
@@ -50,13 +54,6 @@ _EVENT_SIZE: Final = struct.calcsize(_EVENT_FMT)  # 64
 # EVTC2025+ event format (standard arcdps.h cbtevent layout).
 _EVENT_FMT_2025: Final = "<QQQiiIIHHHH16B"
 _EVENT_SIZE_2025: Final = struct.calcsize(_EVENT_FMT_2025)  # 64
-
-
-def _is_evtc2025(build: str) -> bool:
-    """Return True for builds dated 2025 or later."""
-    if len(build) >= 4 and build[:4].isdigit():
-        return int(build[:4]) >= 2025
-    return False
 
 
 def make_cbtevent(
@@ -234,8 +231,7 @@ def post_minimal_fight(
     cross-fight roll-up.
     """
     suffix = suffix or _uuid.uuid4().hex[:8]
-    suffix_digits = f"{int(suffix[:4], 16) % 10000:04d}" if len(suffix) >= 4 else "0925"
-    build = f"2025{suffix_digits}"
+    build = build_2025_string(suffix)
     base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_id_b = base_id_a + 1
     base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
@@ -270,8 +266,7 @@ def post_npc_only_fight() -> str:
     the fight as ``skipped`` and write no summary rows.
     """
     suffix = _uuid.uuid4().hex[:8]
-    suffix_digits = f"{int(suffix[:4], 16) % 10000:04d}" if len(suffix) >= 4 else "0925"
-    build = f"2025{suffix_digits}"
+    build = build_2025_string(suffix)
     base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_id_b = base_id_a + 1
     blob = make_minimal_zevtc(

@@ -6,6 +6,7 @@ import uuid as _uuid
 
 from fastapi.testclient import TestClient
 
+from apps.api.tests.routes._evtc_builder import build_2025_string
 from gw2analytics_api.main import app
 
 from ._evtc_builder import make_cbtevent, make_minimal_zevtc, post_upload
@@ -40,7 +41,7 @@ def _post_fight_and_events(
     ]
     blob = make_minimal_zevtc(
         agents,
-        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
+        build=build_2025_string(suffix),
         skills=[(base_skill + i, f"Skill_{i}") for i in range(max(n_events, 1))],
         events=cbtevents,
     )

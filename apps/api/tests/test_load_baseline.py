@@ -43,6 +43,7 @@ import pytest
 from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 
+from apps.api.tests.routes._evtc_builder import build_2025_string
 from gw2analytics_api.models import OrmFight, Upload
 
 SEQUENTIAL_BASELINE_N = 10  # v0.10.25 starts at N=10; bumped at WAVE-8 SOAK.
@@ -100,7 +101,7 @@ def test_load_baseline_sequential_uploads_and_parses(
         sk = 2_000_000 + n
         blob = make_minimal_zevtc(
             [(aid, 2, 18, f"W {suffix}", True)],
-            build=f"2025{int(suffix[:4], 16) % 10000:04d}",
+            build=build_2025_string(suffix),
             skills=[(sk, f"Dmg {suffix}")],
             events=[],
         )

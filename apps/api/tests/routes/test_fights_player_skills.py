@@ -31,6 +31,8 @@ import uuid as _uuid
 
 from fastapi.testclient import TestClient
 
+from apps.api.tests.routes._evtc_builder import build_2025_string
+
 from ._evtc_builder import make_cbtevent, make_minimal_zevtc, post_upload
 
 
@@ -57,7 +59,7 @@ def test_player_skills_200_with_damage_attribution(
             (a, 2, 18, f"W {suffix}", True),
             (b, 1, 27, f"G {suffix}", True),
         ],
-        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
+        build=build_2025_string(suffix),
         skills=[(sk, "TestSkill")],
         events=[
             make_cbtevent(1_000, src=a, dst=b, value=1000, skill_id=sk),
@@ -125,7 +127,7 @@ def test_player_skills_200_idle_player_empty_skills(
             (a, 2, 18, f"W {suffix}", True),
             (b, 1, 27, f"G {suffix}", True),
         ],
-        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
+        build=build_2025_string(suffix),
         skills=[(sk, "TestSkill")],
         events=[
             # Only ``a`` issues damage; ``b`` is only the target.
@@ -160,7 +162,7 @@ def test_player_skills_404_unknown_account(
             (a, 2, 18, f"W {suffix}", True),
             (b, 1, 27, f"G {suffix}", True),
         ],
-        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
+        build=build_2025_string(suffix),
     )
     fight_id = post_upload(client, blob)
 

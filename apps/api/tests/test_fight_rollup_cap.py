@@ -38,6 +38,7 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 
+from apps.api.tests.routes._evtc_builder import build_2025_string
 from gw2analytics_api.main import app
 
 client = TestClient(app)
@@ -244,7 +245,7 @@ def test_target_dps_rollup_capped_at_100_rows() -> None:
 
     blob = _make_minimal_zevtc(
         agents=agents,
-        build=f"2025{int(suffix[:4], 16) % 10000:04d}" if len(suffix) >= 4 else "20250925",
+        build=build_2025_string(suffix) if len(suffix) >= 4 else "20250925",
         skills=[(base_skill_a, f"CapDpsSkill {suffix}")],
         events=events,
     )
@@ -338,7 +339,7 @@ def test_target_healing_rollup_capped_at_100_rows() -> None:
 
     blob = _make_minimal_zevtc(
         agents=agents,
-        build=f"2025{int(suffix[:4], 16) % 10000:04d}" if len(suffix) >= 4 else "20250925",
+        build=build_2025_string(suffix) if len(suffix) >= 4 else "20250925",
         skills=[(base_skill_a, f"CapHealSkill {suffix}")],
         events=events,
     )
@@ -415,7 +416,7 @@ def test_target_buff_removal_rollup_capped_at_100_rows() -> None:
 
     blob = _make_minimal_zevtc(
         agents=agents,
-        build=f"2025{int(suffix[:4], 16) % 10000:04d}" if len(suffix) >= 4 else "20250925",
+        build=build_2025_string(suffix) if len(suffix) >= 4 else "20250925",
         skills=[(base_skill_a, f"CapStripSkill {suffix}")],
         events=events,
     )
@@ -500,7 +501,7 @@ def test_skills_rollup_capped_at_100_rows() -> None:
 
     blob = _make_minimal_zevtc(
         agents=agents,
-        build=f"2025{int(suffix[:4], 16) % 10000:04d}" if len(suffix) >= 4 else "20250925",
+        build=build_2025_string(suffix) if len(suffix) >= 4 else "20250925",
         skills=skills,
         events=events,
     )
