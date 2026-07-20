@@ -58,6 +58,9 @@ class PerFightBreakdownRowOut(BaseModel):
     outgoing_resolution: int | None = None
     outgoing_superspeed: int | None = None
     outgoing_stealth: int | None = None
+    # Phase 2 (AI-CONTINUATION-PLAN): strips + cleanses.
+    boon_strips: int | None = None
+    condition_cleanses: int | None = None
 
 
 class PlayerTimelinePointOut(BaseModel):

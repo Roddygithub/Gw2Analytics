@@ -341,6 +341,43 @@ def test_role_detection_invoked() -> None:
         session.close()
 
 
+def test_boon_strips_and_condition_cleanses_persisted() -> None:
+    """BoonApplyEvent remove events are classified as boon strips or cleanses."""
+    # Fury (tracked boon id 725) is stripped once; skill 99999 is an
+    # intentionally untracked remove event used to exercise the heuristic
+    # fallback that classifies non-tracked removes as condition cleanses.
+    fight_id = _seed_and_call(
+        [
+            _ba(src=_D, dst=101, skill=725, time_ms=0, duration_ms=5_000),
+            _ba(src=_D, dst=101, skill=725, kind="remove_all", time_ms=5_000, duration_ms=0),
+            _ba(src=_D, dst=101, skill=99_999, kind="remove_all", time_ms=6_000, duration_ms=0),
+            DamageEvent(
+                time_ms=10_000,
+                source_agent_id=_D,
+                target_agent_id=101,
+                skill_id=200,
+                damage=1,
+            ),
+        ]
+    )
+    session = get_sessionmaker()()
+    try:
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        by_account = {row.account_name: row for row in rows}
+        source = by_account["synth.100"]
+        assert source.boon_strips == 1
+        assert source.condition_cleanses == 1
+    finally:
+        session.close()
+
+
 def test_boon_uptime_and_outgoing_persisted() -> None:
     """BoonApplyEvent streams produce uptime + outgoing columns."""
     # Source _D applies fury (skill_id 725) to itself and to target 101

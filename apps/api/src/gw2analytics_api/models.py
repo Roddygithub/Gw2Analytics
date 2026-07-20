@@ -326,6 +326,14 @@ class OrmFightPlayerSummary(Base):
     outgoing_resolution: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     outgoing_superspeed: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     outgoing_stealth: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Phase 2 (AI-CONTINUATION-PLAN): boon strips + condition cleanses.
+    # Tracked-boon remove events are counted as boon_strips. Remove
+    # events whose skill_id is not a tracked boon are heuristically
+    # treated as condition_cleanses (they may also be untracked boons
+    # or other status-effect removes; the UI should label this as an
+    # approximation until a definitive condition skill-id map exists).
+    boon_strips: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    condition_cleanses: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class OrmWebhookSubscription(Base):
