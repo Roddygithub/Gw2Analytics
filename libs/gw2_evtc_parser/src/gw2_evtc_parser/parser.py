@@ -22,20 +22,26 @@ This implementation reads:
     | 24  |  72s   | name (null-padded 72-byte buffer)          |
     +-----+--------+--------------------------------------------+
 
-* ``skill_count`` **variable-size** skill records immediately after the
-  agent block. Each record is:
+* **Fixed-size skill records** immediately after the agent block.
+  Each record is exactly 68 bytes:
 
     +-----+--------+--------------------------------------------+
     | off | size   | field                                      |
     +-----+--------+--------------------------------------------+
     |  0  |  I     | skill_id (uint32)                          |
-    |  4  |  I     | name_len (uint32)                          |
-    |  8  |  s     | name (UTF-8, name_len bytes, no terminator)|
+    |  4  | 64s    | name (null-padded UTF-8 buffer)            |
     +-----+--------+--------------------------------------------+
 
-  arcdps writes ``name_len + 1`` bytes per record (the extra byte is the
-  null terminator for the C string but is NOT counted in ``name_len``).
-  The next record starts at ``cursor += 8 + name_len + 1``.
+  The skill table is stored in one of two wire formats:
+
+  * **Legacy** (pre-2025): a 4-byte ``skill_count`` prefix followed by
+    ``skill_count`` consecutive 68-byte records.
+  * **EVTC2025+**: no count prefix; consecutive 68-byte records run
+    until the parser's heuristic detects the start of the event stream.
+
+  The name buffer is a fixed 64-byte null-padded UTF-8 string. Any
+  bytes after the first null terminator are ignored, so embedded nulls
+  truncate the name at the first ``\0``.
 
 The agent-record 72-byte name buffer holds the *combo string* for
 player agents (``"char_name\\0:account_name\\0subgroup\\0"`` null-padded
@@ -59,6 +65,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import math
 import struct
 import zipfile
 from collections.abc import Iterator
@@ -67,15 +74,19 @@ from typing import BinaryIO, Final
 
 from gw2_core import (
     Agent,
+    BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
     BuffRemovalEvent,
     DamageEvent,
+    DodgeEvent,
     EliteSpec,
     Event,
     EvtcHeader,
     Fight,
     HealingEvent,
+    InterruptEvent,
+    PositionEvent,
     Profession,
     Skill,
 )
@@ -91,18 +102,18 @@ logger = logging.getLogger(__name__)
 # Binary layout constants
 # ---------------------------------------------------------------------------
 
-#: Total size of the EVTC file header in bytes for rev>=1 (extended).
+#: Total size of the EVTC file header in bytes for rev>=1.
 #: Layout (per ``arcdps.h`` ``evtc_header``): magic(4) + build(8) +
-#: rev(1) + combat_id(2) + unused(1) + agent_count(4) + skill_count(4)
-#: + lang(1) = 25 bytes.  For rev>=1 the 25-byte layout also holds
-#: ``map_id`` at bytes 24-27 as a 4-byte extension, making the header
-#: 28 bytes total when present.
-HEADER_SIZE: Final[int] = 25
+#: rev(1) + combat_id(2) + unused(1) + agent_count(4) + map_id(4)
+#: = 24 bytes.  For rev>=1 some builds append a ``skill_count(4)``
+#: extension making the header 28 bytes total; this parser only reads
+#: the first 24 bytes and derives the agent table start from there.
+HEADER_SIZE: Final[int] = 24
 
-#: ``struct`` format for the 25-byte file header (rev>=1 extended).
+#: ``struct`` format for the 24-byte file header (rev>=1).
 #: Fields: magic(4s) + build(8s) + rev(B) + combat_id(H) + unused(B)
-#: + agent_count(I) + skill_count(I) + lang(B).
-_HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<4s8sBHBI IB")
+#: + agent_count(I) + map_id(I).
+_HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<4s8sBHBI I")
 
 #: Byte offset of the agent_count field inside the header.
 AGENT_COUNT_OFFSET: Final[int] = 16
@@ -113,17 +124,18 @@ BUILD_OFFSET: Final[int] = 4
 #: Byte offset of the skill_count field inside the header (bytes 20-23).
 SKILL_COUNT_OFFSET: Final[int] = 20
 
-#: Byte offset where agent records start (right after the 25-byte
+#: Byte offset where agent records start (right after the 24-byte
 #: header). For rev>=1 agents begin immediately after the header.
 AGENTS_OFFSET: Final[int] = HEADER_SIZE
 
 #: Total size of one agent record on disk (the C ``struct ag`` size).
 AGENT_SIZE: Final[int] = 96
 
-#: Size of the 24-byte fixed prefix that starts every agent record.
+#: Size of the 24-byte fixed prefix that starts every agent record
+#: (legacy pre-2025 layout).
 AGENT_PREFIX_SIZE: Final[int] = 24
 
-#: Size of the 72-byte name buffer that ends every agent record.
+#: Size of the 72-byte name buffer that ends every legacy agent record.
 AGENT_NAME_SIZE: Final[int] = AGENT_SIZE - AGENT_PREFIX_SIZE
 
 #: ``struct`` format for the entire 96-byte agent record.
@@ -131,9 +143,25 @@ AGENT_NAME_SIZE: Final[int] = AGENT_SIZE - AGENT_PREFIX_SIZE
 #: 72-byte name buffer.
 _AGENT_STRUCT: Final[struct.Struct] = struct.Struct(f"<QIIhhhh{AGENT_NAME_SIZE}s")
 
-#: ``struct`` format for one skill record's fixed-size header
-#: (``skill_id`` + ``name_len``). The variable-size name follows.
-_SKILL_HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<II")
+#: Size of the 64-byte name buffer inside an EVTC2025+ agent record.
+#: The 2025 layout is: iid_low(u32) + prof(u32) + is_elite(u32) +
+#: toughness(u32) + healing(u32) + concentration(u32) + name(64s) +
+#: subgroup(u32) + addr(u32) = 96 bytes.
+AGENT_NAME_SIZE_2025: Final[int] = 64
+
+#: ``struct`` format for the EVTC2025+ 96-byte agent record.
+_AGENT_STRUCT_2025: Final[struct.Struct] = struct.Struct(
+    f"<IIIIII{AGENT_NAME_SIZE_2025}sII"
+)
+
+#: Size of one fixed-size skill record: skill_id(u32) + name(64B).
+#: arcdps writes skill names as a fixed 64-byte null-padded buffer
+#: (no separate name_len field).
+SKILL_RECORD_SIZE: Final[int] = 68
+
+#: ``struct`` format for the fixed-size portion of a skill record
+#: (just the 4-byte ``skill_id``; the 64-byte name buffer follows).
+_SKILL_ID_STRUCT: Final[struct.Struct] = struct.Struct("<I")
 
 #: Total size of one cbtevent record on disk (arcdps EVTC event record).
 EVENT_SIZE: Final[int] = 64
@@ -222,6 +250,25 @@ _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 #: per event in the hot loop.
 _EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct("<QQQii 4x I 7x bbb 2x b 11x")
 
+#: Standard arcdps cbtevent struct for EVTC2025+ builds.  arcdps
+#: reverted to the documented ``arcdps.h`` layout for 2025+ logs:
+#: time(Q)+src(Q)+dst(Q)+value(i)+buff_dmg(i)+overstack(I)+
+#: skillid(I)+src_instid(H)+dst_instid(H)+src_master_instid(H)+
+#: dst_master_instid(H)+16 flag bytes.  Flags start at byte 48.
+_EVENT_STRUCT_2025: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHH16B")
+
+#: Optimized event struct for EVTC2025+ builds.  Reads the fields
+#: consumed by :meth:`PythonEvtcParser.parse_events` using the
+#: standard flag byte positions:
+#:   byte 48 = iff
+#:   byte 49 = ev.buff
+#:   byte 50 = result
+#:   byte 52 = is_buffremove
+#:   byte 56 = is_statechange
+_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct(
+    "<QQQii 4x I 8x bbbx b 3x b 7x"
+)
+
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
 #: byte values 1, 2, 3 ↔ ``BoonApplyEvent.kind: Literal["remove_all",
 #: "remove_single"]``. Exposed as a 3-tuple-of-literal-strings
@@ -276,6 +323,12 @@ MAX_AGENTS: Final[int] = 10_000
 #: Sanity bound on skill_count to defend against pathological sources.
 MAX_SKILLS: Final[int] = 100_000
 
+#: Maximum number of skill records to scan when looking for the
+#: event-stream boundary in the EVTC2025+ no-count format. Real EVTC
+#: skill tables are typically far smaller; this cap prevents malformed
+#: blobs from iterating forever.
+_MAX_SKILL_BOUNDARY_SEARCH: Final[int] = 10_000
+
 #: Maximum bytes for a single skill name (arcdps caps at 64 in practice
 #: but we allow 4 KiB to absorb long custom skill names from addons).
 MAX_SKILL_NAME_BYTES: Final[int] = 4_096
@@ -298,6 +351,16 @@ MAX_EVTC_BYTES: Final[int] = 500 * 1024 * 1024
 #: verbatim and let downstream code decide whether the leading ``:``
 #: is present (an empty account_name is also valid).
 ACCOUNT_NAME_PREFIX: Final[bytes] = b":"
+
+#: v0.11.0 hotfix: sanity cap for damage / heal / strip values.
+#: arcdps uses INT32_MAX (2,147,483,647) as a sentinel for "no
+#: value" or "infinite duration" in buff-metadata fields that
+#: are misinterpreted as damage by the parser.  Any cbtevent
+#: ``value`` or ``buff_dmg`` field >= this cap is a corrupted
+#: read (buff metadata interpreted as damage).  Real GW2 damage
+#: per hit never exceeds a few million, so this cap is extremely
+#: generous -- it only catches the obvious sentinel cases.
+_DAMAGE_SANITY_CAP: Final[int] = 2_147_483_647
 
 #: Maximum uncompressed size for a single .zevtc zip entry.
 #: Defends against zip-bomb DoS: a 42-byte zip header can claim a
@@ -338,7 +401,7 @@ class PythonEvtcParser:
         return _iter_fights(data)
 
     @staticmethod
-    def parse_events(source: BinaryIO | bytes) -> Iterator[Event]:
+    def parse_events(source: BinaryIO | bytes) -> Iterator[Event]:  # noqa: PLR0912, PLR0915
         """Yield DamageEvent + HealingEvent + BuffRemovalEvent records from the cbtevent block.
 
         Phase 7 v2 ships heterogeneous event-stream extraction
@@ -386,45 +449,82 @@ class PythonEvtcParser:
         per event.
         """
         data = _read_all(source)
-        offset = _compute_post_skills_offset(data)
+        # Determine which event struct to use.  EVTC2025+ builds use the
+        # standard arcdps cbtevent layout; older builds keep the legacy
+        # empirically-calibrated layout.
+        build_str = data[BUILD_OFFSET:BUILD_OFFSET + 8].decode("ascii", errors="replace")
+        is_evtc_2025 = _build_version_from_build_str(build_str) >= 2025_00_00
+        offset = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
         end = len(data)
         cursor = offset
         # Local binding shaves attribute-lookup overhead in the
         # tight event-unpack loop.
-        _unpack_event = _EVENT_STRUCT_EVENTS.unpack_from
+        _unpack_event = (
+            _EVENT_STRUCT_EVENTS_2025.unpack_from
+            if is_evtc_2025
+            else _EVENT_STRUCT_EVENTS.unpack_from
+        )
         # Hoist the REMOVE-kind tuple to a local variable so the
         # hot loop pays local-variable lookup cost instead of
         # global lookup cost.
         _cbtbufremove_kinds = _CBTBUFREMOVE_KINDS
         while cursor + EVENT_SIZE <= end:
-            (
-                time_ms,
-                src_agent,
-                dst_agent,
-                value,
-                buff_dmg,
-                skill_id,
-                is_nondamage,
-                is_statechange,
-                # byte 49 = arcdps ``ev.buff`` field -- the buff ID for
-                # mid-combat APPLY records per F1 byte mapping (struct
-                # slot 13). The legacy name was ``_is_flanking``; v0.10.11+
-                # renames the local binding to ``_ev_buff`` to reflect
-                # the arcdps field semantics. The byte position is
-                # unchanged so the existing damage / heal / strip
-                # / REMOVE-emit logic is unaffected.
-                _ev_buff,
-                # v0.10.6+ Phase 9 step 2: bytes 52-53 of the arcdps
-                # ``cbtevent`` record are the ``is_buffremove`` byte
-                # (the arcdps ``cbtbuffremove`` enum: 0=NONE in this
-                # non-statechange path, 1=ALL, 2=SINGLE, 3=MANUAL) +
-                # ``is_ninety`` flag. Renamed from the legacy
-                # ``_pad61``/``_pad62`` to mirror the arcdps.h field
-                # naming -- the byte offset is unchanged so the
-                # existing damage / healing / buff-removal emission
-                # logic is unaffected.
-                is_buffremove,
-            ) = _unpack_event(data, cursor)
+            if is_evtc_2025:
+                (
+                    time_ms,
+                    src_agent,
+                    dst_agent,
+                    value,
+                    buff_dmg,
+                    skill_id,
+                    _iff,
+                    # byte 49 = arcdps ``ev.buff`` field -- the buff ID for
+                    # mid-combat APPLY records per F1 byte mapping.
+                    _ev_buff,
+                    # byte 50 = arcdps ``result`` enum.  Values 13/14
+                    # (CBTR_HEAL / CBTR_BUFFHEAL) mark heal-class events.
+                    _result,
+                    # byte 52 = arcdps ``is_buffremove`` byte.
+                    is_buffremove,
+                    # byte 56 = arcdps ``is_statechange`` byte.
+                    is_statechange,
+                ) = _unpack_event(data, cursor)
+                # arcdps result enum: 13 = CBTR_HEAL, 14 = CBTR_BUFFHEAL.
+                is_nondamage = 1 if _result in (13, 14) else 0
+            else:
+                (
+                    time_ms,
+                    src_agent,
+                    dst_agent,
+                    value,
+                    buff_dmg,
+                    skill_id,
+                    is_nondamage,
+                    is_statechange,
+                    # byte 49 = arcdps ``ev.buff`` field -- the buff ID for
+                    # mid-combat APPLY records per F1 byte mapping (struct
+                    # slot 13). The legacy name was ``_is_flanking``; v0.10.11+
+                    # renames the local binding to ``_ev_buff`` to reflect
+                    # the arcdps field semantics. The byte position is
+                    # unchanged so the existing damage / heal / strip
+                    # / REMOVE-emit logic is unaffected.
+                    _ev_buff,
+                    # v0.10.6+ Phase 9 step 2: bytes 52-53 of the arcdps
+                    # ``cbtevent`` record are the ``is_buffremove`` byte
+                    # (the arcdps ``cbtbuffremove`` enum: 0=NONE in this
+                    # non-statechange path, 1=ALL, 2=SINGLE, 3=MANUAL) +
+                    # ``is_ninety`` flag. Renamed from the legacy
+                    # ``_pad61``/``_pad62`` to mirror the arcdps.h field
+                    # naming -- the byte offset is unchanged so the
+                    # existing damage / healing / buff-removal emission
+                    # logic is unaffected.
+                    is_buffremove,
+                ) = _unpack_event(data, cursor)
+                # Phase B: extract result byte (offset 50) for
+                # block/dodge/interrupt detection. The byte position
+                # matches the arcdps cbtevent layout verified by the
+                # F1 calibration pilot (byte 50 = arcdps result enum).
+                _result = struct.unpack_from("<b", data, cursor + 50)[0]
             # NOTE: ``is_buffremove`` is consumed below by
             # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``) AND
             # by Step 3 APPLY-BRANCH (predicate ``_ev_buff != 0 AND
@@ -452,6 +552,28 @@ class PythonEvtcParser:
                 )
                 continue
             if is_statechange != 0:
+                # Byte 19 (CBTS_POSITION): position update. The x, y, z
+                # coordinates are encoded as 3 float32 values at offset 16
+                # of the raw cbtevent record (overwriting dst_agent + value).
+                # This must be handled inline because the dispatch function
+                # doesn't have access to the raw bytes.
+                if is_statechange == 19:
+                    x, y, z = struct.unpack_from("<3f", data, cursor + 16)
+                    if (
+                        math.isfinite(x)
+                        and math.isfinite(y)
+                        and math.isfinite(z)
+                        and max(abs(x), abs(y), abs(z)) <= 1e5
+                    ):
+                        yield PositionEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=0,
+                            skill_id=0,
+                            x=x,
+                            y=y,
+                        )
+                    continue
                 # WAVE-8 v0.11.0 Blocker A.4.1 (see
                 # ``plans/WAVE-8-parser-side.md`` §A.4.1): the upstream
                 # filter ``if is_statechange != 0: continue`` is REPLACED
@@ -606,7 +728,20 @@ class PythonEvtcParser:
                     # CBTB_NONE sentinel excluded by the predicate).
                     kind=_cbtbufremove_kinds[is_buffremove - 1],
                 )
-            elif _ev_buff != 0:
+                # v0.11.0 hotfix: do NOT fall through to the damage/heal
+                # path below.  When ``is_buffremove in (1, 2, 3)`` the
+                # cbtevent ``value`` field carries buff metadata (duration
+                # in ms / stack count), NOT a damage or heal magnitude.
+                # Falling through would yield a phantom DamageEvent /
+                # HealingEvent with ``value`` reinterpreted as damage /
+                # heal — the root cause of the trillion-damage bug on
+                # real WvW logs.  The arcdps cbtevent format stores
+                # pure-damage and buff-interaction records as SEPARATE
+                # 64-byte rows; a single record never carries both.
+                continue
+            elif _ev_buff != 0 and not (
+                is_evtc_2025 and (value != 0 or buff_dmg != 0)
+            ):
                 # Phase 9 Step 3 APPLY-BRANCH (SHIPPED 2026-07-11).
                 # Predicate: ``_ev_buff != 0 AND is_buffremove == 0 AND
                 # is_statechange == 0`` -- the arcdps mid-combat APPLY
@@ -622,6 +757,15 @@ class PythonEvtcParser:
                 # byte signals a buff-interaction record (a buff ID
                 # was written), which is exactly an APPLY for that
                 # ``skill_id`` buff.
+                #
+                # EVTC2025+ refinement: real 2025+ cbtevent records with
+                # ``ev.buff != 0`` but carrying a damage/heal payload
+                # (``value != 0`` or ``buff_dmg != 0``) are condition
+                # damage ticks / strip-carrying events, not mid-combat
+                # applies. Requiring ``value == 0 AND buff_dmg == 0``
+                # for 2025+ suppresses those phantom applies while
+                # preserving the legacy dual-emit contract for older
+                # fixtures whose synthetic tests rely on it.
                 #
                 # Conservative default ``duration_ms=0``: cbtevent does
                 # not carry a duration field; the buff duration lives
@@ -642,14 +786,62 @@ class PythonEvtcParser:
                     stacks=1,
                     kind="apply",
                 )
-            magnitude = max(0, value)
-            buff_strip = max(0, buff_dmg)
+                # Same rationale as the REMOVE branch above: the
+                # cbtevent ``value`` field carries buff metadata,
+                # not damage.  Prevent fall-through to the damage /
+                # heal path below.
+                continue
+            # v0.11.0 hotfix: sanity cap on damage/heal values.
+            # Real GW2 damage per individual hit fits easily within
+            # a uint32 (max single hit < 1M).  arcdps uses
+            # ``_DAMAGE_SANITY_CAP`` as a sentinel for "no value" /
+            # "infinite duration" in buff-metadata fields that the
+            # buff branches above did not catch (events where both
+            # ``is_buffremove`` and ``_ev_buff`` are 0 but the
+            # cbtevent ``value`` field still carries buff metadata).
+            magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+            buff_strip = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
             if is_nondamage == 0:
                 # Pure damage path. ``buff_dmg > 0`` is silently
                 # dropped: arcdps only writes ``buff_dmg`` on the
                 # heal-class event kind, so a damage record with
                 # non-zero ``buff_dmg`` is a parser-version artefact
                 # and is NOT a valid Phase 8 buff-strip signal.
+                #
+                # Phase B: emit defense events from the arcdps result
+                # byte (byte 50).  Values: 3=CBTR_BLOCK (blocked hit),
+                # 4=CBTR_EVADE (target dodged), 5=CBTR_INTERRUPT
+                # (source interrupted target's cast). These events
+                # are orthogonal to the damage value -- a blocked or
+                # evaded hit typically has zero damage, while an
+                # interrupt can carry non-zero damage.
+                if _result == 3:  # CBTR_BLOCK
+                    # Target (dst_agent) blocked the incoming attack.
+                    # Actor-only shape per gw2_core.BlockEvent docstring.
+                    yield BlockEvent(
+                        time_ms=time_ms,
+                        source_agent_id=dst_agent,
+                        target_agent_id=0,
+                        skill_id=0,
+                    )
+                elif _result == 4:  # CBTR_EVADE
+                    # Target (dst_agent) evaded (dodged) the attack.
+                    # Actor-only shape per gw2_core.DodgeEvent docstring.
+                    yield DodgeEvent(
+                        time_ms=time_ms,
+                        source_agent_id=dst_agent,
+                        target_agent_id=0,
+                        skill_id=0,
+                    )
+                elif _result == 5:  # CBTR_INTERRUPT
+                    # Source (src_agent) interrupted the target's cast.
+                    # Full shape per gw2_core.InterruptEvent docstring.
+                    yield InterruptEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=dst_agent,
+                        skill_id=skill_id,
+                    )
                 if magnitude == 0:
                     continue
                 yield DamageEvent(
@@ -718,7 +910,7 @@ def _read_all(source: BinaryIO | bytes) -> bytes:
     1. The 30-100 MB range doesn't OOM Python on the ``source.read()``
        call itself (only the downstream algorithm allocations
        would OOM, and those are caught by the structural caps
-       ``MAX_AGENTS`` + ``MAX_SKILLS`` + ``MAX_SKILL_NAME_BYTES``).
+       ``MAX_AGENTS`` + ``MAX_SKILLS`` * ``SKILL_RECORD_SIZE``).
     2. Reading in chunks + raising mid-read (Option B) would
        complicate the error path without meaningfully reducing the
        peak memory (Python still has the partial buffer).
@@ -753,12 +945,135 @@ def _read_all(source: BinaryIO | bytes) -> bytes:
     return data
 
 
+def _looks_like_skill_name(data: bytes, offset: int) -> bool:
+    """Return True if the 64-byte buffer at ``offset`` looks like a skill name.
+
+    A valid skill name contains at least one printable ASCII byte before
+    the first null terminator, or is entirely null (empty name).
+    """
+    if offset + 64 > len(data):
+        return False
+    name_part = data[offset : offset + 64]
+    name_before_nul = name_part.split(b"\x00", 1)[0]
+    if not name_before_nul:
+        return True
+    return any(32 <= b < 127 for b in name_before_nul[:20])
+
+
+def _detect_skill_format_nonzero(
+    data: bytes,
+    skill_offset: int,
+    count: int,
+    known_agents: frozenset[int] | None,
+    *,
+    is_evtc_2025: bool = False,
+) -> tuple[bool, int, int]:
+    """Handle the non-zero first-u32 case of :func:`_detect_skill_format`.
+
+    The first 4 bytes after the agent table could be a legacy count or
+    an EVTC2025+ skill_id. We resolve the ambiguity by checking which
+    interpretation produces a valid event-stream boundary.
+    """
+    capped_count = min(count, MAX_SKILLS)
+    legacy_boundary = skill_offset + 4 + capped_count * SKILL_RECORD_SIZE
+    if legacy_boundary <= len(data) and _validate_event_candidate(
+        data, legacy_boundary, known_agents, is_evtc_2025=is_evtc_2025
+    ):
+        return True, capped_count, skill_offset + 4
+
+    # EVTC2025+ interpretation: records start at skill_offset.
+    # Find the first 68-byte-aligned offset that looks like events.
+    # Cap the search so malformed/truncated blobs don't iterate forever.
+    max_skills_in_data = max(0, (len(data) - skill_offset) // SKILL_RECORD_SIZE)
+    for n in range(1, min(max_skills_in_data, _MAX_SKILL_BOUNDARY_SEARCH) + 1):
+        boundary = skill_offset + n * SKILL_RECORD_SIZE
+        if boundary > len(data):
+            break
+        if _validate_event_candidate(
+            data, boundary, known_agents, is_evtc_2025=is_evtc_2025
+        ):
+            return False, MAX_SKILLS, skill_offset
+
+    # No clear event boundary found; fall back to legacy (safer for
+    # backward compatibility with old variable-length records).
+    return True, capped_count, skill_offset + 4
+
+
+def _detect_skill_format(
+    data: bytes,
+    skill_offset: int,
+    known_agents: frozenset[int] | None = None,
+    *,
+    is_evtc_2025: bool = False,
+) -> tuple[bool, int, int]:
+    """Detect whether the skill table has a count prefix (legacy) or not (EVTC2025+).
+
+    Returns ``(has_count_prefix, count, records_offset)``:
+    * ``has_count_prefix``: True for legacy format, False for EVTC2025+.
+    * ``count``: Number of skill records (capped at MAX_SKILLS).
+    * ``records_offset``: Byte offset where the first skill record starts.
+    """
+    if skill_offset + 4 > len(data):
+        return True, 0, skill_offset
+
+    # Fast path: if the bytes right after the agent table already look
+    # like the event stream, there is no skill table at all. This covers
+    # the EVTC2025+ empty-skill case (and legacy empty-skill too, since
+    # the result is the same: 0 skills, events start here).
+    if known_agents is not None and _validate_event_candidate(
+        data, skill_offset, known_agents, is_evtc_2025=is_evtc_2025
+    ):
+        return True, 0, skill_offset
+
+    count = struct.unpack_from("<I", data, skill_offset)[0]
+
+    # Non-zero count: could be a legacy count prefix OR an EVTC2025+
+    # skill_id. Distinguish by checking where the event stream starts.
+    if count > 0:
+        return _detect_skill_format_nonzero(
+            data, skill_offset, count, known_agents, is_evtc_2025=is_evtc_2025
+        )
+
+    # Count is 0. Could be: (a) legacy format with 0 skills, or
+    # (b) EVTC2025+ format where the first 4 bytes are skill_id=0.
+    # Distinguish by checking whether the bytes look like a valid
+    # EVTC2025+ skill record (printable name) vs. a legacy count=0
+    # followed by the event stream.
+    if skill_offset + SKILL_RECORD_SIZE <= len(data) and _looks_like_skill_name(
+        data, skill_offset + 4
+    ):
+        # EVTC2025+ format: no count prefix, skills start immediately.
+        return False, MAX_SKILLS, skill_offset
+
+    # Legacy format with 0 skills.
+    return True, 0, skill_offset + 4
+
+
+def _build_version_from_build_str(build_str: str) -> int:
+    """Return the numeric build version from the 8-byte ASCII build string.
+
+    arcdps build strings are ISO-like dates (``20251009``).  Non-numeric
+    or unexpectedly short strings return 0 so the caller can treat the
+    file as legacy.
+    """
+    if len(build_str) == 8 and build_str.isdigit():
+        return int(build_str)
+    return 0
+
+
 def _iter_fights(data: bytes) -> Iterator[Fight]:
-    """Parse the EVTC blob and yield a single :class:`Fight`."""
+    """Parse the EVTC blob and yield a single :class:`Fight`.
+
+    Agents are augmented with "UNKNOWN" entries for any agent ID
+    referenced in the event stream that is not in the agent table.
+    This ensures event-to-agent attribution works for minions, pets,
+    environmental objects, and transient entities that arcdps may
+    omit from the agent table.
+    """
     if len(data) < HEADER_SIZE:
         raise EvtcParseError(f"EVTC blob is {len(data)} bytes, header needs {HEADER_SIZE}")
 
-    magic, build, _rev, encounter_id, _unused, agent_count, _skill_count_hdr, _lang = (
+    magic, build, _rev, encounter_id, _unused, agent_count, _skill_count_hdr = (
         _HEADER_STRUCT.unpack_from(data, 0)
     )
 
@@ -773,14 +1088,36 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     if agent_count > MAX_AGENTS:
         raise EvtcParseError(f"agent_count={agent_count} exceeds safety bound {MAX_AGENTS}")
 
-    agents = list(_iter_agents(data, agent_count))
+    build_version = _build_version_from_build_str(build_str)
+    is_evtc_2025 = build_version >= 2025_00_00
+    agents = list(_iter_agents(data, agent_count, is_evtc_2025=is_evtc_2025))
+    known_agents_frozen = frozenset(a.id for a in agents)
 
-    # Walk the skill table.  arcdps does not reliably store skill_count
-    # in the header for rev>=1; we pass a generous upper bound and let
-    # _iter_skill_records stop early via its safety checks.
+    # Walk the skill table.  Detect whether there's a count prefix (legacy)
+    # or consecutive 68-byte records (EVTC2025+).
     skill_offset = AGENTS_OFFSET + agent_count * AGENT_SIZE
-    skills = list(_iter_skills(data, skill_offset, MAX_SKILLS))
+    _has_count, skill_count, records_offset = _detect_skill_format(
+        data, skill_offset, known_agents_frozen, is_evtc_2025=is_evtc_2025
+    )
+    skills = list(
+        _iter_skills(
+            data,
+            records_offset,
+            skill_count,
+            use_heuristic=not _has_count,
+            known_agents=known_agents_frozen,
+            is_evtc_2025=is_evtc_2025,
+        )
+    )
     actual_skill_count = len(skills)
+
+    # v0.11.0: CompleteAgents step (matching GW2EI's CompleteAgents()).
+    # Scan the event stream for agent IDs referenced in src_agent or
+    # dst_agent that are NOT in the parsed agent table. Create "UNKNOWN"
+    # NPC agents for them so event-to-agent attribution works for
+    # minions, pets, environmental objects, gadgets, and transient
+    # entities that arcdps may omit from the agent table.
+    agents = _complete_agents(data, agents, is_evtc_2025=is_evtc_2025)
 
     header = EvtcHeader(
         build_version=build_str,
@@ -798,19 +1135,24 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     )
 
 
-def _iter_agents(data: bytes, count: int) -> Iterator[Agent]:
-    """Read ``count`` fixed-size 96-byte agent records starting at ``AGENTS_OFFSET``."""
+def _iter_agents(data: bytes, count: int, *, is_evtc_2025: bool = False) -> Iterator[Agent]:
+    """Read ``count`` fixed-size 96-byte agent records starting at ``AGENTS_OFFSET``.
+
+    EVTC2025+ files use a different agent-record layout; set
+    ``is_evtc_2025=True`` to decode them correctly.
+    """
     if count == 0:
         return
     cursor = AGENTS_OFFSET
     end = len(data)
+    decoder = _decode_agent_2025 if is_evtc_2025 else _decode_agent
     for _ in range(count):
         if cursor + AGENT_SIZE > end:
             raise EvtcParseError(
                 f"Truncated agent record at offset {cursor}: "
                 f"need {AGENT_SIZE} bytes, only {end - cursor} available",
             )
-        yield _decode_agent(data, cursor)
+        yield decoder(data, cursor)
         cursor += AGENT_SIZE
 
 
@@ -818,34 +1160,32 @@ def _iter_skill_records(
     data: bytes,
     offset: int,
     count: int,
-) -> Iterator[tuple[int, int, int, int]]:
-    """Yield ``(cursor, skill_id, name_len, record_size)`` for each valid skill record.
+    *,
+    use_heuristic: bool = True,
+    known_agents: frozenset[int] | None = None,
+    is_evtc_2025: bool = False,
+) -> Iterator[tuple[int, int, str]]:
+    """Yield ``(cursor, skill_id, name)`` for each valid skill record.
 
-    Reads up to ``count`` variable-size skill records starting at
-    ``offset``. Each record has a fixed 8-byte header (``skill_id`` u32 +
-    ``name_len`` u32) followed by ``name_len`` bytes of UTF-8 name. arcdps
-    writes a trailing null byte after the name, which is included in the
-    byte stream but not counted in ``name_len``; the next record starts
-    immediately after the null terminator
-    (``offset += 8 + name_len + 1``).
+    Reads up to ``count`` fixed-size 68-byte skill records starting at
+    ``offset``. Each record has ``skill_id(u32) + name(64 bytes)`` — the
+    name is a fixed 64-byte null-padded buffer with no separate length
+    field.
 
-    The generator is **lenient**: if the cursor runs past the end of the
-    data, or if a record's ``name_len`` exceeds the safety bound (which
-    happens when ``header.skill_count`` is larger than the actual number
-    of skill records — a known arcdps quirk), the parser stops early and
-    emits a warning. The yielded count may therefore be less than
-    ``count``. This is preferable to raising, because the alternative
-    (reading into the event stream) produces garbage records that pollute
-    downstream analytics.
+    When ``use_heuristic`` is True (default), stops early when the data
+    no longer looks like valid skill records (no printable ASCII in the
+    name and skill_id != 0, or the bytes look like the event stream).
+    When False, reads exactly ``count`` records regardless (use when a
+    count prefix was already validated).
     """
     if count == 0:
         return
     cursor = offset
     end = len(data)
     for skill_index in range(count):
-        if cursor + _SKILL_HEADER_STRUCT.size > end:
+        if cursor + SKILL_RECORD_SIZE > end:
             logger.warning(
-                "Truncated skill table at skill %d: header would read at offset %d "
+                "Truncated skill table at skill %d: would read at offset %d "
                 "but only %d bytes remain; stopping early (claimed %d skills)",
                 skill_index,
                 cursor,
@@ -853,131 +1193,346 @@ def _iter_skill_records(
                 count,
             )
             return
-        skill_id, name_len = _SKILL_HEADER_STRUCT.unpack_from(data, cursor)
-        if name_len > MAX_SKILL_NAME_BYTES:
-            logger.warning(
-                "Skill %d at offset %d has name_len=%d exceeding safety bound %d; "
-                "the skill table likely ends here (header claimed %d skills, "
-                "but the next bytes look like event-stream data)",
+        # Strong stop signal: the bytes at this cursor look like the
+        # event stream, not a skill record. This is the most reliable
+        # way to know we've walked past the skill table in the no-count
+        # EVTC2025+ format.
+        if use_heuristic and _validate_event_candidate(
+            data, cursor, known_agents, is_evtc_2025=is_evtc_2025
+        ):
+            logger.debug(
+                "Skill table ends at skill %d: offset %d looks like the event stream",
                 skill_index,
                 cursor,
-                name_len,
-                MAX_SKILL_NAME_BYTES,
-                count,
             )
             return
-        # 8 bytes header + name_len bytes name + 1 byte null terminator.
-        record_size = _SKILL_HEADER_STRUCT.size + name_len + 1
-        if cursor + record_size > end:
+        skill_id = struct.unpack_from("<I", data, cursor)[0]
+        name_bytes = data[cursor + 4 : cursor + SKILL_RECORD_SIZE]
+        name = name_bytes.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+        # Heuristic: if the skill_id is implausibly large, we've
+        # likely overshot into event-stream data.  Real GW2 skill IDs
+        # are below ~120_000; the first bytes of an event record
+        # (interpreted as a skill_id) are usually a huge timestamp or
+        # agent address.  We check this unconditionally because some
+        # EVTC2025+ event records have printable ASCII bytes in the
+        # name-position even though they are NOT skill records.
+        #
+        # Threshold is 4B to accommodate synthetic test fixtures that
+        # use IDs up to ~3B (e.g. the skills rollup cap test). Values
+        # near uint32 max (4.29B) are almost certainly event timestamp
+        # fragments rather than real skill IDs, but the primary
+        # ``_validate_event_candidate`` check runs first and catches
+        # most event-stream data before this secondary heuristic fires.
+        if use_heuristic and skill_id > 4_000_000_000:
             logger.warning(
-                "Truncated skill body at skill %d offset %d: "
-                "need %d bytes, only %d available; stopping early",
+                "Skill %d at offset %d: id=%d exceeds max valid skill ID; "
+                "skill table likely ends here",
                 skill_index,
                 cursor,
-                record_size,
-                end - cursor,
+                skill_id,
             )
             return
-        yield cursor, skill_id, name_len, record_size
-        cursor += record_size
+        yield cursor, skill_id, name
+        cursor += SKILL_RECORD_SIZE
 
 
-def _iter_skills(data: bytes, offset: int, count: int) -> Iterator[Skill]:
-    """Read up to ``count`` variable-size skill records starting at ``offset``.
+def _iter_skills(
+    data: bytes,
+    offset: int,
+    count: int,
+    *,
+    use_heuristic: bool = True,
+    known_agents: frozenset[int] | None = None,
+    is_evtc_2025: bool = False,
+) -> Iterator[Skill]:
+    """Read up to ``count`` fixed-size skill records starting at ``offset``.
 
-    Thin wrapper around :func:`_iter_skill_records` that decodes the
-    UTF-8 skill name and yields :class:`Skill` instances.
+    Thin wrapper around :func:`_iter_skill_records` that yields
+    :class:`Skill` instances.
     """
-    for cursor, skill_id, name_len, _record_size in _iter_skill_records(data, offset, count):
-        name_bytes = data[
-            cursor + _SKILL_HEADER_STRUCT.size : cursor + _SKILL_HEADER_STRUCT.size + name_len
-        ]
-        name = name_bytes.decode("utf-8", errors="replace")
+    for _cursor, skill_id, name in _iter_skill_records(
+        data,
+        offset,
+        count,
+        use_heuristic=use_heuristic,
+        known_agents=known_agents,
+        is_evtc_2025=is_evtc_2025,
+    ):
         yield Skill(id=skill_id, name=name)
 
 
-def _validate_event_candidate(data: bytes, offset: int) -> bool:
+def _validate_event_candidate(
+    data: bytes,
+    offset: int,
+    known_agents: frozenset[int] | None = None,
+    *,
+    is_evtc_2025: bool = False,
+) -> bool:
     """Return ``True`` if ``offset`` likely points into the event stream.
 
-    Reads up to 2 consecutive 64-byte event records and requires:
-    * Each has ``time_ms < 86_400_000`` (24 hours).
-    * At least one has a non-zero ``src_agent`` or ``dst_agent``
-      (eliminates pure-zero-byte false positives).
+    Reads up to 4 consecutive 64-byte event records and requires:
+    * Each readable record has ``0 <= time_ms < 86_400_000``.
+    * ``time_ms`` values are monotonically non-decreasing (real event
+      streams only move forward in time; random data fails this check).
+    * Each readable record has at least one non-zero payload field
+      (bytes 24-63) — real combat events always carry value/skill/flags.
+    * At least one readable record has a non-zero ``src_agent`` or
+      ``dst_agent`` (eliminates pure-zero-byte false positives).
+    * When ``known_agents`` is provided, at least 2 readable records
+      have a ``src_agent`` or ``dst_agent`` that exists in the agent
+      table.  This is the strongest rejection: random data in skill
+      name regions rarely produces values that match real agent IDs.
     """
     max_time_ms = 86_400_000
     saw_agent = False
-    for i in range(2):
+    prev_time = -1
+    matched_agents = 0
+    event_struct = _EVENT_STRUCT_2025 if is_evtc_2025 else _EVENT_STRUCT
+    for i in range(4):
         ev_offset = offset + i * EVENT_SIZE
         if ev_offset + EVENT_SIZE > len(data):
             break
-        ev = _EVENT_STRUCT.unpack_from(data, ev_offset)
-        if ev[0] > max_time_ms:
+        ev = event_struct.unpack_from(data, ev_offset)
+        time_ms, src_agent, dst_agent = ev[0], ev[1], ev[2]
+        if time_ms > max_time_ms or time_ms < 0:
             return False
-        if ev[1] or ev[2]:
+        if time_ms < prev_time:
+            return False
+        prev_time = time_ms
+        if src_agent or dst_agent:
             saw_agent = True
+        if known_agents is not None and (src_agent in known_agents or dst_agent in known_agents):
+            matched_agents += 1
+        if not any(ev[j] for j in range(3, len(ev))):
+            return False
+    if known_agents is not None:
+        return saw_agent and matched_agents >= 2
     return saw_agent
 
 
-def _compute_post_skills_offset(data: bytes) -> int:
+def _compute_post_skills_offset(  # noqa: PLR0912
+    data: bytes,
+    *,
+    is_evtc_2025: bool | None = None,
+) -> int:
     """Return the byte offset where the event stream starts.
 
     Strategy:
 
-    1. Read ``skill_count`` from the 25-byte header (bytes 20-23).
-       If 0, return ``skill_offset`` immediately (common zero-skills
-       case).  If 1..MAX_SKILLS, walk exactly that many records with
-       :func:`_iter_skill_records` (no overshoot).  If larger than
-       MAX_SKILLS, fall back to the :data:`MAX_SKILLS` walker.
+    1. Determine skill table start (after agents).
 
-    2. If the walker cursor does not look like a valid event start
-       (passes :func:`_validate_event_candidate`), run a backward scan
-       from cursor-1 to ``skill_offset``, then a forward scan up to
-       ``EVENT_SIZE`` bytes past ``cursor``.
+    2. Detect whether the skill table has a 4-byte count prefix or
+       uses the EVTC2025+ no-count format (consecutive 68-byte records).
 
-    The header ``skill_count`` is the authoritative source for
-    synthetic blobs created by test builders.  Real arcdps rev>=1
-    logs store ``map_id`` at bytes 20-23 (read as a large
-    ``skill_count``), so they fall through to the MAX_SKILLS walker
-    which handles them correctly via safety bounds.
+    3. Walk skill records until the data no longer looks like valid skills,
+       then return the offset as the event stream start.
+
+    4. If the walker result doesn't validate as events, scan forward
+       in EVENT_SIZE-aligned blocks.
     """
     if len(data) < HEADER_SIZE:
         return len(data)
     unpacked_header = _HEADER_STRUCT.unpack_from(data, 0)
     agent_count = int(unpacked_header[5])
-    skill_count_hdr = int(unpacked_header[6])
+    if is_evtc_2025 is None:
+        build_str = unpacked_header[1].decode("ascii", errors="replace")
+        is_evtc_2025 = _build_version_from_build_str(build_str) >= 2025_00_00
     skill_offset = AGENTS_OFFSET + agent_count * AGENT_SIZE
 
-    # Pass 1: quick check (most synthetic files have 0 skills)
-    if skill_count_hdr == 0 and _validate_event_candidate(data, skill_offset):
+    # Build the set of known agent IDs for event-stream validation.
+    # EVTC2025+ stores the real event address at byte +92, not at the
+    # start of the record.
+    known_agents: set[int] = set()
+    for i in range(min(agent_count, MAX_AGENTS)):
+        aoff = AGENTS_OFFSET + i * AGENT_SIZE
+        if aoff + AGENT_SIZE > len(data):
+            break
+        if is_evtc_2025:
+            known_agents.add(int(struct.unpack_from("<I", data, aoff + 92)[0]))
+        else:
+            known_agents.add(int(struct.unpack_from("<Q", data, aoff)[0]))
+    known_agents_frozen = frozenset(known_agents)
+
+    # Quick check: if no skills, events start right here.
+    if _validate_event_candidate(
+        data, skill_offset, known_agents_frozen, is_evtc_2025=is_evtc_2025
+    ):
         return skill_offset
 
-    # Pass 2: walk the skill table
-    count = min(skill_count_hdr, MAX_SKILLS) if skill_count_hdr > 0 else MAX_SKILLS
-    cursor = skill_offset
-    for record_start, _skill_id, _name_len, record_size in _iter_skill_records(
-        data, skill_offset, count
-    ):
-        cursor = record_start + record_size
+    # Detect skill table format using shared heuristic.
+    _has_count, _detected_count, skill_records_offset = _detect_skill_format(
+        data, skill_offset, known_agents_frozen, is_evtc_2025=is_evtc_2025
+    )
+    has_count_prefix = _has_count
 
-    if _validate_event_candidate(data, cursor):
+    count = _detected_count if has_count_prefix else MAX_SKILLS  # no-count: walk until invalid
+
+    cursor = skill_records_offset
+    for _record_start, _skill_id, _name in _iter_skill_records(
+        data,
+        skill_records_offset,
+        count,
+        known_agents=known_agents_frozen,
+        is_evtc_2025=is_evtc_2025,
+    ):
+        pass  # cursor is updated inside _iter_skill_records
+
+    # The cursor from _iter_skill_records is the offset after the last
+    # valid skill record. But _iter_skill_records uses a generator,
+    # so we need to track it differently. Walk again to get the final offset.
+    cursor = skill_records_offset
+    for _record_start, _skill_id, _name in _iter_skill_records(
+        data,
+        skill_records_offset,
+        count,
+        known_agents=known_agents_frozen,
+        is_evtc_2025=is_evtc_2025,
+    ):
+        cursor += SKILL_RECORD_SIZE
+
+    if _validate_event_candidate(
+        data, cursor, known_agents_frozen, is_evtc_2025=is_evtc_2025
+    ):
         return cursor
 
-    # Pass 3: backward scan (cursor-1 down to skill_offset).
-    for candidate in range(cursor - 1, skill_offset - 1, -1):
-        if _validate_event_candidate(data, candidate):
-            return candidate
+    # The skill heuristic can overshoot by one event record (the first
+    # event itself looks like a non-skill).  Try the previous event-sized
+    # boundary before falling back to a forward scan.
+    if cursor >= EVENT_SIZE and _validate_event_candidate(
+        data, cursor - EVENT_SIZE, known_agents_frozen, is_evtc_2025=is_evtc_2025
+    ):
+        return cursor - EVENT_SIZE
 
-    # Pass 4: forward scan (byte-by-byte, up to EVENT_SIZE bytes)
-    max_scan = min(cursor + EVENT_SIZE, len(data))
-    for candidate in range(cursor + 1, max_scan):
-        if _validate_event_candidate(data, candidate):
+    # Scan forward in EVENT_SIZE-aligned blocks to find the event stream.
+    aligned = (cursor + EVENT_SIZE - 1) & ~(EVENT_SIZE - 1)
+    max_forward = min(len(data) - EVENT_SIZE * 4, skill_offset + MAX_SKILLS * SKILL_RECORD_SIZE)
+    for candidate in range(aligned, max_forward, EVENT_SIZE):
+        if _validate_event_candidate(
+            data, candidate, known_agents_frozen, is_evtc_2025=is_evtc_2025
+        ):
             return candidate
 
     return cursor
 
 
+def _complete_agents(
+    data: bytes,
+    agents: list[Agent],
+    *,
+    is_evtc_2025: bool = False,
+) -> list[Agent]:
+    """Augment the agent list with "UNKNOWN" entries for any agent ID
+    referenced in the event stream that is not in the agent table.
+
+    Scans the event stream for ``src_agent`` and ``dst_agent`` values, and creates
+    ``Agent(id=<id>, name="UNKNOWN <id>", is_player=False)`` for
+    any ID not already in ``agents``. Returns the augmented list.
+
+    Safety: the scan stops at the first event record whose ``time_ms``
+    exceeds 24h (86_400_000 ms). This is a structural bound against
+    reading corrupted data that survives beyond the event block -- NOT
+    a GetTickCount64 normalisation threshold (the normalisation in
+    ``blob_loader.py`` uses a 1h threshold). Raw un-normalised
+    timestamps from a PC running ~4.5h produce ~16M ms values, well
+    under this 24h cap, so the scan continues correctly.
+    """
+    known_ids = frozenset(a.id for a in agents)
+    event_cursor = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
+    end = len(data)
+    event_struct = _EVENT_STRUCT_2025 if is_evtc_2025 else _EVENT_STRUCT
+    max_time_ms = 86_400_000
+    missing_ids: set[int] = set()
+
+    while event_cursor + EVENT_SIZE <= end:
+        ev = event_struct.unpack_from(data, event_cursor)
+        time_ms = ev[0]
+        if time_ms > max_time_ms:
+            break
+        src_agent = ev[1]
+        dst_agent = ev[2]
+        if src_agent != 0 and src_agent not in known_ids:
+            missing_ids.add(src_agent)
+        if dst_agent != 0 and dst_agent not in known_ids:
+            missing_ids.add(dst_agent)
+        event_cursor += EVENT_SIZE
+
+    if not missing_ids:
+        return agents
+
+    aug = list(agents)
+    for missing_id in sorted(missing_ids):
+        logger.debug(
+            "CompleteAgents: creating UNKNOWN agent for 0x%x",
+            missing_id,
+        )
+        aug.append(
+            Agent(
+                id=missing_id,
+                name=f"UNKNOWN {missing_id}",
+                is_player=False,
+            )
+        )
+    return aug
+
+
+def _decode_agent_2025(data: bytes, offset: int) -> Agent:
+    """Decode a single 96-byte EVTC2025+ agent record at ``offset``.
+
+    The EVTC2025+ layout stores the agent's event address at byte +92
+    (``addr``), not at the start of the record. The leading u32 is an
+    instance-id low word that is not used for event matching.
+    """
+    (
+        _iid_low,
+        prof_raw,
+        elite_raw,
+        _tough,
+        _heal,
+        _conc,
+        name_buf,
+        _subgroup,
+        addr,
+    ) = _AGENT_STRUCT_2025.unpack_from(data, offset)
+
+    # The 64-byte name buffer uses the same combo-string convention as
+    # the legacy layout: ``char\0account\0subgroup\0``.
+    parts = name_buf.split(b"\x00")
+
+    char_name = parts[0].decode("utf-8", errors="replace") if parts else ""
+
+    raw_account = parts[1] if len(parts) >= 2 else b""
+    raw_subgroup = parts[2] if len(parts) >= 3 else b""
+    is_player = bool(raw_account or raw_subgroup)
+    account_name: str | None = None
+    subgroup: str | None = None
+    if is_player:
+        account_name = raw_account.decode("utf-8", errors="replace") if raw_account else None
+        subgroup = raw_subgroup.decode("utf-8", errors="replace")
+
+    try:
+        profession = Profession(prof_raw)
+    except ValueError:
+        profession = Profession.UNKNOWN
+
+    try:
+        elite = EliteSpec(elite_raw)
+    except ValueError:
+        elite = EliteSpec.UNKNOWN
+
+    return Agent(
+        id=addr,
+        name=char_name,
+        profession=profession,
+        elite=elite,
+        elite_raw=elite_raw,
+        is_player=is_player,
+        account_name=account_name,
+        subgroup=subgroup,
+    )
+
+
 def _decode_agent(data: bytes, offset: int) -> Agent:
-    """Decode a single 96-byte agent record at ``offset``."""
+    """Decode a single 96-byte legacy agent record at ``offset``."""
     aid, prof_raw, elite_raw, _tough, _conc, _heal, _width, name_buf = _AGENT_STRUCT.unpack_from(
         data, offset
     )
@@ -1110,8 +1665,7 @@ __all__ = [
     "MAX_AGENTS",
     "MAX_EVTC_BYTES",
     "MAX_SKILLS",
-    "MAX_SKILL_NAME_BYTES",
-    "SKILL_COUNT_OFFSET",
+    "SKILL_RECORD_SIZE",
     "PythonEvtcParser",
     "read_zevtc_archive",
     "read_zevtc_bytes",
