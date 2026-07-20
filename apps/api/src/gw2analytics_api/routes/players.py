@@ -455,17 +455,12 @@ def list_players(
         profession_filter=parsed_profession,
     )
     page = profiles
+    # Phase 3 (AI-CONTINUATION-PLAN): derive a cross-fight
+    # detected role from the aggregated totals. The same
+    # ``detect_role_lite`` weights apply to summed magnitudes,
+    # giving a stable per-account primary role for the UI.
     return [
-        PlayerListRowOut(
-            account_name=p.account_name,
-            name=p.name,
-            profession=_profession_label(p.profession),
-            elite_spec=_elite_label(p.elite),
-            fights_attended=p.fights_attended,
-            total_damage=p.total_damage,
-            total_healing=p.total_healing,
-            total_buff_removal=p.total_buff_removal,
-        )
+        _profile_to_list_row(p)
         for p in page
     ]
 
@@ -748,6 +743,15 @@ def get_player(
         total_buff_removal=sum(c.total_buff_removal for c in own_contributions),
         attended_fight_ids=sorted(c.fight_id for c in own_contributions),
     )
+    # Phase 3 (AI-CONTINUATION-PLAN): cross-fight detected role
+    # from the aggregated per-account totals.
+    detected_role, detected_tags = detect_role_lite(
+        total_damage=profile.total_damage,
+        total_healing=profile.total_healing,
+        total_buff_removal=profile.total_buff_removal,
+        profession_int=int(profile.profession),
+        elite_spec_int=int(profile.elite),
+    )
 
     # Per-fight breakdown: recency-first. The
     # ``own_contributions`` list is already sorted by the merge
@@ -762,6 +766,8 @@ def get_player(
         total_damage=profile.total_damage,
         total_healing=profile.total_healing,
         total_buff_removal=profile.total_buff_removal,
+        detected_role=detected_role,
+        detected_tags=detected_tags,
         attended_fight_ids=profile.attended_fight_ids,
         per_fight_breakdown=[
             PerFightBreakdownRowOut(
@@ -844,6 +850,29 @@ def _parse_profession_filter(value: str) -> Profession | None:
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"unknown profession: {value!r} (expected name like 'MESMER' or integer 0-9)",
         ) from exc
+
+
+def _profile_to_list_row(p: PlayerProfile) -> PlayerListRowOut:
+    """Build a :class:`PlayerListRowOut` with cross-fight role detection."""
+    detected_role, detected_tags = detect_role_lite(
+        total_damage=p.total_damage,
+        total_healing=p.total_healing,
+        total_buff_removal=p.total_buff_removal,
+        profession_int=int(p.profession),
+        elite_spec_int=int(p.elite),
+    )
+    return PlayerListRowOut(
+        account_name=p.account_name,
+        name=p.name,
+        profession=_profession_label(p.profession),
+        elite_spec=_elite_label(p.elite),
+        fights_attended=p.fights_attended,
+        total_damage=p.total_damage,
+        total_healing=p.total_healing,
+        total_buff_removal=p.total_buff_removal,
+        detected_role=detected_role,
+        detected_tags=detected_tags,
+    )
 
 
 def _profession_label(profession: Profession) -> str:

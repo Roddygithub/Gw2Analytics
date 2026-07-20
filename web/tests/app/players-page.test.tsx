@@ -54,6 +54,8 @@ const POPULATED: PlayerListRow[] = [
     total_damage: 12_345,
     total_healing: 0,
     total_buff_removal: 200,
+    detected_role: "DPS",
+    detected_tags: null,
   },
   {
     account_name: ":synth.bbb",
@@ -64,6 +66,8 @@ const POPULATED: PlayerListRow[] = [
     total_damage: 0,
     total_healing: 8_900,
     total_buff_removal: 0,
+    detected_role: "HEAL",
+    detected_tags: null,
   },
 ];
 

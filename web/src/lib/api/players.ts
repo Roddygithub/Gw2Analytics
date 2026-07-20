@@ -10,6 +10,8 @@ export interface PlayerListRow {
   total_damage: number;
   total_healing: number;
   total_buff_removal: number;
+  detected_role: string | null;
+  detected_tags: string[] | null;
 }
 
 export interface PerFightBreakdownRow {
@@ -29,6 +31,8 @@ export interface PlayerProfile {
   total_damage: number;
   total_healing: number;
   total_buff_removal: number;
+  detected_role: string | null;
+  detected_tags: string[] | null;
   attended_fight_ids: string[];
   per_fight_breakdown: PerFightBreakdownRow[];
 }

@@ -95,6 +95,8 @@ const POPULATED: PlayerProfile = {
   total_damage: 7_890,
   total_healing: 0,
   total_buff_removal: 300,
+  detected_role: "DPS",
+  detected_tags: null,
   attended_fight_ids: ["fight-a", "fight-b"],
   per_fight_breakdown: [
     {

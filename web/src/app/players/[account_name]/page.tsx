@@ -250,6 +250,18 @@ export default async function PlayerProfilePage({
           label="Total buff removal"
           value={String(profile.total_buff_removal)}
         />
+        <Stat
+          label="Detected role"
+          value={profile.detected_role ?? "—"}
+        />
+        <Stat
+          label="Tags"
+          value={
+            profile.detected_tags && profile.detected_tags.length > 0
+              ? profile.detected_tags.join(", ")
+              : "—"
+          }
+        />
       </section>
 
       <PlayerTimelineSection

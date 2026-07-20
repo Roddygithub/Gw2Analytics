@@ -252,6 +252,20 @@ export interface FightReadoutOut {
   players: PlayerReadoutOut[];
 }
 
+export interface PlayerPositionOut {
+  account_name: string;
+  name: string;
+  profession: string;
+  elite_spec: string;
+  stack_dist: number | null;
+  dist_to_com: number | null;
+  samples: { x: number; y: number; z: number }[];
+}
+
+export interface FightPositionsOut {
+  players: PlayerPositionOut[];
+}
+
 export async function fetchFightReadout(
   fightId: string,
 ): Promise<FightReadoutOut> {
@@ -261,6 +275,17 @@ export async function fetchFightReadout(
     throw new ApiError(resp.status, await resp.text());
   }
   return (await resp.json()) as FightReadoutOut;
+}
+
+export async function fetchFightPositions(
+  fightId: string,
+): Promise<FightPositionsOut> {
+  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/positions`;
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  return (await resp.json()) as FightPositionsOut;
 }
 
 export async function fetchFights(): Promise<FightRow[]> {
