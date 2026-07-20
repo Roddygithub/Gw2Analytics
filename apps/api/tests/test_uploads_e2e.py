@@ -161,11 +161,11 @@ def _make_minimal_zevtc(
             0,  # unused
             len(agents),  # agent_count (parser AGENT_COUNT_OFFSET=16)
             len(skills or []),  # skill_count (parser SKILL_COUNT_OFFSET=20).
-                # _compute_post_skills_offset Pass 2 uses
-                # min(skill_count_hdr, MAX_SKILLS) to walk exactly this many
-                # skill records before checking for the event stream. Setting
-                # this to 0 causes the fallback to MAX_SKILLS, which walks
-                # into event data and finds a spurious skill.
+            # _compute_post_skills_offset Pass 2 uses
+            # min(skill_count_hdr, MAX_SKILLS) to walk exactly this many
+            # skill records before checking for the event stream. Setting
+            # this to 0 causes the fallback to MAX_SKILLS, which walks
+            # into event data and finds a spurious skill.
             0,  # trailing byte (v0.5.0 parser header bump from 24 to 25 bytes)
         )
         assert len(header) == _HEADER_SIZE

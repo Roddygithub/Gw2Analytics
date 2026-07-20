@@ -4,6 +4,7 @@
 These tests do not start any real servers; they only verify shell syntax,
 help output, and safe read-only subcommands (status).
 """
+
 import subprocess
 from pathlib import Path
 

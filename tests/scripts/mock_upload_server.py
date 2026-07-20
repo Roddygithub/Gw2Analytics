@@ -2,6 +2,7 @@
 
 Consumes the multipart body and always responds with {"status":"completed"}.
 """
+
 import http.server
 import sys
 import time

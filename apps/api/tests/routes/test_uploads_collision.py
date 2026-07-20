@@ -172,8 +172,7 @@ def test_fight_id_collision_marks_upload_failed_with_pivot_id() -> None:
         final["error_message"] or "",
     )
     assert pivot_match is not None, (
-        f"error_message must contain a 64-char hex fight_id; "
-        f"got {final['error_message']!r}"
+        f"error_message must contain a 64-char hex fight_id; got {final['error_message']!r}"
     )
     # Sanity: the matched string is valid lowercase hex.
     assert len(pivot_match.group(1)) == 64
