@@ -274,6 +274,7 @@ class EventType(StrEnum):
     # symmetry-consistent with the post-Tour-6 event vocabulary.
     BARRIER = "BARRIER"
     BUFF_APPLY = "BUFF_APPLY"
+    POSITION = "POSITION"
 
 
 class BaseEvent(BaseModel):
@@ -688,6 +689,20 @@ class BuffApplyEvent(BaseEvent):
     skill_id: int = Field(..., ge=0)
 
 
+class PositionEvent(BaseEvent):
+    """CBTS_POSITION=19 statechange emit path (position update)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.POSITION] = EventType.POSITION
+    time_ms: int = Field(..., ge=0)
+    source_agent_id: int = Field(..., ge=0)
+    target_agent_id: int = Field(..., ge=0)
+    skill_id: int = Field(..., ge=0)
+    x: float
+    y: float
+
+
 _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.DAMAGE: DamageEvent,
     EventType.HEALING: HealingEvent,
@@ -703,6 +718,7 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.BLOCK: BlockEvent,
     EventType.INTERRUPT: InterruptEvent,
     EventType.BUFF_APPLY: BuffApplyEvent,
+    EventType.POSITION: PositionEvent,
 }
 
 
@@ -821,6 +837,7 @@ __all__ = [
     "HealingEvent",
     "InterruptEvent",
     "Population",
+    "PositionEvent",
     "Profession",
     "Skill",
     "StunBreakEvent",

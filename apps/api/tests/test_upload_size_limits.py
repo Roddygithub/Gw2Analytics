@@ -90,10 +90,7 @@ def test_oversized_body_returns_413(
     )
     # Generate enough agents so the ZIP blob exceeds the 1024-byte
     # cap (each 96-byte agent record + ZIP overhead ≈ 110 bytes).
-    agents = [
-        (200_001 + i, 2, 18, f"V10 Warrior OVERSIZE {i}", True)
-        for i in range(12)
-    ]
+    agents = [(200_001 + i, 2, 18, f"V10 Warrior OVERSIZE {i}", True) for i in range(12)]
     blob = make_minimal_zevtc(agents=agents, build="20251021")
     assert len(blob) > 1024, (
         f"fixture blob ({len(blob)} bytes) must be > 1024 bytes "

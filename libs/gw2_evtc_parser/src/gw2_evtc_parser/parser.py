@@ -150,9 +150,7 @@ _AGENT_STRUCT: Final[struct.Struct] = struct.Struct(f"<QIIhhhh{AGENT_NAME_SIZE}s
 AGENT_NAME_SIZE_2025: Final[int] = 64
 
 #: ``struct`` format for the EVTC2025+ 96-byte agent record.
-_AGENT_STRUCT_2025: Final[struct.Struct] = struct.Struct(
-    f"<IIIIII{AGENT_NAME_SIZE_2025}sII"
-)
+_AGENT_STRUCT_2025: Final[struct.Struct] = struct.Struct(f"<IIIIII{AGENT_NAME_SIZE_2025}sII")
 
 #: Size of one fixed-size skill record: skill_id(u32) + name(64B).
 #: arcdps writes skill names as a fixed 64-byte null-padded buffer
@@ -265,9 +263,7 @@ _EVENT_STRUCT_2025: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHH16B")
 #:   byte 50 = result
 #:   byte 52 = is_buffremove
 #:   byte 56 = is_statechange
-_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct(
-    "<QQQii 4x I 8x bbbx b 3x b 7x"
-)
+_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct("<QQQii 4x I 8x bbbx b 3x b 7x")
 
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
 #: byte values 1, 2, 3 ↔ ``BoonApplyEvent.kind: Literal["remove_all",
@@ -452,7 +448,7 @@ class PythonEvtcParser:
         # Determine which event struct to use.  EVTC2025+ builds use the
         # standard arcdps cbtevent layout; older builds keep the legacy
         # empirically-calibrated layout.
-        build_str = data[BUILD_OFFSET:BUILD_OFFSET + 8].decode("ascii", errors="replace")
+        build_str = data[BUILD_OFFSET : BUILD_OFFSET + 8].decode("ascii", errors="replace")
         is_evtc_2025 = _build_version_from_build_str(build_str) >= 2025_00_00
         offset = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
         end = len(data)
@@ -739,9 +735,7 @@ class PythonEvtcParser:
                 # pure-damage and buff-interaction records as SEPARATE
                 # 64-byte rows; a single record never carries both.
                 continue
-            elif _ev_buff != 0 and not (
-                is_evtc_2025 and (value != 0 or buff_dmg != 0)
-            ):
+            elif _ev_buff != 0 and not (is_evtc_2025 and (value != 0 or buff_dmg != 0)):
                 # Phase 9 Step 3 APPLY-BRANCH (SHIPPED 2026-07-11).
                 # Predicate: ``_ev_buff != 0 AND is_buffremove == 0 AND
                 # is_statechange == 0`` -- the arcdps mid-combat APPLY
@@ -989,9 +983,7 @@ def _detect_skill_format_nonzero(
         boundary = skill_offset + n * SKILL_RECORD_SIZE
         if boundary > len(data):
             break
-        if _validate_event_candidate(
-            data, boundary, known_agents, is_evtc_2025=is_evtc_2025
-        ):
+        if _validate_event_candidate(data, boundary, known_agents, is_evtc_2025=is_evtc_2025):
             return False, MAX_SKILLS, skill_offset
 
     # No clear event boundary found; fall back to legacy (safer for
@@ -1390,9 +1382,7 @@ def _compute_post_skills_offset(  # noqa: PLR0912
     ):
         cursor += SKILL_RECORD_SIZE
 
-    if _validate_event_candidate(
-        data, cursor, known_agents_frozen, is_evtc_2025=is_evtc_2025
-    ):
+    if _validate_event_candidate(data, cursor, known_agents_frozen, is_evtc_2025=is_evtc_2025):
         return cursor
 
     # The skill heuristic can overshoot by one event record (the first
