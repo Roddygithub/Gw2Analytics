@@ -129,6 +129,11 @@ jobs:
       - name: Health probe baseline (v0.8.7)
         run: uv run python -m gw2analytics_api.scripts.health_gate --save-baseline /tmp/health_baseline.json
 
+      # Script-level tests do not need Postgres; run them first so the
+      # fast feedback loop is independent of the DB-backed suite.
+      - name: Script tests
+        run: uv run pytest tests/scripts/ --tb=line -q
+
       - name: Pytest
         run: uv run pytest --tb=line -q
 
