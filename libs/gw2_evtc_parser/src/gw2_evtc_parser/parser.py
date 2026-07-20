@@ -984,15 +984,10 @@ def _detect_skill_format_nonzero(
         if boundary > len(data):
             break
         if _validate_event_candidate(data, boundary, known_agents, is_evtc_2025=is_evtc_2025):
-            return False, max_skills_in_data, skill_offset
+            return False, MAX_SKILLS, skill_offset
 
-    # No clear event boundary found. For EVTC2025+, we know there is no
-    # count prefix, so prefer the fixed-size format, capped to the
-    # number of records that actually fit in the data. Only fall back
-    # to legacy for pre-2025 files where the count prefix is expected.
-    if is_evtc_2025:
-        return False, max_skills_in_data, skill_offset
-
+    # No clear event boundary found; fall back to legacy (safer for
+    # backward compatibility with old variable-length records).
     return True, capped_count, skill_offset + 4
 
 
