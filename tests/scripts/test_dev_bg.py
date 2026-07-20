@@ -1,14 +1,15 @@
+# ruff: noqa: S603
 """Lightweight tests for scripts/dev-web-bg.sh and scripts/dev-api-bg.sh.
 
 These tests do not start any real servers; they only verify shell syntax,
-help output, and safe read-only subcommands (status/stop).
+help output, and safe read-only subcommands (status).
 """
-import os
 import subprocess
+from pathlib import Path
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-WEB_SCRIPT = os.path.join(REPO_ROOT, "scripts", "dev-web-bg.sh")
-API_SCRIPT = os.path.join(REPO_ROOT, "scripts", "dev-api-bg.sh")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WEB_SCRIPT = REPO_ROOT / "scripts" / "dev-web-bg.sh"
+API_SCRIPT = REPO_ROOT / "scripts" / "dev-api-bg.sh"
 
 
 def _run(args, check=True):
@@ -54,4 +55,3 @@ def test_api_script_status_no_server():
     res = _run([API_SCRIPT, "--status"], check=False)
     assert res.returncode == 0
     assert "(no tmux session" in res.stdout
-
