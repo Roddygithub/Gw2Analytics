@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Sequence
 from unittest.mock import patch
 
+import pytest
 from sqlalchemy import select
 
 from gw2_core import BoonApplyEvent, BuffRemovalEvent, DamageEvent, HealingEvent
@@ -342,13 +343,23 @@ def test_role_detection_invoked() -> None:
 
 def test_boon_uptime_and_outgoing_persisted() -> None:
     """BoonApplyEvent streams produce uptime + outgoing columns."""
-    # Source _D applies fury (skill_id 725) to itself for 5s, then to
-    # target 101 for 5s. Fight ends at 10s. Source uptime should be
-    # 100% (5s/10s capped to 100%) and outgoing fury = 5000 ms.
+    # Source _D applies fury (skill_id 725) to itself and to target 101
+    # for 5s each. A late damage event pushes fight duration to 10s.
+    # Source and target both have fury uptime > 0; only the source has
+    # outgoing fury.
     fight_id = _seed_and_call(
         [
             _ba(src=_D, dst=_D, skill=725, time_ms=0, duration_ms=5_000),
-            _ba(src=_D, dst=101, skill=725, time_ms=5_000, duration_ms=5_000),
+            _ba(src=_D, dst=101, skill=725, time_ms=0, duration_ms=5_000),
+            _ba(src=_D, dst=_D, skill=725, kind="remove_all", time_ms=5_000, duration_ms=0),
+            _ba(src=_D, dst=101, skill=725, kind="remove_all", time_ms=5_000, duration_ms=0),
+            DamageEvent(
+                time_ms=10_000,
+                source_agent_id=_D,
+                target_agent_id=101,
+                skill_id=200,
+                damage=1,
+            ),
         ]
     )
     session = get_sessionmaker()()
@@ -360,9 +371,20 @@ def test_boon_uptime_and_outgoing_persisted() -> None:
             .scalars()
             .all()
         )
-        assert len(rows) == 1
-        row = rows[0]
-        assert row.fury_uptime is not None and row.fury_uptime > 0.0
-        assert row.outgoing_fury is not None and row.outgoing_fury > 0
+        assert len(rows) == 2
+        by_account = {row.account_name: row for row in rows}
+        source = by_account["synth.100"]
+        target = by_account["synth.101"]
+        # Both players had fury for 5s out of a 10s fight.
+        assert source.fury_uptime == pytest.approx(50.0)
+        assert target.fury_uptime == pytest.approx(50.0)
+        # Source applied fury to target once (5s). Self-buff doesn't count
+        # as outgoing, and the target applied none.
+        assert source.outgoing_fury == 5_000
+        assert target.outgoing_fury is None
+        # No other boons were applied → 0% uptime (tracker returns 0.0
+        # for tracked boons that were never stacked).
+        assert source.might_uptime == pytest.approx(0.0)
+        assert target.might_uptime == pytest.approx(0.0)
     finally:
         session.close()

@@ -42,8 +42,10 @@ def upgrade() -> None:
 
     Idempotent: if a previous migration or manual schema change already
     created ``boon_<boon>_uptime`` columns, rename them to the canonical
-    ``<boon>_uptime`` names used by the ORM. ``ADD COLUMN IF NOT EXISTS``
-    guards the outgoing columns and any missing uptime columns.
+    ``<boon>_uptime`` names used by the ORM. If both the legacy and the
+    canonical column exist, the legacy column is dropped so the schema
+    stays aligned with the ORM. ``ADD COLUMN IF NOT EXISTS`` guards the
+    outgoing columns and any missing uptime columns.
     """
     boon_list = ", ".join(f"'{boon}'" for boon in _BOONS)
     op.execute(
@@ -61,13 +63,29 @@ def upgrade() -> None:
                 IF EXISTS (
                     SELECT 1
                     FROM information_schema.columns
-                    WHERE table_name = 'fight_player_summaries'
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'fight_player_summaries'
                       AND column_name = old_name
                 ) THEN
-                    EXECUTE format(
-                        'ALTER TABLE fight_player_summaries RENAME COLUMN %I TO %I',
-                        old_name, new_name
-                    );
+                    IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = current_schema()
+                          AND table_name = 'fight_player_summaries'
+                          AND column_name = new_name
+                    ) THEN
+                        -- Both old and canonical names exist; drop the
+                        -- legacy column so the schema stays aligned.
+                        EXECUTE format(
+                            'ALTER TABLE fight_player_summaries DROP COLUMN IF EXISTS %I',
+                            old_name
+                        );
+                    ELSE
+                        EXECUTE format(
+                            'ALTER TABLE fight_player_summaries RENAME COLUMN %I TO %I',
+                            old_name, new_name
+                        );
+                    END IF;
                 END IF;
             END LOOP;
         END $$;
