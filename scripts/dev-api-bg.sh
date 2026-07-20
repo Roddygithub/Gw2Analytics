@@ -33,6 +33,25 @@ API_PATH="${REPO_ROOT}/${API_DIR}"
 
 cmd="${1:-start}"
 
+show_help() {
+  cat <<EOF
+Usage: $0 [command]
+
+Start or manage the FastAPI/uvicorn dev server in a detached tmux session.
+
+Commands:
+  start            Start the dev server (default)
+  --status, status Show session and health-check status
+  --stop, stop     Kill the tmux sessions and any orphaned processes
+  --tail, tail     Tail the uvicorn log
+  --tail-worker, tail-worker  Tail the arq worker log
+  --attach, attach Attach to the uvicorn tmux session
+  --attach-worker, attach-worker  Attach to the arq worker tmux session
+  --restart, restart  Stop and start the dev server
+  --help, help     Show this help message
+EOF
+}
+
 # --- helpers ------------------------------------------------------------------
 
 # Build a small wrapper script that exports the shared dev env vars and
@@ -66,6 +85,11 @@ EOF
 }
 
 # --- subcommand dispatch ------------------------------------------------------
+
+if [[ "$cmd" == "--help" || "$cmd" == "help" ]]; then
+  show_help
+  exit 0
+fi
 
 if [[ "$cmd" == "--status" || "$cmd" == "status" ]]; then
   echo "=== tmux session ==="
@@ -196,6 +220,10 @@ cd "$API_PATH"
 # resolved env vars directly and then execs uvicorn, so the process
 # tree is clean and tmux only sees a single executable argument.
 WRAPPER=$(build_wrapper "uv run uvicorn gw2analytics_api.main:app --host 0.0.0.0 --port ${PORT} --timeout-keep-alive 120" "$LOG" "api-dev")
+
+# Ensure the temporary wrappers are cleaned up even if we exit before
+# they get a chance to delete themselves (e.g., tmux already running).
+trap 'rm -f "${WRAPPER:-}" "${WORKER_WRAPPER:-}"' EXIT INT TERM
 
 # Run the wrapper through bash explicitly so it works even if /tmp is
 # mounted noexec (the file still needs read permission, not execute).

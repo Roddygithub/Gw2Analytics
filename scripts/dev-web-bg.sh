@@ -31,7 +31,29 @@ WEB_PATH="${REPO_ROOT}/${WEB_DIR}"
 
 cmd="${1:-start}"
 
+show_help() {
+  cat <<EOF
+Usage: $0 [command]
+
+Start or manage the Next.js dev server in a detached tmux session.
+
+Commands:
+  start            Start the dev server (default)
+  --status, status Show session and health-check status
+  --stop, stop     Kill the tmux session and any orphaned next processes
+  --tail, tail     Tail the dev log
+  --attach, attach Attach to the tmux session
+  --restart, restart  Stop and start the dev server
+  --help, help     Show this help message
+EOF
+}
+
 # --- subcommand dispatch ------------------------------------------------------
+
+if [[ "$cmd" == "--help" || "$cmd" == "help" ]]; then
+  show_help
+  exit 0
+fi
 
 if [[ "$cmd" == "--status" || "$cmd" == "status" ]]; then
   echo "=== tmux session ==="
@@ -186,6 +208,10 @@ while true; do
 done
 EOF
 chmod +x "$WRAPPER"
+
+# Ensure the temporary wrapper is cleaned up even if we exit before it
+# gets a chance to delete itself (e.g., tmux already running).
+trap 'rm -f "$WRAPPER"' EXIT INT TERM
 
 # Run the wrapper through bash explicitly so it works even if /tmp is
 # mounted noexec (the file still needs read permission, not execute).
