@@ -1,3 +1,4 @@
+# ruff: noqa: S603
 """Tests for scripts/upload-batch.sh.
 
 Covers dry-run, normal upload, and progress-resume behavior against a
@@ -8,13 +9,12 @@ import os
 import socket
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
-SCRIPT_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "upload-batch.sh")
-)
-MOCK_SERVER_PATH = os.path.join(os.path.dirname(__file__), "mock_upload_server.py")
+SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "upload-batch.sh"
+MOCK_SERVER_PATH = Path(__file__).parent / "mock_upload_server.py"
 
 
 def _wait_for_port(port: int, timeout: float = 5.0) -> None:
@@ -36,7 +36,7 @@ def _start_mock_server(mode: str = ""):
     ``mode`` can be empty (always succeed) or "retry" (first 2 requests
     return rate_limited).
     """
-    args = ["python3", MOCK_SERVER_PATH, "0"]
+    args = ["python3", str(MOCK_SERVER_PATH), "0"]
     if mode == "retry":
         args.append("retry")
     proc = subprocess.Popen(
@@ -84,7 +84,7 @@ def zevtc_dir(tmp_path):
 def test_dry_run(zevtc_dir):
     """--dry-run lists files without hitting the network."""
     res = subprocess.run(
-        [SCRIPT_PATH, "--dry-run", str(zevtc_dir)],
+        [str(SCRIPT_PATH), "--dry-run", str(zevtc_dir)],
         capture_output=True,
         text=True,
         check=False,
@@ -103,7 +103,7 @@ def test_dry_run_respects_progress_file(mock_server, zevtc_dir, tmp_path):
 
     # First run uploads all files and writes the progress file.
     subprocess.run(
-        [SCRIPT_PATH, str(zevtc_dir)],
+        [str(SCRIPT_PATH), str(zevtc_dir)],
         env=env,
         check=True,
         capture_output=True,
@@ -116,7 +116,7 @@ def test_dry_run_respects_progress_file(mock_server, zevtc_dir, tmp_path):
 
     # Dry-run should report only the new file as pending.
     res = subprocess.run(
-        [SCRIPT_PATH, "--dry-run", str(zevtc_dir)],
+        [str(SCRIPT_PATH), "--dry-run", str(zevtc_dir)],
         env=env,
         capture_output=True,
         text=True,
@@ -133,7 +133,7 @@ def test_successful_upload(mock_server, zevtc_dir):
     env = os.environ.copy()
     env["API_BASE"] = mock_server
     res = subprocess.run(
-        [SCRIPT_PATH, str(zevtc_dir)],
+        [str(SCRIPT_PATH), str(zevtc_dir)],
         env=env,
         capture_output=True,
         text=True,
@@ -152,7 +152,7 @@ def test_progress_resume(mock_server, zevtc_dir, tmp_path):
 
     # First run: upload everything.
     subprocess.run(
-        [SCRIPT_PATH, str(zevtc_dir)],
+        [str(SCRIPT_PATH), str(zevtc_dir)],
         env=env,
         check=True,
         capture_output=True,
@@ -161,7 +161,7 @@ def test_progress_resume(mock_server, zevtc_dir, tmp_path):
 
     # Second run: should skip all previously uploaded files.
     res = subprocess.run(
-        [SCRIPT_PATH, str(zevtc_dir)],
+        [str(SCRIPT_PATH), str(zevtc_dir)],
         env=env,
         capture_output=True,
         text=True,
@@ -178,7 +178,7 @@ def test_python3_fallback(mock_server, zevtc_dir):
     env["API_BASE"] = mock_server
     env["UPLOAD_DISABLE_JQ"] = "1"
     res = subprocess.run(
-        [SCRIPT_PATH, str(zevtc_dir)],
+        [str(SCRIPT_PATH), str(zevtc_dir)],
         env=env,
         capture_output=True,
         text=True,
@@ -208,7 +208,7 @@ def test_retry_on_transient_error(mock_server_retry, zevtc_dir, tmp_path):
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
 
     res = subprocess.run(
-        [SCRIPT_PATH, str(zevtc_dir)],
+        [str(SCRIPT_PATH), str(zevtc_dir)],
         env=env,
         capture_output=True,
         text=True,
