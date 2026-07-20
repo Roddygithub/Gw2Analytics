@@ -970,20 +970,31 @@ def _detect_skill_format_nonzero(
     """
     capped_count = min(count, MAX_SKILLS)
     legacy_boundary = skill_offset + 4 + capped_count * SKILL_RECORD_SIZE
-    if legacy_boundary <= len(data) and _validate_event_candidate(
-        data, legacy_boundary, known_agents, is_evtc_2025=is_evtc_2025
+    if legacy_boundary == len(data) or (
+        legacy_boundary <= len(data)
+        and _validate_event_candidate(
+            data, legacy_boundary, known_agents, is_evtc_2025=is_evtc_2025
+        )
     ):
         return True, capped_count, skill_offset + 4
 
     # EVTC2025+ interpretation: records start at skill_offset.
     # Find the first 68-byte-aligned offset that looks like events.
     # Cap the search so malformed/truncated blobs don't iterate forever.
+    #
+    # When the file ends exactly at a skill boundary we treat EOF as a
+    # valid empty event stream: a legacy table of N records would occupy
+    # 4 + N*68 bytes, which can never equal the EVTC2025+ N*68 bytes
+    # because 4 is not divisible by 68. So an EOF-aligned boundary
+    # unambiguously signals EVTC2025+ with zero events.
     max_skills_in_data = max(0, (len(data) - skill_offset) // SKILL_RECORD_SIZE)
     for n in range(1, min(max_skills_in_data, _MAX_SKILL_BOUNDARY_SEARCH) + 1):
         boundary = skill_offset + n * SKILL_RECORD_SIZE
         if boundary > len(data):
             break
-        if _validate_event_candidate(data, boundary, known_agents, is_evtc_2025=is_evtc_2025):
+        if boundary == len(data) or _validate_event_candidate(
+            data, boundary, known_agents, is_evtc_2025=is_evtc_2025
+        ):
             return False, MAX_SKILLS, skill_offset
 
     # No clear event boundary found; fall back to legacy (safer for

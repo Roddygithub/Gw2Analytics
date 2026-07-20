@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
+from apps.api.tests.routes._evtc_builder import build_2025_string
 from gw2analytics_api.main import app
 
 from ._evtc_builder import make_cbtevent, make_minimal_zevtc, post_upload
@@ -26,7 +27,7 @@ def test_detail_200() -> None:
     ]
     blob = make_minimal_zevtc(
         [(a, 2, 18, f"W {suffix}", True), (b, 1, 27, f"G {suffix}", True)],
-        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
+        build=build_2025_string(suffix),
         skills=[(sk, "S")],
         events=events,
     )

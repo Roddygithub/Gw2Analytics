@@ -38,6 +38,25 @@ def _is_evtc2025(build: str) -> bool:
     return False
 
 
+def build_2025_string(suffix: str | None = None) -> str:
+    """Return a numeric EVTC2025+ build string from an optional hex suffix.
+
+    Real arcdps build strings are exactly 8 ASCII digits (yyyymmdd).
+    Test helpers often derive a suffix from ``uuid.uuid4().hex[:8]``,
+    which is hexadecimal and may contain letters. This helper converts
+    the first 4 hex characters of ``suffix`` into a 4-digit decimal
+    string so the parser's ``_build_version_from_build_str`` recognises
+    the build as 2025+.
+
+    If ``suffix`` is empty or too short, falls back to ``"0925"`` so
+    the resulting string is still 8 digits long.
+    """
+    digits = (
+        f"{int(suffix[:4], 16) % 10000:04d}" if suffix and len(suffix) >= 4 else "0925"
+    )
+    return f"2025{digits}"
+
+
 def make_cbtevent(
     time_ms: int,
     src: int,

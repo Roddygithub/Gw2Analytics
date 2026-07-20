@@ -637,6 +637,102 @@ def test_synthetic_minimal_evtc_2025_parses() -> None:
     assert fight.id
 
 
+def test_evtc2025_boundary_zero_events_parses() -> None:
+    """EVTC2025+ with skills but no events must still parse cleanly."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(101, "Whirlwind")],
+        events=[],
+    )
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    assert fight.header is not None
+    assert fight.header.build_version == "20250925"
+    assert fight.header.agent_count == 1
+    assert len(fight.skills) == 1
+    assert fight.skills[0].id == 101
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_evtc2025_boundary_zero_events_with_small_skill_id_parses() -> None:
+    """EVTC2025+ with skill_id that looks like a small legacy count.
+
+    A skill_id of 1 is the most ambiguous legacy-count lookalike,
+    because the first 4 bytes could also be read as a legacy
+    skill_count. The parser must still identify the EVTC2025+ format.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(1, "Whirlwind")],
+        events=[],
+    )
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    assert fight.header is not None
+    assert fight.header.agent_count == 1
+    assert len(fight.skills) == 1
+    assert fight.skills[0].id == 1
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert events == []
+
+
+def test_evtc2025_boundary_one_event_parses() -> None:
+    """EVTC2025+ with a single event must locate the event stream."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=100,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    assert isinstance(events[0], DamageEvent)
+    assert events[0].time_ms == 1_000
+    assert events[0].damage == 100
+
+
+def test_evtc2025_boundary_two_events_parses() -> None:
+    """EVTC2025+ with two events must parse both in order."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=100,
+                skill_id=101,
+            ),
+            _build_event_record_2025(
+                time_ms=2_000,
+                src_agent=1,
+                dst_agent=2,
+                value=200,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 2
+    assert isinstance(events[0], DamageEvent)
+    assert events[0].time_ms == 1_000
+    assert events[0].damage == 100
+    assert isinstance(events[1], DamageEvent)
+    assert events[1].time_ms == 2_000
+    assert events[1].damage == 200
+
+
 def test_synthetic_player_agent_2025_has_account_and_is_player() -> None:
     evtc = _build_minimal_evtc(
         [(123456, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Test Guardian", True)],
