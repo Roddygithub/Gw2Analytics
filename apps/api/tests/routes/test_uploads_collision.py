@@ -76,7 +76,6 @@ from unittest.mock import patch
 
 # NOTE: _uuid.UUID is still used for upload_id parsing below
 # but fight_id is now SHA-256 hex (gw2_core Fight.id).
-
 from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
