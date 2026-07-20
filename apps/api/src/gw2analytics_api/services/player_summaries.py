@@ -167,15 +167,17 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
     for event in events:
         if isinstance(event, (BoonApplyEvent, BuffApplyEvent)):
             buff_tracker.process(event)
-            # A player can attend purely as a boon source (e.g. a healer
-            # that only applies quickness/fury). Make sure they get a
-            # summary bucket even if they never deal damage/healing/strip.
-            evt_agent = source_map.get(event.source_agent_id)
-            if evt_agent is not None:
-                account = evt_agent.account_name
-                assert account is not None  # noqa: S101
-                if account not in per_account:
-                    per_account[account] = _make_bucket(evt_agent)
+            # A player can attend purely as a boon source or target (e.g.
+            # a healer that only applies quickness/fury, or a DPS that
+            # only receives them). Make sure both sides get a summary
+            # bucket so their uptime/outgoing metrics are persisted.
+            for _agent_id in (event.source_agent_id, event.target_agent_id):
+                evt_agent = source_map.get(_agent_id)
+                if evt_agent is not None:
+                    account = evt_agent.account_name
+                    assert account is not None  # noqa: S101
+                    if account not in per_account:
+                        per_account[account] = _make_bucket(evt_agent)
             continue
         evt_agent = source_map.get(event.source_agent_id)
         if evt_agent is None:
