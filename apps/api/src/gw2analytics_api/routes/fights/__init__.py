@@ -115,6 +115,7 @@ from gw2analytics_api.route_helpers import format_elite_spec, format_profession
 from gw2analytics_api.routes.fights.aggregators import (
     _split_three_event_streams,
     aggregate_combat_readout,
+    aggregate_player_positions,
     aggregate_skill_usage,
     aggregate_squad_rollup,
 )
@@ -131,6 +132,7 @@ from gw2analytics_api.schemas import (
     EventBucketOut,
     FightEventsSummaryOut,
     FightOut,
+    FightPositionsOut,
     FightReadoutOut,
     FightSkillsOut,
     FightsPageOut,
@@ -139,6 +141,7 @@ from gw2analytics_api.schemas import (
     PerFightTimelinePointOut,
     PerPlayerTimelineOut,
     PerPlayerTimelineSeriesOut,
+    PlayerPositionOut,
     PlayerSkillLoadoutOut,
     PlayerSkillsOut,
     PlayerSkillUsageRowOut,
@@ -458,6 +461,60 @@ def get_fight_player_timeline(
         # schema's field names 1:1, so the round-trip is
         # mechanical -- no manual field mapping.
         series=[PerPlayerTimelineSeriesOut.model_validate(s) for s in series],
+    )
+
+
+# ---------------------------------------------------------------------------
+# v0.11.0 Phase C: per-fight player positions (stack distance +
+# distance to center of mass).
+#
+# Declaration order: placed after the timeline variants and
+# before the ``/{fight_id}`` catch-all. The 3-segment route
+# cannot collide with the 2-segment catch-all.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{fight_id}/positions",
+    response_model=FightPositionsOut,
+)
+def get_fight_positions(
+    fight_id: str,
+    db: Session = Depends(get_session),  # noqa: B008
+) -> FightPositionsOut:
+    """Return per-player positioning metrics + downsampled traces for one fight.
+
+    Phase C heatmap foundation: filters ``PositionEvent`` records
+    from the parsed event stream, downsamples them to at most one
+    sample per 500 ms per player (2000 sample cap), and computes
+    ``stack_dist`` (average distance to all other players) and
+    ``dist_to_com`` (average distance to the squad's center of
+    mass) via :mod:`gw2_analytics.position_analysis`.
+
+    Response codes match :func:`get_fight_events` exactly:
+
+    - ``404 Not Found``: fight id is unknown OR the events blob
+      is missing.
+    - ``502 Bad Gateway``: events blob is present but corrupt.
+    - ``200 OK``: ``FightPositionsOut`` envelope. A fight with
+      zero player agents (or no PositionEvent records) returns
+      ``players: []``.
+    """
+    # Shared helper handles the blob load + decompress + event
+    # split + 404 / 502 error contract (same pattern as the
+    # per-target trio + squads + skills endpoints).
+    events = _load_fight_events(db, fight_id)
+
+    # Build the player-only identity map (same helper the
+    # Combat-readout endpoint uses). NPCs are not in this map
+    # and therefore excluded from position metrics.
+    agent_id_to_identity_map = agent_id_to_identity(db, fight_id)
+
+    players = aggregate_player_positions(events, agent_id_to_identity_map)
+
+    return FightPositionsOut(
+        fight_id=fight_id,
+        players=[PlayerPositionOut.model_validate(p) for p in players],
     )
 
 

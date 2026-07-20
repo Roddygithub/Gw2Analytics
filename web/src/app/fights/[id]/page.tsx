@@ -101,6 +101,7 @@ import { PlayerReadoutDamage } from "@/components/PlayerReadoutDamage";
 import { PlayerReadoutHeal } from "@/components/PlayerReadoutHeal";
 import { PlayerReadoutBoons } from "@/components/PlayerReadoutBoons";
 import { PlayerReadoutDefense } from "@/components/PlayerReadoutDefense";
+import { PlayerPositionGrid } from "@/components/PlayerPositionGrid";
 import { fetchReplayTimeline } from "@/lib/replayFetcher";
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
 import { TargetFilter } from "@/components/TargetFilter";
@@ -1060,6 +1061,16 @@ export default async function FightEventsPage({
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Event windows</h2>
         <EventWindowsChart buckets={summary.event_windows} />
         <EventWindowsTable buckets={summary.event_windows} />
+      </section>
+
+      {/* v0.11.0 Phase C: per-player positioning metrics. Rendered
+          client-side because the grid fetches its own data from
+          ``GET /api/v1/fights/{id}/positions`` and manages its own
+          loading / error states. The section sits below the event
+          windows so the existing overview flow is not interrupted. */}
+      <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600 }}>Positions</h2>
+        <PlayerPositionGrid fightId={id} />
       </section>
 
       {/* v0.8.9 of web (plan/002): the per-fight timeline lives

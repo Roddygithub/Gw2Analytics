@@ -111,6 +111,7 @@ from gw2_analytics.player_heal import (
     PlayerHealAggregator,
     PlayerHealRow,
 )
+from gw2_analytics.position_analysis import compute_position_metrics
 from gw2_analytics.skill_usage import SkillUsageAggregator, SkillUsageRow
 from gw2_analytics.squad_rollup import SquadRollupAggregator, SquadRollupRow
 from gw2_analytics.target_buff_removal import (
@@ -130,16 +131,19 @@ from gw2_core import (
     Event,
     HealingEvent,
     InterruptEvent,
+    PositionEvent,
     StunBreakEvent,
 )
 from gw2analytics_api.routes.fights.mappers import AgentIdentity
 from gw2analytics_api.schemas import (
     FightReadoutOut,
+    PlayerPositionOut,
     PlayerReadoutBoonsOut,
     PlayerReadoutDamageOut,
     PlayerReadoutDefenseOut,
     PlayerReadoutHealOut,
     PlayerReadoutOut,
+    PositionSampleOut,
 )
 
 
@@ -686,9 +690,118 @@ def aggregate_combat_readout(
     )
 
 
+def _downsample_positions(
+    events: list[PositionEvent],
+) -> tuple[list[PositionSampleOut], list[list[float]]]:
+    """Downsample position events to 1 per 500 ms, capped at 2000.
+
+    Returns ``(samples, position_analysis_input)`` where each entry
+    is a ``[time_ms, x, y]`` list. Integer math is used for the cap
+    to avoid floating-point index drift.
+    """
+    evts_sorted = sorted(events, key=lambda e: e.time_ms)
+    bucketed: dict[int, PositionEvent] = {}
+    for e in evts_sorted:
+        bucketed[e.time_ms // 500] = e
+    selected = sorted(bucketed.values(), key=lambda e: e.time_ms)
+
+    if len(selected) > 2000:
+        selected = [selected[(len(selected) * i) // 2000] for i in range(2000)]
+
+    samples = [
+        # PositionEvent currently carries only x/y; z is reserved for a
+        # future elevation-aware parser extension. Returning 0.0 keeps the
+        # wire shape stable and matches the existing frontend contract.
+        # TODO(parser-pos-z): wire real elevation when PositionEvent gains z.
+        PositionSampleOut(x=e.x, y=e.y, z=0.0)
+        for e in selected
+    ]
+    return samples, [[e.time_ms, e.x, e.y] for e in selected]
+
+
+def aggregate_player_positions(
+    events: Iterable[Event],
+    agent_id_to_identity_map: dict[int, AgentIdentity],
+) -> list[PlayerPositionOut]:
+    """Aggregate per-player position metrics + downsampled traces.
+
+    Phase C heatmap foundation: filters ``PositionEvent`` from the
+    heterogeneous event stream, downsamples to at most 1 sample per
+    500 ms per player (capped at 2000 samples), computes
+    ``stack_dist`` / ``dist_to_com`` via
+    :func:`gw2_analytics.position_analysis.compute_position_metrics`,
+    and returns one :class:`PlayerPositionOut` per player agent.
+
+    NPC agents are silently dropped (they have no entry in the
+    ``agent_id_to_identity_map``). Player agents without an
+    ``account_name`` are also dropped because the position-analysis
+    key is the canonical account name.
+    """
+    if not agent_id_to_identity_map:
+        return []
+
+    # Collect PositionEvents for player agents only.
+    raw_by_agent: dict[int, list[PositionEvent]] = {}
+    for event in events:
+        if not isinstance(event, PositionEvent):
+            continue
+        agent_id = event.source_agent_id
+        if agent_id in agent_id_to_identity_map:
+            raw_by_agent.setdefault(agent_id, []).append(event)
+
+    if not raw_by_agent:
+        return []
+
+    # Downsample + build per-account samples and position-analysis input.
+    player_samples: dict[str, list[list[float]]] = {}
+    samples_by_account: dict[str, list[PositionSampleOut]] = {}
+
+    for agent_id, evts in raw_by_agent.items():
+        identity = agent_id_to_identity_map[agent_id]
+        account = identity.account_name
+        if not account:
+            continue
+        samples, samples_for_analysis = _downsample_positions(evts)
+        if not samples:
+            continue
+        samples_by_account[account] = samples
+        player_samples[account] = samples_for_analysis
+
+    if not player_samples:
+        return []
+
+    metrics = compute_position_metrics(player_samples)
+
+    result: list[PlayerPositionOut] = []
+    # Sort by account_name for deterministic, user-friendly ordering.
+    for agent_id in sorted(
+        raw_by_agent,
+        key=lambda aid: agent_id_to_identity_map[aid].account_name or "",
+    ):
+        identity = agent_id_to_identity_map[agent_id]
+        account = identity.account_name
+        if not account:
+            continue
+        row_metrics = metrics.get(account, {})
+        result.append(
+            PlayerPositionOut(
+                account_name=account,
+                name=identity.name,
+                profession=identity.profession,
+                elite_spec=identity.elite_spec,
+                stack_dist=row_metrics.get("stack_dist"),
+                dist_to_com=row_metrics.get("dist_to_com"),
+                samples=samples_by_account.get(account, []),
+            ),
+        )
+
+    return result
+
+
 __all__ = [
     "_aggregate_per_target_rollup",
     "aggregate_combat_readout",
+    "aggregate_player_positions",
     "aggregate_skill_usage",
     "aggregate_squad_rollup",
 ]
