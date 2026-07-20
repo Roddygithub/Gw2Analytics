@@ -100,7 +100,7 @@ def test_load_baseline_sequential_uploads_and_parses(
         sk = 2_000_000 + n
         blob = make_minimal_zevtc(
             [(aid, 2, 18, f"W {suffix}", True)],
-            build=f"2025{suffix[:4]}",
+            build=f"2025{int(suffix[:4], 16) % 10000:04d}",
             skills=[(sk, f"Dmg {suffix}")],
             events=[],
         )

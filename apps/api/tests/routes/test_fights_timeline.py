@@ -24,7 +24,7 @@ def _post_fight(n_events: int) -> tuple[str, int, int]:
     ]
     blob = make_minimal_zevtc(
         [(a, 2, 18, f"W {suffix}", True), (b, 1, 27, f"G {suffix}", True)],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(sk + i, f"S{i}") for i in range(max(n_events, 1))],
         events=cbtevents,
     )

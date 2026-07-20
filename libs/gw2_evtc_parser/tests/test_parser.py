@@ -181,6 +181,96 @@ def _build_event_record(
     )
 
 
+def _build_agent_record_2025(
+    agent_id: int,
+    prof: int,
+    elite: int,
+    name: str,
+    *,
+    account_name: str | None = None,
+    subgroup: str | None = None,
+) -> bytes:
+    """Build one 96-byte EVTC2025+ agent record.
+
+    Layout (per ``arcdps.h`` 2025+):
+    ``<IIIIII64sII`` -- iid_low, profession, is_elite, toughness,
+    healing, concentration, 64-byte name buffer, subgroup, addr.
+    The event address is stored in ``addr`` (offset +92).
+    """
+    if account_name is None:
+        raw = name.encode("utf-8") + b"\x00"
+    else:
+        raw = (
+            name.encode("utf-8")
+            + b"\x00"
+            + account_name.encode("utf-8")
+            + b"\x00"
+        )
+        if subgroup is not None:
+            raw += subgroup.encode("utf-8") + b"\x00"
+        else:
+            raw += b"\x00"
+    if len(raw) > 64:
+        msg = f"name region {len(raw)} bytes exceeds 64"
+        raise ValueError(msg)
+    name_buf = raw + b"\x00" * (64 - len(raw))
+    return struct.pack(
+        "<IIIIII64sII",
+        0,  # iid_low (unused)
+        prof,
+        elite,
+        0,  # toughness
+        0,  # healing
+        0,  # concentration
+        name_buf,
+        0,  # subgroup struct field (parser reads subgroup from name buffer)
+        agent_id,  # addr (event-matching id)
+    )
+
+
+def _build_event_record_2025(
+    time_ms: int,
+    src_agent: int,
+    dst_agent: int,
+    value: int,
+    skill_id: int = 42,
+    *,
+    is_statechange: int = 0,
+    is_nondamage: int = 0,
+    buff_dmg: int = 0,
+    result: int = 0,
+) -> bytes:
+    """Build one 64-byte EVTC2025+ cbtevent record.
+
+    Layout (per ``arcdps.h`` 2025+):
+    ``<QQQiiIIHHHH16B`` -- time, src, dst, value, buff_dmg,
+    overstack, skillid, 4x instids, 16 flag bytes.
+    Byte 50 (flags index 2) is the ``result`` enum (13/14 = heal);
+    byte 56 (flags index 8) is ``is_statechange``.
+    """
+    flags = bytearray(16)
+    if result:
+        flags[2] = result
+    else:
+        flags[2] = 13 if is_nondamage > 0 else 0  # result
+    flags[8] = is_statechange
+    return struct.pack(
+        "<QQQiiIIHHHH16B",
+        time_ms,
+        src_agent,
+        dst_agent,
+        value,
+        buff_dmg,
+        0,  # overstack_value
+        skill_id,
+        0,  # src_instid
+        0,  # dst_instid
+        0,  # src_master_instid
+        0,  # dst_master_instid
+        *flags,
+    )
+
+
 def _build_minimal_evtc(
     agents: list[tuple[int, int, int, str, bool]],
     *,
@@ -204,6 +294,7 @@ def _build_minimal_evtc(
         skills = []
     if events is None:
         events = []
+    is_2025 = int(build[:4]) >= 2025
     header = struct.pack(
         "<4s8sBHBI I",
         b"EVTC",
@@ -217,7 +308,18 @@ def _build_minimal_evtc(
     assert len(header) == HEADER_SIZE
     body = bytearray()
     for aid, prof, elite, name, is_player in agents:
-        if is_player:
+        if is_2025:
+            if is_player:
+                rec = _build_agent_record_2025(
+                    aid,
+                    prof,
+                    elite,
+                    name,
+                    account_name=f":synth.{aid}",
+                )
+            else:
+                rec = _build_agent_record_2025(aid, prof, elite, name)
+        elif is_player:
             rec = _build_agent_record(
                 aid,
                 prof,
@@ -264,6 +366,32 @@ def test_synthetic_minimal_evtc_parses() -> None:
     assert fight.agents == []
     assert fight.skills == []
     assert fight.id
+
+
+def test_synthetic_legacy_evtc_with_single_event_parses() -> None:
+    """Pre-2025 (legacy) EVTC with a count prefix and a single event round-trips."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20240925",
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record(
+                time_ms=42_500,
+                src_agent=1,
+                dst_agent=2,
+                value=1_337,
+                skill_id=101,
+            ),
+        ],
+    )
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    assert fight.header is not None
+    assert fight.header.build_version == "20240925"
+    assert len(fight.skills) == 1
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    assert isinstance(events[0], DamageEvent)
+    assert events[0].damage == 1_337
 
 
 def test_synthetic_player_agent_has_account_and_is_player() -> None:
@@ -490,6 +618,184 @@ def test_npc_with_fully_null_tail_after_name_is_npc() -> None:
     assert a.name == "Mob"
     assert a.account_name is None
     assert a.subgroup is None
+
+
+# ---------------------------------------------------------------------------
+# EVTC2025+ format tests
+# ---------------------------------------------------------------------------
+
+
+def test_synthetic_minimal_evtc_2025_parses() -> None:
+    evtc = _build_minimal_evtc([], build="20250925")
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    assert fight.header is not None
+    assert fight.header.build_version == "20250925"
+    assert fight.header.agent_count == 0
+    assert fight.header.skill_count == 0
+    assert fight.agents == []
+    assert fight.skills == []
+    assert fight.id
+
+
+def test_synthetic_player_agent_2025_has_account_and_is_player() -> None:
+    evtc = _build_minimal_evtc(
+        [(123456, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Test Guardian", True)],
+        build="20250925",
+    )
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    assert len(fight.agents) == 1
+    a = fight.agents[0]
+    assert a.id == 123456
+    assert a.name == "Test Guardian"
+    assert a.account_name == ":synth.123456"
+    assert a.is_player is True
+    assert a.subgroup == ""
+    assert a.profession == Profession.GUARDIAN
+    assert a.elite == EliteSpec.DRAGONHUNTER
+
+
+def test_synthetic_npc_agent_2025_has_no_account() -> None:
+    evtc = _build_minimal_evtc(
+        [(789012, 99, 99, "Hostile NPC", False)],
+        build="20250925",
+    )
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    a = fight.agents[0]
+    assert a.id == 789012
+    assert a.name == "Hostile NPC"
+    assert a.is_player is False
+    assert a.account_name is None
+    assert a.subgroup is None
+
+
+def test_synthetic_skill_table_2025_parses_without_count_prefix() -> None:
+    # EVTC2025+ has no skill count prefix; the parser discovers the
+    # skill-to-event boundary by inspecting the event stream. Include
+    # at least two events so the boundary validator can confirm the
+    # event stream (it needs >=2 known-agent matches).
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(101, "Whirlwind"), (202, "Burning Precision")],
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000, src_agent=1, dst_agent=2, value=100, skill_id=101
+            ),
+            _build_event_record_2025(
+                time_ms=2_000, src_agent=1, dst_agent=2, value=200, skill_id=202
+            ),
+        ],
+    )
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    assert fight.header is not None
+    assert fight.header.skill_count == 2
+    assert len(fight.skills) == 2
+    assert fight.skills[0].id == 101
+    assert fight.skills[0].name == "Whirlwind"
+    assert fight.skills[1].id == 202
+    assert fight.skills[1].name == "Burning Precision"
+
+
+def test_parse_events_2025_single_damage_round_trips() -> None:
+    # Include two events so the EVTC2025+ boundary validator (which
+    # requires >=2 known-agent matches) can locate the event stream.
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record_2025(
+                time_ms=42_500,
+                src_agent=1,
+                dst_agent=2,
+                value=1_337,
+                skill_id=101,
+            ),
+            _build_event_record_2025(
+                time_ms=43_500,
+                src_agent=1,
+                dst_agent=2,
+                value=2_000,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 2
+    e = events[0]
+    assert isinstance(e, DamageEvent)
+    assert e.time_ms == 42_500
+    assert e.source_agent_id == 1
+    assert e.target_agent_id == 2
+    assert e.skill_id == 101
+    assert e.damage == 1_337
+
+
+def test_parse_events_2025_single_event_with_known_agent_is_accepted() -> None:
+    """A single-event EVTC2025+ file with a known agent is parsed correctly.
+
+    The boundary validator originally required >=2 known-agent
+    matches, which rejected single-event files. This regression test
+    locks down the relaxed requirement (1 match when only 1 record
+    is readable).
+    """
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record_2025(
+                time_ms=42_500,
+                src_agent=1,
+                dst_agent=2,
+                value=1_337,
+                skill_id=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    assert isinstance(events[0], DamageEvent)
+    assert events[0].damage == 1_337
+
+
+@pytest.mark.parametrize("result_value", [13, 14])
+def test_parse_events_2025_yields_healing_event_on_nondamage(result_value: int) -> None:
+    # Include two events so the EVTC2025+ boundary validator can
+    # locate the event stream. Both result=13 (CBTR_HEAL) and
+    # result=14 (CBTR_BUFFHEAL) should be interpreted as healing.
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(101, "Symbol of Healing")],
+        events=[
+            _build_event_record_2025(
+                time_ms=42_500,
+                src_agent=1,
+                dst_agent=2,
+                value=8_500,
+                skill_id=101,
+                result=result_value,
+            ),
+            _build_event_record_2025(
+                time_ms=43_500,
+                src_agent=1,
+                dst_agent=2,
+                value=9_000,
+                skill_id=101,
+                result=result_value,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 2
+    e = events[0]
+    assert isinstance(e, HealingEvent)
+    assert e.time_ms == 42_500
+    assert e.source_agent_id == 1
+    assert e.target_agent_id == 2
+    assert e.skill_id == 101
+    assert e.healing == 8_500
 
 
 # ---------------------------------------------------------------------------

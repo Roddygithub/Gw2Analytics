@@ -1,16 +1,10 @@
 """Shared test fixtures for the apps/api e2e tests.
 
-The V1.3 EVTC layout (struct pack/unpack) and the synthetic
+The V1.4/2025 EVTC layout (struct pack/unpack) and the synthetic
 ``.zevtc`` blob builder are ~150 lines of code that all e2e
 tests share. This module extracts them so the test files
 focus on the test contract (the assertions on the API
 response + the DB state) rather than the wire format.
-
-v0.8.5 bring-up: extracted from :mod:`tests.test_uploads_e2e`
-to support :mod:`tests.test_backfill` (the v0.8.5 backfill
-script's e2e tests). The struct layout + the ZIP builder
-are byte-identical to the v0.7.0+ tests; the only difference
-is the location (this module vs inline in the test file).
 """
 
 from __future__ import annotations
@@ -28,22 +22,41 @@ from gw2analytics_api.main import app
 
 client: Final = TestClient(app)
 
-# V1.3 EVTC layout (matches libs/gw2_evtc_parser parser.py):
-#   25-byte header (magic + 8B build + rev + combat + unused
-#                   + agent_count + skill_count + lang)
+# V1.4/2025 EVTC layout (matches libs/gw2_evtc_parser parser.py):
+#   24-byte header (magic + 8B build + rev + combat_id + unused
+#   + agent_count + map_id)
 #   + agent_count x 96-byte agent records
-#   + skill_count x variable-size skill records
-#   + N x 64-byte cbtevent records (Phase 7 v1)
-_HEADER_FMT: Final = "<4s8sBHBI IB"
-_HEADER_SIZE: Final = struct.calcsize(_HEADER_FMT)  # 25
+#   + skill_count x fixed 68-byte skill records
+#       * legacy (pre-2025): 4-byte count prefix before records
+#       * EVTC2025+: records start immediately, no count prefix
+#   + N x 64-byte cbtevent records
+_HEADER_FMT: Final = "<4s8sBHBII"
+_HEADER_SIZE: Final = struct.calcsize(_HEADER_FMT)  # 24
+
 _AGENT_RECORD_FMT: Final = "<QIIhhhh"
 _AGENT_PREFIX_SIZE: Final = struct.calcsize(_AGENT_RECORD_FMT)  # 24
 _AGENT_NAME_SIZE: Final = 72
 _AGENT_SIZE: Final = _AGENT_PREFIX_SIZE + _AGENT_NAME_SIZE  # 96
-_SKILL_HEADER_FMT: Final = "<II"
-_SKILL_HEADER_SIZE: Final = struct.calcsize(_SKILL_HEADER_FMT)  # 8
+
+_AGENT_NAME_SIZE_2025: Final = 64
+_AGENT_FMT_2025: Final = f"<IIIIII{_AGENT_NAME_SIZE_2025}sII"
+
+_SKILL_RECORD_SIZE: Final = 68
+
+# Legacy event format (empirically calibrated for pre-2025 builds).
 _EVENT_FMT: Final = "<QQQiiIIHHHbbbbbbbbIIbb"
 _EVENT_SIZE: Final = struct.calcsize(_EVENT_FMT)  # 64
+
+# EVTC2025+ event format (standard arcdps.h cbtevent layout).
+_EVENT_FMT_2025: Final = "<QQQiiIIHHHH16B"
+_EVENT_SIZE_2025: Final = struct.calcsize(_EVENT_FMT_2025)  # 64
+
+
+def _is_evtc2025(build: str) -> bool:
+    """Return True for builds dated 2025 or later."""
+    if len(build) >= 4 and build[:4].isdigit():
+        return int(build[:4]) >= 2025
+    return False
 
 
 def make_cbtevent(
@@ -56,19 +69,36 @@ def make_cbtevent(
     is_statechange: int = 0,
     is_nondamage: int = 0,
     buff_dmg: int = 0,
+    is_evtc2025: bool = True,
 ) -> bytes:
     """Pack one 64-byte cbtevent record matching the parser's struct layout.
 
-    Field padding (``pad61..pad66``) is set to zero -- the parser does
-    not read them. ``value > 0`` + ``is_statechange == 0`` +
-    ``is_nondamage == 0`` produces a yielded ``DamageEvent``.
-
-    Phase 8: ``buff_dmg`` is the ``int32`` arcdps field that surfaces
-    a separate ``BuffRemovalEvent`` from the heal-class event kind.
-    Set to > 0 on a record with ``is_nondamage == 1`` to exercise
-    the same-record dual-emit (heal + strip) or the pure-strip (no
-    heal) case.
+    For EVTC2025+ builds the ``result`` byte (offset 50) encodes the
+    event class: ``13``/``14`` = heal. For legacy builds the
+    ``is_nondamage`` byte is used directly.
     """
+    if is_evtc2025:
+        flags = bytearray(16)
+        # byte 50 (index 2) = result. 13 = CBTR_HEAL, 14 = CBTR_BUFFHEAL.
+        flags[2] = 13 if is_nondamage > 0 else 0
+        # byte 56 (index 8) = is_statechange.
+        flags[8] = is_statechange
+        return struct.pack(
+            _EVENT_FMT_2025,
+            time_ms,
+            src,
+            dst,
+            value,
+            buff_dmg,
+            0,  # overstack_value
+            skill_id,
+            0,  # src_instid
+            0,  # dst_instid
+            0,  # src_master_instid
+            0,  # dst_master_instid
+            *flags,
+        )
+
     return struct.pack(
         _EVENT_FMT,
         time_ms,
@@ -76,12 +106,12 @@ def make_cbtevent(
         dst,
         value,
         buff_dmg,
-        0,
+        0,  # overstack_value
         skill_id,
-        0,
-        0,
-        0,
-        0,
+        0,  # src_instid
+        0,  # dst_instid
+        0,  # src_master_instid
+        0,  # dst_master_instid
         is_nondamage,
         is_statechange,
         0,
@@ -96,6 +126,41 @@ def make_cbtevent(
     )[:_EVENT_SIZE]
 
 
+def _encode_agent(
+    aid: int,
+    prof: int,
+    elite: int,
+    name: str,
+    is_player: bool,
+    *,
+    is_2025: bool,
+) -> bytes:
+    """Encode a single 96-byte agent record."""
+    if is_2025:
+        account = f":synth.{aid}".encode() if is_player else b""
+        raw_name = name.encode() + b"\x00" + account + b"\x00" + b"\x00"
+        raw_name = raw_name[:_AGENT_NAME_SIZE_2025]
+        name_buf = raw_name + b"\x00" * (_AGENT_NAME_SIZE_2025 - len(raw_name))
+        return struct.pack(
+            _AGENT_FMT_2025,
+            0,  # iid_low (unused)
+            prof,
+            elite,
+            0,  # toughness
+            0,  # healing
+            0,  # concentration
+            name_buf,
+            0,  # subgroup
+            aid,  # addr (event-matching id for 2025+)
+        )
+
+    prefix = struct.pack(_AGENT_RECORD_FMT, aid, prof, elite, 0, 0, 0, 0)
+    account = f":synth.{aid}".encode() if is_player else b""
+    raw = name.encode() + b"\x00" + account + (b"\x00\x00" if is_player else b"\x00")
+    name_buf = raw + b"\x00" * (_AGENT_NAME_SIZE - len(raw))
+    return prefix + name_buf
+
+
 def make_minimal_zevtc(
     agents: list[tuple[int, int, int, str, bool]],
     build: str,
@@ -104,65 +169,45 @@ def make_minimal_zevtc(
 ) -> bytes:
     """Build a synthetic ``.zevtc`` blob (zip wrapper around EVTC).
 
-    Uses the V1.3 25-byte header + 96-byte agent records +
-    variable skill records. For player agents the combo string
-    ``name\\0:synth.<id>\\0`` is null-padded to 72 bytes; NPCs
-    get a single null-terminated name null-padded to 72 bytes.
-    Skill records are ``<II`` (skill_id + name_len) + UTF-8
-    name + 1 byte null.
-
-    ``events`` is an optional list of pre-packed 64-byte
-    cbtevent records appended verbatim after the skill block.
+    Supports both legacy (pre-2025) and EVTC2025+ wire formats.
+    The build string determines which format is emitted; tests
+    currently default to 2025+ builds.
     """
     if skills is None:
         skills = []
     if events is None:
         events = []
+    is_2025 = _is_evtc2025(build)
+
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
         header = struct.pack(
             _HEADER_FMT,
             b"EVTC",
             build.encode("ascii"),
-            0,
-            0,
-            0,
+            0,  # rev
+            0,  # combat_id
+            0,  # unused
             len(agents),
-            len(skills),
-            0,  # lang
+            0,  # map_id
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()
+
         for aid, prof, elite, name, is_player in agents:
-            prefix = struct.pack(
-                _AGENT_RECORD_FMT,
-                aid,
-                prof,
-                elite,
-                0,
-                0,
-                0,
-                0,
-            )
-            assert len(prefix) == _AGENT_PREFIX_SIZE
-            if is_player:
-                raw = name.encode() + b"\x00" + f":synth.{aid}".encode() + b"\x00\x00"
-            else:
-                raw = name.encode() + b"\x00"
-            if len(raw) > _AGENT_NAME_SIZE:
-                msg = f"agent name region {len(raw)} > {_AGENT_NAME_SIZE}"
-                raise ValueError(msg)
-            name_buf = raw + b"\x00" * (_AGENT_NAME_SIZE - len(raw))
-            assert len(name_buf) == _AGENT_NAME_SIZE
-            body += prefix + name_buf
+            body += _encode_agent(aid, prof, elite, name, is_player, is_2025=is_2025)
+
+        if not is_2025:
+            body += struct.pack("<I", len(skills))
+
         for skill_id, skill_name in skills:
-            name_bytes = skill_name.encode("utf-8")
-            skill_record = (
-                struct.pack(_SKILL_HEADER_FMT, skill_id, len(name_bytes)) + name_bytes + b"\x00"
-            )
-            body += skill_record
+            name_bytes = skill_name.encode("utf-8")[:64]
+            name_buf = name_bytes + b"\x00" * (_SKILL_RECORD_SIZE - 4 - len(name_bytes))
+            body += struct.pack("<I64s", skill_id, name_buf)
+
         for ev in events:
             body += ev
+
         zf.writestr("fight.evtc", header + bytes(body))
     return buf.getvalue()
 
@@ -189,7 +234,8 @@ def post_minimal_fight(
     cross-fight roll-up.
     """
     suffix = suffix or _uuid.uuid4().hex[:8]
-    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    suffix_digits = f"{int(suffix[:4], 16) % 10000:04d}" if len(suffix) >= 4 else "0925"
+    build = f"2025{suffix_digits}"
     base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_id_b = base_id_a + 1
     base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
@@ -211,8 +257,7 @@ def post_minimal_fight(
         files={"file": ("sample.zevtc", blob, "application/octet-stream")},
     )
     assert resp.status_code == 201, resp.text
-    upload_id = resp.json()["id"]
-    return wait_for_upload_completion(upload_id)
+    return wait_for_upload_completion(resp.json()["id"])
 
 
 def post_npc_only_fight() -> str:
@@ -225,7 +270,8 @@ def post_npc_only_fight() -> str:
     the fight as ``skipped`` and write no summary rows.
     """
     suffix = _uuid.uuid4().hex[:8]
-    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    suffix_digits = f"{int(suffix[:4], 16) % 10000:04d}" if len(suffix) >= 4 else "0925"
+    build = f"2025{suffix_digits}"
     base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_id_b = base_id_a + 1
     blob = make_minimal_zevtc(
@@ -240,8 +286,7 @@ def post_npc_only_fight() -> str:
         files={"file": ("npc_only.zevtc", blob, "application/octet-stream")},
     )
     assert resp.status_code == 201, resp.text
-    upload_id = resp.json()["id"]
-    return wait_for_upload_completion(upload_id)
+    return wait_for_upload_completion(resp.json()["id"])
 
 
 def wait_for_upload_completion(upload_id: str) -> str:

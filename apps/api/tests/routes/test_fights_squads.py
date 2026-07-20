@@ -21,7 +21,7 @@ def _post_fight() -> str:
     events = [make_cbtevent(1_000, src=a, dst=b, value=1000, skill_id=sk)]
     blob = make_minimal_zevtc(
         [(a, 2, 18, f"W {suffix}", True), (b, 1, 27, f"G {suffix}", True)],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(sk, "S")],
         events=events,
     )
@@ -51,7 +51,7 @@ def test_squads_404_no_events() -> None:
     b = a + 1
     blob = make_minimal_zevtc(
         [(a, 2, 18, f"W {suffix}", True), (b, 1, 27, f"G {suffix}", True)],
-        build=f"2025{suffix[:4]}",
+        build=f"2025{int(suffix[:4], 16) % 10000:04d}",
         skills=[(1_000_000 + int(suffix[:4], 16), "S")],
     )
     fight_id = post_upload(client, blob)
