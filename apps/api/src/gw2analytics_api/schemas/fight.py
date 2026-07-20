@@ -427,6 +427,61 @@ class PlayerReadoutOut(BaseModel):
     defense: PlayerReadoutDefenseOut = PlayerReadoutDefenseOut()
 
 
+class PositionSampleOut(BaseModel):
+    """One downsampled position sample for a player.
+
+    Phase C heatmap foundation: the backend persists only
+    ``x`` and ``y`` from the EVTC position statechange; ``z`` is
+    emitted as ``0.0`` so the wire shape stays forward-compatible
+    with any future elevation-aware parser extension without
+    requiring a frontend type change.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    x: float
+    y: float
+    z: float = 0.0
+
+
+class PlayerPositionOut(BaseModel):
+    """Per-player positioning metrics + downsampled trace.
+
+    Phase C heatmap foundation: returned by
+    ``GET /api/v1/fights/{fight_id}/positions``. The
+    ``stack_dist`` and ``dist_to_com`` values are computed by
+    :mod:`gw2_analytics.position_analysis` from the downsampled
+    traces. ``samples`` is capped at 2000 per player and
+    downsampled to at most one point every 500 ms.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    account_name: str
+    name: str
+    profession: str
+    elite_spec: str
+    stack_dist: float | None
+    dist_to_com: float | None
+    samples: list[PositionSampleOut] = []
+
+
+class FightPositionsOut(BaseModel):
+    """Wrapper for the per-fight positions endpoint.
+
+    Phase C heatmap foundation: the response shape for
+    ``GET /api/v1/fights/{fight_id}/positions``. Only player
+    agents (``is_player=True``) with a non-empty account name are
+    included; NPCs and gadgets are silently dropped because
+    stack-distance metrics are only meaningful for squad players.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fight_id: str
+    players: list[PlayerPositionOut] = []
+
+
 class FightReadoutOut(BaseModel):
     """The full Combat-readout payload for one fight.
 
