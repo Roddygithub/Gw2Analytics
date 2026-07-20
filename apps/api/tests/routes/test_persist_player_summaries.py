@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from sqlalchemy import select
 
-from gw2_core import BuffRemovalEvent, DamageEvent, HealingEvent
+from gw2_core import BoonApplyEvent, BuffRemovalEvent, DamageEvent, HealingEvent
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (
     OrmFight,
@@ -125,6 +125,27 @@ def _bf(src: int = _D, dst: int = 101, skill: int = 200, bf: int = 0) -> BuffRem
         target_agent_id=dst,
         skill_id=skill,
         buff_removal=bf,
+    )
+
+
+def _ba(
+    src: int = _D,
+    dst: int = 101,
+    skill: int = 725,
+    *,
+    kind: str = "apply",
+    stacks: int = 1,
+    duration_ms: int = 0,
+    time_ms: int = 1_000,
+) -> BoonApplyEvent:
+    return BoonApplyEvent(
+        time_ms=time_ms,
+        source_agent_id=src,
+        target_agent_id=dst,
+        skill_id=skill,
+        kind=kind,
+        stacks=stacks,
+        duration_ms=duration_ms,
     )
 
 
@@ -315,5 +336,33 @@ def test_role_detection_invoked() -> None:
         )
         assert len(rows) == 1
         assert rows[0].detected_role == "DPS"
+    finally:
+        session.close()
+
+
+def test_boon_uptime_and_outgoing_persisted() -> None:
+    """BoonApplyEvent streams produce uptime + outgoing columns."""
+    # Source _D applies fury (skill_id 725) to itself for 5s, then to
+    # target 101 for 5s. Fight ends at 10s. Source uptime should be
+    # 100% (5s/10s capped to 100%) and outgoing fury = 5000 ms.
+    fight_id = _seed_and_call(
+        [
+            _ba(src=_D, dst=_D, skill=725, time_ms=0, duration_ms=5_000),
+            _ba(src=_D, dst=101, skill=725, time_ms=5_000, duration_ms=5_000),
+        ]
+    )
+    session = get_sessionmaker()()
+    try:
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.fury_uptime is not None and row.fury_uptime > 0.0
+        assert row.outgoing_fury is not None and row.outgoing_fury > 0
     finally:
         session.close()

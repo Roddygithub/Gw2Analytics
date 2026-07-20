@@ -6,9 +6,17 @@ from dataclasses import dataclass
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from gw2_analytics.buff_state import BuffStateTracker
 from gw2_analytics.condi_power_split import KNOWN_CONDI_NAMES
 from gw2_analytics.role_detection import detect_role_lite
-from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
+from gw2_core import (
+    BoonApplyEvent,
+    BuffApplyEvent,
+    BuffRemovalEvent,
+    DamageEvent,
+    Event,
+    HealingEvent,
+)
 from gw2analytics_api.models import (
     OrmFight,
     OrmFightAgent,
@@ -19,7 +27,99 @@ from gw2analytics_api.services.fight_persistence import _sanitize_name
 logger = logging.getLogger(__name__)
 
 
-def _persist_player_summaries(  # noqa: PLR0912
+@dataclass(slots=True)
+class _SummaryBucket:
+    """Mutable per-account summary totals."""
+
+    damage: int = 0
+    healing: int = 0
+    strip: int = 0
+    power: int = 0
+    condi: int = 0
+    name: str = ""
+    prof: int = 0
+    elite: int = 0
+    agent_id: int = 0
+
+
+def _make_bucket(agent: OrmFightAgent) -> _SummaryBucket:
+    """Return a fresh zero-totals summary bucket for ``agent``."""
+    return _SummaryBucket(
+        name=_sanitize_name(agent.name),
+        prof=int(agent.profession),
+        elite=int(agent.elite_spec),
+        agent_id=int(agent.agent_id),
+    )
+
+
+def _build_account_agent_ids(
+    agents: list[OrmFightAgent],
+) -> dict[str, list[int]]:
+    """Return a mapping from account_name to the list of agent_ids observed."""
+    account_to_ids: dict[str, list[int]] = {}
+    for agent in agents:
+        if agent.is_player and agent.account_name:
+            account_to_ids.setdefault(agent.account_name, []).append(int(agent.agent_id))
+    return account_to_ids
+
+
+def _boon_fields_for_account(
+    account_name: str,
+    bucket: _SummaryBucket,
+    account_to_agent_ids: dict[str, list[int]],
+    uptimes_by_agent: dict[int, dict[str, float]],
+    outgoing_by_agent: dict[int, dict[str, int]],
+) -> dict[str, float | int | None]:
+    """Aggregate boon uptimes and outgoing generation for one account.
+
+    A player may appear under multiple agent_ids (disconnect/reconnect),
+    so we aggregate across every agent_id that belongs to the account.
+    """
+    agent_ids = account_to_agent_ids.get(account_name, [bucket.agent_id])
+    merged_uptime: dict[str, float] = {}
+    merged_outgoing: dict[str, int] = {}
+    for aid in agent_ids:
+        for name, pct in uptimes_by_agent.get(aid, {}).items():
+            merged_uptime[name] = merged_uptime.get(name, 0.0) + pct
+        for name, total in outgoing_by_agent.get(aid, {}).items():
+            merged_outgoing[name] = merged_outgoing.get(name, 0) + total
+    # Average uptime percentages across the player's agents.
+    if len(agent_ids) > 1:
+        for name in merged_uptime:
+            merged_uptime[name] /= len(agent_ids)
+    return {
+        "might_uptime": merged_uptime.get("might"),
+        "fury_uptime": merged_uptime.get("fury"),
+        "quickness_uptime": merged_uptime.get("quickness"),
+        "alacrity_uptime": merged_uptime.get("alacrity"),
+        "protection_uptime": merged_uptime.get("protection"),
+        "regeneration_uptime": merged_uptime.get("regeneration"),
+        "vigor_uptime": merged_uptime.get("vigor"),
+        "aegis_uptime": merged_uptime.get("aegis"),
+        "stability_uptime": merged_uptime.get("stability"),
+        "swiftness_uptime": merged_uptime.get("swiftness"),
+        "resistance_uptime": merged_uptime.get("resistance"),
+        "resolution_uptime": merged_uptime.get("resolution"),
+        "superspeed_uptime": merged_uptime.get("superspeed"),
+        "stealth_uptime": merged_uptime.get("stealth"),
+        "outgoing_might": merged_outgoing.get("might"),
+        "outgoing_fury": merged_outgoing.get("fury"),
+        "outgoing_quickness": merged_outgoing.get("quickness"),
+        "outgoing_alacrity": merged_outgoing.get("alacrity"),
+        "outgoing_protection": merged_outgoing.get("protection"),
+        "outgoing_regeneration": merged_outgoing.get("regeneration"),
+        "outgoing_vigor": merged_outgoing.get("vigor"),
+        "outgoing_aegis": merged_outgoing.get("aegis"),
+        "outgoing_stability": merged_outgoing.get("stability"),
+        "outgoing_swiftness": merged_outgoing.get("swiftness"),
+        "outgoing_resistance": merged_outgoing.get("resistance"),
+        "outgoing_resolution": merged_outgoing.get("resolution"),
+        "outgoing_superspeed": merged_outgoing.get("superspeed"),
+        "outgoing_stealth": merged_outgoing.get("stealth"),
+    }
+
+
+def _persist_player_summaries(  # noqa: PLR0912,PLR0915
     db: Session,
     orm_fight: OrmFight,
     events: list[Event],
@@ -30,30 +130,13 @@ def _persist_player_summaries(  # noqa: PLR0912
     if not source_map:
         return
 
+    account_to_agent_ids = _build_account_agent_ids(
+        [a for a in orm_fight.agents if a.is_player and a.account_name],
+    )
     skill_name_map: dict[int, str | None] = {int(s.skill_id): s.name for s in orm_fight.skills}
 
-    @dataclass(slots=True)
-    class _SummaryBucket:
-        """Mutable per-account summary totals."""
-
-        damage: int = 0
-        healing: int = 0
-        strip: int = 0
-        power: int = 0
-        condi: int = 0
-        name: str = ""
-        prof: int = 0
-        elite: int = 0
-
-    def _make_bucket(agent: OrmFightAgent) -> _SummaryBucket:
-        """Return a fresh zero-totals summary bucket for ``agent``."""
-        return _SummaryBucket(
-            name=_sanitize_name(agent.name),
-            prof=int(agent.profession),
-            elite=int(agent.elite_spec),
-        )
-
     per_account: dict[str, _SummaryBucket] = {}
+    buff_tracker = BuffStateTracker()
     # Hoist globals / method lookups to local variables so the
     # per-event hot loop pays local-variable cost only.
     _known_condi_names = KNOWN_CONDI_NAMES
@@ -82,6 +165,18 @@ def _persist_player_summaries(  # noqa: PLR0912
                 per_account[account] = _make_bucket(agent)
 
     for event in events:
+        if isinstance(event, (BoonApplyEvent, BuffApplyEvent)):
+            buff_tracker.process(event)
+            # A player can attend purely as a boon source (e.g. a healer
+            # that only applies quickness/fury). Make sure they get a
+            # summary bucket even if they never deal damage/healing/strip.
+            evt_agent = source_map.get(event.source_agent_id)
+            if evt_agent is not None:
+                account = evt_agent.account_name
+                assert account is not None  # noqa: S101
+                if account not in per_account:
+                    per_account[account] = _make_bucket(evt_agent)
+            continue
         evt_agent = source_map.get(event.source_agent_id)
         if evt_agent is None:
             continue
@@ -115,6 +210,16 @@ def _persist_player_summaries(  # noqa: PLR0912
             len(source_map),
         )
 
+    # Compute boon uptimes / outgoing across all processed buff events.
+    # duration_s is derived from the last event timestamp; empty fights
+    # keep all boon metrics at None (no duration to divide by).
+    duration_s: float = 0.0
+    if events:
+        last_time_ms = max((e.time_ms for e in events), default=0)
+        duration_s = last_time_ms / 1000.0
+    uptimes_by_agent = buff_tracker.compute_all_uptimes(duration_s)
+    outgoing_by_agent = buff_tracker.compute_all_outgoing(duration_s)
+
     db.execute(
         delete(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == orm_fight.id),
     )
@@ -137,6 +242,13 @@ def _persist_player_summaries(  # noqa: PLR0912
             profession_int=bucket.prof,
             elite_spec_int=bucket.elite,
         )
+        boon_kwargs = _boon_fields_for_account(
+            account_name,
+            bucket,
+            account_to_agent_ids,
+            uptimes_by_agent,
+            outgoing_by_agent,
+        )
         db.add(
             OrmFightPlayerSummary(
                 fight_id=orm_fight.id,
@@ -151,5 +263,6 @@ def _persist_player_summaries(  # noqa: PLR0912
                 detected_tags=detected_tags,
                 power_damage=bucket.power,
                 condi_damage=bucket.condi,
+                **boon_kwargs,
             ),
         )

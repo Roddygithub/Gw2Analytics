@@ -25,6 +25,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -294,6 +295,37 @@ class OrmFightPlayerSummary(Base):
     # algorithm + the calibration note.
     power_damage: Mapped[int | None] = mapped_column(Integer, nullable=True)
     condi_damage: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Phase 1 (plan AI-CONTINUATION-PLAN): boon uptimes + outgoing boons.
+    # 14 tracked boons x 2 metrics. All nullable so pre-migration rows keep
+    # NULL; re-parses populate them. Uptime stored as 0-100 percentage.
+    might_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fury_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quickness_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alacrity_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    protection_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    regeneration_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vigor_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aegis_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stability_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    swiftness_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resistance_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resolution_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    superspeed_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stealth_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    outgoing_might: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_fury: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_quickness: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_alacrity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_protection: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_regeneration: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_vigor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_aegis: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_stability: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_swiftness: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_resistance: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_resolution: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_superspeed: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outgoing_stealth: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class OrmWebhookSubscription(Base):
