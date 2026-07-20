@@ -18,13 +18,14 @@ followed by a 68-byte name buffer that arcdps writes as a null-padded
 combo string ``"char_name\\0:account_name\\0subgroup\\0"`` for player
 agents or a single null-terminated string for NPCs.
 
-The skill table (V1.3) is a sequence of variable-size records: each
-starts with a u32 ``skill_id`` + u32 ``name_len`` header followed by
-``name_len`` bytes of UTF-8 name + a 1-byte null terminator. The
-parser is **lenient**: if a record's name_len exceeds the safety
-bound (which happens when ``header.skill_count`` is larger than the
-actual skill table size — a known arcdps quirk), the parser stops
-early and logs a warning.
+The skill table (V1.3+) is a sequence of fixed-size 68-byte records:
+``skill_id(u32)`` followed by a 64-byte null-padded UTF-8 name buffer.
+Legacy (<2025) files prefix the table with a u32 ``skill_count``; the
+parser detects this prefix and reads exactly ``skill_count`` records.
+EVTC2025+ files omit the count and the parser walks fixed-size records
+until it reaches the event stream or the end of data. The parser is
+**lenient**: if data runs out mid-record it stops early and logs a
+warning.
 """
 
 from __future__ import annotations
@@ -52,8 +53,8 @@ from gw2_evtc_parser.parser import (
     EVENT_SIZE,
     HEADER_SIZE,
     MAX_EVTC_BYTES,
-    MAX_SKILL_NAME_BYTES,
     SKILL_COUNT_OFFSET,
+    SKILL_RECORD_SIZE,
     _iter_skill_records,
 )
 
@@ -117,13 +118,15 @@ def _build_agent_record(
 
 
 def _build_skill_record(skill_id: int, name: str) -> bytes:
-    """Build one V1.3 skill record.
+    """Build one fixed-size 68-byte skill record.
 
-    Layout: ``<II`` (skill_id + name_len) + ``name_len`` bytes UTF-8 + 1 byte null.
+    Layout: skill_id(u32) + name(64-byte null-padded UTF-8 buffer).
     """
     name_bytes = name.encode("utf-8")
-    header = struct.pack("<II", skill_id, len(name_bytes))
-    return header + name_bytes + b"\x00"
+    if len(name_bytes) > 64:
+        name_bytes = name_bytes[:64]
+    name_buf = name_bytes.ljust(64, b"\x00")
+    return struct.pack("<I", skill_id) + name_buf
 
 
 def _build_event_record(
@@ -181,15 +184,15 @@ def _build_event_record(
 def _build_minimal_evtc(
     agents: list[tuple[int, int, int, str, bool]],
     *,
-    build: str = "20250925",
+    build: str = "20240925",
     encounter_id: int = 0,
     skills: list[tuple[int, str]] | None = None,
     events: list[bytes] | None = None,
 ) -> bytes:
     """Build a synthetic EVTC binary with the given agents, skills, and events.
 
-    Header layout is 25 bytes (see :data:`HEADER_SIZE`): magic + build
-    (8 ASCII) + rev + combat_id + unused + agent_count + skill_count + lang.
+    Header layout is 24 bytes (see :data:`HEADER_SIZE`): magic + build
+    (8 ASCII) + rev + combat_id + unused + agent_count + skill_count.
     Each agent tuple is ``(id, profession_id, elite_id,
     name, is_player)``. Each skill tuple is ``(skill_id, name)``. Each
     event is a full 64-byte cbtevent record pre-built by the caller.
@@ -202,7 +205,7 @@ def _build_minimal_evtc(
     if events is None:
         events = []
     header = struct.pack(
-        "<4s8sBHBI IB",
+        "<4s8sBHBI I",
         b"EVTC",
         build.encode("ascii"),
         0,
@@ -210,7 +213,6 @@ def _build_minimal_evtc(
         0,
         len(agents),
         len(skills),
-        0,  # lang
     )
     assert len(header) == HEADER_SIZE
     body = bytearray()
@@ -226,6 +228,10 @@ def _build_minimal_evtc(
         else:
             rec = _build_agent_record(aid, prof, elite, name)
         body += rec
+    # Legacy (<2025) skill table has a count prefix before fixed-size records.
+    build_version = int(build[:4])
+    if build_version < 2025:
+        body += struct.pack("<I", len(skills))
     for skill_id, skill_name in skills:
         body += _build_skill_record(skill_id, skill_name)
     for ev in events:
@@ -251,7 +257,7 @@ def test_synthetic_minimal_evtc_parses() -> None:
     evtc = _build_minimal_evtc([])
     fight = next(iter(PythonEvtcParser().parse(evtc)))
     assert fight.header is not None
-    assert fight.header.build_version == "20250925"
+    assert fight.header.build_version == "20240925"
     assert fight.header.agent_count == 0
     assert fight.header.skill_count == 0
     assert fight.header.encounter_id == 0
@@ -311,7 +317,7 @@ def test_synthetic_mixed_players_and_npcs() -> None:
 
 def test_synthetic_truncated_blob_raises() -> None:
     short = b"EVTC" + b"\x00" * 10
-    with pytest.raises(EvtcParseError, match="header needs 25"):
+    with pytest.raises(EvtcParseError, match="header needs 24"):
         list(PythonEvtcParser().parse(short))
 
 
@@ -323,7 +329,7 @@ def test_synthetic_bad_magic_raises() -> None:
 
 def test_synthetic_truncated_agent_prefix_raises() -> None:
     """Header claims 1 agent but there is no AGENT_SIZE bytes after the header."""
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 1, 0)
     blob = header + b"\x00" * 50  # only 50 bytes after header (need 96)
     with pytest.raises(EvtcParseError, match="Truncated agent record"):
         list(PythonEvtcParser().parse(blob))
@@ -331,7 +337,7 @@ def test_synthetic_truncated_agent_prefix_raises() -> None:
 
 def test_synthetic_agent_count_lie_raises() -> None:
     """Header claims 99 agents but body has none — first iteration truncates."""
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 99, 0, 0)
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 99, 0)
     with pytest.raises(EvtcParseError, match="Truncated agent record"):
         list(PythonEvtcParser().parse(header))
 
@@ -382,10 +388,10 @@ def test_stable_fight_id_is_sha256_of_input() -> None:
 
 def test_layout_constants_match_parser_v1() -> None:
     """Sanity-check the layout constants we publish."""
-    assert HEADER_SIZE == 25
+    assert HEADER_SIZE == 24
     assert AGENT_COUNT_OFFSET == 16
     assert SKILL_COUNT_OFFSET == 20
-    assert AGENTS_OFFSET == 25
+    assert AGENTS_OFFSET == 24
     assert AGENT_PREFIX_SIZE == 24
     assert AGENT_NAME_SIZE == 72
     assert AGENT_SIZE == 96
@@ -409,7 +415,7 @@ def test_account_name_without_colon_is_accepted_as_player() -> None:
         # subgroup omitted intentionally -> helper writes a single \x00 tail
     )
     assert len(rec) == AGENT_SIZE
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 1, 0)
     fight = next(iter(PythonEvtcParser().parse(header + rec)))
     a = fight.agents[0]
     assert a.is_player is True
@@ -426,7 +432,7 @@ def test_player_with_empty_account_name_and_subgroup() -> None:
     # verbatim.
     rec = _build_agent_record(1, 0, 0, "Name", account_name="", subgroup="sub")
     assert len(rec) == AGENT_SIZE
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 1, 0)
     fight = next(iter(PythonEvtcParser().parse(header + rec)))
     a = fight.agents[0]
     assert a.is_player is True
@@ -465,7 +471,7 @@ def test_player_with_empty_char_name_but_valid_account_and_subgroup() -> None:
         subgroup="subSquad",
     )
     assert len(rec) == AGENT_SIZE
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 1, 0)
     fight = next(iter(PythonEvtcParser().parse(header + rec)))
     a = fight.agents[0]
     assert a.is_player is True
@@ -477,7 +483,7 @@ def test_player_with_empty_char_name_but_valid_account_and_subgroup() -> None:
 def test_npc_with_fully_null_tail_after_name_is_npc() -> None:
     rec = _build_agent_record(1, 0, 0, "Mob")
     assert len(rec) == AGENT_SIZE
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 1, 0, 0)
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 1, 0)
     fight = next(iter(PythonEvtcParser().parse(header + rec)))
     a = fight.agents[0]
     assert a.is_player is False
@@ -543,39 +549,31 @@ def test_synthetic_truncated_skill_header_stops_early() -> None:
     rather than raising. This is the V1.3 behavior for real arcdps
     files whose skill table is empty.
     """
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 0, 0)
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 0, 0)
     fight = next(iter(PythonEvtcParser().parse(header)))
     assert fight.skills == []
 
 
-def test_synthetic_truncated_skill_body_stops_early() -> None:
-    """Skill header says name_len=10 but body is only 3 bytes.
+def test_synthetic_truncated_skill_record_stops_early() -> None:
+    """Skill data ends before a full 68-byte record is present.
 
     Lenient: parser yields zero skills and logs a warning.
     """
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 0, 0)
-    skill_header = struct.pack("<II", 1, 10)
-    blob = header + skill_header + b"abc"  # 8 + 3 = 11 bytes; need 8 + 10 + 1 = 19
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 0, 0)
+    partial = struct.pack("<I", 1) + b"abc"  # only 7 bytes of the 68-byte record
+    blob = header + partial
     fight = next(iter(PythonEvtcParser().parse(blob)))
     assert fight.skills == []
 
 
-def test_synthetic_skill_name_too_long_stops_early() -> None:
-    """A name_len > MAX_SKILL_NAME_BYTES stops the skill table early.
-
-    Lenient: the parser yields whatever valid skills it read so far and
-    stops. The remaining skill slots are abandoned.
-    """
-
-    # First a valid skill, then a corrupt one (name_len too large).
-    good_skill = _build_skill_record(1, "Whirlwind")
-    bad_header = struct.pack("<II", 2, MAX_SKILL_NAME_BYTES + 1)
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 0, 0)
-    fight = next(iter(PythonEvtcParser().parse(header + good_skill + bad_header)))
-    # Parser yields the 1 valid skill and stops
+def test_synthetic_long_skill_name_is_truncated_to_buffer() -> None:
+    """A skill name longer than 64 bytes is truncated to the fixed buffer."""
+    long_name = "a" * 100
+    evtc = _build_minimal_evtc([], skills=[(1, long_name)])
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
     assert len(fight.skills) == 1
     assert fight.skills[0].id == 1
-    assert fight.skills[0].name == "Whirlwind"
+    assert fight.skills[0].name == "a" * 64
 
 
 def test_synthetic_skills_and_agents_together() -> None:
@@ -603,22 +601,20 @@ def test_synthetic_skills_and_agents_together() -> None:
 
 
 def test_iter_skill_records_yields_expected_tuples() -> None:
-    """``_iter_skill_records`` exposes cursor, skill_id, name_len and record_size."""
+    """``_iter_skill_records`` exposes cursor, skill_id and name."""
     skill_block = _build_skill_record(101, "Whirlwind") + _build_skill_record(202, "Burning")
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 0, 0)
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 0, 0)
     data = header + skill_block
     records = list(_iter_skill_records(data, AGENTS_OFFSET, 2))
     assert len(records) == 2
-    cursor0, skill_id0, name_len0, record_size0 = records[0]
+    cursor0, skill_id0, name0 = records[0]
     assert skill_id0 == 101
-    assert name_len0 == len("Whirlwind")
-    assert record_size0 == 8 + name_len0 + 1
+    assert name0 == "Whirlwind"
     assert cursor0 == AGENTS_OFFSET
-    cursor1, skill_id1, name_len1, record_size1 = records[1]
+    cursor1, skill_id1, name1 = records[1]
     assert skill_id1 == 202
-    assert cursor1 == AGENTS_OFFSET + record_size0
-    assert name_len1 == len("Burning")
-    assert record_size1 == 8 + name_len1 + 1
+    assert name1 == "Burning"
+    assert cursor1 == AGENTS_OFFSET + SKILL_RECORD_SIZE
 
 
 def test_iter_skill_records_empty_count_yields_nothing() -> None:
@@ -627,45 +623,44 @@ def test_iter_skill_records_empty_count_yields_nothing() -> None:
     assert records == []
 
 
-def test_iter_skill_records_truncated_header_stops_early(caplog: pytest.LogCaptureFixture) -> None:
-    """If the skill header does not fit, the generator stops and logs a warning."""
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 0, 0)
-    # Only 3 bytes after the header, not enough for the 8-byte skill header.
-    data = header + b"\x00\x00\x00"
+def test_iter_skill_records_truncated_record_stops_early(caplog: pytest.LogCaptureFixture) -> None:
+    """If a full skill record does not fit, the generator stops and logs a warning."""
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 0, 0)
+    # Only 20 bytes after the header, not enough for a 68-byte skill record.
+    data = header + b"\x00" * 20
     with caplog.at_level("WARNING"):
         records = list(_iter_skill_records(data, AGENTS_OFFSET, 1))
     assert records == []
     assert "Truncated skill table" in caplog.text
 
 
-def test_iter_skill_records_name_len_too_large_stops_early(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A name_len exceeding the safety bound stops the generator early."""
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 0, 0)
-    skill_header = struct.pack("<II", 1, MAX_SKILL_NAME_BYTES + 1)
-    data = header + skill_header
+def test_iter_skill_records_long_name_truncated_to_buffer(caplog: pytest.LogCaptureFixture) -> None:
+    """A name longer than 64 bytes is truncated to the fixed name buffer."""
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 0, 0)
+    long_name = "a" * 100
+    skill_block = _build_skill_record(1, long_name)
+    data = header + skill_block
     with caplog.at_level("WARNING"):
         records = list(_iter_skill_records(data, AGENTS_OFFSET, 1))
-    assert records == []
-    assert "exceeding safety bound" in caplog.text
+    assert len(records) == 1
+    assert records[0][1] == 1
+    assert records[0][2] == "a" * 64
 
 
-def test_iter_skill_records_truncated_body_stops_early(caplog: pytest.LogCaptureFixture) -> None:
-    """A record whose body is truncated stops the generator early."""
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 0, 0)
-    # name_len=10 but only 3 bytes of name follow.
-    skill_header = struct.pack("<II", 1, 10)
-    data = header + skill_header + b"abc"
-    with caplog.at_level("WARNING"):
-        records = list(_iter_skill_records(data, AGENTS_OFFSET, 1))
-    assert records == []
-    assert "Truncated skill body" in caplog.text
+def test_iter_skill_records_empty_name_yields_empty_string() -> None:
+    """A skill with an empty name yields an empty string as its name."""
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 0, 0)
+    skill_block = _build_skill_record(1, "")
+    data = header + skill_block
+    records = list(_iter_skill_records(data, AGENTS_OFFSET, 1))
+    assert len(records) == 1
+    assert records[0][1] == 1
+    assert records[0][2] == ""
 
 
 def test_iter_skill_records_stops_when_table_runs_past_end() -> None:
     """The generator yields valid records and stops when data runs out."""
-    header = struct.pack("<4s8sBHBI IB", b"EVTC", b"20250925", 0, 0, 0, 0, 0, 0)
+    header = struct.pack("<4s8sBHBI I", b"EVTC", b"20240925", 0, 0, 0, 0, 0)
     # Only 2 skills actually present.
     skill_block = _build_skill_record(101, "A") + _build_skill_record(202, "B")
     data = header + skill_block
@@ -686,7 +681,7 @@ def test_read_zevtc_bytes_extracts_inner_evtc() -> None:
     assert read_zevtc_bytes(zevtc) == inner
     fight = next(iter(PythonEvtcParser().parse(read_zevtc_bytes(zevtc))))
     assert fight.header is not None
-    assert fight.header.build_version == "20250925"
+    assert fight.header.build_version == "20240925"
 
 
 def test_read_zevtc_bytes_raises_on_bogus_zip() -> None:
