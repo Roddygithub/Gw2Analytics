@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
-from gw2_analytics.buff_state import BuffStateTracker
+from gw2_analytics.buff_state import TRACKED_BUFFS, BuffStateTracker
 from gw2_analytics.condi_power_split import KNOWN_CONDI_NAMES
 from gw2_analytics.role_detection import detect_role_lite
 from gw2_core import (
@@ -24,6 +24,12 @@ from gw2analytics_api.models import (
 )
 from gw2analytics_api.services.fight_persistence import _sanitize_name
 
+# Skill IDs that correspond to the tracked positive boons. Any
+# BoonApplyEvent remove event whose skill_id is NOT in this set is
+# treated as a condition cleanse (this is a heuristic: non-boon
+# remove events can also be other untracked status effects).
+_TRACKED_BOON_IDS: frozenset[int] = frozenset(TRACKED_BUFFS.values())
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +42,8 @@ class _SummaryBucket:
     strip: int = 0
     power: int = 0
     condi: int = 0
+    boon_strips: int = 0
+    condition_cleanses: int = 0
     name: str = ""
     prof: int = 0
     elite: int = 0
@@ -178,6 +186,18 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
                     assert account is not None  # noqa: S101
                     if account not in per_account:
                         per_account[account] = _make_bucket(evt_agent)
+            # Count tracked-boon strips vs condition cleanses from the
+            # source of any non-apply boon state change.
+            if isinstance(event, BoonApplyEvent) and event.kind != "apply":
+                source = source_map.get(event.source_agent_id)
+                if source is not None:
+                    account = source.account_name
+                    assert account is not None  # noqa: S101
+                    bucket = per_account.setdefault(account, _make_bucket(source))
+                    if event.skill_id in _TRACKED_BOON_IDS:
+                        bucket.boon_strips += event.stacks
+                    else:
+                        bucket.condition_cleanses += event.stacks
             continue
         evt_agent = source_map.get(event.source_agent_id)
         if evt_agent is None:
@@ -202,6 +222,9 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
             bucket.healing += event.healing
         elif isinstance(event, BuffRemovalEvent):
             bucket.strip += event.buff_removal
+            # cbtevent.buff_dmg strips are offensive boon strips; route
+            # their magnitude into the dedicated boon_strips column.
+            bucket.boon_strips += event.buff_removal
 
     if not per_account and source_map:
         logger.warning(
@@ -265,6 +288,8 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
                 detected_tags=detected_tags,
                 power_damage=bucket.power,
                 condi_damage=bucket.condi,
+                boon_strips=bucket.boon_strips,
+                condition_cleanses=bucket.condition_cleanses,
                 **boon_kwargs,
             ),
         )
