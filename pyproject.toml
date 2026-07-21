@@ -221,6 +221,10 @@ check_untyped_defs = true
 module = ["fastapi_mcp"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["slowapi", "slowapi.util", "slowapi.middleware"]
+ignore_missing_imports = true
+
 # v0.10.26-pre followup-5: the Locust load-test harness subclasses
 # ``HttpUser`` and decorates ``@task`` methods. Locust since 2.x ships
 # its own .pyi stubs but the @task decorator's return-type annotation
