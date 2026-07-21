@@ -263,7 +263,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.30] - 2026-07-21
 
 ### Added (F-series polish — F7 batch_size threading + F8 audit leftover + F7 polish, 3 commits)
 
@@ -1186,10 +1186,6 @@ The README "Status" line delta is: `**Deferred**: 5 → **6** (target v0.10.19)`
 - ROADMAP sync: [`docs/ROADMAP.md`](../docs/ROADMAP.md) "Current state (post v0.10.18.1 cycle)" + section 1.1 cycle shipts v0.10.18.1 entry + section 1.2 shortlist re-classification (M1 + M2 + M3 + M4 closed; M8 + M6 + M5 + M7 deferred to v0.10.19+).
 
 [0.10.18.1]: https://github.com/Roddygithub/Gw2Analytics/compare/v0.10.18...v0.10.18.1
-
-## [Unreleased]
-
-
 
 ## [0.10.2] - v0.10.2: 100-row cap on per-target roll-up + per-skill lists (hotfix followup #12)
 
