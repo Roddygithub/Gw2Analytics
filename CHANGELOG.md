@@ -263,6 +263,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.3] - 2026-07-21
+
+### Added
+- **Buff ID lookup table** (`libs/gw2_core/src/gw2_core/_buff_ids.py`):
+  maps 28 well-known GW2 buff/effect IDs to `BuffCategory` (BOON,
+  CONDITION_DAMAGE, CONDITION_CONTROL).  Exports `classify_buff` and
+  `is_condition` helpers for aggregator-tier condition-vs-boon
+  classification.  Prerequisite for `ConditionRemoveEvent` dispatch.
+- **37 hermetic tests** (`libs/gw2_core/tests/test_buff_ids.py`):
+  parametrized boon (14 IDs), damage condition (5 IDs), control
+  condition (9 IDs) classification + overlap/count sanity checks.
+
+### Docs
+- **WAVE-8 plan**: updated Step 6 (A.4) to reflect CCEvent wired
+  (v0.11.1), result-byte tests shipped (v0.11.2), ConditionRemoveEvent
+  deferred pending buff ID table integration.
+
+### Validation
+- ruff: clean, mypy: 0 errors, pytest: 48/48 (37 buff_ids + 11 emit)
+
 ## [0.11.2] - 2026-07-21
 
 ### Added

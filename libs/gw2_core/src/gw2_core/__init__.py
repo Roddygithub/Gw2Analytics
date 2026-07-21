@@ -28,6 +28,12 @@ function in :mod:`gw2_core._scaffold`.
 
 from __future__ import annotations
 
+from gw2_core._buff_ids import (
+    BUFF_CATEGORY_MAP,
+    BuffCategory,
+    classify_buff,
+    is_condition,
+)
 from gw2_core._scaffold import (
     default_barrier_portion_from_damage,
     default_barrier_portion_from_healing,
@@ -82,6 +88,7 @@ __version__ = "0.6.0"
 # `_`-prefixed group: '_E...' < '__' < '_d...' (E=0x45 < `_`=0x5F
 # < d=0x64).
 __all__ = [
+    "BUFF_CATEGORY_MAP",
     "_EVENT_MAP",
     "AccountInfo",
     "Agent",
@@ -90,6 +97,7 @@ __all__ = [
     "BlockEvent",
     "BoonApplyEvent",
     "BuffApplyEvent",
+    "BuffCategory",
     "BuffRemovalEvent",
     "CCEvent",
     "ConditionRemoveEvent",
@@ -113,9 +121,11 @@ __all__ = [
     "WorldInfo",
     "__version__",
     "_dispatch_event",
+    "classify_buff",
     "default_barrier_portion_from_damage",
     "default_barrier_portion_from_healing",
     "default_dps_split",
     "default_full_power_split",
     "default_zero",
+    "is_condition",
 ]

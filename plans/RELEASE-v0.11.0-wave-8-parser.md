@@ -62,15 +62,16 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
             byte and emit the matching subclass.
             - Statechange dispatch (statechange_dispatch.py): StunBreak (56), Barrier (38),
               Death (4), Down (5) — 4 entries ✅
+            - CCEvent (BreakbarPercent, byte 35): _emit_cc ✅ (v0.11.1)
             - Result-byte dispatch (parser.py line 808-837): Block (_result==3),
               Dodge (_result==4), Interrupt (_result==5) — 3 entries ✅
-            Total: 7 of 8 wired; CCEvent + ConditionRemoveEvent deferred (non-statechange
-            source per A.1 audit).
-[x] Step 7: A.5 — 8 hermetic parse_events predicate-boundary tests
-            in libs/gw2_evtc_parser/tests/test_parser_emit_statechange.py
-            (4 statechange dispatch: StunBreak + Barrier + Death + Down ✅).
-            Result-byte events (Block/Dodge/Interrupt) tested via damage-path
-            hermetic tests.
+            - Result-byte tests: 3 hermetic tests in test_parser_emit_statechange.py ✅ (v0.11.2)
+            Total: 8 of 8 subclasses identified; 7 wired (5 statechange + 3 result-byte,
+            StunBreak counted once). ConditionRemoveEvent deferred — requires buff ID
+            lookup table (libs/gw2_core/_buff_ids.py, shipped v0.11.3) for aggregator-tier
+            classification of BuffRemovalEvent skill_id as condition vs boon.
+[x] Step 7: A.5 — 11 hermetic dispatch tests (8 statechange + 3 result-byte)
+            in libs/gw2_evtc_parser/tests/test_parser_emit_statechange.py ✅
 [x] Step 8: A.6 — real-fixture integration test (extend the F1 calibration pilot).
             → test_parser_applive_realfixture.py extended to count DeathEvent,
             DownEvent, BarrierEvent, StunBreakEvent. Total sum expanded from
