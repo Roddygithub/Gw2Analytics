@@ -156,9 +156,9 @@ def test_load_baseline_sequential_uploads_and_parses(
     # SHA-256 collision; this assertion closes the silent-drop
     # regression gate (an OOM mid-iteration would manifest as
     # N < SEQUENTIAL_BASELINE_N).
-    from sqlalchemy import select  # noqa: PLC0415  -- lazy import
+    from sqlalchemy import select
 
-    from gw2analytics_api.database import (  # noqa: PLC0415
+    from gw2analytics_api.database import (
         get_sessionmaker,
     )
 

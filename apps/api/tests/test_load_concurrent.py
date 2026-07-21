@@ -178,9 +178,9 @@ def test_load_concurrent_workers_upload_and_get(
     )
 
     # DB consistency: N OrmFight rows + N Upload rows.
-    from sqlalchemy import select  # noqa: PLC0415  -- lazy import
+    from sqlalchemy import select
 
-    from gw2analytics_api.database import (  # noqa: PLC0415
+    from gw2analytics_api.database import (
         get_sessionmaker,
     )
 

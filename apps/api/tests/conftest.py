@@ -128,6 +128,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from gw2analytics_api.config import Settings, get_settings
 from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_factory
+from gw2analytics_api.limiter import limiter
 from gw2analytics_api.main import app
 from gw2analytics_api.models import (
     OrmFight,
@@ -210,7 +211,7 @@ def _clear_blob_caches() -> None:
 
 @pytest.fixture(autouse=True)
 def _isolate_test_state() -> None:
-    """Bulk-delete from state-accumulating tables before each test.
+    """Bulk-delete from state-accumulating tables + reset rate limiter before each test.
 
     The cleanup is hermetic to the apps/api test database only
     (``get_sessionmaker()`` is the process-wide sessionmaker
@@ -219,7 +220,13 @@ def _isolate_test_state() -> None:
     transaction so the cleanup is atomic (a torn DELETE on
     ``uploads`` + ``fights`` mid-test would surface a partial
     state to the test).
+
+    v0.13.4: also resets the slowapi rate limiter so each test
+    starts with a clean 5/min bucket — without this, the global
+    limiter accumulates state across tests and the 6th cumulative
+    upload in the suite gets 429.
     """
+    limiter.reset()
     with _get_sessionmaker_factory()() as db:
         # Order: children before parents. ``OrmFight`` has SQLAlchemy
         # relationship cascades to ``OrmFightAgent`` + ``OrmFightSkill``

@@ -243,7 +243,10 @@ app.add_middleware(
 # Uses X-Forwarded-For when behind a reverse proxy (Caddy),
 # falling back to the direct client IP.
 app.state.limiter = limiter
-app.add_exception_handler(429, _rate_limit_exceeded_handler)
+# slowapi's _rate_limit_exceeded_handler accepts RateLimitExceeded
+# (a subclass of Exception) but Starlette's type signature expects
+# the wider Exception type — this is a safe narrowing in practice.
+app.add_exception_handler(429, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 app.add_middleware(SlowAPIMiddleware)
 
 

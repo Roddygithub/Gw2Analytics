@@ -26,25 +26,25 @@ FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends libpq5 curl && rm -rf /var/lib/apt/lists/*
 
-# Copy the entire venv from builder (editable .pth files point to source)
-COPY --from=builder /app/.venv /app/.venv
+# Create the non-root user FIRST so we can use --chown on COPY
+# (avoids a 119 MB redundant chown layer on the venv).
+RUN useradd -r appuser
+
+# Copy the entire venv from builder with --chown (editable .pth files point to source).
+# This collapses the previous "COPY + chown -R" into a single layer.
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 # Copy workspace source trees (needed by editable .pth files + alembic)
-COPY --from=builder /app/libs/gw2_core /app/libs/gw2_core
-COPY --from=builder /app/libs/gw2_evtc_parser /app/libs/gw2_evtc_parser
-COPY --from=builder /app/libs/gw2_analytics /app/libs/gw2_analytics
-COPY --from=builder /app/libs/gw2_api_client /app/libs/gw2_api_client
-COPY --from=builder /app/libs/gw2_skills /app/libs/gw2_skills
-COPY --from=builder /app/apps/api/src /app/apps/api/src
-COPY --from=builder /app/apps/api/alembic /app/apps/api/alembic
-COPY --from=builder /app/apps/api/alembic.ini /app/apps/api/alembic.ini
+COPY --from=builder --chown=appuser:appuser /app/libs/gw2_core /app/libs/gw2_core
+COPY --from=builder --chown=appuser:appuser /app/libs/gw2_evtc_parser /app/libs/gw2_evtc_parser
+COPY --from=builder --chown=appuser:appuser /app/libs/gw2_analytics /app/libs/gw2_analytics
+COPY --from=builder --chown=appuser:appuser /app/libs/gw2_api_client /app/libs/gw2_api_client
+COPY --from=builder --chown=appuser:appuser /app/libs/gw2_skills /app/libs/gw2_skills
+COPY --from=builder --chown=appuser:appuser /app/apps/api/src /app/apps/api/src
+COPY --from=builder --chown=appuser:appuser /app/apps/api/alembic /app/apps/api/alembic
+COPY --from=builder --chown=appuser:appuser /app/apps/api/alembic.ini /app/apps/api/alembic.ini
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Run as non-root for security (principle of least privilege).
-# The venv + source trees are owned by root (copied from builder)
-# but are read-only at runtime — only alembic needs write access
-# for migration version tracking, which goes through Postgres.
-RUN useradd -r appuser && chown -R appuser:appuser /app
 USER appuser
 
 WORKDIR /app/apps/api

@@ -114,7 +114,6 @@ async def _enqueue_parse(
     sf = get_sessionmaker()
     await asyncio.to_thread(process_parse, sf, upload_id, raw)
     await dispatch_for_upload(sf, upload_id)
-@limiter.limit("5/minute")
 
 
 @router.post(
@@ -145,6 +144,7 @@ async def _enqueue_parse(
         },
     },
 )
+@limiter.limit("5/minute")
 async def create_upload(
     request: Request,
     file: UploadFile = File(..., description="A .zevtc combat log file"),  # noqa: B008
