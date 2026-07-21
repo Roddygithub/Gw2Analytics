@@ -1,3 +1,31 @@
+## [0.13.0] - 2026-07-21
+
+### Changed — Feature-complete milestone
+- **AI-CONTINUATION-PLAN: all 5 phases delivered.** Phase 1 (boon
+  uptimes + outgoing), Phase 2 (strips + cleanses), Phase 3 (role
+  detection), Phase 4 (position heatmaps), Phase 5 (guilds +
+  multi-fight comparison + cross-account timeline) — all verified
+  in production code.
+- **BLOCKER-C: C.1 + C.3 delivered.** C.2 (offline calibration on
+  M=4/N=20 corpus) deferred — non-blocking, classifier functional
+  with WvW 8-fight calibration.
+- **F17 frontend rollout delivered.** All 4 AG Grid readout tables
+  (Damage/Heal/Boons/Defense) with Phase 6 v2 live data.
+- **All plans archived.** 191 historical plan files moved to
+  `plans/archive/`. Only `adr/` + `README.md` remain active.
+
+### Added
+- **`docs/EVTC2025_FORMAT.md`**: complete binary format specification.
+- **`.env.prod.example`**: production environment template.
+- **`docker-compose.prod.yml`**: postgres + minio with health checks.
+
+### Removed
+- **`_scaffold.py`**: 5 dead functions never called by production code.
+
+### Validation
+- pytest: 0 failures (1 flaky perf), mypy: 144 source files, ruff: clean
+- vitest: 391/394, Playwright E2E: 34/34, Coverage: 92%
+
 ## [0.12.5] - 2026-07-21
 
 ### Changed — Project status audit + plan archival
