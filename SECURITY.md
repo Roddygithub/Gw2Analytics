@@ -9,8 +9,10 @@
 
 ## Reporting a vulnerability
 
-**Do NOT open a public issue.** Email the maintainer directly.
-Details in [SECURITY.md](./SECURITY.md) footer.
+**Do NOT open a public issue.** Use GitHub's Security Advisories:
+`https://github.com/Roddygithub/Gw2Analytics/security/advisories`
+
+See the Disclosure policy below for the full process.
 
 ---
 
