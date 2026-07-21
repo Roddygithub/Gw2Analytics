@@ -1,7 +1,7 @@
 # --- builder stage ---
-FROM node:23-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 
-RUN corepack enable && corepack prepare pnpm@11.13 --activate
+RUN corepack enable && corepack prepare pnpm@10 --activate
 
 ARG API_BASE_URL=http://api:8000
 ENV API_BASE_URL=${API_BASE_URL}
@@ -9,20 +9,13 @@ ENV API_BASE_URL=${API_BASE_URL}
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /app/
-# CI=true tells pnpm to run native build scripts (esbuild, sharp)
-# even in a non-TTY Docker environment.
-ENV CI=true
-# --no-frozen-lockfile: the lockfile was generated locally (Node 26)
-# while Docker runs Node 22. The Node major version delta causes
-# minor resolution differences. pnpm-workspace.yaml IS copied now
-# so overrides + onlyBuiltDependencies are correctly read.
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 COPY . /app
 RUN pnpm build
 
 # --- runtime stage ---
-FROM node:23-bookworm-slim
+FROM node:22-bookworm-slim
 
 # API_BASE_URL needed at runtime for SSR + rewrites.
 # env.ts requires it in production (NODE_ENV=production).
