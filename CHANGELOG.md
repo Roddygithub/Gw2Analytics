@@ -1,3 +1,30 @@
+## [0.12.3] - 2026-07-21
+
+### Changed — Frontend SCAFFOLD banner close-out
+- **Readout tab status banner updated**: removed the outdated
+  "SCAFFOLD-zero" disclaimer that claimed dps_power, dps_condi,
+  barrier_total, barrier_ps, dodges, blocks, interrupts "stay at 0
+  until Phase 6 v2 lands." Replaced with an accurate live-data
+  banner confirming all columns are wired to real parser-stream values.
+- **All 5 PlayerReadout component JSDoc comments updated**: removed
+  pre-phase-6-v2 SCAFFOLD-zero references across Damage, Heal,
+  Boons, Defense, and Base components. Replaced with v0.12.x
+  live-data notes.
+- **PlayerReadoutBase.ts stale SCAFFOLD comment removed** (line 115:
+  "Phase 6 v2 SCAFFOLD-zero contract").
+
+### Added — Phase 6 v2 live-data hermetic test
+- **NEW `test_readout_phase6_v2_barrier_and_condi_split_live`**
+  in `test_fights_readout.py`: uses direct `aggregate_combat_readout`
+  call with `HealingEvent(barrier=500)` + `DamageEvent(buff_dmg=300)`
+  to assert `barrier_total=500`, `dps_power ≈ 233.3`, `dps_condi ≈ 100.0`.
+  Hermetic (no Postgres, no Arq), fast, pins the Phase 6 v2 getter
+  wiring contract.
+
+### Validation
+- pytest: 0 failures (3 skipped), mypy: 0 errors, ruff: clean
+- vitest: 391/394 passed (3 skipped), tsc: clean
+
 ## [0.10.25] - 2026-07-16
 
 ### Added
@@ -190,7 +217,7 @@ Closes the upload-size audit gap. The audit found that the 3 layers of defense-i
 ### Forward-blockers (rider-next-cycle)
 
 All 4 v0.10.26 reviewer NICE-to-HAVEs closed by this cycle (see v0.10.27-pre section for the closing commits). Next cycle focus areas:
-- Wave 6 PART-2 SCAFFOLD-getter plumbing wire-up (when Phase 6 v2 parser-stream lands)
+- Phase 6 v2 parser-stream landed (v0.12.x): condi/power split, barrier tracking, down-state lifecycle. See [0.12.3].
 - New operator-facing tuning surfaced by the v0.10.26 review-cycle audit
 - E2E tooling expansions (per-fight timeline guard fix from plan 159 already shipped in v0.10.26)
 
@@ -231,7 +258,7 @@ The v0.10.28 release closes the v0.10.27-pre + v0.10.27 cycle's 4 reviewer NICE-
 
 - **Plan 161 partial closeout: extract the remaining 5 sections into inline async Server Components with per-section try/catch** (per the [E2E-JOURNEY-2026-07-11](/plans/E2E-JOURNEY-2026-07-11.md) plan). The lazy wrapper handles its own error state for the timeline/players section; the remaining 5 sections (events + squads + skills + player-skill + player-skill-agents) still need their own try/catch wrappers around the Promise.allSettled results processing. The existing 6 SectionErrorChip sites + the sectionErrors object handle the common cases today, but a unified inline Server Component pattern would make the isolation contract explicit + testable.
 
-- **WAVE-8 parser-side extension** (XL effort, multi-cycle). The 8 SCAFFOLD-zero readout columns (damages + heals + defenses) await the Blocker A parser extension (9 new Event subclasses: BarrierEvent + DownEvent + DodgeEvent + ...) + Blocker B Skills DB catalog (libs/gw2_skills). See plans/WAVE-8-parser-side.md + plans/RELEASE-v0.11.0-wave-8-parser.md.
+- **WAVE-8 parser-side extension landed (v0.11.0-v0.12.2)**: all 8 SCAFFOLD-zero readout columns now wired to real parser-stream values via statechange dispatch + result-byte decode + condi/power split + barrier tracking + down-state lifecycle. The [0.12.3] release closes the frontend SCAFFOLD banner contract.
 
 - **BLOCKER-C-role-classifier C.2 offline calibration** (separate workstream). The roles column stays at the canonical Wave 2 SCAFFOLD default (`[]`) until the offline calibration is complete.
 

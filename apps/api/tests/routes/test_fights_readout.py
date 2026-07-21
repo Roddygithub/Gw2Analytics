@@ -30,11 +30,16 @@ from __future__ import annotations
 
 import uuid as _uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.tests.routes._evtc_builder import build_2025_string
-from gw2_core import HealingEvent, StunBreakEvent
-from gw2analytics_api.routes.fights.aggregators import aggregate_combat_readout
+from gw2_core import DamageEvent, HealingEvent, StunBreakEvent
+from gw2analytics_api.routes.fights.aggregators import (
+    aggregate_combat_readout,
+    make_barrier_portion_getter,
+    make_dps_split_getter,
+)
 from gw2analytics_api.routes.fights.mappers import AgentIdentity
 
 from ._evtc_builder import make_cbtevent, make_minimal_zevtc, post_upload
@@ -351,3 +356,128 @@ def test_readout_aggregator_account_name_none_passthrough() -> None:
     # The pre-followup coerce of None to "" would have triggered
     # ``assert a_readout.account_name == ""`` (the lossy sentinel);
     # the post-followup None preservation is what this test pins.
+
+
+# -----------------------------------------------------------------
+# Phase 6 v2 live-data verification (v0.12.3)
+# -----------------------------------------------------------------
+
+
+def test_readout_phase6_v2_barrier_and_condi_split_live() -> None:
+    """Phase 6 v2 live-data contract: barrier_total > 0 and dps_power/dps_condi split.
+
+    Verifies the v0.12.x Phase 6 v2 parser-stream wiring end-to-end:
+    ``HealingEvent.barrier`` flows into ``heal.barrier_total`` > 0
+    and ``DamageEvent.buff_dmg`` drives the condi/power split
+    (``damage.dps_power`` > 0, ``damage.dps_condi`` > 0).
+
+    Uses the direct ``aggregate_combat_readout`` call (not the full
+    parse pipeline) so the test is hermetic and fast — no Postgres,
+    no EVTC binary, no Arq worker. The aggregator wiring is the
+    single integration point for the Phase 6 v2 getter factories.
+    """
+    a = 500_001
+    b = a + 1
+    heal_skill = 5_500_001
+    damage_skill = 5_500_002
+
+    # HealingEvent with barrier=500 (simulates arcdps buff_dmg on
+    # a heal-class cbtevent). total heal = 1000, barrier portion = 500.
+    heal_event = HealingEvent(
+        time_ms=1_000,
+        source_agent_id=a,
+        target_agent_id=b,
+        skill_id=heal_skill,
+        healing=1000,
+        barrier=500,
+    )
+    # DamageEvent with buff_dmg=300 (simulates arcdps condi portion
+    # on a damage-class cbtevent). total damage = 1000, condi = 300,
+    # power = 1000 - 300 = 700.
+    damage_event = DamageEvent(
+        time_ms=2_000,
+        source_agent_id=a,
+        target_agent_id=b,
+        skill_id=damage_skill,
+        damage=1000,
+        buff_dmg=300,
+    )
+
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a,
+            name=f"Phase6v2 {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(2)",
+            elite_spec="ELITE(18)",
+            is_player=True,
+            is_commander=False,
+        ),
+        b: AgentIdentity(
+            agent_id=b,
+            name=f"Phase6v2 {b}",
+            subgroup=0,
+            account_name=f"synth.{b}",
+            profession="PROF(1)",
+            elite_spec="ELITE(27)",
+            is_player=True,
+            is_commander=False,
+        ),
+    }
+    duration_s = 3.0
+    skill_getter = {heal_skill: "HealSkill", damage_skill: "DmgSkill"}.get
+    out = aggregate_combat_readout(
+        events=[heal_event, damage_event],
+        skill_id_to_name_map={heal_skill: "HealSkill", damage_skill: "DmgSkill"},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=duration_s,
+        fight_id="phase6v2-test",
+        dps_split_getter=make_dps_split_getter("20250925", skill_getter),
+        barrier_portion_getter_heal=make_barrier_portion_getter(),
+    )
+
+    assert isinstance(out.players, list)
+    assert len(out.players) == 2
+
+    a_readout = next(p for p in out.players if p.agent_id == a)
+
+    # Barrier: HealingEvent.barrier=500 → heal.barrier_total >= 500
+    # (the HealBarrierGetter extracts event.barrier; aggregator sums).
+    assert a_readout.heal.barrier_total == 500, (
+        f"expected barrier_total=500 from HealingEvent.barrier=500, "
+        f"got {a_readout.heal.barrier_total}"
+    )
+    assert a_readout.heal.barrier_ps == pytest.approx(500.0 / duration_s, abs=1.0), (
+        f"expected barrier_ps ≈ {500.0 / duration_s:.1f}, "
+        f"got {a_readout.heal.barrier_ps}"
+    )
+
+    # DPS split: DamageEvent.damage=1000, buff_dmg=300
+    # → condi = min(1000, 300) = 300, power = 1000 - 300 = 700
+    assert a_readout.damage.dps_power == pytest.approx(700.0 / duration_s, abs=1.0), (
+        f"expected dps_power ≈ {700.0 / duration_s:.1f}, "
+        f"got {a_readout.damage.dps_power}"
+    )
+    assert a_readout.damage.dps_condi == pytest.approx(300.0 / duration_s, abs=1.0), (
+        f"expected dps_condi ≈ {300.0 / duration_s:.1f}, "
+        f"got {a_readout.damage.dps_condi}"
+    )
+    # dps_total should be (700 + 300) / 3 = 333.3
+    assert a_readout.damage.dps_total == pytest.approx(1000.0 / duration_s, abs=1.0), (
+        f"expected dps_total ≈ {1000.0 / duration_s:.1f}, "
+        f"got {a_readout.damage.dps_total}"
+    )
+
+    # Player a cast the heal → heal_total=1000 (source-side attribution)
+    assert a_readout.heal.heal_total == 1000, (
+        f"expected heal_total=1000 (cast heal on b), "
+        f"got {a_readout.heal.heal_total}"
+    )
+
+    # Player b received the heal but cast none → heal_total=0
+    b_readout = next(p for p in out.players if p.agent_id == b)
+    assert b_readout.heal.heal_total == 0, (
+        f"expected heal_total=0 (received heal from a, no outgoing heals), "
+        f"got {b_readout.heal.heal_total}"
+    )
