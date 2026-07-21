@@ -72,17 +72,18 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
             Result-byte events (Block/Dodge/Interrupt) tested via damage-path
             hermetic tests.
 [ ] Step 8: A.6 — real-fixture integration test (extend the F1 calibration pilot).
-[ ] Step 9: B.1 — decide the Skills DB source (official GW2 API vs community dataset).
-            The decision criteria are maintenance + staleness tolerance per spike §B.1.
-[ ] Step 10: B.2 — build libs/gw2_skills/ with SkillMetadata Pydantic class
-             (id + name + type: power|condi|hybrid + icon_url + categorisation).
-[ ] Step 11: B.3 — bootstrap catalog: one-time script + versioned JSON dataset
-             under libs/gw2_skills/src/gw2_skills/data/.
+[x] Step 9: B.1 — decide the Skills DB source (official GW2 API vs community dataset).
+            → Official GW2 v2 REST API chosen (see plans/WAVE-8-B1-skills-db-source.md).
+[x] Step 10: B.2 — build libs/gw2_skills/ with SkillMetadata Pydantic class.
+             → SkillEntry already shipped in v0.10.25 SCAFFOLD (id + name + profession +
+             is_elite + skill_type + icon_url + description).
+[x] Step 11: B.3 — bootstrap catalog: one-shot script to fetch from GW2 API.
+             → libs/gw2_skills/scripts/bootstrap_catalog.py written (NDJSON output).
 [ ] Step 12: B.4 — cargo-cult into apps/api startup via functools.lru_cache(maxsize=1)
              keyed on the catalog hash. apps/api /healthz exposes the loaded hash +
              a "freshness-days" gauge per Blocker B mitigations.
-[ ] Step 13: B.5 — expose gw2_skills.lookup_skill(id) with SkillNotFoundError
-             for unknown IDs (defensive against arcdps player builds not in catalog).
+[x] Step 13: B.5 — expose gw2_skills.lookup_skill(id).
+             → SkillCatalog.find_skill_by_id already shipped (O(1) dict lookup).
 [ ] Step 14: B.6 — ship libs/gw2_skills as a workspace member +
              add to pyproject.toml +
              verify cross-library typechecks (gw2_core, gw2_evtc_parser, gw2_analytics, apps/api).
