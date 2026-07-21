@@ -12,7 +12,11 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /app/
 # CI=true tells pnpm to run native build scripts (esbuild, sharp)
 # even in a non-TTY Docker environment.
 ENV CI=true
-RUN pnpm install --frozen-lockfile
+# --no-frozen-lockfile: the lockfile was generated locally (Node 26)
+# while Docker runs Node 22. The Node major version delta causes
+# minor resolution differences. pnpm-workspace.yaml IS copied now
+# so overrides + onlyBuiltDependencies are correctly read.
+RUN pnpm install --no-frozen-lockfile
 
 COPY . /app
 RUN pnpm build
