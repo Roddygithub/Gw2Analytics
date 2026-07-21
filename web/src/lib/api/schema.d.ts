@@ -199,6 +199,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fights/{fight_id}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fight Positions
+         * @description Return per-player positioning metrics + downsampled traces for one fight.
+         *
+         *     Phase C heatmap foundation: filters ``PositionEvent`` records
+         *     from the parsed event stream, downsamples them to at most one
+         *     sample per 500 ms per player (2000 sample cap), and computes
+         *     ``stack_dist`` (average distance to all other players) and
+         *     ``dist_to_com`` (average distance to the squad's center of
+         *     mass) via :mod:`gw2_analytics.position_analysis`.
+         *
+         *     Response codes match :func:`get_fight_events` exactly:
+         *
+         *     - ``404 Not Found``: fight id is unknown OR the events blob
+         *       is missing.
+         *     - ``502 Bad Gateway``: events blob is present but corrupt.
+         *     - ``200 OK``: ``FightPositionsOut`` envelope. A fight with
+         *       zero player agents (or no PositionEvent records) returns
+         *       ``players: []``.
+         */
+        get: operations["get_fight_positions_api_v1_fights__fight_id__positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/fights/{fight_id}/readout": {
         parameters: {
             query?: never;
@@ -1024,6 +1060,25 @@ export interface components {
             started_at: string;
         };
         /**
+         * FightPositionsOut
+         * @description Wrapper for the per-fight positions endpoint.
+         *
+         *     Phase C heatmap foundation: the response shape for
+         *     ``GET /api/v1/fights/{fight_id}/positions``. Only player
+         *     agents (``is_player=True``) with a non-empty account name are
+         *     included; NPCs and gadgets are silently dropped because
+         *     stack-distance metrics are only meaningful for squad players.
+         */
+        FightPositionsOut: {
+            /** Fight Id */
+            fight_id: string;
+            /**
+             * Players
+             * @default []
+             */
+            players: components["schemas"]["PlayerPositionOut"][];
+        };
+        /**
          * FightReadoutOut
          * @description The full Combat-readout payload for one fight.
          *
@@ -1125,23 +1180,83 @@ export interface components {
         };
         /** PerFightBreakdownRowOut */
         PerFightBreakdownRowOut: {
+            /** Aegis Uptime */
+            aegis_uptime?: number | null;
+            /** Alacrity Uptime */
+            alacrity_uptime?: number | null;
+            /** Boon Strips */
+            boon_strips?: number | null;
+            /** Condition Cleanses */
+            condition_cleanses?: number | null;
             /** Detected Role */
             detected_role?: string | null;
             /** Detected Tags */
             detected_tags?: string[] | null;
             /** Fight Id */
             fight_id: string;
+            /** Fury Uptime */
+            fury_uptime?: number | null;
+            /** Might Uptime */
+            might_uptime?: number | null;
+            /** Outgoing Aegis */
+            outgoing_aegis?: number | null;
+            /** Outgoing Alacrity */
+            outgoing_alacrity?: number | null;
+            /** Outgoing Fury */
+            outgoing_fury?: number | null;
+            /** Outgoing Might */
+            outgoing_might?: number | null;
+            /** Outgoing Protection */
+            outgoing_protection?: number | null;
+            /** Outgoing Quickness */
+            outgoing_quickness?: number | null;
+            /** Outgoing Regeneration */
+            outgoing_regeneration?: number | null;
+            /** Outgoing Resistance */
+            outgoing_resistance?: number | null;
+            /** Outgoing Resolution */
+            outgoing_resolution?: number | null;
+            /** Outgoing Stability */
+            outgoing_stability?: number | null;
+            /** Outgoing Stealth */
+            outgoing_stealth?: number | null;
+            /** Outgoing Superspeed */
+            outgoing_superspeed?: number | null;
+            /** Outgoing Swiftness */
+            outgoing_swiftness?: number | null;
+            /** Outgoing Vigor */
+            outgoing_vigor?: number | null;
+            /** Protection Uptime */
+            protection_uptime?: number | null;
+            /** Quickness Uptime */
+            quickness_uptime?: number | null;
+            /** Regeneration Uptime */
+            regeneration_uptime?: number | null;
+            /** Resistance Uptime */
+            resistance_uptime?: number | null;
+            /** Resolution Uptime */
+            resolution_uptime?: number | null;
+            /** Stability Uptime */
+            stability_uptime?: number | null;
             /**
              * Started At
              * Format: date-time
              */
             started_at: string;
+            /** Stealth Uptime */
+            stealth_uptime?: number | null;
+            /** Superspeed Uptime */
+            superspeed_uptime?: number | null;
+            /** Swiftness Uptime */
+            swiftness_uptime?: number | null;
             /** Total Buff Removal */
             total_buff_removal: number;
             /** Total Damage */
             total_damage: number;
             /** Total Healing */
             total_healing: number;
+            /** Vigor Uptime */
+            vigor_uptime?: number | null;
         };
         /** PerFightTimelineOut */
         PerFightTimelineOut: {
@@ -1213,6 +1328,10 @@ export interface components {
         PlayerListRowOut: {
             /** Account Name */
             account_name: string;
+            /** Detected Role */
+            detected_role?: string | null;
+            /** Detected Tags */
+            detected_tags?: string[] | null;
             /** Elite Spec */
             elite_spec: string;
             /** Fights Attended */
@@ -1228,6 +1347,36 @@ export interface components {
             /** Total Healing */
             total_healing: number;
         };
+        /**
+         * PlayerPositionOut
+         * @description Per-player positioning metrics + downsampled trace.
+         *
+         *     Phase C heatmap foundation: returned by
+         *     ``GET /api/v1/fights/{fight_id}/positions``. The
+         *     ``stack_dist`` and ``dist_to_com`` values are computed by
+         *     :mod:`gw2_analytics.position_analysis` from the downsampled
+         *     traces. ``samples`` is capped at 2000 per player and
+         *     downsampled to at most one point every 500 ms.
+         */
+        PlayerPositionOut: {
+            /** Account Name */
+            account_name: string;
+            /** Dist To Com */
+            dist_to_com: number | null;
+            /** Elite Spec */
+            elite_spec: string;
+            /** Name */
+            name: string;
+            /** Profession */
+            profession: string;
+            /**
+             * Samples
+             * @default []
+             */
+            samples: components["schemas"]["PositionSampleOut"][];
+            /** Stack Dist */
+            stack_dist: number | null;
+        };
         /** PlayerProfileOut */
         PlayerProfileOut: {
             /** Account Name */
@@ -1237,6 +1386,10 @@ export interface components {
              * @default []
              */
             attended_fight_ids: string[];
+            /** Detected Role */
+            detected_role?: string | null;
+            /** Detected Tags */
+            detected_tags?: string[] | null;
             /** Elite Spec */
             elite_spec: string;
             /** Fights Attended */
@@ -1698,6 +1851,27 @@ export interface components {
             /** Total Healing */
             total_healing: number;
         };
+        /**
+         * PositionSampleOut
+         * @description One downsampled position sample for a player.
+         *
+         *     Phase C heatmap foundation: the backend persists only
+         *     ``x`` and ``y`` from the EVTC position statechange; ``z`` is
+         *     emitted as ``0.0`` so the wire shape stays forward-compatible
+         *     with any future elevation-aware parser extension without
+         *     requiring a frontend type change.
+         */
+        PositionSampleOut: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+            /**
+             * Z
+             * @default 0
+             */
+            z: number;
+        };
         /** SkillUsageRowOut */
         SkillUsageRowOut: {
             /** Hit Count */
@@ -2122,6 +2296,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlayerSkillsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fight_positions_api_v1_fights__fight_id__positions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FightPositionsOut"];
                 };
             };
             /** @description Validation Error */

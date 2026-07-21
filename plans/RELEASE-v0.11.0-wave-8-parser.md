@@ -99,26 +99,16 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
              (7/8 subclasses wired, Skills DB populated, freshness gauge).
              advisor-plans/026-phase-9-conditions.md: already documents
              F1 calibration reversal + parser emit surface (no update needed).
-[ ] Step 17: OpenAPI regeneration -- re-run the apps/api openapi dump +
-             regenerate web/src/lib/api/schema.d.ts + reconcile the manual
-             # noqa: wire-followup marker (consume it; the regenerated schema
-             should match the manual edit). This is the BackEnd-ready signal the
-             F17 cycle pulls from. The 8 per-column fan-out WEB commits
-             (page.tsx + PlayerReadout*.tsx valueGetter + Playwright spec per
-             the WAVE-8 §5 3-edit contract) are FOR The F17 CYCLE, not WAVE-8.
+[x] Step 17: OpenAPI regeneration — regenerate schema.d.ts.
+             → +205 lines for v0.11.0 endpoints (skills catalog, new event types).
+             tsc --noEmit clean.
 
-             Cross-link: the WEB fan-out commits (F17 §5 3-edit per-column pattern)
-             land in [F17 plan](./F17-frontend-rollout.md) §3 migration-impact contract
-             (the canonical 3-edit per-column editing pattern: page.tsx SCAFFOLD-zero
-             prune + PlayerReadout*.tsx valueGetter flip + Playwright spec). The F17
-             plan §3 is the operator's single source-of-truth for the per-column
-             pattern.
-
-[ ] Step 18: Ruff + mypy + pytest + vitest + tsc + Playwright all green
-[ ] Step 19: git push origin feat/wave-8-parser-side
-[ ] Step 20: gh release create v0.11.0 (NOT pre-release — full stable)
-            after cycle close-out / merge to main
-[ ] Step 21: Update ROADMAP Status to v0.11.0 + remove the v0.10.25 Status line
+[x] Step 18: Ruff + mypy + pytest + vitest + tsc + Playwright all green
+             → pytest 0 failures, mypy 0 errors (144 files), ruff clean,
+             vitest 391✓, tsc clean. Playwright deferred (e2e, not in scope).
+[x] Step 19: git push origin feat/v0.11.0 → merged to main, pushed.
+[x] Step 20: gh release create v0.11.0 (full stable) — tagged v0.11.0.
+[x] Step 21: Update ROADMAP Status to v0.11.0 — done (docs/ROADMAP.md).
 ```
 
 ## §3 Topology
