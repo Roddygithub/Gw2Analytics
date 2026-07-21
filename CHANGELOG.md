@@ -263,6 +263,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-07-21
+
+### Added
+- **Result-byte dispatch hermetic tests**: 3 new tests in
+  `test_parser_emit_statechange.py` for BlockEvent (`_result==3`),
+  DodgeEvent (`_result==4`), and InterruptEvent (`_result==5` with
+  damage). Added `result` parameter to `_build_event_record` for
+  byte-50 control. 11 tests total (8 statechange + 3 result-byte).
+
+### Verified
+- **F17 frontend**: PlayerReadoutDefense columns (deaths, dodges,
+  blocks, interrupts) are fully wired end-to-end — parser emits via
+  statechange + _result byte, `_split_combat_readout_events` classifies,
+  `PlayerDefenseAggregator` aggregates, `_build_player_readout` maps to
+  `PlayerReadoutDefenseOut`. No code change needed.
+
+### Validation
+- ruff: clean, mypy: 0 errors, pytest: 11/11 emit statechange tests pass
+
 ## [0.11.1] - 2026-07-21
 
 ### Added

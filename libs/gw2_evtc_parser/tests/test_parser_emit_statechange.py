@@ -46,7 +46,17 @@ from __future__ import annotations
 import struct
 from typing import Final
 
-from gw2_core import BarrierEvent, CCEvent, DamageEvent, DeathEvent, DownEvent, StunBreakEvent
+from gw2_core import (
+    BarrierEvent,
+    BlockEvent,
+    CCEvent,
+    DamageEvent,
+    DeathEvent,
+    DodgeEvent,
+    DownEvent,
+    InterruptEvent,
+    StunBreakEvent,
+)
 from gw2_evtc_parser import PythonEvtcParser
 from gw2_evtc_parser.parser import _EVENT_STRUCT
 from gw2_evtc_parser.statechange_dispatch import (
@@ -80,6 +90,7 @@ def _build_event_record(
     buff_dmg: int = 0,
     is_buffremove: int = 0,
     ev_buff: int = 0,
+    result: int = 0,
 ) -> bytes:
     """Build one 64-byte cbtevent record matching the arcdps ``cbtevent`` struct.
 
@@ -104,7 +115,7 @@ def _build_event_record(
         is_nondamage,  # byte 47 = is_nondamage
         is_statechange,  # byte 48 = is_statechange
         ev_buff,  # byte 49 = ev.buff (arcdps buff ID)
-        0,  # byte 50 = result (was is_shields)
+        result,  # byte 50 = result (CBTR_BLOCK=3, CBTR_EVADE=4, CBTR_INTERRUPT=5)
         is_offcycle,  # byte 51 = is_activation (was is_offcycle)
         is_buffremove,  # byte 52 = is_buffremove (arcdps cbtbuffremove)
         0,  # byte 53 = is_ninety
@@ -439,6 +450,120 @@ def test_parse_events_dispatch_does_not_break_damage_path() -> None:
     assert len(events) == 1
     assert isinstance(events[0], DamageEvent)
     assert events[0].damage == 500
+
+
+# ---------------------------------------------------------------------------
+# A.4 result-byte dispatch tests (Block / Dodge / Interrupt)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_events_dispatch_block_yields_event() -> None:
+    """Result byte 3 (CBTR_BLOCK) yields ONE BlockEvent via _result dispatch.
+
+    The parser emits BlockEvent from the damage path when ``_result == 3``
+    (the target blocked the incoming attack). Actor-only shape:
+    ``source_agent_id`` = dst_agent (the blocker), ``target_agent_id=0``,
+    ``skill_id=0``. A blocked hit typically has zero damage, so no
+    DamageEvent is emitted alongside.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True), (2, 1, 1, "Dst", True)],
+        skills=[(42, "Skill")],
+        events=[
+            _build_event_record(time_ms=1, src_agent=1, dst_agent=1, value=0),
+            _build_event_record(
+                time_ms=5_000,
+                src_agent=100,
+                dst_agent=200,
+                value=0,  # blocked hits have zero damage
+                skill_id=0,
+                result=3,  # CBTR_BLOCK
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, BlockEvent)
+    assert e.time_ms == 5_000
+    # Actor-only: the target (dst_agent) blocked, so source_agent_id = dst_agent.
+    assert e.source_agent_id == 200
+    assert e.target_agent_id == 0
+    assert e.skill_id == 0
+
+
+def test_parse_events_dispatch_dodge_yields_event() -> None:
+    """Result byte 4 (CBTR_EVADE) yields ONE DodgeEvent via _result dispatch.
+
+    The parser emits DodgeEvent from the damage path when ``_result == 4``
+    (the target evaded/dodged the incoming attack). Actor-only shape:
+    ``source_agent_id`` = dst_agent (the dodger), ``target_agent_id=0``,
+    ``skill_id=0``.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True), (2, 1, 1, "Dst", True)],
+        skills=[(42, "Skill")],
+        events=[
+            _build_event_record(time_ms=1, src_agent=1, dst_agent=1, value=0),
+            _build_event_record(
+                time_ms=6_000,
+                src_agent=100,
+                dst_agent=200,
+                value=0,
+                skill_id=0,
+                result=4,  # CBTR_EVADE
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, DodgeEvent)
+    assert e.time_ms == 6_000
+    assert e.source_agent_id == 200
+    assert e.target_agent_id == 0
+    assert e.skill_id == 0
+
+
+def test_parse_events_dispatch_interrupt_yields_events() -> None:
+    """Result byte 5 (CBTR_INTERRUPT) yields InterruptEvent + DamageEvent.
+
+    The parser emits InterruptEvent from the damage path when ``_result == 5``
+    (the source interrupted the target's cast). Full shape:
+    ``source_agent_id`` = src_agent (the interrupter),
+    ``target_agent_id`` = dst_agent (the interrupted enemy),
+    ``skill_id`` = skill_id (the interrupt mechanic).
+    Unlike Block/Dodge, an interrupt CAN carry non-zero damage,
+    so a DamageEvent is also yielded when ``value > 0``.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True), (2, 1, 1, "Dst", True)],
+        skills=[(888, "InterruptSkill")],
+        events=[
+            _build_event_record(time_ms=1, src_agent=1, dst_agent=1, value=0),
+            _build_event_record(
+                time_ms=7_000,
+                src_agent=300,
+                dst_agent=400,
+                value=250,  # interrupt with damage
+                skill_id=888,
+                result=5,  # CBTR_INTERRUPT
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    # Two events: InterruptEvent first (yielded before damage check),
+    # then DamageEvent (magnitude=250 > 0).
+    assert len(events) == 2
+    interrupt = events[0]
+    damage = events[1]
+    assert isinstance(interrupt, InterruptEvent)
+    assert isinstance(damage, DamageEvent)
+    assert interrupt.time_ms == 7_000
+    assert interrupt.source_agent_id == 300
+    assert interrupt.target_agent_id == 400
+    assert interrupt.skill_id == 888
+    assert damage.damage == 250
 
 
 # ---------------------------------------------------------------------------
