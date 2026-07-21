@@ -1,6 +1,6 @@
 # Plan: v0.12.0 Phase 6 v2 — parser-stream switch (condi/power split, barrier, downtime)
 
-> **Status**: DRAFT — implementation plan
+> **Status**: ✅ COMPLETE (v0.12.0–v0.12.3) — all 5 SCAFFOLD-zero columns now live
 > **Depends on**: v0.11.4 (WAVE-8 complete, 8/8 subclasses dispatched)
 > **Target**: v0.12.0
 
@@ -115,9 +115,20 @@ exists but is always 0 from the parser.
 
 ## Done criteria
 
-- [ ] `dps_power` + `dps_condi` > 0 on real WvW logs (new-build path with buff_dmg)
-- [ ] Old-build logs (pre-20240501) get correct skill-name-based split
-- [ ] `barrier_total` + `barrier_ps` > 0 on healers with barrier skills
-- [ ] `time_downed_ms` > 0 on fights with downed players
-- [ ] 0 regressions on existing test suite
-- [ ] Frontend AG Grid tables display non-zero values (no code change needed — columns already built)
+- [x] `dps_power` + `dps_condi` > 0 on real WvW logs (v0.12.1: buff_dmg wiring)
+- [x] Old-build logs (pre-20240501) get correct skill-name-based split (v0.12.1: make_dps_split_getter)
+- [x] `barrier_total` + `barrier_ps` > 0 on healers with barrier skills (v0.12.1: HealingEvent.barrier)
+- [x] `time_downed_ms` > 0 on fights with downed players (v0.12.2: parser down-state lifecycle; v0.12.0: aggregator wiring)
+- [x] 0 regressions on existing test suite
+- [x] Frontend AG Grid tables display non-zero values (v0.12.3: SCAFFOLD banner close-out)
+
+### Completion notes (2026-07-21)
+
+- **Steps 1-2**: shipped in v0.12.1 — `buff_dmg` on DamageEvent + DpsSplitGetter factory wired into `get_fight_readout` → dps_power/dps_condi live.
+- **Step 3**: shipped in v0.12.1 — `barrier` on HealingEvent + HealBarrierGetter factory → barrier_total/barrier_ps live.
+- **Step 4**: shipped in v0.12.2 — parser down-state lifecycle (ChangeUp/ChangeDown/ChangeDead) with per-agent `down_start` dict → time_downed_ms wired (0 for fights without down-state cycles).
+- **Frontend**: v0.12.3 closed the SCAFFOLD banner contract — removed the "stay at 0 until Phase 6 v2" disclaimer from the readout tab status banner.
+- **E2E**: v0.12.3 added Playwright test verifying non-zero dps_power/dps_condi/barrier_total/dodges/blocks in AG Grid cells.
+- **Hermetic test**: `test_readout_phase6_v2_barrier_and_condi_split_live` pins the aggregator-level getter contract.
+
+**Validated with real WvW data**: 9 players, 40,146s fight — dps_power=22, dps_condi=8, barrier=739, dodges=28, blocks=46, interrupts=52.

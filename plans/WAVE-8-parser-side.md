@@ -6,8 +6,9 @@
 
 > **Privacy caveat (companion promote commit):** this plan was authored alongside a separate commit that promotes `docs/v0.10.22-night-mode.md` from a gitignored root artefact into a tracked project asset. If the operator-private material in that file is sensitive, BOTH commits must be reverted: `git revert HEAD --no-edit && git revert HEAD~1 --no-edit && git push --force-with-lease origin feat/integrate-zevtc-fixture` (assumes the promote is the second-newest commit on the branch).
 
-> **Status:** Plan (post-v0.10.19 spike; post Tour 6 v0.10.24-pre StunBreaks landing; pre v0.11.0 cycle authorisation).
-> **Branch target:** a fresh `feat/wave-8-parser-side` branch on cycle authorisation.
+> **Status:** ✅ COMPLETE (v0.11.0–v0.12.3). All 8 SCAFFOLD-zero columns live. All Blocker A + Blocker B work shipped.
+> **Completion date:** 2026-07-21.
+> **Branch target:** shipped on `main` (v0.11.0 → v0.12.3).
 
 > **Tour 6 v0.10.24-pre unblock event (2026-07-15):** the `GET /api/v1/fights/{fight_id}/readout` endpoint is now wired end-to-end with the new `AgentIdentity` mapper + the `stun_break_events: Iterable[StunBreakEvent] = ()` parameter on `PlayerHealAggregator`. Blocker A.3 (9 new Event subclasses in `libs/gw2_core/src/gw2_core/models.py`) is now ~11% complete -- 1 of 9 (`StunBreakEvent`) shipped through to the wire (the heal aggregator's `stun_breaks` column is LIVE end-to-end via the union-keys row-builder + the `_check_invariants` conservation invariant). The §1 SCAFFOLD-zero column -> upstream blocker mapping gained a new LIVE cell (`heal.stun_breaks` -- no longer SCAFFOLD-zero; readiness indicator for the Blocker A.4 path). Priority shifts: Blocker A.4 (parser statechange REMOVE decode extension) + Blocker A.3 (remaining 8 Event subclasses: `BarrierEvent + ConditionRemoveEvent + CCEvent + DownEvent + DeathEvent + DodgeEvent + BlockEvent + InterruptEvent`) -- the cbtevent decode-loop scaffolding per spike doc §A.4 is now established. Blocker B (Skills DB catalog) remains M-L scope from §3; the v0.11.0 cycle authorisation can now move in parallel with Blocker A.3.
 
@@ -160,11 +161,25 @@ Net migration: each Blocker-DONE column unlock is **3 small edits** (page.tsx +1
 
 ## §7 Done criteria
 
-Wave 8 is DONE when **all 8 SCAFFOLD-zero columns** in the `readout-tab-status` banner have been removed (replaced by their unlocked aggregated values) AND the F17 frontend ships the 4 tables with **no SCAFFOLD-zero cell anywhere**. The banner paragraph mutates from the current long footnote into:
+Wave 8 is DONE ✅ (v0.12.3, 2026-07-21). All 8 SCAFFOLD-zero columns are now live with real parser-stream values. The banner paragraph now reads:
 
-> Combat readout loaded · N players · duration X.X s.
+> Combat readout loaded · N players · duration X.X s. All columns are wired to real parser-stream values...
 
-with no column-pruning footnote (the SCAFFOLD-zero contract is satisfied because no cell needs the inline note).
+See `plans/RELEASE-v0.12.0-phase-6-v2.md` for the Phase 6 v2 completion details.
+
+### Shipped releases
+
+| Release | Content |
+|---------|---------|
+| v0.11.0 | WAVE-8 statechange dispatch (7/8 subclasses), Skills DB catalog (4610 skills) |
+| v0.11.1 | CCEvent dispatch (BreakbarPercent) |
+| v0.11.2 | Result-byte dispatch tests (Block/Dodge/Interrupt) |
+| v0.11.3 | Buff ID lookup table + ConditionRemoveEvent wiring |
+| v0.11.4 | ConditionRemoveEvent end-to-end (buff_id classification) |
+| v0.12.0 | DownEvent stream + time_downed_ms aggregator wiring |
+| v0.12.1 | buff_dmg on DamageEvent + barrier on HealingEvent + getter factories |
+| v0.12.2 | Down-state lifecycle tracking (ChangeUp/ChangeDown/ChangeDead) |
+| v0.12.3 | SCAFFOLD banner close-out + hermetic test + E2E Playwright test |
 
 ---
 

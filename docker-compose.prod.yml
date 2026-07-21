@@ -1,21 +1,66 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gw2a-postgres-prod
+    environment:
+      POSTGRES_USER: gw2analytics
+      POSTGRES_PASSWORD: gw2analytics
+      POSTGRES_DB: gw2analytics
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gw2analytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: gw2a-minio-prod
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: gw2analytics
+      MINIO_ROOT_PASSWORD: gw2analytics-secret
+    volumes:
+      - miniodata_prod:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     env_file: ./.env.prod
-    depends_on: [postgres, minio, redis]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+
   redis:
     image: redis:7-alpine
+    container_name: gw2a-redis-prod
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
+
   web:
     build: ./web
     env_file: ./.env.prod
     depends_on: [api]
     restart: unless-stopped
+
+volumes:
+  pgdata_prod:
+  miniodata_prod:
