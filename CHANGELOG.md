@@ -263,6 +263,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.34] - 2026-07-21
+
+### Added
+- **A.6 Real-fixture integration test**: extended F1 calibration pilot to
+  count DeathEvent, DownEvent, BarrierEvent, StunBreakEvent. Total-sum
+  assertion expanded from 6-kind to 10-kind.
+- **A.7 Docs**: ROADMAP.md §1.1 updated with WAVE-8 cycle shipts entry.
+
+### Changed
+- **WAVE-8 plan**: Steps A.1-A.7, B.1-B.5, B.7 marked complete.
+  7/8 subclasses wired, 4610-skill catalog populated, freshness gauge shipped.
+
 ## [0.10.33] - 2026-07-21
 
 ### Added
