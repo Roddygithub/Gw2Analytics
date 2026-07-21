@@ -946,7 +946,7 @@ dev = []
 
 [[package]]
 name = "gw2analytics-root"
-version = "0.10.33"
+version = "0.10.34"
 source = { virtual = "." }
 
 [package.dev-dependencies]

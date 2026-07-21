@@ -263,6 +263,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-21
+
+### Added — WAVE-8 parser statechange dispatch (Blocker A)
+- **DeathEvent dispatch** (arcdps byte 4 ChangeDead): `_emit_death` in
+  `statechange_dispatch.py`, actor-only shape, 1 hermetic test.
+- **DownEvent dispatch** (byte 5 ChangeDown): `_emit_down`, actor-only
+  shape, 1 hermetic test.
+- **BarrierEvent dispatch** (byte 38 BarrierUpdate): already wired
+  in v0.10.25, 1 hermetic test.
+- **StunBreakEvent dispatch** (byte 56): already wired in Tour 6,
+  1 hermetic test.
+- **Result-byte dispatch** (already in `parser.py:808-837`):
+  BlockEvent (`_result==3`), DodgeEvent (`_result==4`),
+  InterruptEvent (`_result==5`).
+- **7/8 WAVE-8 subclasses wired**; CCEvent + ConditionRemoveEvent
+  deferred (non-statechange sources per A.1 audit).
+
+### Added — Skills DB catalog (Blocker B)
+- **4,610 skills from official GW2 v2 API**: `bootstrap_catalog.py`
+  fetches all skill IDs, batch-fetches 200 at a time, validates via
+  `SkillEntry`, writes NDJSON atomically.
+- **B.1 decision**: GW2 v2 REST API chosen over community datasets
+  (see `plans/WAVE-8-B1-skills-db-source.md`).
+- **Catalog in API lifespan**: eager-loaded at startup since
+  v0.10.26-pre with `SKILLS_CATALOG_FRESHNESS_DAYS` Prometheus gauge
+  (v0.10.33).
+
+### Added — Tests
+- **A.5 Hermetic dispatch tests**: 7 tests in
+  `test_parser_emit_statechange.py` (4 statechange + 3 result-byte).
+- **A.6 Real-fixture integration test**: `test_parser_applive_realfixture.py`
+  extended to 10-kind event sum (adds death + down + barrier + stunbreak).
+- **B.7 Catalog tests**: 17 tests across `test_catalog.py` +
+  `test_profession_validator.py`, all pass with 4610-skill catalog.
+
+### Docs
+- **A.1 Statechange audit**: `plans/WAVE-8-A1-statechange-audit.md`
+  mapping all 84 arcdps StateChange bytes.
+- **Plan checklist**: Steps A.1-A.7, B.1-B.5, B.7 marked complete.
+- **ROADMAP.md §1.1**: WAVE-8 cycle shipts entry.
+
+### Validation
+- pytest: 0 failures (5 skipped: load tests + real fixtures)
+- mypy: 0 errors (144 source files)
+- ruff: all checks passed
+- vitest: 391 passed, 3 skipped
+- tsc --noEmit: clean
+
 ## [0.10.34] - 2026-07-21
 
 ### Added

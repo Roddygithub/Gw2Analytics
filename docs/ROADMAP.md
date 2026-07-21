@@ -1,7 +1,8 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed AT v0.10.23-pre cycle
-close-out (2026-07-15) — Wave 4 update lands Workstream D-extension complete (Boons + Defense aggregators shipped).
+**Status:** Living document. Last refreshed AT v0.11.0 cycle
+close-out (2026-07-21) — WAVE-8 shipped (parser statechange dispatch +
+Skills DB catalog). — Wave 4 update lands Workstream D-extension complete (Boons + Defense aggregators shipped).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -24,7 +25,8 @@ ZERO production-code regression on Tour 4 (v0.10.22). ZERO regression on the exi
 
 6 forward-blockers carried to v0.10.24+ / v0.11.0+: Workstream D-extension (Boons + Defense aggregators) + Phase 6 v2 parser-stream switch + Skills DB catalog + `aggregate_combat_readout` dispatcher extension + `GET /api/v1/fights/{fight_id}/readout` artisan route handler + 4 web AG Grid Client Components.
 
-- **Latest shipped tag:** v0.10.22 (Tour 4 Skill build analyser mimo-half cycle). The **v0.10.22 mimo-half** cycle landed 9 atomic commits (6 code+tests + 3 docs: CHANGELOG entry splice + ROADMAP stamp refresh + cycle-end audit). Close-out docs shipped: `## [0.10.22]` CHANGELOG entry spliced + `docs/ROADMAP.md` refresh (this section) + `plans/AUDIT-2026-07-15-v0.10.22.md`. Cumulative test surface: apps/api pytest 256 / web vitest 179 / web Playwright 28 = **344 tests** (all green; 318 pre-v0.10.22 baseline + 26 NEW Tour 4).
+- **Latest shipped tag:** v0.11.0 (WAVE-8 parser statechange dispatch +
+  Skills DB catalog). The **v0.10.22 mimo-half** cycle landed 9 atomic commits (6 code+tests + 3 docs: CHANGELOG entry splice + ROADMAP stamp refresh + cycle-end audit). Close-out docs shipped: `## [0.10.22]` CHANGELOG entry spliced + `docs/ROADMAP.md` refresh (this section) + `plans/AUDIT-2026-07-15-v0.10.22.md`. Cumulative test surface: apps/api pytest 256 / web vitest 179 / web Playwright 28 = **344 tests** (all green; 318 pre-v0.10.22 baseline + 26 NEW Tour 4).
 
 - **Prior cycle audit chain (for archival):** v0.10.19 mimo-half DEFER cycle shipped at marker `cd6e9ad`. The v0.10.19 cycle attempted M8 (per `plans/RELEASE-v0.10.19.md`) but DEFERRED to v0.10.20 after 6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` autouse fixture exhausted the signature-shape budget. v0.10.18.1 (`plans/AUDIT-2026-07-13-2ffafc75.md`) is the canonical K1+K2+K3 discoverer. v0.10.19 close-out audit: `plans/AUDIT-2026-07-12-cd6e9ad.md`.
 
