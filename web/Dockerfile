@@ -17,6 +17,11 @@ RUN pnpm build
 # --- runtime stage ---
 FROM node:22-bookworm-slim
 
+# API_BASE_URL needed at runtime for SSR + rewrites.
+# env.ts requires it in production (NODE_ENV=production).
+ARG API_BASE_URL=http://api:8000
+ENV API_BASE_URL=${API_BASE_URL}
+
 WORKDIR /app
 
 COPY --from=builder /app/.next/standalone /app
