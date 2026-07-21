@@ -79,7 +79,9 @@ from gw2_core import (
     BuffApplyEvent,
     BuffRemovalEvent,
     DamageEvent,
+    DeathEvent,
     DodgeEvent,
+    DownEvent,
     EliteSpec,
     Event,
     EvtcHeader,
@@ -464,6 +466,11 @@ class PythonEvtcParser:
         # hot loop pays local-variable lookup cost instead of
         # global lookup cost.
         _cbtbufremove_kinds = _CBTBUFREMOVE_KINDS
+        # v0.12.2: Phase 6 v2 Step 4 — per-agent down-state lifecycle
+        # tracking.  Maps agent_id -> time_ms when the agent went down.
+        # Populated by ChangeDown (byte 5), consumed by ChangeUp (byte 6)
+        # and ChangeDead (byte 4).
+        down_start: dict[int, int] = {}
         while cursor + EVENT_SIZE <= end:
             if is_evtc_2025:
                 (
@@ -570,6 +577,49 @@ class PythonEvtcParser:
                             y=y,
                         )
                     continue
+                # v0.12.2: Phase 6 v2 Step 4 — down-state lifecycle.
+                # Handle ChangeUp (byte 6), ChangeDown (byte 5), and
+                # ChangeDead (byte 4) inline with per-agent downtime
+                # computation.  These are intercepted BEFORE the
+                # statechange dispatch call so the down_start dict
+                # is available for computing downtime_ms.
+                if is_statechange == 6:  # ChangeUp
+                    if src_agent in down_start:
+                        downtime = time_ms - down_start.pop(src_agent)
+                        yield DownEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=0,
+                            skill_id=0,
+                            downtime_ms=downtime,
+                        )
+                    continue
+                if is_statechange == 5:  # ChangeDown
+                    down_start[src_agent] = time_ms
+                    yield DownEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=0,
+                        skill_id=0,
+                    )
+                    continue
+                if is_statechange == 4:  # ChangeDead
+                    if src_agent in down_start:
+                        downtime = time_ms - down_start.pop(src_agent)
+                        yield DownEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=0,
+                            skill_id=0,
+                            downtime_ms=downtime,
+                        )
+                    yield DeathEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=0,
+                        skill_id=0,
+                    )
+                    continue
                 # WAVE-8 v0.11.0 Blocker A.4.1 (see
                 # ``plans/WAVE-8-parser-side.md`` §A.4.1): the upstream
                 # filter ``if is_statechange != 0: continue`` is REPLACED
@@ -578,9 +628,11 @@ class PythonEvtcParser:
                 # The dispatch table maps the arcdps ``is_statechange``
                 # byte (per :file:`docs/statechange-ids.md`) to a
                 # Pydantic event constructor -- currently StunBreak
-                # (byte 56) + Barrier (byte 38). Unmapped kinds return
-                # ``None`` so the filter continues to suppress them at
-                # the byte boundary (backward compat preserved).
+                # (byte 56) + Barrier (byte 38) + CC (byte 35).
+                # Unmapped kinds return ``None`` so the filter
+                # continues to suppress them at the byte boundary
+                # (backward compat preserved).  Bytes 4, 5, 6 were
+                # intercepted above.
                 statechange_event = dispatch_statechange(
                     is_statechange=is_statechange,
                     time_ms=time_ms,

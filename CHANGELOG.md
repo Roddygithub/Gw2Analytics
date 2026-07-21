@@ -263,6 +263,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-07-21
+
+### Added — Phase 6 v2 Step 4: down-state lifecycle tracking
+- **Per-agent downtime computation in parser**: `parse_events` now
+  tracks per-agent down-state via `down_start: dict[int, int]`.
+  ChangeDown (byte 5) records the start time; ChangeUp (byte 6)
+  computes `downtime_ms = time_ms - down_start` and yields a
+  second `DownEvent` with the computed duration.  ChangeDead
+  (byte 4) also finalizes any in-progress down state.
+- **Two-event contract**: each down-up cycle yields TWO DownEvents —
+  one with `downtime_ms=0` (the "down started" marker) and one
+  with the computed `downtime_ms` (the "down ended" marker).
+  The `aggregate_combat_readout` downtime counter sums both,
+  producing the correct total per agent.
+- **Bytes 4, 5, 6 now handled inline in parser.py** before the
+  statechange dispatch call.  `_emit_death` and `_emit_down` in
+  `statechange_dispatch.py` are superseded (marked as such).
+
+### Docs
+- `statechange_dispatch.py`: `STATE_CHANGE_DEATH` and
+  `STATE_CHANGE_DOWN` marked as superseded by inline handling
+  in `parser.py` (v0.12.2).
+
+### Validation
+- ruff: clean, mypy: 0 errors, pytest: 0 failures (3 skipped)
+
 ## [0.12.1] - 2026-07-21
 
 ### Added — Phase 6 v2 parser-stream switch (Steps 1-3)

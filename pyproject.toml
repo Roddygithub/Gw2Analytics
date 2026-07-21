@@ -1,6 +1,6 @@
 [project]
 name = "gw2analytics-root"
-version = "0.12.1"
+version = "0.12.2"
 description = "GW2 WvW combat analytics platform (monorepo root)"
 readme = "README.md"
 requires-python = ">=3.12"

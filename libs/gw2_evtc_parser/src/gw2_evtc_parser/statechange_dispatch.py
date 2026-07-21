@@ -44,17 +44,16 @@ STATE_CHANGE_STUN_BREAK: Final[int] = 56
 STATE_CHANGE_BARRIER_UPDATE: Final[int] = 38
 
 #: arcdps statechange byte for ChangeDead events (per statechange-ids.md).
-#: The player who died is source_agent_id; target_agent_id and skill_id
-#: are 0 because the statechange record does not carry kill attribution.
-#: The ``killed_by_agent_id`` and ``killing_skill_id`` fields default to
-#: None (Phase 6 v2 forward-compat).
+#: **Superseded in v0.12.2** — byte 4 is now intercepted inline in
+#: ``parser.py`` (Phase 6 v2 Step 4 down-state lifecycle) alongside
+#: bytes 5 and 6 for per-agent downtime computation.  The entry below
+#: is dead code; kept for backward-compat with tests that import
+#: ``STATECHANGE_MAP``.
 STATE_CHANGE_DEATH: Final[int] = 4
 
 #: arcdps statechange byte for ChangeDown events (per statechange-ids.md).
-#: The player who went down is source_agent_id; target_agent_id and
-#: skill_id are 0 because the statechange record does not carry a target
-#: or skill attribution. ``downtime_ms`` defaults to 0 (Phase 6 v2
-#: forward-compat).
+#: **Superseded in v0.12.2** — byte 5 is now intercepted inline in
+#: ``parser.py`` alongside bytes 4 and 6.  See ``STATE_CHANGE_DEATH``.
 STATE_CHANGE_DOWN: Final[int] = 5
 
 #: arcdps statechange byte for BreakbarPercent (per statechange-ids.md).
