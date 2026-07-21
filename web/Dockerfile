@@ -3,6 +3,8 @@ FROM node:22-bookworm-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@11 --activate
 
+ENV CI=true
+
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml /app/
