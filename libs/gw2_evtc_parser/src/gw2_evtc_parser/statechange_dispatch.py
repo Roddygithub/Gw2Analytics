@@ -11,11 +11,11 @@ extend the table with more ``byte -> emit_function`` entries WITHOUT
 any consumer-side change. The ``STATECHANGE_MAP`` dict is exposed at
 module level so the F1 calibration pilot can inspect the wired kinds.
 
-Backward compat: A.4.1 ships with 2 entries (StunBreakEvent +
-BarrierEvent); unmapped statechange kinds return ``None`` from
-:func:`dispatch_statechange` so the parser's upstream filter
-(``if is_statechange != 0: continue``) still suppresses them at the
-byte boundary.
+Backward compat: A.4 ships 5 entries (StunBreakEvent +
+BarrierEvent + DeathEvent + DownEvent + CCEvent); unmapped
+statechange kinds return ``None`` from :func:`dispatch_statechange`
+so the parser's upstream filter (``if is_statechange != 0: continue``)
+still suppresses them at the byte boundary.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import logging
 from collections.abc import Callable
 from typing import Final
 
-from gw2_core import BarrierEvent, DeathEvent, DownEvent, Event, StunBreakEvent
+from gw2_core import BarrierEvent, CCEvent, DeathEvent, DownEvent, Event, StunBreakEvent
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,14 @@ STATE_CHANGE_DEATH: Final[int] = 4
 #: or skill attribution. ``downtime_ms`` defaults to 0 (Phase 6 v2
 #: forward-compat).
 STATE_CHANGE_DOWN: Final[int] = 5
+
+#: arcdps statechange byte for BreakbarPercent (per statechange-ids.md).
+#: Byte 35 carries the defiance-bar percentage (0-100) in the cbtevent
+#: ``value`` field. Byte 34 (BreakbarState) is the phase indicator
+#: (active/recovering/immune) and is NOT dispatched separately -- the
+#: percentage alone is sufficient for the CC-magnitude aggregator.
+#: Dual-byte tracking (34+35) is deferred to Phase 6 v2 parser-stream.
+STATE_CHANGE_BREAKBAR_PERCENT: Final[int] = 35
 
 
 def _emit_stun_break(
@@ -154,6 +162,33 @@ def _emit_down(
     )
 
 
+def _emit_cc(
+    time_ms: int,
+    src_agent: int,
+    dst_agent: int,
+    value: int,
+    skill_id: int,
+) -> Event:
+    """Emit a :class:`CCEvent` for arcdps byte 35 (BreakbarPercent).
+
+    The breakbar percent (0-100) from the cbtevent ``value`` field is
+    mapped to ``cc_value``. Byte 34 (BreakbarState -- phase indicator)
+    is NOT dispatched separately; the percentage alone is sufficient
+    for the CC-magnitude aggregator. Dual-byte tracking (34+35 for
+    phase-aware CC attribution) is deferred to Phase 6 v2.
+
+    ``target_agent_id`` carries the NPC whose breakbar was affected;
+    ``source_agent_id`` is the player who applied the CC.
+    """
+    return CCEvent(
+        time_ms=time_ms,
+        source_agent_id=src_agent,
+        target_agent_id=dst_agent,
+        skill_id=skill_id,
+        cc_value=value,
+    )
+
+
 #: Dispatch table mapping arcdps ``is_statechange`` byte -> emit constructor.
 #:
 #: The constructor signature is uniform across all emit functions::
@@ -165,8 +200,9 @@ def _emit_down(
 #: (DEATH + DOWN + CONDITION_REMOVE + CC) extend this table without
 #: any change to the dispatch wrapper.
 #:
-#: v0.11.0 A.4.3: DEATH (byte 4) and DOWN (byte 5) shipped.
-#: CONDITION_REMOVE + CC remain deferred (non-statechange sources).
+#: v0.11.0 A.4: DEATH (byte 4), DOWN (byte 5), and CC (byte 35)
+#: BreakbarPercent shipped. ConditionRemoveEvent remains deferred
+#: (non-statechange source).
 #:
 #: Exposed at module level (NOT underscored) so the F1 calibration
 #: pilot + the parser emit-side diagnostic logger can introspect the
@@ -176,6 +212,7 @@ STATECHANGE_MAP: Final[dict[int, Callable[[int, int, int, int, int], Event]]] = 
     STATE_CHANGE_BARRIER_UPDATE: _emit_barrier_update,
     STATE_CHANGE_DEATH: _emit_death,
     STATE_CHANGE_DOWN: _emit_down,
+    STATE_CHANGE_BREAKBAR_PERCENT: _emit_cc,
 }
 
 
@@ -218,6 +255,7 @@ def dispatch_statechange(
 __all__ = [
     "STATECHANGE_MAP",
     "STATE_CHANGE_BARRIER_UPDATE",
+    "STATE_CHANGE_BREAKBAR_PERCENT",
     "STATE_CHANGE_DEATH",
     "STATE_CHANGE_DOWN",
     "STATE_CHANGE_STUN_BREAK",

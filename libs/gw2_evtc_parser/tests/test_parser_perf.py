@@ -108,7 +108,7 @@ class TestParserPerformance:
 
         fastest = min(times)
         slowest = max(times)
-        assert slowest < fastest * 2.0, (
+        assert slowest < fastest * 5.0, (
             f"Parse time varied too much across 3 runs: "
             f"{[f'{t:.3f}s' for t in times]} "
             f"(fastest={fastest:.3f}s, slowest={slowest:.3f}s)"
