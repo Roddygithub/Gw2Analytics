@@ -44,8 +44,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # The venv + source trees are owned by root (copied from builder)
 # but are read-only at runtime — only alembic needs write access
 # for migration version tracking, which goes through Postgres.
-RUN useradd --create-home --shell /bin/bash appuser && \
-    chown -R appuser:appuser /app
+RUN useradd -r appuser && chown -R appuser:appuser /app
 USER appuser
 
 WORKDIR /app/apps/api
