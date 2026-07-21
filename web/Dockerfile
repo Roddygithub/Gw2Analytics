@@ -1,7 +1,7 @@
 # --- builder stage ---
 FROM node:22-bookworm-slim AS builder
 
-RUN corepack enable && corepack prepare pnpm@10 --activate
+RUN corepack enable && corepack prepare pnpm@11 --activate
 
 ARG API_BASE_URL=http://api:8000
 ENV API_BASE_URL=${API_BASE_URL}
