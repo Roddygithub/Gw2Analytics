@@ -292,21 +292,45 @@ class BaseEvent(BaseModel):
 
 
 class DamageEvent(BaseEvent):
-    """One outgoing-damage event. ``damage`` is the per-hit integer value."""
+    """One outgoing-damage event. ``damage`` is the per-hit integer value.
+
+    ``buff_dmg`` carries the arcdps ``buff_dmg`` field from the raw
+    cbtevent.  For builds >= 20240501 this is the condi portion of
+    the hit; for older builds it is metadata (parsed but unused).
+    The aggregator-tier DpsSplitGetter decides how to use it based
+    on the fight's build date.  Defaults to 0 for backward-compat
+    with pre-Phase-6-v2 streams.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_type: Literal[EventType.DAMAGE] = EventType.DAMAGE
     damage: int = Field(..., ge=0)
+    #: arcdps ``buff_dmg`` from the raw cbtevent record — the condi
+    #: portion of this hit for builds >= 20240501.  Default 0 for
+    #: backward-compat with pre-v0.12.1 streams.
+    buff_dmg: int = Field(default=0, ge=0)
 
 
 class HealingEvent(BaseEvent):
-    """One outgoing-healing event. ``healing`` is the per-hit integer value."""
+    """One outgoing-healing event. ``healing`` is the per-hit integer value.
+
+    ``barrier`` carries the arcdps ``buff_dmg`` field from the raw
+    cbtevent for heal-class records.  On heal records, arcdps
+    encodes the barrier (shield) portion of the hit in ``buff_dmg``;
+    this field surfaces it so the HealBarrierGetter can extract it
+    without a parser-side side table.  Defaults to 0 for
+    backward-compat with pre-Phase-6-v2 streams.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_type: Literal[EventType.HEALING] = EventType.HEALING
     healing: int = Field(..., ge=0)
+    #: arcdps ``buff_dmg`` from the raw cbtevent record for heal-class
+    #: events — the barrier (shield) portion of this heal hit.
+    #: Default 0 for backward-compat with pre-v0.12.1 streams.
+    barrier: int = Field(default=0, ge=0)
 
 
 class BuffRemovalEvent(BaseEvent):

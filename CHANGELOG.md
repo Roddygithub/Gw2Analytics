@@ -263,6 +263,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-07-21
+
+### Added — Phase 6 v2 parser-stream switch (Steps 1-3)
+- **`buff_dmg` on DamageEvent**: new field (default 0) carrying the
+  raw arcdps `buff_dmg` from the cbtevent. For builds >= 20240501
+  this is the condi portion of the hit. Parser passes
+  `buff_dmg=buff_strip` on every DamageEvent yield.
+- **`barrier` on HealingEvent**: new field (default 0) carrying the
+  arcdps `buff_dmg` on heal-class records — the barrier/shield
+  portion. Parser passes `barrier=buff_strip` on every HealingEvent
+  yield.
+- **`make_dps_split_getter(build_date, skill_name_getter)`**: factory
+  in `aggregators.py` returning a per-event `DpsSplitGetter`. New
+  builds (>= 20240501): extracts `event.buff_dmg` capped at
+  `event.damage`. Old builds: skill name lookup against
+  `KNOWN_CONDI_NAMES` (Bleeding/Burning/Confusion/Poisoned/Torment).
+- **`make_barrier_portion_getter()`**: factory returning
+  `lambda e: e.barrier` — extracts the barrier portion from
+  `HealingEvent.barrier`.
+- **Route wiring**: `get_fight_readout` now queries
+  `OrmFight.build_version`, constructs both getters, and passes
+  them to `aggregate_combat_readout`. `dps_power` and
+  `barrier_total`/`barrier_ps` now carry real values from the
+  parser stream.
+
+### Fixed
+- **`test_fights_readout.py`**: updated `dps_power` assertion from
+  SCAFFOLD-zero (0.0) to the real value (500.0) — the DpsSplitGetter
+  classifies `buff_dmg=0` events as all-power.
+
+### Validation
+- ruff: clean, mypy: 0 errors, pytest: 0 failures (3 skipped)
+
 ## [0.12.0] - 2026-07-21
 
 ### Added

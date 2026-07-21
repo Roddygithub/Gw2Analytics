@@ -97,9 +97,10 @@ fixtures.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
-from typing import cast
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Final, cast
 
+from gw2_analytics.condi_power_split import KNOWN_CONDI_NAMES
 from gw2_analytics.player_boons import PlayerBoonsAggregator, PlayerBoonsRow
 from gw2_analytics.player_damage import (
     DpsSplitGetter,
@@ -834,10 +835,69 @@ def aggregate_player_positions(
     return result
 
 
+#: Arcdps build-date gate for condi/power split.  Builds >= this date
+#: carry the condi portion of a damage hit in the raw cbtevent's
+#: ``buff_dmg`` field.  Older builds encode condi implicitly via skill
+#: name lookup.  Calibrated against plan 135.
+_BUILD_DATE_GATE: Final[str] = "20240501"
+
+
+def make_dps_split_getter(
+    build_date: str,
+    skill_name_getter: Callable[[int], str | None],
+) -> DpsSplitGetter:
+    """Create a per-event ``(condi, power)`` splitter for the given fight.
+
+    For new builds (>= :data:`_BUILD_DATE_GATE`), extracts the condi
+    portion from ``DamageEvent.buff_dmg``.  For old builds, uses the
+    skill name lookup against :data:`KNOWN_CONDI_NAMES`.
+
+    Returns a :class:`DpsSplitGetter` suitable for passing to
+    :meth:`PlayerDamageAggregator.aggregate`.
+    """
+    is_new = build_date.isdigit() and int(build_date) >= int(_BUILD_DATE_GATE)
+    # Per-call cache: skill_id -> name lookup.  None is a valid
+    # cached value (unknown skill).
+    cache: dict[int, str | None] = {}
+    known = KNOWN_CONDI_NAMES
+
+    if is_new:
+        def _new_splitter(e: DamageEvent) -> tuple[int, int]:
+            condi = min(e.damage, max(0, e.buff_dmg))
+            return (condi, e.damage - condi)
+
+        return _new_splitter
+
+    def _old_splitter(e: DamageEvent) -> tuple[int, int]:
+        sid = e.skill_id
+        if sid not in cache:
+            cache[sid] = skill_name_getter(sid)
+        if cache[sid] in known:
+            return (e.damage, 0)  # all condi
+        return (0, e.damage)  # all power
+
+    return _old_splitter
+
+
+def make_barrier_portion_getter() -> HealBarrierGetter:
+    """Create a per-event barrier getter for heal-class events.
+
+    Extracts ``HealingEvent.barrier`` — the arcdps ``buff_dmg`` field
+    on heal records, which encodes the barrier/shield portion.
+
+    Returns a :class:`HealBarrierGetter` suitable for passing to
+    :meth:`PlayerHealAggregator.aggregate`.
+    """
+    return lambda e: e.barrier
+
+
 __all__ = [
+    "_BUILD_DATE_GATE",
     "_aggregate_per_target_rollup",
     "aggregate_combat_readout",
     "aggregate_player_positions",
     "aggregate_skill_usage",
     "aggregate_squad_rollup",
+    "make_barrier_portion_getter",
+    "make_dps_split_getter",
 ]

@@ -118,6 +118,8 @@ from gw2analytics_api.routes.fights.aggregators import (
     aggregate_player_positions,
     aggregate_skill_usage,
     aggregate_squad_rollup,
+    make_barrier_portion_getter,
+    make_dps_split_getter,
 )
 from gw2analytics_api.routes.fights.blob_cache import _cached_get_events
 from gw2analytics_api.routes.fights.blob_loader import _load_fight_events
@@ -1021,12 +1023,25 @@ def get_fight_readout(
     # wall-clock duration scalar).
     duration_s = _duration_s_from_events(events)
 
+    # v0.12.1: Phase 6 v2 parser-stream switch — wire the
+    # condi/power split and heal-side barrier getters.
+    # Fetch the fight's build_version for the build-date gate.
+    # _load_fight_events above already guarantees the fight exists
+    # (raises 404 otherwise), so scalar_one_or_none() always returns a value.
+    build_date = db.execute(
+        select(OrmFight.build_version).where(OrmFight.id == fight_id),
+    ).scalar_one()
+    dps_split_getter = make_dps_split_getter(build_date, skill_id_to_name_map.get)
+    barrier_getter = make_barrier_portion_getter()
+
     return aggregate_combat_readout(
         events,
         skill_id_to_name_map=skill_id_to_name_map,
         agent_id_to_identity_map=agent_id_to_identity_map,
         duration_s=duration_s,
         fight_id=fight_id,
+        dps_split_getter=dps_split_getter,
+        barrier_portion_getter_heal=barrier_getter,
     )
 
 

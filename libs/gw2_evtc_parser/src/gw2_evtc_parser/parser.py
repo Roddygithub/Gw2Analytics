@@ -846,6 +846,11 @@ class PythonEvtcParser:
                     target_agent_id=dst_agent,
                     skill_id=skill_id,
                     damage=magnitude,
+                    # v0.12.1: pass the raw cbtevent buff_dmg field.
+                    # For builds >= 20240501 this is the condi portion
+                    # of the hit; the aggregator-tier DpsSplitGetter
+                    # decides how to use it based on build date.
+                    buff_dmg=buff_strip,
                 )
             else:
                 # ``is_nondamage > 0`` is the healing-class signal. We
@@ -860,6 +865,10 @@ class PythonEvtcParser:
                         target_agent_id=dst_agent,
                         skill_id=skill_id,
                         healing=magnitude,
+                        # v0.12.1: pass buff_dmg as barrier for heal-class
+                        # records.  On heal records arcdps encodes the
+                        # barrier/shield portion in buff_dmg.
+                        barrier=buff_strip,
                     )
                 # Phase 8 buff-strip emission. Yields a SEPARATE
                 # ``BuffRemovalEvent`` event alongside the heal (or

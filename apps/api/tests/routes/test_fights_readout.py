@@ -88,8 +88,9 @@ def test_readout_200_happy_path_with_player(client: TestClient) -> None:
     assert a_row["roles"] == []
     # DPS: total_damage=1000 / duration_s=2.0 = 500.0
     assert a_row["damage"]["dps_total"] == 500.0
-    # SCAFFOLD-stub columns (Phase 3 forward-compat) stay at 0
-    assert a_row["damage"]["dps_power"] == 0.0
+    # v0.12.1: Phase 6 v2 DpsSplitGetter wired — buff_dmg=0 on the
+    # fixture's damage event, so everything is power (condi=0).
+    assert a_row["damage"]["dps_power"] == 500.0
     assert a_row["damage"]["dps_condi"] == 0.0
     assert a_row["damage"]["strips"] == 0
     # Heal side: stay zero (no outgoing heals from a)
