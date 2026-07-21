@@ -6,7 +6,7 @@ RUN corepack enable && corepack prepare pnpm@11 --activate
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml /app/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install
 
 COPY . /app
 RUN pnpm build
