@@ -70,6 +70,53 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     ).toBeVisible();
   });
 
+  // -------------------------------------------------------------------------
+  // Phase 6 v2 (v0.12.3): Combat-readout tab E2E — verify
+  // dps_power, dps_condi, barrier_total, dodges, blocks,
+  // interrupts columns render real non-zero values.
+  // -------------------------------------------------------------------------
+
+  test("readout tab renders Phase 6 v2 columns with non-zero data", async ({ page }) => {
+    await page.goto("/fights/fixture-fight-001?tab=readout");
+
+    // The readout tab status banner is visible (v0.12.3: no
+    // longer says "SCAFFOLD-zero").
+    const banner = page.locator('[data-testid="readout-tab-status"]');
+    await expect(banner).toBeVisible();
+    // The old SCAFFOLD-zero disclaimer is GONE (v0.12.3).
+    await expect(banner.getByText(/stay at 0/i)).toHaveCount(0);
+    // The banner now says "All columns" (v0.12.3 live-data text).
+    await expect(banner.getByText(/All columns/i)).toBeVisible();
+
+    // The 4 per-aspect section headings
+    await expect(
+      page.getByRole("heading", { name: "Damage" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Heal" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Boons" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Defense" }),
+    ).toBeVisible();
+
+    // AG Grid renders the DPS power column with the mock
+    // fixture value ("1800" for Fighty McFight). All chosen
+    // values are unique across the 4-player fixture.
+    await expect(page.getByText("1800", { exact: true }).first()).toBeVisible();
+    // DPS condi also renders non-zero
+    await expect(page.getByText("650", { exact: true }).first()).toBeVisible();
+
+    // Barrier total: Heal Bot has barrier_total=45000
+    await expect(page.getByText("45000", { exact: true }).first()).toBeVisible();
+
+    // Defense: Heal Bot blocks=12 is unique across the fixture
+    // (dodges=[3,7,2,1], blocks=[2,0,5,12], interrupts=[1,3,0,4]).
+    await expect(page.getByText("12", { exact: true }).first()).toBeVisible();
+  });
+
   test("renders the upstream-error card for an unknown fight id", async ({ page }) => {
     // ``unknown-fight-999`` is not in the mock server's
     // KNOWN_FIGHTS set, so the /events fetch returns 404, the

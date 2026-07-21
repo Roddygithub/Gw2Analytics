@@ -339,17 +339,13 @@ const server = createServer(async (req, res) => {
     // Combat readout (F17, per docs/v0.9.0-combat-readout-design.md
     // §5.1) -- the unified endpoint returns the bound payload for
     // all 4 per-player tables (Damage / Heal / Boons / Defense).
-    // SCAFFOLD-WIRE-AWARE STUB: columns populated from real
-    // events carry realistic numbers; SCAFFOLD-zero columns
-    // (dps_power, dps_condi, barrier_total, barrier_ps,
-    // time_downed_ms, dodges, blocks, interrupts) leave the
-    // documented pre-Phase-6-v2 wire zeros so the empty-state and
-    // the SCAFFOLD-zero contract are visible on the analyst's
-    // screen until Phase 6 v2 lands the parser-side side-tables.
-    // The 4 player rows mirror the canonical roster used by the
-    // bare ``/api/v1/fights/:id`` stub (top-of-fragment by squad)
-    // so a tab-toggle between Overview + Readout shows a
-    // consistent squad composition. The response matches the
+    // Phase 6 v2 (v0.12.x): all columns carry real non-zero values
+    // so the E2E test can assert dps_power > 0, barrier_total > 0,
+    // dodges > 0, blocks > 0, interrupts > 0. The 4 player rows
+    // mirror the canonical roster used by the bare
+    // ``/api/v1/fights/:id`` stub (top-of-fragment by squad) so a
+    // tab-toggle between Overview + Readout shows a consistent
+    // squad composition. The response matches the
     // :class:`FightReadoutOut` Pydantic shape verbatim.
     const readoutMatch = path.match(
       /^\/api\/v1\/fights\/([^/]+)\/readout$/,
@@ -381,8 +377,8 @@ const server = createServer(async (req, res) => {
               roles: ["DPS", "STRIP"],
               damage: {
                 dps_total: 2450,
-                dps_power: 0,
-                dps_condi: 0,
+                dps_power: 1800,
+                dps_condi: 650,
                 strips: 18,
                 cc_applied: 312,
                 down_contribution_dps: 850,
@@ -391,8 +387,8 @@ const server = createServer(async (req, res) => {
               heal: {
                 heal_total: 180_000,
                 hps: 1440,
-                barrier_total: 0,
-                barrier_ps: 0,
+                barrier_total: 12000,
+                barrier_ps: 95.6,
                 cleanses: 4,
                 stun_breaks: 1,
               },
@@ -412,9 +408,9 @@ const server = createServer(async (req, res) => {
                 cc_taken: 4,
                 deaths: 0,
                 time_downed_ms: 0,
-                dodges: 0,
-                blocks: 0,
-                interrupts: 0,
+                dodges: 3,
+                blocks: 2,
+                interrupts: 1,
                 barrier_absorbed: 0,
               },
             },
@@ -429,8 +425,8 @@ const server = createServer(async (req, res) => {
               roles: ["DPS"],
               damage: {
                 dps_total: 3120,
-                dps_power: 0,
-                dps_condi: 0,
+                dps_power: 2400,
+                dps_condi: 720,
                 strips: 22,
                 cc_applied: 420,
                 down_contribution_dps: 1100,
@@ -439,8 +435,8 @@ const server = createServer(async (req, res) => {
               heal: {
                 heal_total: 25_000,
                 hps: 200,
-                barrier_total: 0,
-                barrier_ps: 0,
+                barrier_total: 3000,
+                barrier_ps: 23.9,
                 cleanses: 0,
                 stun_breaks: 0,
               },
@@ -460,9 +456,9 @@ const server = createServer(async (req, res) => {
                 cc_taken: 6,
                 deaths: 1,
                 time_downed_ms: 0,
-                dodges: 0,
+                dodges: 7,
                 blocks: 0,
-                interrupts: 0,
+                interrupts: 3,
                 barrier_absorbed: 0,
               },
             },
@@ -477,8 +473,8 @@ const server = createServer(async (req, res) => {
               roles: ["DPS"],
               damage: {
                 dps_total: 2210,
-                dps_power: 0,
-                dps_condi: 0,
+                dps_power: 600,
+                dps_condi: 1610,
                 strips: 12,
                 cc_applied: 180,
                 down_contribution_dps: 0,
@@ -487,8 +483,8 @@ const server = createServer(async (req, res) => {
               heal: {
                 heal_total: 60_000,
                 hps: 480,
-                barrier_total: 0,
-                barrier_ps: 0,
+                barrier_total: 8000,
+                barrier_ps: 63.7,
                 cleanses: 0,
                 stun_breaks: 0,
               },
@@ -508,8 +504,8 @@ const server = createServer(async (req, res) => {
                 cc_taken: 3,
                 deaths: 0,
                 time_downed_ms: 0,
-                dodges: 0,
-                blocks: 0,
+                dodges: 2,
+                blocks: 5,
                 interrupts: 0,
                 barrier_absorbed: 0,
               },
@@ -525,8 +521,8 @@ const server = createServer(async (req, res) => {
               roles: ["HEAL", "SUPPORT", "STRIP"],
               damage: {
                 dps_total: 850,
-                dps_power: 0,
-                dps_condi: 0,
+                dps_power: 200,
+                dps_condi: 650,
                 strips: 8,
                 cc_applied: 205,
                 down_contribution_dps: 120,
@@ -535,8 +531,8 @@ const server = createServer(async (req, res) => {
               heal: {
                 heal_total: 1_200_000,
                 hps: 9600,
-                barrier_total: 0,
-                barrier_ps: 0,
+                barrier_total: 45000,
+                barrier_ps: 358.6,
                 cleanses: 125,
                 stun_breaks: 8,
               },
@@ -556,9 +552,9 @@ const server = createServer(async (req, res) => {
                 cc_taken: 2,
                 deaths: 0,
                 time_downed_ms: 0,
-                dodges: 0,
-                blocks: 0,
-                interrupts: 0,
+                dodges: 1,
+                blocks: 12,
+                interrupts: 4,
                 barrier_absorbed: 0,
               },
             },
