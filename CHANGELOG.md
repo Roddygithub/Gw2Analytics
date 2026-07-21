@@ -263,6 +263,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-07-21
+
+### Added
+- **DownEvent stream in Combat readout**: `_split_combat_readout_events`
+  extended from 9 to 10 streams (added `down_events`).
+  `aggregate_combat_readout` sums `DownEvent.downtime_ms` per
+  `source_agent_id` and passes the total to `_build_player_readout`
+  via new `time_downed_ms` kwarg. The parser currently emits
+  `downtime_ms=0` (down-state lifecycle tracking is Phase 6 v2 parser
+  work); the aggregator wiring is in place so the column picks up
+  real values automatically when the parser computes per-event downtime.
+- **Phase 6 v2 implementation plan** (`plans/RELEASE-v0.12.0-phase-6-v2.md`):
+  documents the 4 remaining steps to unlock dps_power/dps_condi,
+  barrier_total/barrier_ps, and time_downed_ms columns.
+
+### Verified (F17 real WvW log)
+- Uploaded `20250928-223731.zevtc` (40,146s, 9 players): dodges=28 ✅,
+  blocks=46 ✅, interrupts=52 ✅ — WAVE-8 result-byte dispatch confirmed
+  live against real WvW data.
+
+### Docs
+- NEW `plans/RELEASE-v0.12.0-phase-6-v2.md` — implementation plan for
+  condi/power split, barrier tracking, and downtime computation.
+
+### Validation
+- ruff: clean, mypy: 0 errors, pytest: 0 failures (2 skipped)
+
 ## [0.11.4] - 2026-07-21
 
 ### Added

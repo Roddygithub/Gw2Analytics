@@ -129,6 +129,7 @@ from gw2_core import (
     DamageEvent,
     DeathEvent,
     DodgeEvent,
+    DownEvent,
     Event,
     HealingEvent,
     InterruptEvent,
@@ -192,10 +193,11 @@ def _split_combat_readout_events(
     list[BlockEvent],
     list[InterruptEvent],
     list[StunBreakEvent],
+    list[DownEvent],
 ]:
     """Split a heterogeneous event stream into typed Combat-readout streams.
 
-    Returns 9 typed event lists in the canonical order consumed by
+    Returns 10 typed event lists in the canonical order consumed by
     :func:`aggregate_combat_readout`. Unknown event subclasses are
     silently dropped.
 
@@ -212,6 +214,7 @@ def _split_combat_readout_events(
     block_events: list[BlockEvent] = []
     interrupt_events: list[InterruptEvent] = []
     stun_break_events: list[StunBreakEvent] = []
+    down_events: list[DownEvent] = []
 
     # Local bindings avoid repeated attribute lookups in the hot loop.
     append_damage = damage_events.append
@@ -223,6 +226,7 @@ def _split_combat_readout_events(
     append_block = block_events.append
     append_interrupt = interrupt_events.append
     append_stun_break = stun_break_events.append
+    append_down = down_events.append
 
     for event in events:
         if isinstance(event, DamageEvent):
@@ -243,6 +247,8 @@ def _split_combat_readout_events(
             append_interrupt(event)
         elif isinstance(event, StunBreakEvent):
             append_stun_break(event)
+        elif isinstance(event, DownEvent):
+            append_down(event)
 
     return (
         damage_events,
@@ -254,6 +260,7 @@ def _split_combat_readout_events(
         block_events,
         interrupt_events,
         stun_break_events,
+        down_events,
     )
 
 
@@ -393,6 +400,7 @@ def _build_player_readout(
     defense_row: PlayerDefenseRow | None,
     *,
     cleanses: int = 0,
+    time_downed_ms: int = 0,
 ) -> PlayerReadoutOut:
     """Build a single :class:`PlayerReadoutOut` from aspect rows + identity.
 
@@ -474,7 +482,7 @@ def _build_player_readout(
             damage_taken=def_row.damage_taken,
             cc_taken=def_row.cc_taken,
             deaths=def_row.deaths,
-            time_downed_ms=def_row.time_downed_ms,
+            time_downed_ms=time_downed_ms if time_downed_ms > 0 else def_row.time_downed_ms,
             dodges=def_row.dodges,
             blocks=def_row.blocks,
             interrupts=def_row.interrupts,
@@ -564,6 +572,7 @@ def aggregate_combat_readout(
         block_events,
         interrupt_events,
         stun_break_events,
+        down_events,
     ) = _split_combat_readout_events(events)
     _identity_name_map: dict[int, str | None] | None = (
         {aid: ident.name for aid, ident in (agent_id_to_identity_map or {}).items()}
@@ -644,6 +653,16 @@ def aggregate_combat_readout(
         if isinstance(event, BuffRemovalEvent) and is_condition(event.buff_id):
             cleanses_counter[event.source_agent_id] += 1
 
+    # v0.12.0: sum DownEvent.downtime_ms per source_agent_id.
+    # The parser currently emits downtime_ms=0 (down-state lifecycle
+    # tracking is Phase 6 v2 parser work); the aggregation loop is
+    # wired now so the column picks up real values automatically
+    # when the parser computes per-event downtime.
+    downtime_counter: Counter[int] = Counter()
+    for de in down_events:
+        if de.downtime_ms > 0:
+            downtime_counter[de.source_agent_id] += de.downtime_ms
+
     # Build the per-agent_id -> per-aspect-row map. The 4
     # per-player aggregators all key on agent_id, so a single
     # dict comprehension per aspect merges cleanly. Agents that
@@ -695,6 +714,7 @@ def aggregate_combat_readout(
             boons_by_id.get(agent_id),
             defense_by_id.get(agent_id),
             cleanses=cleanses_counter.get(agent_id, 0),
+            time_downed_ms=downtime_counter.get(agent_id, 0),
         )
         for agent_id in sorted(valid_agent_ids)
     ]
