@@ -1,7 +1,7 @@
 # --- builder stage ---
-FROM node:20-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 
-RUN corepack enable && corepack prepare pnpm@9 --activate
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ COPY . /app
 RUN pnpm build
 
 # --- runtime stage ---
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 
