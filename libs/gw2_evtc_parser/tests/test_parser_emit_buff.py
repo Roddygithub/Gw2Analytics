@@ -45,9 +45,7 @@ import pytest
 from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
-    BuffRemovalEvent,
     DamageEvent,
-    HealingEvent,
 )
 from gw2_core.models import _EVENT_MAP, EventType
 from gw2_core.models import EventType as _EventType
@@ -61,6 +59,10 @@ from gw2_evtc_parser.parser import _EVENT_STRUCT
 #: Reused struct format -- mirrors the parser's ``_EVENT_STRUCT`` literal 1:1.
 _CBTEVENT_FMT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 _AGENT_NAME_SIZE: Final[int] = 72
+
+
+#: Size of one fixed-size skill record (u32 id + 64-byte null-padded name).
+_SKILL_NAME_SIZE: Final[int] = 64
 
 
 def _build_event_record(
@@ -82,7 +84,7 @@ def _build_event_record(
 
     Extended from the test_parser.py version with ``is_buffremove`` + ``ev_buff``
     keyword parameters so the Phase 9 emit tests can drive both
-    REMOVE-class + APPLY-class predicate boundaries without hand-packing
+    Remove-class + Apply-class predicate boundaries without hand-packing
     64-byte fixtures.
 
     Pack order MUST mirror the parser's unpack order 1:1:
@@ -127,10 +129,20 @@ def _build_event_record(
     )
 
 
+def _build_skill_record(skill_id: int, name: str) -> bytes:
+    """Build one fixed-size 68-byte skill record.
+
+    Layout: skill_id(u32) + name(64-byte null-padded UTF-8 buffer).
+    """
+    name_bytes = name.encode("utf-8")[:_SKILL_NAME_SIZE]
+    name_buf = name_bytes.ljust(_SKILL_NAME_SIZE, b"\x00")
+    return struct.pack("<I", skill_id) + name_buf
+
+
 def _build_minimal_evtc(
     agents: list[tuple[int, int, int, str, bool]],
     *,
-    build: str = "20250925",
+    build: str = "20240925",
     encounter_id: int = 0,
     skills: list[tuple[int, str]] | None = None,
     events: list[bytes] | None = None,
@@ -139,11 +151,9 @@ def _build_minimal_evtc(
 
     Mirrors the helper in :file:`test_parser.py` -- duplicated here
     so this test file stays self-contained (no cross-test imports).
-    The agent-record 72-byte name buffer is filled entirely with
-    nulls; this test file does NOT exercise the player / NPC split
-    (the emit-predicate boundary tests don't depend on agent
-    decode). The fixture builder still produces structurally-valid
-    96-byte agent records so the parser can locate the event block.
+    The fixture builder produces structurally-valid 96-byte agent
+    records and 68-byte fixed-size skill records so the parser can
+    locate the event block.
     """
     if len(build) != 8:
         msg = f"build must be exactly 8 ASCII chars (yyyymmdd), got {len(build)}"
@@ -152,8 +162,9 @@ def _build_minimal_evtc(
         skills = []
     if events is None:
         events = []
+    is_2025 = int(build[:4]) >= 2025
     header = struct.pack(
-        "<4s8sBHBI IB",
+        "<4s8sBHBI I",
         b"EVTC",
         build.encode("ascii"),
         0,
@@ -161,19 +172,21 @@ def _build_minimal_evtc(
         0,
         len(agents),
         len(skills),
-        0,  # lang
     )
-    prefix_fmt = struct.Struct("<QIIhhhh")
-    name_buf = b"\x00" * _AGENT_NAME_SIZE
     body = bytearray()
     for aid, prof, elite, _name, _is_player in agents:
-        # 24-byte prefix + 72-byte all-null name buffer = 96 bytes
-        # (struct ag size) per agent record.
-        body += prefix_fmt.pack(aid, prof, elite, 0, 0, 0, 0) + name_buf
+        if is_2025:
+            # EVTC2025+ agent layout: 6*u32 + 64-byte name + 2*u32 = 96 bytes.
+            name_buf = b"\x00" * _SKILL_NAME_SIZE
+            body += struct.pack("<IIIIII64sII", 0, prof, elite, 0, 0, 0, name_buf, 0, aid)
+        else:
+            prefix = struct.pack("<QIIhhhh", aid, prof, elite, 0, 0, 0, 0)
+            body += prefix + b"\x00" * _AGENT_NAME_SIZE
+    # Legacy (<2025) skill table has a count prefix before fixed-size records.
+    if not is_2025:
+        body += struct.pack("<I", len(skills))
     for skill_id, skill_name in skills:
-        name_bytes = skill_name.encode("utf-8")
-        skill_header = struct.pack("<II", skill_id, len(name_bytes))
-        body += skill_header + name_bytes + b"\x00"
+        body += _build_skill_record(skill_id, skill_name)
     for ev in events:
         if len(ev) != 64:  # EVENT_SIZE
             msg = f"each event record must be exactly 64 bytes, got {len(ev)}"
@@ -217,13 +230,10 @@ def test_parse_events_emit_buff_remove_all_yields_boon_apply_event() -> None:
     """``is_buffremove == 1`` (CBTB_ALL) yields ONE BoonApplyEvent with kind="remove_all".
 
     The extended ``_build_event_record`` helper drives ``is_buffremove=1``
-    via its keyword parameter. The result should be 1 BoonApplyEvent
-    (the REMOVE_ALL marker) + 1 DamageEvent (the ``value > 0``
-    non-statechange record). Total yield: 2 events.
-
-    Dual-emission rationale: Phase 9 tracks buff lifecycle markers
-    via BoonApplyEvent; the magnitude of the strip is the
-    BuffRemovalEvent (which fires when ``buff_dmg > 0`` -- zero here).
+    via its keyword parameter. The parser yields ONLY the
+    BoonApplyEvent(REMOVE_ALL) marker; the ``value`` field on this
+    cbtevent carries buff metadata, not a damage magnitude, so the
+    record does not also emit a DamageEvent. Total yield: 1 event.
     """
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
@@ -239,11 +249,8 @@ def test_parse_events_emit_buff_remove_all_yields_boon_apply_event() -> None:
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
-    # Predicate: BoonApplyEvent REMOVE_ALL fires (kind="remove_all");
-    # DamageEvent fires (value > 0, is_nondamage == 0).
-    # BuffRemovalEvent does NOT fire (buff_dmg == 0).
-    assert len(events) == 2
-    boon, damage = events
+    assert len(events) == 1
+    boon = events[0]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_all"
     assert boon.time_ms == 1_000
@@ -252,23 +259,15 @@ def test_parse_events_emit_buff_remove_all_yields_boon_apply_event() -> None:
     assert boon.skill_id == 42
     assert boon.duration_ms == 0
     assert boon.stacks == 1
-    assert isinstance(damage, DamageEvent)
-    assert damage.damage == 100
 
 
-def test_parse_events_emit_buff_remove_single_yields_three_events() -> None:
-    """``is_buffremove == 2 + is_nondamage > 0 + buff_dmg > 0`` yields triple emission.
+def test_parse_events_emit_buff_remove_single_yields_boon_apply_event() -> None:
+    """``is_buffremove == 2`` yields ONE BoonApplyEvent with kind="remove_single".
 
-    The canonical cbtevent record for a corrupting / confusion skill:
-    REMOVE-single signal at byte 52, heal magnitude in ``value``,
-    strip magnitude in ``buff_dmg``. The parser yields THREE events:
-    BoonApplyEvent (kind="remove_single") + HealingEvent +
-    BuffRemovalEvent. The triple emission is the Phase 8 + Phase 9
-    contract for same-record dual/triple emit.
-
-    This locks the predicate + emission ordering so a future refactor
-    that reorders the yields (e.g. BuffRemovalEvent before
-    BoonApplyEvent) fires at the unit-test boundary.
+    The cbtevent ``value`` / ``buff_dmg`` fields carry buff metadata on
+    REMOVE-class records, not real damage/heal magnitudes. After yielding
+    the BoonApplyEvent marker the parser continues; the downstream
+    damage/heal/strip path is NOT reached. Total yield: 1 event.
     """
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
@@ -278,26 +277,21 @@ def test_parse_events_emit_buff_remove_single_yields_three_events() -> None:
                 time_ms=42_500,
                 src_agent=1,
                 dst_agent=2,
-                value=8_500,  # heal magnitude
-                skill_id=101,  # FK to skills table = "Mimic"
-                buff_dmg=2_250,  # strip magnitude
-                is_nondamage=1,  # heal-class signal
+                value=8_500,  # buff metadata, not a heal magnitude
+                skill_id=101,
+                buff_dmg=2_250,  # buff metadata, not a strip magnitude
+                is_nondamage=1,
                 is_buffremove=2,  # CBTB_SINGLE
             ),
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
-    # Triple emission: boon-apply + heal + strip.
-    assert len(events) == 3
-    boon, heal, strip = events
+    assert len(events) == 1
+    boon = events[0]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_single"
     assert boon.time_ms == 42_500
     assert boon.skill_id == 101
-    assert isinstance(heal, HealingEvent)
-    assert heal.healing == 8_500
-    assert isinstance(strip, BuffRemovalEvent)
-    assert strip.buff_removal == 2_250
 
 
 def test_parse_events_emit_buff_remove_manual_collapses_to_remove_single() -> None:
@@ -306,9 +300,8 @@ def test_parse_events_emit_buff_remove_manual_collapses_to_remove_single() -> No
     The 4th arcdps ``cbtbuffremove`` enum value (CBTB_MANUAL) collapses
     onto ``remove_single`` per arcdps's documented guidance: "use for
     in/out volume". The parser's inline mapping treats bytes 2 and 3
-    identically -- both yield ``kind="remove_single"``. Locks the
-    manual-collapse behaviour so a future refactor that distinguishes
-    MANUAL from SINGLE fires at the unit-test boundary.
+    identically -- both yield ``kind="remove_single"``. After yielding
+    the marker the parser continues; no damage event is emitted.
     """
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
@@ -324,8 +317,8 @@ def test_parse_events_emit_buff_remove_manual_collapses_to_remove_single() -> No
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
-    assert len(events) == 2  # BoonApplyEvent + DamageEvent
-    boon, _damage = events  # _damage intentionally unused
+    assert len(events) == 1
+    boon = events[0]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_single"  # CBTB_MANUAL collapses to SINGLE
 
@@ -443,15 +436,11 @@ def test_parse_events_emit_buff_apply_statechange_marker() -> None:
 
 
 def test_parse_events_emit_buff_remove_with_no_magnitude_still_emits_boon() -> None:
-    """REMOVE record (buff_dmg=0, is_nondamage=0) yields BoonApply + Damage (no strip).
+    """REMOVE record (buff_dmg=0, is_nondamage=0) yields only the BoonApply marker.
 
-    Edge case the plan calls out: REMOVE-class records that have a
-    heal/strip of zero are still REMOVE markers from arcdps
-    (the ``is_buffremove`` byte is set regardless of magnitude) --
-    Phase 9 emits the BoonApplyEvent marker to keep buff-uptime
-    aggregation accurate. BuffRemovalEvent does NOT fire (zero
-    magnitude strip is meaningless); DamageEvent fires (value > 0,
-    is_nondamage == 0).
+    REMOVE-class records with ``value > 0`` still carry buff metadata
+    in ``value``, not a real damage hit. The parser emits the
+    BoonApplyEvent marker and continues; no DamageEvent is emitted.
     """
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
@@ -461,22 +450,18 @@ def test_parse_events_emit_buff_remove_with_no_magnitude_still_emits_boon() -> N
                 time_ms=1_000,
                 src_agent=1,
                 dst_agent=2,
-                value=2_500,  # direct damage
-                buff_dmg=0,  # no strip
-                is_nondamage=0,  # damage-class
-                is_buffremove=2,  # but REMOVE_SINGLE marker
+                value=2_500,
+                buff_dmg=0,
+                is_nondamage=0,
+                is_buffremove=2,
             ),
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
-    # Predicate: BoonApplyEvent REMOVE_SINGLE fires; DamageEvent fires.
-    # BuffRemovalEvent does NOT fire (buff_dmg == 0).
-    assert len(events) == 2
-    boon, damage = events
+    assert len(events) == 1
+    boon = events[0]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_single"
-    assert isinstance(damage, DamageEvent)
-    assert damage.damage == 2_500
 
 
 # ---------------------------------------------------------------------------
@@ -523,14 +508,13 @@ def test_parse_events_emit_apply_mid_combat_yields_boon_apply() -> None:
     assert e.stacks == 1
 
 
-def test_parse_events_emit_apply_with_damage_yields_dual_event() -> None:
-    """APPLY record with damage co-emits BoonApply(kind="apply") + DamageEvent.
+def test_parse_events_emit_apply_with_damage_yields_boon_only() -> None:
+    """APPLY record with non-zero value yields only BoonApply(kind="apply").
 
-    A single arcdps cbtevent can carry BOTH a buff apply AND a
-    damage magnitude (the canonical case is a damage skill that
-    also applies a debuff via the same hit). The parser yields both
-    events: BoonApplyEvent(kind="apply") for the buff lifecycle
-    marker + DamageEvent for the magnitude.
+    On buff-interaction records the ``value`` field carries buff
+    metadata, not a real damage magnitude. The parser emits a single
+    ``BoonApplyEvent(kind="apply")`` and continues so the same record
+    does not also emit a ``DamageEvent``.
     """
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
@@ -540,22 +524,18 @@ def test_parse_events_emit_apply_with_damage_yields_dual_event() -> None:
                 time_ms=15_000,
                 src_agent=1,
                 dst_agent=2,
-                value=850,  # damage magnitude
-                skill_id=42,  # the buff being applied (Torment)
-                ev_buff=42,  # arcdps ev.buff = Torment's buff_id
+                value=850,
+                skill_id=42,
+                ev_buff=42,
             ),
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
-    # Dual emission: BoonApply(apply) + DamageEvent.
-    assert len(events) == 2
-    boon, damage = events
+    assert len(events) == 1
+    boon = events[0]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "apply"
     assert boon.skill_id == 42
-    assert isinstance(damage, DamageEvent)
-    assert damage.damage == 850
-    assert damage.skill_id == 42
 
 
 def test_parse_events_emit_apply_excludes_remove_class() -> None:
@@ -566,7 +546,7 @@ def test_parse_events_emit_apply_excludes_remove_class() -> None:
     handles the rest. A record with ``is_buffremove=2`` AND
     ``ev_buff=42`` (a REMOVE_SINGLE event for buff 42) fires ONLY
     the REMOVE branch, NOT the APPLY branch. The ``elif`` makes the
-    branches exclusive.
+    branches exclusive. No damage event is emitted.
     """
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
@@ -585,17 +565,10 @@ def test_parse_events_emit_apply_excludes_remove_class() -> None:
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
-    # Expected: the REMOVE branch fires (BoonApply kind="remove_single")
-    # and the Damage path fires (DamageEvent because value>0 and
-    # is_nondamage defaults to 0). The APPLY branch is silent because
-    # `is_buffremove == 2` makes the Step 3 `elif _ev_buff != 0`
-    # predicate unreachable via short-circuit.
-    assert len(events) == 2
+    assert len(events) == 1
     boon = events[0]
-    damage = events[1]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_single"
-    assert isinstance(damage, DamageEvent)
 
 
 def test_parse_events_emit_apply_zero_ev_buff_does_not_emit() -> None:
@@ -662,6 +635,46 @@ def test_parse_events_emit_apply_statechange_filtered_upstream() -> None:
     # Statechange record is filtered upstream -- no events.
     # APPLY predicate is unreachable for statechange records.
     assert events == []
+
+
+# ---------------------------------------------------------------------------
+# EVTC2025+ regression: _ev_buff != 0 with value/buff_dmg != 0 emits apply
+# ---------------------------------------------------------------------------
+
+
+def test_parse_events_emit_apply_2025_with_damage_and_strip_yields_boon_only() -> None:
+    """EVTC2025+ APPLY record with value/buff_dmg still emits BoonApply(apply).
+
+    After the v0.10.x guard that suppressed BoonApplyEvent for
+    EVTC2025+ records when ``value != 0`` or ``buff_dmg != 0`` was
+    removed, any non-statechange record with ``_ev_buff != 0`` and
+    ``is_buffremove == 0`` should yield a ``BoonApplyEvent`` with
+    ``kind="apply"`` and then continue so the same record does not
+    also emit a DamageEvent/HealingEvent. This test locks that
+    contract for 2025+ builds.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        skills=[(101, "Quickness")],
+        events=[
+            _build_event_record(
+                time_ms=10_000,
+                src_agent=1,
+                dst_agent=2,
+                value=1_000,  # non-zero in EVTC2025+ apply record
+                buff_dmg=500,  # non-zero in EVTC2025+ apply record
+                skill_id=101,
+                ev_buff=101,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, BoonApplyEvent)
+    assert e.kind == "apply"
+    assert e.skill_id == 101
 
 
 # ---------------------------------------------------------------------------
