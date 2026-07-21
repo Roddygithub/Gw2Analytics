@@ -31,7 +31,7 @@ def _boon_apply(
         skill_id=skill_id,
         duration_ms=duration_ms,
         stacks=stacks,
-        kind=kind,  # type: ignore[arg-type]
+        kind=kind,
     )
 
 
