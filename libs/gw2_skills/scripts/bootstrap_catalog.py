@@ -125,7 +125,7 @@ def _api_skill_to_entry(skill: dict[str, Any]) -> dict[str, Any]:
 def _fetch_all_skill_ids(client: httpx.Client) -> list[int]:
     """Fetch the full list of skill IDs from ``/v2/skills``."""
     print("Fetching skill ID list from /v2/skills ...", end=" ", flush=True)
-    resp = client.get("/v2/skills")
+    resp = client.get("/skills")
     resp.raise_for_status()
     ids: list[int] = resp.json()
     print(f"{len(ids)} IDs retrieved.")
@@ -149,7 +149,7 @@ def _batch_fetch_skills(
             end=" ", flush=True,
         )
         params = {"ids": ",".join(str(sid) for sid in batch)}
-        resp = client.get("/v2/skills", params=params)
+        resp = client.get("/skills", params=params)
         resp.raise_for_status()
         data: list[dict[str, Any]] = resp.json()
         all_skills.extend(data)
