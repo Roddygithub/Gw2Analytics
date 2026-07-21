@@ -48,7 +48,7 @@ class TestPlayerHealAggregator:
         assert rows[0].total_healing == 120
         assert rows[0].heal_count == 1
         assert rows[0].hps == 12.0
-        # SCAFFOLD barrier: pre-Phase-6-v2 streams return barrier_total=0, barrier_ps=0.0.
+        # Legacy (pre-v0.12.x) streams return barrier_total=0, barrier_ps=0.0.
         assert rows[0].barrier_total == 0
         assert rows[0].barrier_ps == 0.0
 

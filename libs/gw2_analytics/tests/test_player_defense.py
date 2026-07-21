@@ -1,9 +1,10 @@
 """Wave 4 / Tour 5 tests for :class:`PlayerDefenseAggregator`.
 
 The Defense aggregator groups damage + CC + death events by the
-receiving/dying player. It also owns the Phase 6 v2 forward-compat
-stub columns (dodges / blocks / interrupts / barrier_absorbed /
-time_downed_ms) which currently stay at 0.
+receiving/dying player. The defense-tracking columns (dodges /
+blocks / interrupts / barrier_absorbed / time_downed_ms) are
+live since v0.12.0-v0.12.3 and receive real data when their
+respective events are present in the stream.
 """
 
 from __future__ import annotations
@@ -119,7 +120,7 @@ class TestPlayerDefenseAggregator:
         assert rows[0].damage_taken == 100
         assert rows[0].cc_taken == 0
         assert rows[0].deaths == 0
-        # Stub columns stay at 0 in the SCAFFOLD path.
+        # Stub columns stay at 0 in the legacy (no-events) path.
         assert rows[0].dodges == 0
         assert rows[0].blocks == 0
         assert rows[0].interrupts == 0
@@ -226,7 +227,7 @@ class TestPlayerDefenseAggregator:
             )
 
     def test_dodge_block_interrupt_events(self) -> None:
-        """Wave 5 SCAFFOLD: dodge/block/interrupt events fill their stub columns."""
+        """Wave 5: dodge/block/interrupt events fill their stub columns."""
         rows = PlayerDefenseAggregator().aggregate(
             [],
             [],

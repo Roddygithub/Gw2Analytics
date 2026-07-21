@@ -48,8 +48,8 @@ class TestPlayerDamageAggregator:
         assert rows[0].total_damage == 100
         assert rows[0].attack_count == 1
         assert rows[0].dps == 10.0
-        # SCAFFOLD split: pre-Phase-6-v2 streams return dps_power=0.0, dps_condi=0.0
-        # (wire-shape-fidelity default: both columns stay at 0 until Phase 6 v2).
+        # Legacy (pre-v0.12.x) streams return dps_power=0.0, dps_condi=0.0
+        # (wire-shape-fidelity default: both columns stay at 0 when no split getter is wired).
         assert rows[0].dps_power == 0.0
         assert rows[0].dps_condi == 0.0
 
