@@ -9,6 +9,9 @@ ENV API_BASE_URL=${API_BASE_URL}
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml /app/
+# CI=true tells pnpm to run native build scripts (esbuild, sharp)
+# even in a non-TTY Docker environment.
+ENV CI=true
 # The lockfile was generated locally (pnpm 11.13.0, Node 26) while
 # Docker runs Node 22. The Node major version delta causes persistent
 # ERR_PNPM_LOCKFILE_CONFIG_MISMATCH on the overrides section even with
