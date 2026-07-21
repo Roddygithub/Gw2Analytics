@@ -14,8 +14,10 @@ COPY libs/gw2_api_client /app/libs/gw2_api_client
 COPY libs/gw2_skills /app/libs/gw2_skills
 COPY apps/api /app/apps/api
 
-# Install all deps (path deps + transitive) into .venv
-RUN uv sync --frozen --no-dev
+# Install API + its workspace path deps (libs/) into .venv.
+# The root pyproject.toml is a virtual project (package=false),
+# so uv sync at the root needs --package to pick a member.
+RUN uv sync --frozen --no-dev --package gw2analytics_api
 
 # --- runtime stage ---
 FROM python:3.12-slim
