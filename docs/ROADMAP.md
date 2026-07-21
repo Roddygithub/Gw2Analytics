@@ -1,8 +1,8 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed AT v0.11.0 cycle
-close-out (2026-07-21) — WAVE-8 shipped (parser statechange dispatch +
-Skills DB catalog).
+**Status:** Living document. Last refreshed AT v0.11.4 cycle
+close-out (2026-07-21) — WAVE-8 COMPLETE (8/8 subclasses shipped,
+ConditionRemoveEvent wired end-to-end via buff ID lookup table).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -21,8 +21,9 @@ The **v0.10.23-pre mimo-half cycle** (Tour 5 plan 045 Combat readout, per `docs/
 
 ZERO production-code regression on v0.10.25 (Tour 7). ZERO regression on Tour 6 (v0.10.24-pre). ZERO regression on Tour 5 (v0.10.23-pre). ZERO regression on Tour 4 (v0.10.22).
 
-**Forward-blockers resolved by v0.11.0**: Skills DB catalog (B.1-B.5) ✅,
-parser statechange dispatch (A.4: 7/8 subclasses wired) ✅.
+**Forward-blockers resolved by v0.11.4**: Skills DB catalog (B.1-B.5) ✅,
+parser statechange dispatch (A.4: 8/8 subclasses wired) ✅,
+ConditionRemoveEvent (aggregator-tier via buff_id + is_condition) ✅.
 
 **F17 frontend SCAFFOLD-zero columns unlocked by v0.11.0**:
 - `defense.deaths` → DeathEvent (byte 4) ✅
@@ -35,15 +36,18 @@ parser statechange dispatch (A.4: 7/8 subclasses wired) ✅.
 `heal.barrier_ps` (needs barrier-rate aggregator), `damage.dps_power` /
 `damage.dps_condi` (needs Phase 6 v2 condi_portion table).
 
-**Remaining forward-blockers**: Phase 6 v2 parser-stream switch,
-CCEvent (bytes 34+35, dual-byte BreakbarState+Percent),
-ConditionRemoveEvent (aggregator-tier via Skills DB catalog),
-`aggregate_combat_readout` dispatcher extension,
+**Remaining forward-blockers**: Phase 6 v2 parser-stream switch
+(for dps_power/condi split, barrier_ps, time_downed_ms),
 `GET /api/v1/fights/{fight_id}/readout` artisan route handler,
-4 web AG Grid Client Components.
+4 web AG Grid Client Components (F17 frontend verification).
 
-- **Latest shipped tag:** v0.11.0 (WAVE-8 parser statechange dispatch +
-  Skills DB catalog).
+**Next cycle focus**: F17 frontend verification with real WvW data
+(to confirm the 5 unlocked SCAFFOLD-zero columns populate correctly),
+Phase 6 v2 parser-stream switch preparation,
+ROADMAP cleanup (remove stale v0.10.x entries).
+
+- **Latest shipped tag:** v0.11.4 (WAVE-8 complete — 8/8 subclasses shipped,
+  ConditionRemoveEvent wired end-to-end, Skills DB catalog 4,610 skills).
 - **Test coverage:** 92% (9,316 lines, 742 uncovered). Perf tests: 2 flakes
   (timing-sensitive, environment-specific). All other suites green. landed 9 atomic commits (6 code+tests + 3 docs: CHANGELOG entry splice + ROADMAP stamp refresh + cycle-end audit). Close-out docs shipped: `## [0.10.22]` CHANGELOG entry spliced + `docs/ROADMAP.md` refresh (this section) + `plans/AUDIT-2026-07-15-v0.10.22.md`. Cumulative test surface: apps/api pytest 256 / web vitest 179 / web Playwright 28 = **344 tests** (all green; 318 pre-v0.10.22 baseline + 26 NEW Tour 4).
 

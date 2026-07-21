@@ -7,9 +7,9 @@
 > - [Spike — v0.10.19 combat readout](../docs/v0.10.19-combat-readout-spike.md) — A.1-A.7 + B.1-B.7 sub-blocks source-of-truth
 > - [Design doc — v0.9.0 combat readout](../docs/v0.9.0-combat-readout-design.md) §3-§6 — table column contracts
 
-> **Status:** Plan (post-Tour 6 v0.10.24-pre wire-contract stabilisation + post-StunBreakEvent partial Blocker A.3 shipping; pre cycle authorisation).
-> **Branch target:** a fresh `feat/wave-8-parser-side` branch on cycle authorisation.
-> **Shippable in:** v0.11.0 cycle (2-cycle scope per WAVE-8 §4 sequencing; the cycle authorisation may stack into one cycle if budget allows).
+> **Status:** **COMPLETE** — 8/8 WAVE-8 subclasses shipped (v0.11.4).
+> v0.11.0: initial 7/8 dispatch. v0.11.1: CCEvent. v0.11.2: result-byte tests.
+> v0.11.3: buff ID lookup table. v0.11.4: ConditionRemoveEvent end-to-end.
 
 ## §1 Cycle thread
 
@@ -66,10 +66,9 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
             - Result-byte dispatch (parser.py line 808-837): Block (_result==3),
               Dodge (_result==4), Interrupt (_result==5) — 3 entries ✅
             - Result-byte tests: 3 hermetic tests in test_parser_emit_statechange.py ✅ (v0.11.2)
-            Total: 8 of 8 subclasses identified; 7 wired (5 statechange + 3 result-byte,
-            StunBreak counted once). ConditionRemoveEvent deferred — requires buff ID
-            lookup table (libs/gw2_core/_buff_ids.py, shipped v0.11.3) for aggregator-tier
-            classification of BuffRemovalEvent skill_id as condition vs boon.
+            Total: 8 of 8 subclasses shipped. ConditionRemoveEvent wired
+            end-to-end in v0.11.4 via buff_id classification (using
+            libs/gw2_core/_buff_ids.py is_condition() on the arcdps ev.buff byte).
 [x] Step 7: A.5 — 11 hermetic dispatch tests (8 statechange + 3 result-byte)
             in libs/gw2_evtc_parser/tests/test_parser_emit_statechange.py ✅
 [x] Step 8: A.6 — real-fixture integration test (extend the F1 calibration pilot).
@@ -123,14 +122,14 @@ pre-cycle: feat/wave-8-parser-side branch from main post-5725423
              heal.barrier_total + heal.barrier_ps (awaiting Blocker A.4)
              defense.time_downed_ms + defense.dodges + defense.blocks
              + defense.interrupts (awaiting Blocker A.4)
-post-cycle: Parser skip-filter closed over; the cbtevent decode loop emits
-            BarrierEvent + ConditionRemoveEvent + CCEvent + DownEvent + DeathEvent
-            + DodgeEvent + BlockEvent + InterruptEvent per the matching statechange
-            kind byte.
-            Skills DB catalog ships in libs/gw2_skills/ with the canonical 500-skill
-            fixture subset bootstrapped.
-            All 8 SCAFFOLD-zero columns surface live values in the readout banner.
-            The banner mutates to "Combat readout loaded · N players · duration X.X s."
+             post-cycle: 8/8 WAVE-8 subclasses shipped (v0.11.4).
+             ConditionRemoveEvent wired via buff_id classification.
+             Skills DB catalog shipped (4,610 skills).
+             All 8 SCAFFOLD-zero columns have a dispatch path;
+             5 columns (deaths/dodges/blocks/interrupts/barrier_total)
+             fully wired through parser→aggregator→frontend.
+             3 columns (time_downed_ms, barrier_ps, dps_power/condi)
+             still need Phase 6 v2 aggregator work.
 ```
 
 ZERO regression on Tour 7 (v0.10.25). ZERO regression on Tour 6 (v0.10.24-pre). ZERO regression on Tour 5 (v0.10.23-pre). ZERO regression on Tour 4 (v0.10.22).
