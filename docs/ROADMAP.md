@@ -2,7 +2,7 @@
 
 **Status:** Living document. Last refreshed AT v0.11.0 cycle
 close-out (2026-07-21) — WAVE-8 shipped (parser statechange dispatch +
-Skills DB catalog). — Wave 4 update lands Workstream D-extension complete (Boons + Defense aggregators shipped).
+Skills DB catalog).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -19,23 +19,24 @@ The **v0.10.23-pre mimo-half cycle** (Tour 5 plan 045 Combat readout, per `docs/
 - **Wave 2 SCAFFOLD** (2 atomic commits): 4 NEW statechange event subclasses in [`libs/gw2_core/src/gw2_core/models.py`](libs/gw2_core/src/gw2_core/models.py) (ConditionRemoveEvent / DownEvent / DeathEvent / StunBreakEvent) wired through the `EventType` StrEnum + the `type Event` discriminated union (now 9 members; DeathEvent gains 2 Optional forward-compat fields `killed_by_agent_id` + `killing_skill_id` that prevent Phase 6 v2 schema bump) + 6 NEW wire-shape Pydantic classes in [`apps/api/src/gw2analytics_api/schemas/fight.py`](apps/api/src/gw2analytics_api/schemas/fight.py) (PlayerReadout{Damage,Heal,Boons,Defense}Out + PlayerReadoutOut + FightReadoutOut) + their re-exports in [`apps/api/src/gw2analytics_api/schemas/__init__.py`](apps/api/src/gw2analytics_api/schemas/__init__.py).
 - **Wave 3 Workstream D-partial** (1 atomic commit): 2 NEW per-player aggregators `PlayerDamageAggregator` + `PlayerHealAggregator` in [`libs/gw2_analytics/src/gw2_analytics/player_damage.py`](libs/gw2_analytics/src/gw2_analytics/player_damage.py) + [`player_heal.py`](libs/gw2_analytics/src/gw2_analytics/player_heal.py) -- strict axis-flipped mirrors of `target_dps.py` + `target_healing.py` so future cross-axis edits are mechanical. `libs/gw2_analytics/src/gw2_analytics/__init__.py` re-exports the 4 NEW names alphabetically.
 
-The cycle is hedged-rank SCAFFOLD: NO `apps/api/routes/fights/aggregators.py` dispatcher change (the library-side modules ship in isolation; the route-side wiring awaits the Phase 6 v2 parser-stream switch + a follow-up tour with `pytest` online). NO web/Frontend change (the 4 AG Grid `<PlayerReadoutXxx>` Client Components await the same tour). NO new tests (the library-side surface is package-isolated; the tests will land with the future route handler + web UI).
+ZERO production-code regression on v0.10.25 (Tour 7). ZERO regression on Tour 6 (v0.10.24-pre). ZERO regression on Tour 5 (v0.10.23-pre). ZERO regression on Tour 4 (v0.10.22).
 
-ZERO production-code regression on Tour 4 (v0.10.22). ZERO regression on the existing 5 per-fight endpoints. ZERO regression on the v0.10.20 PARTIAL-FIX K-cluster (the cycle is library-only -- `apps/api/conftest.py`, the `routes/fights/aggregators.py`, and the web test substrate are all untouched). Tour 4's 344 cumulative test surface remains GREEN.
-
-6 forward-blockers carried to v0.10.24+ / v0.11.0+: Workstream D-extension (Boons + Defense aggregators) + Phase 6 v2 parser-stream switch + Skills DB catalog + `aggregate_combat_readout` dispatcher extension + `GET /api/v1/fights/{fight_id}/readout` artisan route handler + 4 web AG Grid Client Components.
+**Forward-blockers resolved by v0.11.0**: Skills DB catalog (B.1-B.5) ✅.
+**Remaining forward-blockers**: Phase 6 v2 parser-stream switch +
+`aggregate_combat_readout` dispatcher extension +
+`GET /api/v1/fights/{fight_id}/readout` artisan route handler +
+4 web AG Grid Client Components.
 
 - **Latest shipped tag:** v0.11.0 (WAVE-8 parser statechange dispatch +
-  Skills DB catalog). The **v0.10.22 mimo-half** cycle landed 9 atomic commits (6 code+tests + 3 docs: CHANGELOG entry splice + ROADMAP stamp refresh + cycle-end audit). Close-out docs shipped: `## [0.10.22]` CHANGELOG entry spliced + `docs/ROADMAP.md` refresh (this section) + `plans/AUDIT-2026-07-15-v0.10.22.md`. Cumulative test surface: apps/api pytest 256 / web vitest 179 / web Playwright 28 = **344 tests** (all green; 318 pre-v0.10.22 baseline + 26 NEW Tour 4).
+  Skills DB catalog). landed 9 atomic commits (6 code+tests + 3 docs: CHANGELOG entry splice + ROADMAP stamp refresh + cycle-end audit). Close-out docs shipped: `## [0.10.22]` CHANGELOG entry spliced + `docs/ROADMAP.md` refresh (this section) + `plans/AUDIT-2026-07-15-v0.10.22.md`. Cumulative test surface: apps/api pytest 256 / web vitest 179 / web Playwright 28 = **344 tests** (all green; 318 pre-v0.10.22 baseline + 26 NEW Tour 4).
 
 - **Prior cycle audit chain (for archival):** v0.10.19 mimo-half DEFER cycle shipped at marker `cd6e9ad`. The v0.10.19 cycle attempted M8 (per `plans/RELEASE-v0.10.19.md`) but DEFERRED to v0.10.20 after 6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` autouse fixture exhausted the signature-shape budget. v0.10.18.1 (`plans/AUDIT-2026-07-13-2ffafc75.md`) is the canonical K1+K2+K3 discoverer. v0.10.19 close-out audit: `plans/AUDIT-2026-07-12-cd6e9ad.md`.
 
-- **Architecture:** unchanged from v0.10.9+:
+- **Architecture:** unchanged:
   `gw2_evtc_parser` → `gw2_core` → `gw2_analytics` →
   `apps/api` (FastAPI) + `gw2_api_client` (outbound) → `web`
   (Next.js 16). Pure-Python parser, gated behind an `EvtcParser`
-  Protocol so a Rust + PyO3 binding is a drop-in replacement (no
-  churn elsewhere).
+  Protocol. New in v0.10.25+: `libs/gw2_skills` catalog library.
 
 ---
 
@@ -290,7 +291,7 @@ is now in §1.1 cycle shipts (see "v0.10.17 cycle shipts" above).
 - **Wave 4 Workstream D-extension complete** — 2 NEW per-player aggregators (`PlayerBoonsAggregator` + `PlayerDefenseAggregator` in libs/gw2_analytics) close the Workstream D-extension forward-blocker. `PlayerBoonsAggregator` handles the Combat readout §5 Boons table (6 fixed buff-IDs as module constants + dynamic `other_boons_out` bucket) with `kind == "apply"` pre-filter; source-side attribution for `boons_out`, target-side for `boons_in`. `PlayerDefenseAggregator` handles the Combat readout §6 Defense table (target-side for damage + CC, actor-side for deaths) with optional `barrier_portion_getter` for the Phase 6 v2 parser-stream wire-up; sort: `(-damage_taken, agent_id)` per design doc §13 "defensive load is the leading indicator". The 4 stub columns (`time_downed_ms` / `dodges` / `blocks` / `interrupts`) + `barrier_absorbed` are pinned at 0 for the v0.10.23 wire contract — Phase 6 v2 will land the 3 NEW Event subclasses (DodgeEvent / BlockEvent / InterruptEvent) AND the down-state lifecycle parser AND the per-damage barrier portion to fill these in without a schema bump.
 - **Cycle topology** — 4 atomic commits on `main` (2 library commits for Wave 2 + 1 library commit for Wave 3 + 1 library commit for Wave 4 + docs folded into each wave commit per `CONTRIBUTING.md` linear-history rule). ZERO net test-surface delta (the cycle is SCAFFOLD + library-only; the cumulative test count stays at 344 from v0.10.22). 5 forward-blockers REMAINING at Wave 4 close (down from 6): Phase 6 v2 parser-stream switch + Skills DB catalog + `aggregate_combat_readout` dispatcher extension + `GET /api/v1/fights/{fight_id}/readout` artisan route handler + 4 web AG Grid Client Components.
 
-**v0.11.0 WAVE-8 cycle shipts (in progress)** — release branch `feat/v0.11.0`.
+**v0.11.0 WAVE-8 cycle shipts (shipped)** — release tag `v0.11.0`.
 
 - **A.4 parser statechange dispatch**: 7 of 8 new Event subclasses wired.
   4 statechange-driven (DeathEvent byte 4, DownEvent byte 5, BarrierEvent
