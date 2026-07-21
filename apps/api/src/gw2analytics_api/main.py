@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response as FastAPIResponse
-from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
+from fastapi_mcp import FastApiMCP
 from prometheus_client import generate_latest
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
