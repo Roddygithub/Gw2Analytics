@@ -1,3 +1,33 @@
+## [0.12.4] - 2026-07-21
+
+### Changed — Dead code removal + docstring cleanup
+- **Deleted `_scaffold.py`**: the 5 legacy fallback functions
+  (`default_dps_split`, `default_barrier_portion_from_damage`,
+  `default_barrier_portion_from_healing`, `default_zero`,
+  `default_full_power_split`) were never called by production code
+  (aggregators use `None`-checks, not scaffold fallbacks). Removed
+  the module + `test_scaffold.py`. Cleaned `__init__.py` re-exports.
+- **SCAFFOLD docstrings cleaned** across 13 files (~50 occurrences):
+  `player_damage.py`, `player_heal.py`, `player_defense.py`,
+  `player_boons.py`, `down_contribution.py`, `aggregators.py`,
+  `models.py`, `schemas/fight.py`, `__init__.py`, and 3 test files.
+  "Phase 6 v2 SCAFFOLD" → "Phase 6 v2 (live since v0.12.1)",
+  "pre-Phase-6-v2" → "legacy (pre-v0.12.x)", "SCAFFOLD path" →
+  "legacy path". Removed broken `:func:` cross-references.
+
+### Added
+- **`.env.prod.example`**: production environment template for
+  `docker-compose.prod.yml` with docker hostnames, Fernet key
+  placeholder, and production-appropriate defaults.
+- **`docker-compose.prod.yml`**: added postgres + minio services
+  (mirroring dev compose) with health conditions on `depends_on`,
+  separate prod volumes (`pgdata_prod`/`miniodata_prod`).
+
+### Validation
+- pytest: 0 failures, mypy: clean (83→109 source files), ruff: clean
+- vitest: 391/394, Playwright E2E: 34/34
+- Coverage: 92%
+
 ## [0.12.3] - 2026-07-21
 
 ### Changed — Frontend SCAFFOLD banner close-out
