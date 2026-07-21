@@ -263,6 +263,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.33] - 2026-07-21
+
+### Added
+- **Skills catalog populated: 4,610 skills from official GW2 v2 API**.
+  ``libs/gw2_skills/scripts/bootstrap_catalog.py`` fetches all skill IDs
+  from ``/v2/skills`` (public, no auth), batch-fetches 200 at a time,
+  maps to ``SkillEntry``, writes NDJSON atomically. Catalog loads
+  successfully (17/17 tests pass), wired into API lifespan since v0.10.26.
+  4,702 fetched, 92 skipped (name too short for Pydantic validation).
+- **B.1 Skills DB source decision** (``plans/WAVE-8-B1-skills-db-source.md``):
+  official GW2 v2 REST API chosen over community datasets.
+
 ## [0.10.32] - 2026-07-21
 
 ### Added
