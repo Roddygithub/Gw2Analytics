@@ -36,7 +36,7 @@ import time
 import uuid as _uuid
 
 import pytest
-from _fixtures import make_minimal_zevtc
+from _fixtures import build_2025_string, make_minimal_zevtc
 from fastapi.testclient import TestClient
 from sqlalchemy import BigInteger, cast
 
@@ -62,7 +62,7 @@ def test_duplicate_skill_id_is_deduped_on_insert() -> None:
     one).
     """
     suffix = _uuid.uuid4().hex[:8]
-    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    build = build_2025_string(suffix)
 
     # The 2 skills share the SAME skill_id (99999) but have
     # different names. This simulates the arcdps parser quirk:

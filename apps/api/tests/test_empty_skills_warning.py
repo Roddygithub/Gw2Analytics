@@ -54,20 +54,22 @@ client: TestClient = TestClient(app)
 def test_parser_safety_bound_graceful_degradation(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """v0.10.2 hotfix followup #8: 5000-char skill name triggers parser safety bound.
+    """v0.10.2 hotfix followup #8: 5000-char skill name is handled gracefully.
 
-    The 5000-char skill name exceeds ``MAX_SKILL_NAME_BYTES``
-    (4096). The parser's ``_iter_skills`` logs its own WARNING
-    and stops reading, yielding 0 skills. The parser computes
-    ``actual_skill_count`` from the walk (NOT the raw header
-    byte), so ``head.skill_count`` is already 0 when
-    ``_save_fight`` receives it. The upload completes gracefully.
+    The parser uses fixed 68-byte skill records (4-byte skill_id +
+    64-byte name buffer). A 5000-char skill name is silently truncated
+    to 64 bytes by the fixture before the parser sees it. The upload
+    completes gracefully with the truncated name (non-fatal degradation).
+
+    Pre-v0.10.2 (variable-length skill records): the parser's
+    ``MAX_SKILL_NAME_BYTES`` safety bound would fire and log a WARNING.
+    Post-v0.10.2 (fixed 68-byte records): the 64-byte buffer IS the
+    safety bound, so no separate WARNING is needed.
     """
     suffix = _uuid.uuid4().hex[:8]
     build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
 
-    # A 5000-char skill name triggers the parser's
-    # ``MAX_SKILL_NAME_BYTES`` safety bound.
+    # A 5000-char skill name is truncated to 64 bytes by the fixture.
     overlong_skill_name = "A" * 5_000
     blob = make_minimal_zevtc(
         agents=[(11111, 2, 18, f"Player {suffix}", True)],
@@ -75,42 +77,26 @@ def test_parser_safety_bound_graceful_degradation(
         build=build,
     )
 
-    with caplog.at_level(logging.WARNING, logger=parser_logger.name):
-        resp = client.post(
-            "/api/v1/uploads",
-            files={"file": ("empty_skills.zevtc", blob, "application/octet-stream")},
-        )
-        assert resp.status_code == 201, resp.text
-        upload_id = resp.json()["id"]
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("empty_skills.zevtc", blob, "application/octet-stream")},
+    )
+    assert resp.status_code == 201, resp.text
+    upload_id = resp.json()["id"]
 
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            upload_resp = client.get(f"/api/v1/uploads/{upload_id}")
-            assert upload_resp.status_code == 200
-            if upload_resp.json()["status"] in ("completed", "failed"):
-                break
-            time.sleep(0.1)
-        else:
-            pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
-        assert upload_resp.json()["status"] == "completed", (
-            f"expected 'completed' (safety bound is non-fatal), "
-            f"got {upload_resp.json()['status']!r}; "
-            f"error_message: {upload_resp.json().get('error_message')!r}"
-        )
-
-    # Verify the parser's safety-bound WARNING was logged.
-    # The parser logs "exceeding safety bound" when name_len
-    # > MAX_SKILL_NAME_BYTES.
-    safety_warnings = [
-        r
-        for r in caplog.records
-        if r.levelno == logging.WARNING
-        and r.name == parser_logger.name
-        and "safety bound" in r.message
-    ]
-    assert len(safety_warnings) >= 1, (
-        f"expected at least 1 parser WARNING with 'safety bound', got: "
-        f"{[(r.name, r.levelname, r.message) for r in caplog.records]}"
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        upload_resp = client.get(f"/api/v1/uploads/{upload_id}")
+        assert upload_resp.status_code == 200
+        if upload_resp.json()["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail(f"upload {upload_id} did not reach terminal status within 5s")
+    assert upload_resp.json()["status"] == "completed", (
+        f"expected 'completed' (truncation is non-fatal), "
+        f"got {upload_resp.json()['status']!r}; "
+        f"error_message: {upload_resp.json().get('error_message')!r}"
     )
 
 

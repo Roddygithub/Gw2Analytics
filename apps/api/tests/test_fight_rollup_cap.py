@@ -38,20 +38,18 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 
-from apps.api.tests.routes._evtc_builder import build_2025_string
 from gw2analytics_api.main import app
 
 client = TestClient(app)
 
 # V1.3 EVTC layout (matches libs/gw2_evtc_parser parser.py).
-_HEADER_FMT = "<4s8sBHBI IB"
-_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 25
+_HEADER_FMT = "<4s8sBHBII"
+_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 24
 _AGENT_RECORD_FMT = "<QIIhhhh"
 _AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)  # 24
 _AGENT_NAME_SIZE = 72
 _AGENT_SIZE = _AGENT_PREFIX_SIZE + _AGENT_NAME_SIZE  # 96
-_SKILL_HEADER_FMT = "<II"
-_SKILL_HEADER_SIZE = struct.calcsize(_SKILL_HEADER_FMT)  # 8
+_SKILL_RECORD_SIZE = 68  # skill_id(u32) + name(64s)
 _EVENT_FMT = "<QQQiiIIHHHbbbbbbbbIIbb"
 _EVENT_SIZE = struct.calcsize(_EVENT_FMT)  # 64
 
@@ -134,7 +132,6 @@ def _make_minimal_zevtc(
             0,
             len(agents),
             len(skills),
-            0,  # lang
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()
@@ -159,11 +156,9 @@ def _make_minimal_zevtc(
             name_buf = raw + b"\x00" * (_AGENT_NAME_SIZE - len(raw))
             body += prefix + name_buf
         for skill_id, skill_name in skills:
-            name_bytes = skill_name.encode("utf-8")
-            skill_record = (
-                struct.pack(_SKILL_HEADER_FMT, skill_id, len(name_bytes)) + name_bytes + b"\x00"
-            )
-            body += skill_record
+            name_bytes = skill_name.encode("utf-8")[:64]
+            name_buf = name_bytes + b"\x00" * (_SKILL_RECORD_SIZE - 4 - len(name_bytes))
+            body += struct.pack("<I64s", skill_id, name_buf)
         for ev in events:
             body += ev
         zf.writestr("fight.evtc", header + bytes(body))
@@ -245,7 +240,7 @@ def test_target_dps_rollup_capped_at_100_rows() -> None:
 
     blob = _make_minimal_zevtc(
         agents=agents,
-        build=build_2025_string(suffix) if len(suffix) >= 4 else "20250925",
+        build="20240925",  # legacy: local helper uses legacy EVTC layout
         skills=[(base_skill_a, f"CapDpsSkill {suffix}")],
         events=events,
     )
@@ -339,7 +334,7 @@ def test_target_healing_rollup_capped_at_100_rows() -> None:
 
     blob = _make_minimal_zevtc(
         agents=agents,
-        build=build_2025_string(suffix) if len(suffix) >= 4 else "20250925",
+        build="20240925",  # legacy: local helper uses legacy EVTC layout
         skills=[(base_skill_a, f"CapHealSkill {suffix}")],
         events=events,
     )
@@ -416,7 +411,7 @@ def test_target_buff_removal_rollup_capped_at_100_rows() -> None:
 
     blob = _make_minimal_zevtc(
         agents=agents,
-        build=build_2025_string(suffix) if len(suffix) >= 4 else "20250925",
+        build="20240925",  # legacy: local helper uses legacy EVTC layout
         skills=[(base_skill_a, f"CapStripSkill {suffix}")],
         events=events,
     )
@@ -501,7 +496,7 @@ def test_skills_rollup_capped_at_100_rows() -> None:
 
     blob = _make_minimal_zevtc(
         agents=agents,
-        build=build_2025_string(suffix) if len(suffix) >= 4 else "20250925",
+        build="20240925",  # legacy: local helper uses legacy EVTC layout
         skills=skills,
         events=events,
     )

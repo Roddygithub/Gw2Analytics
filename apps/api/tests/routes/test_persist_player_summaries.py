@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections.abc import Sequence
 from unittest.mock import patch
@@ -33,6 +34,13 @@ def _seed_and_call(
     """Seed a fight + 2 agents + call _persist_player_summaries. Returns fight_id."""
     fight_id = f"ps-test-{uuid.uuid4().hex[:8]}"
     upload_uuid = uuid.uuid4()
+    # Derive a unique 64-char sha256 from the fight_id so parallel test
+    # methods and re-runs do not collide on the Upload.sha256 unique
+    # index (previously hardcoded to "a" * 64, which raised
+    # UniqueViolation on the second test method that committed an Upload).
+    # Using hashlib.sha256 (not uuid5) because the column is String(64)
+    # and uuid5.hex is only 32 chars.
+    sha256 = hashlib.sha256(fight_id.encode()).hexdigest()
     session = get_sessionmaker()()
     try:
         session.add(
@@ -40,7 +48,7 @@ def _seed_and_call(
                 id=upload_uuid,
                 status="completed",
                 parser_version="0",
-                sha256="a" * 64,
+                sha256=sha256,
                 original_filename="t.zevtc",
                 size_bytes=0,
             )

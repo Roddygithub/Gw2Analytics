@@ -48,7 +48,7 @@ import uuid as _uuid
 import zipfile
 
 import pytest
-from _fixtures import make_minimal_zevtc
+from _fixtures import build_2025_string, make_minimal_zevtc
 from fastapi.testclient import TestClient
 
 from gw2_evtc_parser import __version__ as PARSER_VERSION  # noqa: N812
@@ -68,7 +68,7 @@ def test_parser_version_is_stamped_on_successful_parse() -> None:
     parser-version bumps.
     """
     suffix = _uuid.uuid4().hex[:8]
-    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    build = build_2025_string(suffix)
 
     blob = make_minimal_zevtc(
         agents=[(11111, 2, 18, f"Player {suffix}", True)],

@@ -116,11 +116,11 @@ def _make_minimal_zevtc(
         skills = []
     if events is None:
         events = []
-    header_fmt = "<4s8sBHBI IB"
+    header_fmt = "<4s8sBHBII"
     header_size = _struct.calcsize(header_fmt)
     agent_record_fmt = "<QIIhhhh"
     agent_name_size = 72
-    skill_header_fmt = "<II"
+    skill_record_size = 68
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
         header = _struct.pack(
@@ -132,7 +132,6 @@ def _make_minimal_zevtc(
             0,
             len(agents),
             len(skills),
-            0,  # lang
         )
         assert len(header) == header_size
         body = bytearray()
@@ -156,12 +155,14 @@ def _make_minimal_zevtc(
                 raise ValueError(msg)
             name_buf = raw + b"\x00" * (agent_name_size - len(raw))
             body += prefix + name_buf
+        # Legacy format: 4-byte skill_count prefix before the records
+        # (the parser's _detect_skill_format reads this to determine the
+        # table layout).
+        body += _struct.pack("<I", len(skills))
         for skill_id, skill_name in skills:
-            name_bytes = skill_name.encode("utf-8")
-            skill_record = (
-                _struct.pack(skill_header_fmt, skill_id, len(name_bytes)) + name_bytes + b"\x00"
-            )
-            body += skill_record
+            name_bytes = skill_name.encode("utf-8")[:64]
+            name_buf = name_bytes + b"\x00" * (skill_record_size - 4 - len(name_bytes))
+            body += _struct.pack("<I64s", skill_id, name_buf)
         for ev in events:
             body += ev
         zf.writestr("fight.evtc", header + bytes(body))
@@ -200,7 +201,12 @@ def _post_minimal_fight_with_professions(
     """
 
     suffix = suffix or _uuid.uuid4().hex[:8]
-    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    # Legacy (pre-2025) build: the local _make_minimal_zevtc helper
+    # uses the legacy EVTC wire format (uint64 agent_id, variable
+    # skill records, legacy event struct).  A 2025+ build string would
+    # make the parser use the EVTC2025+ layout, causing a layout
+    # mismatch and garbage reads.
+    build = "20240925"
     # Large ``base_id_a`` range to avoid collisions with prior
     # test runs' account_names (1_000_000_000..1_429_496_729 for
     # a full 8-char hex suffix). The agent_id field is uint64
@@ -217,19 +223,25 @@ def _post_minimal_fight_with_professions(
     # Back-and-forth cbtevent stream so every agent has at
     # least 1 contribution. The exact direction doesn't
     # matter for the profession filter.
+    # Events MUST be in non-decreasing time_ms order so the
+    # parser's ``_validate_event_candidate`` monotonicity check
+    # passes (backwards timestamps cause the parser to fall back
+    # to EVTC2025+ detection, misreading events as skills).
+    # Emit all forward events first, then all reverse events.
     for i in range(len(professions) - 1):
         events.append(
             _make_cbtevent(
-                time_ms=1_500,
+                time_ms=1_500 + i * 1_000,
                 src=base_id_a + i,
                 dst=base_id_a + i + 1,
                 value=1_000,
                 skill_id=base_skill,
             ),
         )
+    for i in range(len(professions) - 1):
         events.append(
             _make_cbtevent(
-                time_ms=2_000,
+                time_ms=2_000 + i * 1_000,
                 src=base_id_a + i + 1,
                 dst=base_id_a + i,
                 value=500,

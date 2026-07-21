@@ -35,7 +35,7 @@ def _bind_client(request: pytest.FixtureRequest) -> None:
 def _post_compare_fight(n_players: int, suffix: str | None = None) -> tuple[str, list[str]]:
     assert client is not None  # mypy: narrow TestClient | None → TestClient
     suffix = suffix or _uuid.uuid4().hex[:8]
-    base_id = 2_000_000_000 + int(suffix, 16)
+    base_id = 1_000_000 + int(suffix[:4], 16) if len(suffix) >= 4 else 1_000_000
     base_skill = 2_000_000 + int(suffix[:4], 16) if len(suffix) >= 4 else 2_000_000
     agents = [(base_id + i, 2, 5, f"V0100 P{i} {suffix}", True) for i in range(n_players)]
     events = []

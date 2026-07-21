@@ -40,7 +40,7 @@ import time
 import uuid as _uuid
 
 import pytest
-from _fixtures import make_minimal_zevtc
+from _fixtures import build_2025_string, make_minimal_zevtc
 from fastapi.testclient import TestClient
 from sqlalchemy import Numeric as SANumeric
 from sqlalchemy import cast
@@ -67,7 +67,7 @@ def test_duplicate_agent_id_is_deduped_on_insert() -> None:
     that was active longest in the fight).
     """
     suffix = _uuid.uuid4().hex[:8]
-    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    build = build_2025_string(suffix)
 
     # The 2 agents share the SAME agent_id (12345) but have
     # different names. This simulates the arcdps quirk: a player
