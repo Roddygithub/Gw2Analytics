@@ -96,6 +96,7 @@ fixtures.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from typing import cast
 
@@ -133,6 +134,7 @@ from gw2_core import (
     InterruptEvent,
     PositionEvent,
     StunBreakEvent,
+    is_condition,
 )
 from gw2analytics_api.routes.fights.mappers import AgentIdentity
 from gw2analytics_api.schemas import (
@@ -389,6 +391,8 @@ def _build_player_readout(
     heal_row: PlayerHealRow | None,
     boons_row: PlayerBoonsRow | None,
     defense_row: PlayerDefenseRow | None,
+    *,
+    cleanses: int = 0,
 ) -> PlayerReadoutOut:
     """Build a single :class:`PlayerReadoutOut` from aspect rows + identity.
 
@@ -450,7 +454,7 @@ def _build_player_readout(
             # fallback).
             barrier_total=h_row.barrier_total,
             barrier_ps=h_row.barrier_ps,
-            cleanses=0,  # awaits ConditionRemoveEvent stream (Phase 6 v2 yields).
+            cleanses=cleanses,
             # Tour 6 v0.10.24 close-out: stun_breaks populated
             # from the per-player row (actor-side attribution).
             stun_breaks=h_row.stun_breaks,
@@ -629,6 +633,17 @@ def aggregate_combat_readout(
         name_map=_identity_name_map,
     )
 
+    # v0.11.4: classify BuffRemovalEvent by buff_id using is_condition()
+    # from gw2_core._buff_ids.  Condition cleanses (buff_id is a
+    # condition like Bleeding=736) are counted per source_agent_id
+    # and passed to _build_player_readout as the cleanses column.
+    # Boon strips (buff_id is a boon like Might=740) remain as
+    # generic BuffRemovalEvent and are NOT reclassified here.
+    cleanses_counter: Counter[int] = Counter()
+    for event in events:
+        if isinstance(event, BuffRemovalEvent) and is_condition(event.buff_id):
+            cleanses_counter[event.source_agent_id] += 1
+
     # Build the per-agent_id -> per-aspect-row map. The 4
     # per-player aggregators all key on agent_id, so a single
     # dict comprehension per aspect merges cleanly. Agents that
@@ -679,6 +694,7 @@ def aggregate_combat_readout(
             heal_by_id.get(agent_id),
             boons_by_id.get(agent_id),
             defense_by_id.get(agent_id),
+            cleanses=cleanses_counter.get(agent_id, 0),
         )
         for agent_id in sorted(valid_agent_ids)
     ]

@@ -263,6 +263,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.4] - 2026-07-21
+
+### Added
+- **ConditionRemoveEvent wiring**: the last WAVE-8 subclass is now
+  functionally wired end-to-end via the buff ID lookup table:
+  - `BuffRemovalEvent.buff_id` (new field, default 0) carries the
+    arcdps `ev.buff` byte — the buff/effect ID being removed.
+  - Parser passes `_ev_buff & 0xFF` (unsigned byte) as `buff_id`.
+  - `aggregate_combat_readout` classifies each `BuffRemovalEvent`
+    via `gw2_core.is_condition(buff_id)` and counts cleanses per
+    source agent.
+  - `_build_player_readout` now accepts `cleanses` kwarg (default 0).
+  - The `PlayerReadoutHealOut.cleanses` column is populated from
+    real data instead of the hardcoded SCAFFOLD-zero.
+
+### Fixed
+- **Signed byte bug**: `_ev_buff` is int8 in the struct format;
+  buff IDs ≥ 128 would unpack as negative and violate `buff_id`'s
+  `ge=0` constraint. Fixed with `_ev_buff & 0xFF`.
+
+### Validation
+- ruff: clean, mypy: 0 errors, pytest: 0 failures (parser + API)
+
 ## [0.11.3] - 2026-07-21
 
 ### Added

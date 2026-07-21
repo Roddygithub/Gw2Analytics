@@ -337,6 +337,12 @@ class BuffRemovalEvent(BaseEvent):
 
     event_type: Literal[EventType.BUFF_REMOVAL] = EventType.BUFF_REMOVAL
     buff_removal: int = Field(..., ge=0)
+    #: arcdps ``ev.buff`` byte — the buff/effect ID being removed.
+    #: Used by the aggregator layer to classify the removal as a
+    #: boon strip (e.g. Might=740) or a condition cleanse
+    #: (e.g. Bleeding=736) via :func:`gw2_core.is_condition`.
+    #: Defaults to 0 for backward-compat with pre-v0.11.4 streams.
+    buff_id: int = Field(default=0, ge=0)
 
 
 class BoonApplyEvent(BaseEvent):

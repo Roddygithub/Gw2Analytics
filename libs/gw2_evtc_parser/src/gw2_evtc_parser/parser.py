@@ -873,12 +873,19 @@ class PythonEvtcParser:
                 # events: one ``HealingEvent`` (above) + one
                 # ``BuffRemovalEvent`` (below).
                 if buff_strip > 0:
+                    # v0.11.4: pass the arcdps ev.buff byte as buff_id
+                    # so the aggregator can classify the removal as a
+                    # boon strip vs condition cleanse via gw2_core.is_condition.
+                    # _ev_buff is a signed int8; use & 0xFF for the
+                    # unsigned byte value (buff IDs 128-255 would otherwise
+                    # be negative and violate BuffRemovalEvent.buff_id ge=0).
                     yield BuffRemovalEvent(
                         time_ms=time_ms,
                         source_agent_id=src_agent,
                         target_agent_id=dst_agent,
                         skill_id=skill_id,
                         buff_removal=buff_strip,
+                        buff_id=_ev_buff & 0xFF,
                     )
 
 
