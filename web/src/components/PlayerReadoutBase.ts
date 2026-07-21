@@ -111,8 +111,7 @@ export const SHARED_COLUMNS: ColDef<PlayerReadoutOut>[] = [
     headerName: "Spécialisation",
     width: 180,
     // F17 W.1: Tango icon cellRenderer (elite_spec > profession
-    // precedence; falls back to text for unknown enum values
-    // captured in the Phase 6 v2 SCAFFOLD-zero contract).
+    // precedence; falls back to text for unknown enum values).
     cellRenderer: EliteSpecCellRenderer,
   },
   {

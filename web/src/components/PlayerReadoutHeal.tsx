@@ -15,11 +15,9 @@
  * 3. ``agent_id`` ASC tie-breaker
  *
  * Per design doc §7, barrier is a SEPARATE field from heal
- * (the canonical "barrier is separable" lock-in). The
- * SCAFFOLD-getter plumbing from Wave 6 PART-2 makes
- * ``barrier_total`` + ``barrier_ps`` carry real phase-6-v2
- * values once the parser-side ``barrier_portion`` table lands;
- * pre-phase-6-v2 streams show ``0`` for both columns.
+ * (the canonical "barrier is separable" lock-in).
+ * ``barrier_total`` + ``barrier_ps`` carry real values from the
+ * v0.12.x Phase 6 v2 parser stream (HealingEvent.barrier field).
  */
 import type { ColDef, SortModelItem } from "ag-grid-community";
 

@@ -37,8 +37,7 @@ import { PlayerReadoutGrid } from "./PlayerReadoutGrid";
 
 /**
  * Sum all values in the ``other_boons_out`` dict for one row.
- * Renders zero when the dict is empty or undefined (the pre-
- * phase-6-v2 SCAFFOLD zero-fallback case).
+ * Renders zero when the dict is empty or undefined.
  */
 function sumOtherBoons(
   dict: Record<string, number> | undefined | null,

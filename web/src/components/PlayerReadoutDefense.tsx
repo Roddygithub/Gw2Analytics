@@ -19,18 +19,11 @@
  *    glance)
  * 3. ``agent_id`` ASC tie-breaker
  *
- * Pre-phase-6-v2 SCAFFOLD-zero note
- * =================================
- * ``time_downed_ms`` requires the parser to track the per-
- * target down-state lifecycle across events (Phase 6 v2 work);
- * the SCAFFOLD-zero contract leaves it at ``0`` until that
- * lands. The Wave 6 PART-2 wire-shape keeps the column on the
- * grid so a future phase-6-v2 stream automatically picks up the
- * real value without a UI change. ``dodges`` + ``blocks`` +
- * ``interrupts`` await the statechange event subclasses
- * (DodgeEvent / BlockEvent / InterruptEvent) which the
- * Wave 5 SCAFFOLD shipped but whose parser yield paths remain
- * Phase 6 v2 work.
+ * All defense columns (``dodges``, ``blocks``, ``interrupts``,
+ * ``time_downed_ms``) carry real values from the v0.12.x
+ * Phase 6 v2 parser stream (statechange dispatch + down-state
+ * lifecycle tracking). ``time_downed_ms`` may be 0 for fights
+ * without captured down-state cycles.
  */
 import type { ColDef, SortModelItem } from "ag-grid-community";
 

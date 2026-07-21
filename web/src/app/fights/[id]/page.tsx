@@ -432,26 +432,14 @@ export default async function FightEventsPage({
     accountSkillsError = fightDetailsError ?? FAILED_TO_LOAD_FIGHT_DETAILS;
   }
 
-  // Tour 6 v0.11.0-prep: Combat-readout payload fetch for the
-  // ?tab=readout path. Conditional fetch so the /readout
+  // Tour 6 v0.12.x (Phase 6 v2): Combat-readout payload fetch for
+  // the ?tab=readout path. Conditional fetch so the /readout
   // network round-trip only fires when the analyst lands on
-  // the readout tab -- the Overview + Replay tabs skip it
-  // entirely (the SCAFFOLD-state hardcoded rows={[]} on the
-  // Wave 7 save was the right shape before the backend route
-  // landed; now the round-trip is cheap (cached blob fetch +
-  // O(player-count) compute) so the conditional-on-tab is
-  // sufficient). Wires the live PlayerReadoutOut rows into
-  // the 4 PlayerReadout{Damage,Heal,Boons,Defense} components
-  // that previously rendered with rows={[]} per the Wave 7
-  // SCAFFOLD contract (see CHANGELOG v0.10.23-pre). SCAFFOLD-
-  // ZERO honesty: dps_power + dps_condi + barrier_total +
-  // barrier_ps + time_downed_ms + dodges + blocks + interrupts
-  // stay at 0 by design -- those columns await the Phase 6 v2
-  // parser-stream switch (per docs/v0.10.19-combat-readout-
-  // spike.md Blocker A) + the Skills DB catalog full fill-out
-  // (Blocker B). The downstream cells render the in-grid zero
-  // + the status banner below names which columns are SCAFFOLD-
-  // zero so the analyst reads the contract inline.
+  // the readout tab. All columns (dps_power, dps_condi,
+  // barrier_total, barrier_ps, dodges, blocks, interrupts,
+  // time_downed_ms) are wired to real parser-stream values
+  // via the v0.12.x aggregator getter plumbing + parser
+  // statechange dispatch.
   let readoutData: FightReadoutOut | null = null;
   let readoutError: string | null = null;
   if (activeTab === "readout") {
@@ -705,17 +693,16 @@ export default async function FightEventsPage({
           ) : (
             <>
               Combat readout loaded · {readoutData.players.length} players ·
-              duration {readoutData.duration_s.toFixed(1)} s. SCAFFOLD-zero
-              columns <code>dps_power</code> + <code>dps_condi</code> +
-              <code> heal.barrier_total</code> + <code>heal.barrier_ps</code> +
-              <code> defense.time_downed_ms</code> +{" "}
+              duration {readoutData.duration_s.toFixed(1)} s. All columns are
+              wired to real parser-stream values:{" "}
+              <code>dps_power</code> + <code>dps_condi</code> +
+              <code>heal.barrier_total</code> + <code>heal.barrier_ps</code> +
               <code>defense.dodges</code> + <code>defense.blocks</code> +
-              <code> defense.interrupts</code> stay at 0 until Phase 6 v2
-              lands the parser-side barrier-portion + condi-split +
-              statechange event subclasses (per{" "}
-              <code>docs/v0.10.19-combat-readout-spike.md</code> Blocker A + B).
-              Every other column shown below is wired to real per-event data
-              from the upstream blob.
+              <code>defense.interrupts</code>.{" "}
+              <code>defense.time_downed_ms</code> is aggregator-wired (parser
+              emits downtime from down-state lifecycle tracking;
+              may be 0 for fights without captured down-state cycles).
+              All columns below are live.
             </>
           )}
         </p>

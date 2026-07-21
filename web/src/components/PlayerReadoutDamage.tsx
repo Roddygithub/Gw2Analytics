@@ -19,12 +19,9 @@
  *    priority via array order — AG Grid Community v34
  *    ``SortModelItem`` omits ``sortIndex``).
  *
- * The component is a thin wrapper around ``PlayerReadoutGrid``
- * -- the SCAFFOLD-getter plumbing we wired in Wave 6 PART-2 makes
- * the ``dps_power`` / ``dps_condi`` fields carry real phase-6-v2
- * values once the parser-side ``condi_portion`` table lands.
- * Pre-phase-6-v2 streams show ``dps_power=0.0`` + ``dps_condi=0.0``
- * for every row -- the byte-equivalent SCAFFOLD wire shape.
+ * The component is a thin wrapper around ``PlayerReadoutGrid``.
+ * ``dps_power`` / ``dps_condi`` carry real values from the
+ * v0.12.x Phase 6 v2 parser stream (per-event buff_dmg split).
  */
 import type { ColDef, SortModelItem } from "ag-grid-community";
 
