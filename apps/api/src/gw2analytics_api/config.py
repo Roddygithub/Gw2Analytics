@@ -172,19 +172,6 @@ class Settings(BaseSettings):
         ge=100,
         le=100_000,
     )
-    # v0.13.4: rate limiting (slowapi). Defaults are per-endpoint;
-    # operators can override via env vars. Upload is the tightest
-    # (5/min) because a 100 MiB POST is the highest-risk endpoint.
-    # General API endpoints default to 100/min.
-    rate_limit_upload: str = Field(
-        default="5/minute",
-        validation_alias="RATE_LIMIT_UPLOAD",
-    )
-    rate_limit_default: str = Field(
-        default="100/minute",
-        validation_alias="RATE_LIMIT_DEFAULT",
-    )
-
     # v0.10.25: hard cap on the compressed ``.zevtc`` upload body.
     # Real WvW logs are ~5-40 MB compressed; the cap gives headroom
     # for the largest known files while preventing OOM from malicious

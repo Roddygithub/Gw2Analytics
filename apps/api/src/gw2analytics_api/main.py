@@ -19,8 +19,6 @@ from prometheus_client import generate_latest
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 
-from gw2analytics_api.limiter import limiter
-
 # v0.10.8 plan 140 plan 140 Fix-E: switched from module-local binding to
 # live attribute lookup. The module-local binding (``from ... import
 # check_schema_drift``) created a snapshot at import time; conftest.py
@@ -33,6 +31,7 @@ from gw2analytics_api.limiter import limiter
 from gw2analytics_api import schema_guard
 from gw2analytics_api.config import get_settings
 from gw2analytics_api.database import get_sessionmaker
+from gw2analytics_api.limiter import limiter
 from gw2analytics_api.metrics import SKILLS_CATALOG_FRESHNESS_DAYS
 from gw2analytics_api.routes import (
     account,

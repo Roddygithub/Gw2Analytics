@@ -1,5 +1,9 @@
 packages: []
 
+allowBuilds:
+  esbuild: set this to true or false
+  sharp: set this to true or false
+
 # Security overrides: force patched versions of transitive dependencies
 # to silence `pnpm audit` findings. These can be removed once Next.js
 # and Vitest update their own dependency ranges to pull in the patched
