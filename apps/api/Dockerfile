@@ -24,7 +24,7 @@ RUN uv sync --frozen --no-dev --package gw2analytics_api
 # --- runtime stage ---
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 curl && rm -rf /var/lib/apt/lists/*
 
 # Copy the entire venv from builder (editable .pth files point to source)
 COPY --from=builder /app/.venv /app/.venv
