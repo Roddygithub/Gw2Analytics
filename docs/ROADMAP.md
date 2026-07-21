@@ -10,54 +10,39 @@ or the CHANGELOG. It is meant to be edited at every release tag so
 that the next session can pick up exactly where the previous one left
 off.
 
----
+---## Current state (post-WAVE-8 v0.11.4)
 
-## Current state (post v0.10.23-pre cycle)
+**WAVE-8 COMPLETE** — 5 releases (v0.11.0→v0.11.4), 8/8 Event subclasses dispatched:
 
-The **v0.10.23-pre mimo-half cycle** (Tour 5 plan 045 Combat readout, per `docs/v0.9.0-combat-readout-design.md`) shipped hedged-rank SCAFFOLD + Workstream D-partial:
+| Subclass | Dispatch | Shipped |
+|---|---|---|
+| StunBreakEvent | byte 56 (statechange) | Tour 6 → v0.11.0 |
+| BarrierEvent | byte 38 (statechange) | v0.11.0 |
+| DeathEvent | byte 4 (statechange) | v0.11.0 |
+| DownEvent | byte 5 (statechange) | v0.11.0 |
+| CCEvent | byte 35 (BreakbarPercent) | v0.11.1 |
+| BlockEvent | _result=3 (CBTR_BLOCK) | v0.11.0 parser.py |
+| DodgeEvent | _result=4 (CBTR_EVADE) | v0.11.0 parser.py |
+| InterruptEvent | _result=5 (CBTR_INTERRUPT) | v0.11.0 parser.py |
+| ConditionRemoveEvent | buff_id→is_condition() | v0.11.4 aggregator |
 
-- **Wave 2 SCAFFOLD** (2 atomic commits): 4 NEW statechange event subclasses in [`libs/gw2_core/src/gw2_core/models.py`](libs/gw2_core/src/gw2_core/models.py) (ConditionRemoveEvent / DownEvent / DeathEvent / StunBreakEvent) wired through the `EventType` StrEnum + the `type Event` discriminated union (now 9 members; DeathEvent gains 2 Optional forward-compat fields `killed_by_agent_id` + `killing_skill_id` that prevent Phase 6 v2 schema bump) + 6 NEW wire-shape Pydantic classes in [`apps/api/src/gw2analytics_api/schemas/fight.py`](apps/api/src/gw2analytics_api/schemas/fight.py) (PlayerReadout{Damage,Heal,Boons,Defense}Out + PlayerReadoutOut + FightReadoutOut) + their re-exports in [`apps/api/src/gw2analytics_api/schemas/__init__.py`](apps/api/src/gw2analytics_api/schemas/__init__.py).
-- **Wave 3 Workstream D-partial** (1 atomic commit): 2 NEW per-player aggregators `PlayerDamageAggregator` + `PlayerHealAggregator` in [`libs/gw2_analytics/src/gw2_analytics/player_damage.py`](libs/gw2_analytics/src/gw2_analytics/player_damage.py) + [`player_heal.py`](libs/gw2_analytics/src/gw2_analytics/player_heal.py) -- strict axis-flipped mirrors of `target_dps.py` + `target_healing.py` so future cross-axis edits are mechanical. `libs/gw2_analytics/src/gw2_analytics/__init__.py` re-exports the 4 NEW names alphabetically.
+**Skills DB catalog**: 4,610 skills from GW2 /v2/skills API,
+eager-loaded in API lifespan.
 
-ZERO production-code regression on v0.10.25 (Tour 7). ZERO regression on Tour 6 (v0.10.24-pre). ZERO regression on Tour 5 (v0.10.23-pre). ZERO regression on Tour 4 (v0.10.22).
+**E2E verified** (2026-07-21, real WvW log): blocks=1, interrupts=2
+populated from arcdps data through parser→aggregator→readout endpoint.
 
-**Forward-blockers resolved by v0.11.4**: Skills DB catalog (B.1-B.5) ✅,
-parser statechange dispatch (A.4: 8/8 subclasses wired) ✅,
-ConditionRemoveEvent (aggregator-tier via buff_id + is_condition) ✅.
+**Forward-blockers resolved**: Skills DB ✅, 8/8 dispatch ✅,
+ConditionRemoveEvent ✅, buff ID lookup table ✅.
 
-**F17 frontend SCAFFOLD-zero columns unlocked by v0.11.0**:
-- `defense.deaths` → DeathEvent (byte 4) ✅
-- `defense.dodges` → DodgeEvent (_result byte) ✅
-- `defense.blocks` → BlockEvent (_result byte) ✅
-- `defense.interrupts` → InterruptEvent (_result byte) ✅
-- `heal.barrier_total` → BarrierEvent (byte 38) ✅
+**Remaining**: Phase 6 v2 parser-stream (dps_power/condi split,
+barrier_ps, time_downed_ms), F17 frontend verification with real data.
 
-**Still pending**: `defense.time_downed_ms` (needs downtime tracking),
-`heal.barrier_ps` (needs barrier-rate aggregator), `damage.dps_power` /
-`damage.dps_condi` (needs Phase 6 v2 condi_portion table).
-
-**Remaining forward-blockers**: Phase 6 v2 parser-stream switch
-(for dps_power/condi split, barrier_ps, time_downed_ms),
-`GET /api/v1/fights/{fight_id}/readout` artisan route handler,
-4 web AG Grid Client Components (F17 frontend verification).
-
-**Next cycle focus**: F17 frontend verification with real WvW data
-(to confirm the 5 unlocked SCAFFOLD-zero columns populate correctly),
-Phase 6 v2 parser-stream switch preparation,
-ROADMAP cleanup (remove stale v0.10.x entries).
-
-- **Latest shipped tag:** v0.11.4 (WAVE-8 complete — 8/8 subclasses shipped,
-  ConditionRemoveEvent wired end-to-end, Skills DB catalog 4,610 skills).
-- **Test coverage:** 92% (9,316 lines, 742 uncovered). Perf tests: 2 flakes
-  (timing-sensitive, environment-specific). All other suites green. landed 9 atomic commits (6 code+tests + 3 docs: CHANGELOG entry splice + ROADMAP stamp refresh + cycle-end audit). Close-out docs shipped: `## [0.10.22]` CHANGELOG entry spliced + `docs/ROADMAP.md` refresh (this section) + `plans/AUDIT-2026-07-15-v0.10.22.md`. Cumulative test surface: apps/api pytest 256 / web vitest 179 / web Playwright 28 = **344 tests** (all green; 318 pre-v0.10.22 baseline + 26 NEW Tour 4).
-
-- **Prior cycle audit chain (for archival):** v0.10.19 mimo-half DEFER cycle shipped at marker `cd6e9ad`. The v0.10.19 cycle attempted M8 (per `plans/RELEASE-v0.10.19.md`) but DEFERRED to v0.10.20 after 6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` autouse fixture exhausted the signature-shape budget. v0.10.18.1 (`plans/AUDIT-2026-07-13-2ffafc75.md`) is the canonical K1+K2+K3 discoverer. v0.10.19 close-out audit: `plans/AUDIT-2026-07-12-cd6e9ad.md`.
-
-- **Architecture:** unchanged:
-  `gw2_evtc_parser` → `gw2_core` → `gw2_analytics` →
-  `apps/api` (FastAPI) + `gw2_api_client` (outbound) → `web`
-  (Next.js 16). Pure-Python parser, gated behind an `EvtcParser`
-  Protocol. New in v0.10.25+: `libs/gw2_skills` catalog library.
+- **Latest tag:** v0.11.4
+- **Test surface:** pytest ~500+ / vitest 391 / Playwright 28
+- **Architecture:** gw2_evtc_parser → gw2_core → gw2_analytics →
+  apps/api (FastAPI) + gw2_api_client → web (Next.js 16)
+  + libs/gw2_skills (catalog) + libs/gw2_core/_buff_ids.py (buff ID lookup)
 
 ---
 
@@ -71,266 +56,32 @@ ROADMAP cleanup (remove stale v0.10.x entries).
 
 
 > **v0.10.19 mimo-half cycle attempt**: 6 iterations on `conftest.py`'s `_disable_dotenv_for_tests` autouse fixture exhausted the signature-budget against pydantic-settings actual call style; 3 residual failures persisted out of the 11 K-cluster per `CHANGELOG [0.10.19]`. Forward-defer to v0.10.20 per `plans/AUDIT-2026-07-12-cd6e9ad.md` §2. NO production-code regression; bucket K = Test-Substrate Mismatch.
-### 1.1 Items removed since v0.8.0 / v0.9.0 release cycle (for archival)
+### 1.1 Historical cycle shipts (archival)
 
-The following items previously listed in §1 have shipped and are now
-documented in their respective CHANGELOG entries. Listed here once
-so a future audit can confirm what was cleaned up; do not re-add.
+Shipped features are documented in CHANGELOG.md. Key milestones:
 
-- **Backend "webhooks" (foundational + API + single-attempt worker)** — shipped v0.9.0 close-out. 8 files: alembic migration `0006` (3 tables: `webhook_subscriptions` / `webhook_deliveries` / `webhook_dlq` per design doc §4) + 3 ORM classes (`OrmWebhookSubscription` with `filter_payload` Python attr shadowing the SQL `filter` column, `OrmWebhookDelivery` with NO ondelete cascade, `OrmWebhookDlq` with NO FK subscription_id for forensics) + 3 Pydantic schemas (`WebhookSubscriptionCreate` / `WebhookSubscriptionCreatedOut` with one-time secret / `WebhookSubscriptionOut` after the dead-`revoked_at`-field post-reviewer drop) + 4 endpoints under `/api/v1/webhooks` (POST → 201 / GET-list / GET-by-id / DELETE → 204 idempotent soft-delete) + workers module (`apps/api/src/gw2analytics_api/workers/webhook_dispatch.py`) with single-attempt HMAC-SHA256-signed dispatch + 11 e2e tests (`apps/api/tests/test_webhooks_e2e.py`, all ruff+mypy clean). The retry+DLQ+replay layer was deliberately deferred to v0.9.1 -- the v0.9.0 close-out ships enough for integrators to build against the API; the retry/DLQ replay-ui loop is the natural hardening slice.
-  Original source: `docs/v0.8.0-backend-design.md` (full design doc shippable as-is). Effort estimate matched reality: M-effort vs the original L estimate (the v0.9.0 scope intentionally excluded the 3-attempt retry schedule + the DLQ replay endpoint to land the foundational layer in one cycle).
-- **Cross-account comparison** — shipped v0.10.0
-  (new route at `/players/compare` + `?accounts=` multi-select on the
-  timeline endpoint). The effort matched the M estimate.
-- **Per-day bucketing on the timeline** — shipped v0.8.1
-  (`?bucket=day` on `GET /api/v1/players/{account_name:path}/timeline` +
-  "Per fight" / "Per day" toggle on `PlayerTimelineSection`).
-  Original source: `docs/v0.8.0-web-design.md` §7. Effort estimate
-  matched reality: S-effort as predicted.
+- **v0.9.0**: Webhooks backend (foundational + API + single-attempt worker)
+- **v0.10.0**: Cross-account comparison
+- **v0.10.13**: Event dispatch streaming, LRU cache, webhook DLQ replay
+- **v0.10.14**: BFF Playwright e2e, fetchCached helper, ARQ CI gate
+- **v0.10.15**: Exception narrowing, per-section error chips
+- **v0.10.17**: Replay UI (F18), vitest specs, fetchCached isolation tests
+- **v0.10.18**: Replay UI Playwright e2e, README parity sync
+- **v0.10.22**: Skill build analyser (Tour 4)
+- **v0.10.23-pre**: Wave 2-4 SCAFFOLD (9-member Event union, 4 per-player aggregators)
+- **v0.11.0→v0.11.4**: WAVE-8 complete (8/8 dispatch, Skills DB, ConditionRemoveEvent)
 
-**v0.10.13 cycle shipts** (release commit `fa67b15`).
+### 1.2 Next deliverables (post-WAVE-8)
 
-- **Plan 027 — Event dispatch streaming `gzip.GzipFile`** — shipped
-  v0.10.13. Replaces `gzip.decompress + splitlines` (which
-  materialised the full 30 MB JSONL into memory) with a streaming
-  `gzip.GzipFile(fileobj=io.BytesIO(gz_bytes))` wrapper. Bounded
-  memory peak to the zlib-chunk buffer (~64 KB) regardless of blob
-  size. Closes the pre-v0.10.13 OOM path on large WvW raid dumps.
-
-- **Plan 028 — Event dispatch hub consolidation** — shipped v0.10.13.
-  Single `EVENT_TYPE_ADAPTER: TypeAdapter[Event]` instance in
-  `apps/api/src/gw2analytics_api/_event_dispatch.py` shared across
-  `backfill.py` + `routes/fights.py` + `routes/players.py` (3
-  previous duplicates). Closes the "3 adapters go stale" future risk.
-
-- **Plan 029 — Per-fight blob `lru_cache(maxsize=8)`** — shipped
-  v0.10.13 on `get_events(blob_uri)` in `routes/fights.py`. Closes
-  the 4× MinIO GET waterfall on the `Promise.allSettled` drilldown
-  page (was a prior-audit F2 finding).
-
-- **Plan 012 — Webhook DLQ GET + replay route** — shipped v0.10.13.
-  New `GET /api/v1/webhooks/dlq` (returns DLQ rows with
-  `subscription_id` filter) + new `POST
-  /api/v1/webhooks/dlq/{delivery_id}/replay` (creates fresh
-  delivery + atomically deletes the DLQ row, with SELECT FOR UPDATE
-  row-locking for concurrent-replay idempotency). UI in
-  `web/src/components/WebhookDlqGrid.tsx`.
-
-- **Plan 013 — Webhook DNS executor + 2.0 s timeout fence** —
-  shipped v0.10.13. `_DNS_EXECUTOR` thread pool + 2.0 s
-  `future.result(timeout)` fence closes the slow-DNS-resolver DoS
-  hot path. v0.10.10 followup bumped `max_workers` from 1 to 32
-  via `DNS_POOL_MAX_WORKERS`.
-
-**v0.10.14 cycle shipts** (release commit `5d0d4d4`).
-
-- **D1 — BFF Playwright e2e to CI green** — shipped v0.10.14.
-  Rewrite `web/tests/e2e/account-bff.spec.ts` to use Playwright's
-  `page.route` stubbing for the negative-path coverage. 5 cases
-  exercise the BFF proxy + the validation envelope directly.
-
-- **D2 — `fetchCached` helper for the per-fight drilldown page** —
-  shipped v0.10.14. New `web/src/lib/fetchCached.ts` wraps the 5
-  gateway calls in LRU (8 entries) + TTL (60 s) with in-flight
-  dedup. Page uses Promise.allSettled to fire all 5 in parallel.
-  Test suite in `web/tests/lib/fetchCached.test.ts` (6 cases).
-
-- **D3 — Visual regression baseline refresh (threshold 1→1.5%)** —
-  shipped v0.10.14. Refreshed 9 baseline PNGs at `docs/screenshots/`;
-  `DIFF_THRESHOLD` raised from `0.01` to `0.015` to absorb the
- 8-fixture font-rendering drift between the v0.10.9 baseline host
-  and the v0.10.14 CI host.
-
-- **D4 — ARQ-integration CI gate + port-1 defensive env** — shipped
-  v0.10.14. New `arq-integration` job in `.github/workflows/ci.yml`
-  brings up the arq worker against `docker compose up -d redis`, runs
-  the `apps/api/tests/test_parser_worker.py` +
-  `apps/api/tests/test_uploads_arq.py` suites. Port-1 defensive
-  guard in `parser_settings.py` so a missing `REDIS_PORT` env
-  surfaces a clear RuntimeError at startup, not a silent port 1
-  bind.
-
-**v0.10.15 cycle shipts** (release commit — see `plans/RELEASE-v0.10.15.md`).
-
-- **Plan 032 — `except Exception` narrow in `main.py:113`** — shipped
-  v0.10.15. Caught exception class narrowed from bare `Exception` to
-  `(ConnectionError, OSError, TimeoutError)`. Other exception types
-  (e.g. `AttributeError` from a typo'd `redis_settings`) now
-  propagate, surfacing the real misconfiguration instead of masking
-  it with a misleading "arq pool init failed" warning.
-
-- **Plan 033 — `except Exception` narrow in `rotate_kek.py:104`** —
-  shipped v0.10.15. Per-row catch narrowed to `(InvalidToken,
-  UnicodeDecodeError, SQLAlchemyError)`. Closes the dev DX landmine
-  of catching unrelated exception types.
-
-- **Plan 034 — `?subscription_id=` collapse in `webhooks.py:294`** —
-  shipped v0.10.15. Normalize empty query string to `None` so the
-  typed contract `str | None` holds + tests can assert
-  `subscription_id is None` on `?subscription_id=`.
-
-- **Plan 035 — Per-section error chips in
-  `web/src/app/fights/[id]/page.tsx`** — shipped v0.10.15. The
-  `Promise.allSettled` pattern's silent partial-failure UX is
-  replaced with per-section diagnostic chips on the squads / skills
-  / timeline / playerTimeline grids. Events endpoint failure
-  retains the page-level blocking-error banner.
-
-**v0.10.17 cycle shipts** (release commit — see `plans/RELEASE-v0.10.17.md`).
-
-- **D1 — Replay UI for `/fights/[id]` (F18 main scope)** — shipped
-  v0.10.17. NEW `web/src/components/ReplayPlayer.tsx` (~600 LoC) is
-  a Client Component with playback engine (play/pause + 1x/2x/4x/8x
-  speed toggle + scrubber drag + auto-pause at last bucket) +
-  per-bucket visualisation (3 horizontal sub-bars per bucket:
-  damage / healing / strip) + locale-formatted totals + the
-  speed-chip cluster with `aria-pressed` + current-bucket badge
-  `B{i+1}` + empty-state messaging. NEW `web/src/lib/replayFetcher.ts`
-  (~90 LoC) wraps `fetchCached` to fetch the per-fight timeline
-  rollup at the page's resolved `window_s` (URL omits `?window_s=`
-  when windowS=5; includes `?window_s=N` otherwise).
-  `web/src/app/fights/[id]/page.tsx` MODIFIED to add the Replay tab
-  to the tab strip; case-insensitive tab matching + wiring
-  `fetchReplayTimeline` into the `Promise.allSettled` (6th parallel
-  fetch). `web/src/components/PerFightTimelineChart.tsx` MODIFIED (1
-  line) — `export` added to `formatSecondsLabel` so ReplayPlayer.tsx
-  can reuse it.
-
-- **D2 — `replay-player.test.tsx` vitest specs (13 cases)** — shipped
-  v0.10.17. NEW `web/tests/components/replay-player.test.tsx` covers
-  3 render chrome (scrubber `aria-valuemin`/`aria-valuemax`/
-  `aria-valuenow` + speed chips `aria-pressed` + locale-formatted
-  totals), 5 playback engine (Play click → setInterval fakes + speed
-  toggle changes interval + Pause stops advancement + Reset pauses +
-  auto-pause at last bucket), 2 scrubber + current bucket (drag
-  updates currentIndex + badge `B{i+1}` highlights), 2 empty states
-  (no timeline / no buckets), 1 initial state (Bucket 1 of N
-  visible at mount). All `vi.advanceTimersByTime(N)` wrapped in
-  `act(() => ...)` to neutralise React 18+ auto-batching flakiness.
-
-- **D3 — `window-size-selector.test.tsx` vi.mock TDZ fix (pre-existing
-  vitest failure closure)** — shipped v0.10.17. Closes 1 of the 7
-  pre-existing vitest failures from the v0.10.14 release notes:
-  `window-size-selector.test.tsx` had a TDZ error on the
-  top-of-file `pushMock` + `searchParamsMock` constants when
-  vitest hoists `vi.mock(...)` above them. Wraps both mocks in
-  `vi.hoisted(() => ({ ... }))` so they initialise BEFORE the
-  `vi.mock` calls run.
-
-- **D4 — `fetchCached` LRU isolation test (deferred v0.10.16 D4
-  hygiene pin)** — shipped v0.10.17. NEW `web/tests/lib/
-  fetchCached-isolation.test.ts` pins all 5 promised-behaviors + 1
-  concurrency case (TTL hit / TTL expiry / dedup / no-cache-on-error
-  / LRU cap eviction at maxsize=8 / concurrent `Promise.all`).
-  Without this test, a future `fetchCached` refactor could silently
-  break the LRU bound + the TTL contract + the dedup contract
-  without test detection. Anti-regression substrate for the v0.10.14
-  D2 `fetchCached` helper.
-
-- **D5 — `replay-substrate-integration.test.ts` cross-component
-  substrate pin (v0.10.17 D5)** — shipped v0.10.17. NEW file pins
-  the contract between `ReplayPlayer.tsx` (consumer) and
-  `fetchCached.ts` (infrastructure) at the `fetchReplayTimeline`
-  wrapper boundary. 6 sub-cases: URL omits `?window_s=` when
-  windowS=5 / URL includes `?window_s=N` when windowS!==5 /
-  `encodeURIComponent` defensiveness on fightId / invalid windowS
-  rejection (0/-1/NaN) BEFORE the gateway call / `fetchCached` error
-  propagation unmodified / LRU cache hit within 60s TTL. A future
-  regression in EITHER ReplayPlayer.tsx OR fetchCached.ts would
-  break this contract; D5 is the single test that catches
-  regressions on EITHER side.
-
-**v0.10.18 cycle shipts** (release commit — see `plans/RELEASE-v0.10.18.md`
-+ cycle-end audit `plans/AUDIT-2026-07-20-1405720.md`).
-
-- **D1 marker — D1 pre-closed by v0.10.17 D3** — shipped v0.10.18
-  (commit `4610a10`). The v0.10.17 D3 mock-layer-swap commit
-  `52fd60f` closed ALL 7 pre-existing vitest failures atomically
-  (they shared ONE root cause: mocking the wrong module). The
-  v0.10.18 cycle's diagnostic-first phase reconciles the audit's
-  stale "1 of 7 closed" count into the true outcome (7 of 7
-  closed). Zero-line `git commit --allow-empty` preserves the
-  cycle's strict 4-commit topology.
-- **D3 — Replay UI Playwright e2e spec (deferred from v0.10.17
-  D2)** — shipped v0.10.18 (commit `53e1796`). NEW
-  `web/tests/e2e/replay-ui.spec.ts` (~167 LoC, 4 cases: page tab
-  strip renders + scrubber keyboard accessibility with `aria-valuenow`
-  + B3 badge highlight + play/pause `aria-pressed` conservation
-  without console errors + 1x/2x/4x/8x speed toggle). Exercises
-  the existing `mock-server.mjs` inline `/timeline` stub (3 buckets
-  of 5s window). Pre-Phase-8a defensive grep verified
-  `web/src/app/fights/[id]/page.tsx:404` routes `?tab=replay` to
-  the ReplayPlayer Client Component.
-- **D4 — F16 README parity sync (audit M4 polish observation)** —
-  shipped v0.10.18 (commit `1405720`). 1 row appended to the
-  README's `## Screenshots` table referencing the v0.10.17 F18
-  Replay UI tab path (`/fights/[id]?tab=replay`) + the reserved
-  `docs/screenshots/08-fight-drilldown.png`. Targets the actual
-  documentation gap (the UI tab path, NOT a phantom 9th HTTP route;
-  the `## API surface` table already lists 15 entries including
-  the underlying `/api/v1/fights/{id}/timeline?window_s=N`).
-  Closes the M4 polish finding from the v0.10.17 cycle-end audit.
-
-**O7 carry-forward to v0.10.18.1 cycle** — the 2 pre-existing pytest
-failures in `apps/api/tests/test_uploads_e2e.py` (per the v0.10.14
-release notes; stable through v0.10.15 + v0.10.16-deferred + v0.10.17
-+ v0.10.18 partial-cycle). The 2 failures are PostgreSQL-fixture-gated
-and require `docker compose up -d` to surface; v0.10.18 cycle is
-`web/`-only by design, so the back-end-touching D2 ships as the
-v0.10.18.1 followup cycle (the v0.10.18.1 brief will be authored
-post-v0.10.18 close-out per the v0.10.17 / v0.10.18
-anti-premature-cycle-rule).
-
-### 1.2 "Ready to implement" shortlist (post v0.10.18.1 close-out)
-
-The items below have a complete plan spec in `advisor-plans/` and
-can ship any time the maintainer gives the green light:
-
-1. **Combat readout** — `docs/v0.9.0-combat-readout-design.md`.
-   Note: blocked on statechange parser + skills DB; the §1 table
-   marks this XL+ with the block reason explicit.
-2. **Skill build analyser** — design doc on §6 of
-   `docs/v0.8.0-web-design.md` (~M effort).
-
-The previous v0.8.0 list's third + fourth + fifth items (per-day
-bucketing + fight_player_summaries materialisation + webhooks
-backend) shipped in v0.8.1, v0.8.4, v0.9.0 respectively and are
-no longer in the shortlist. **F18 Replay UI is no longer listed in
-§1 v1.0 candidates** — it shipped in v0.10.17 (D1 + D2 + D5) and
-is now in §1.1 cycle shipts (see "v0.10.17 cycle shipts" above).
-
-**M8 PR status (v0.10.20 cycle PARTIAL-FIX):** M8 shipped as PARTIAL-FIX in the v0.10.20 mimo-half cycle (closes 5 of 11 lifecycle-race subtype failures via PR-1 K-1 + closes 2 of 2 saturation subtypes via PR-2 K-3 per-test executor; 4 SSRF-gate residuals + 6 NEW dispatch-FK subtype failures + substrate-pollution remain forward-blocked). See `plans/RELEASE-v0.10.21.md` for the v0.10.21 cycle plan-landing picking up the 12 TASK-Y forward-blockers (canonical enumeration lives in the AUDIT doc, cited inside that plan; AUDIT §A invariant pasted below verbatim from `plans/AUDIT-2026-07-13-v0.10.20.md`).
-
-> **Cycle may NOT be relabeled as "completed"** until the 12 v0.10.21 cycle-scope items close (4 true test residuals + 8 substrate-improvement / cycle-authoring / cross-validation items). The maintainer invariant stated above is the contract.
-
----
-
-**v0.10.23-pre cycle shipts** (release commit — see CHANGELOG `## [0.10.23-pre]` entry + [`plans/RELEASE-v0.10.23-pre.md`](./plans/RELEASE-v0.10.23-pre.md) + [`plans/AUDIT-2026-07-15-v0.10.23-pre.md`](./plans/AUDIT-2026-07-15-v0.10.23-pre.md) + design doc [`docs/v0.9.0-combat-readout-design.md`](./docs/v0.9.0-combat-readout-design.md)).
-
-- **Wave 2 SCAFFOLD** — 4 NEW statechange event subclasses (ConditionRemoveEvent / DownEvent / DeathEvent / StunBreakEvent) wired into the gw2_core discriminated union (now 9 members; DeathEvent gains 2 Optional forward-compat fields `killed_by_agent_id` + `killing_skill_id` that prevent Phase 6 v2 schema bump) + 6 NEW wire-shape Pydantic schemas (PlayerReadout{Damage,Heal,Boons,Defense}Out + PlayerReadoutOut + FightReadoutOut) for the future Combat-readout endpoint.
-- **Wave 3 Workstream D-partial** — 2 NEW per-player aggregators (`PlayerDamageAggregator` + `PlayerHealAggregator` in libs/gw2_analytics) as strict mirrors of `target_dps.py` + `target_healing.py` with grouping axis flipped from `target_agent_id` to `source_agent_id`.
-- **Wave 4 Workstream D-extension complete** — 2 NEW per-player aggregators (`PlayerBoonsAggregator` + `PlayerDefenseAggregator` in libs/gw2_analytics) close the Workstream D-extension forward-blocker. `PlayerBoonsAggregator` handles the Combat readout §5 Boons table (6 fixed buff-IDs as module constants + dynamic `other_boons_out` bucket) with `kind == "apply"` pre-filter; source-side attribution for `boons_out`, target-side for `boons_in`. `PlayerDefenseAggregator` handles the Combat readout §6 Defense table (target-side for damage + CC, actor-side for deaths) with optional `barrier_portion_getter` for the Phase 6 v2 parser-stream wire-up; sort: `(-damage_taken, agent_id)` per design doc §13 "defensive load is the leading indicator". The 4 stub columns (`time_downed_ms` / `dodges` / `blocks` / `interrupts`) + `barrier_absorbed` are pinned at 0 for the v0.10.23 wire contract — Phase 6 v2 will land the 3 NEW Event subclasses (DodgeEvent / BlockEvent / InterruptEvent) AND the down-state lifecycle parser AND the per-damage barrier portion to fill these in without a schema bump.
-- **Cycle topology** — 4 atomic commits on `main` (2 library commits for Wave 2 + 1 library commit for Wave 3 + 1 library commit for Wave 4 + docs folded into each wave commit per `CONTRIBUTING.md` linear-history rule). ZERO net test-surface delta (the cycle is SCAFFOLD + library-only; the cumulative test count stays at 344 from v0.10.22). 5 forward-blockers REMAINING at Wave 4 close (down from 6): Phase 6 v2 parser-stream switch + Skills DB catalog + `aggregate_combat_readout` dispatcher extension + `GET /api/v1/fights/{fight_id}/readout` artisan route handler + 4 web AG Grid Client Components.
-
-**v0.11.0 WAVE-8 cycle shipts (shipped)** — release tag `v0.11.0` (2026-07-21).
-All 21 plan steps complete.
-
-- **A.4 parser statechange dispatch**: 7 of 8 new Event subclasses wired.
-  4 statechange-driven (DeathEvent byte 4, DownEvent byte 5, BarrierEvent
-  byte 38, StunBreakEvent byte 56 via `statechange_dispatch.py`) + 3
-  result-byte-driven (BlockEvent `_result==3`, DodgeEvent `_result==4`,
-  InterruptEvent `_result==5` via `parser.py:808-837`). 7 hermetic tests.
-  CCEvent + ConditionRemoveEvent deferred (non-statechange sources).
-- **B.1 Skills DB source**: official GW2 v2 REST API chosen.
-- **B.3 Catalog populated**: 4,610 skills from `/v2/skills` API
-  (`libs/gw2_skills/scripts/bootstrap_catalog.py`).
-- **B.4 Catalog wired**: eager-loaded in API lifespan with
-  `SKILLS_CATALOG_FRESHNESS_DAYS` Prometheus gauge.
-- **A.6 Real-fixture test**: extended to count 10 event kinds
-  (adds death + down + barrier + stunbreak to the 6-kind sum).
-- **A.1 Statechange audit**: all 84 arcdps kinds mapped.
-
-**Pre-existing drift note (operator action**): the v0.10.22 (Tour 4 Skill build analyser — plan 044) cycle-shipts entry was never landed in this §1.1 (the prior session added the SHIPPED table-row but not the section header per the project's per-cycle closure protocol). The v0.10.22 cycle is fully documented in CHANGELOG `## [0.10.22]` + `plans/RELEASE-v0.10.22.md` + `plans/AUDIT-2026-07-15-v0.10.22.md` so the §1.1 entry is back-fill, not a missing canonical record. Recommend the operator add a `**v0.10.22 cycle shipts** (...) ` entry back-fill (cross-fixes the historical gap) in the same follow-up cycle that closes Workstream D-extension. The v0.10.20 PARTIAL-FIX entryback-fill is similar.
+1. **F17 frontend verification** — rebuild Docker with v0.11.4, upload
+   real WvW logs, verify SCAFFOLD-zero columns (deaths, dodges, blocks,
+   interrupts, barrier_total, cleanses) populate correctly.
+2. **Phase 6 v2 parser-stream switch** — dps_power/condi split,
+   barrier_ps aggregator, time_downed_ms tracking (see
+   `docs/v0.9.0-combat-readout-design.md` §3-6).
+3. **Combat readout frontend** — 4 AG Grid Client Components
+   (PlayerReadoutDamage, PlayerReadoutHeal, PlayerReadoutBoons,
+   PlayerReadoutDefense) already scaffolded, need real-data verification.
 
 ## 2. Tech debt / performance (signaled in the CHANGELOG, never resolved)
 
