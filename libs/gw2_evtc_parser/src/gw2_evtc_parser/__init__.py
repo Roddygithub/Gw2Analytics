@@ -22,6 +22,8 @@ from gw2_evtc_parser.parser import (
 )
 from gw2_evtc_parser.statechange_dispatch import (
     STATE_CHANGE_BARRIER_UPDATE,
+    STATE_CHANGE_DEATH,
+    STATE_CHANGE_DOWN,
     STATE_CHANGE_STUN_BREAK,
     STATECHANGE_MAP,
     dispatch_statechange,
@@ -32,6 +34,8 @@ __version__ = "0.5.0"
 __all__ = [
     "STATECHANGE_MAP",
     "STATE_CHANGE_BARRIER_UPDATE",
+    "STATE_CHANGE_DEATH",
+    "STATE_CHANGE_DOWN",
     "STATE_CHANGE_STUN_BREAK",
     "EvtcBaseError",
     "EvtcParseError",
