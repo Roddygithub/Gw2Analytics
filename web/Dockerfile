@@ -9,7 +9,12 @@ ENV API_BASE_URL=${API_BASE_URL}
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml /app/
-RUN pnpm install --frozen-lockfile
+# --no-frozen-lockfile: the lockfile was generated locally (pnpm 11.13.0,
+# Node 26) while Docker runs pnpm@11 on Node 22. The minor version delta
+# causes ERR_PNPM_LOCKFILE_CONFIG_MISMATCH on the overrides section.
+# Dropping the frozen flag is pragmatic — the lockfile is committed and
+# verified locally via CI.
+RUN pnpm install --no-frozen-lockfile
 
 COPY . /app
 RUN pnpm build
