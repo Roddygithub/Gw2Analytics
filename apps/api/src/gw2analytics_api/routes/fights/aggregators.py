@@ -41,7 +41,7 @@ Public surface
   wrapping :class:`SkillUsageAggregator`.
 - :func:`aggregate_combat_readout` -- the unified Combat readout
   dispatcher wrapping the 4 per-player aggregators + the
-  Phase 6 v2 SCAFFOLD-getter plumbing (see ``SCAFFOLD hooks``
+  Phase 6 v2 getter plumbing (see ``Getter hooks``
   section below).
 
 Test monkeypatch contract (READ BEFORE PATCHING)
@@ -56,42 +56,30 @@ behaviour in isolation; patching via the production namespace won't
 reach the call site. Mirrors the PR 1 contract established on
 ``routes.fights.blob_cache.get_events``.
 
-SCAFFOLD hooks (Phase 3 / Wave 6)
-=================================
+Getter hooks (Phase 3 / Wave 6, live since v0.12.1)
+===================================================
 
-The 3 NEW optional parameters on
-:func:`aggregate_combat_readout` plumb the Phase 6 v2 parser-side
-side-table getters through to the per-player aggregators WITHOUT
-mutating the wire shape:
+The 3 optional parameters on :func:`aggregate_combat_readout`
+plumb the Phase 6 v2 parser-side getters through to the per-player
+aggregators:
 
 - ``dps_split_getter``: ``Callable[[DamageEvent], tuple[int, int]] | None``
   fed to :meth:`PlayerDamageAggregator.aggregate`. When ``None``
-  (the canonical v0.10.23 SCAFFOLD path), the per-player
-  aggregator substitutes
-  :func:`gw2_core.default_dps_split` -- the "everything is power"
-  fallback that keeps the wire-shape ``dps_power=0.0 +
-  dps_condi=dps`` for pre-Phase-6-v2 streams.
+  (legacy path), the aggregator skips the split call and
+  ``dps_power=dps_condi=0.0``.
 - ``barrier_portion_getter``: ``Callable[[HealingEvent], int] | None``
-  fed to :meth:`PlayerHealAggregator.aggregate`. When ``None``, the
-  per-player aggregator substitutes
-  :func:`gw2_core.default_barrier_portion_from_healing`. Note: this
-  is the HEAL-side barrier getter; the DAMAGE-side
+  fed to :meth:`PlayerHealAggregator.aggregate`. When ``None``,
+  the aggregator skips the barrier call. The DAMAGE-side
   ``barrier_portion_getter`` for :class:`PlayerDefenseAggregator`
-  is hardcoded to ``None`` in the v0.10.23 path (the parser
-  doesn't yet carry per-damage barrier) and feeds
-  :meth:`PlayerDefenseAggregator.aggregate` via the existing
-  parameter.
+  is hardcoded to ``None`` (the parser doesn't yet carry
+  per-damage barrier).
 - ``buff_removal_events``: ``Iterable[BuffRemovalEvent] | None``
   fed to :meth:`PlayerBoonsAggregator.aggregate`. When ``None``,
-  no buff-removal events flow through; the row's
-  ``strips_received_in`` column defaults to 0 (the SCAFFOLD path).
+  ``strips_received_in`` defaults to 0.
 
-A future Phase 6 v2 PR constructs each getter from the parser-side
-side table; the SCAFFOLD absorbs the swap via one constructor
-change. Pre-Phase-6-v2 streams: all 3 SCAFFOLD params default to
-``None`` and the per-player aggregators substitute their
-SCAFFOLD defaults -- ZERO behavioural change for existing
-fixtures.
+Since v0.12.1, the production path always passes real getters via
+``make_dps_split_getter`` / ``make_barrier_portion_getter``;
+``None`` fallback is for legacy stream compatibility only.
 """
 
 from __future__ import annotations
@@ -436,15 +424,9 @@ def _build_player_readout(
         profession=identity.profession,
         elite_spec=identity.elite_spec,
         is_commander=identity.is_commander,
-        roles=[],  # canonical Wave 2 SCAFFOLD default -- Blocker C deferred.
+        roles=[],  # Blocker C deferred (role classifier).
         damage=PlayerReadoutDamageOut(
             dps_total=d_row.dps,
-            # Phase 3 SCAFFOLD: power/condi split driven from
-            # the per-player row's rate columns. Pre-Phase-6-v2
-            # wireshape: ``dps_power=0.0 + dps_condi=dps``
-            # (because :func:`gw2_core.default_dps_split`
-            # returns ``(0, damage)`` -- the canonical
-            # "everything is power" SCAFFOLD fallback).
             dps_power=d_row.dps_power,
             dps_condi=d_row.dps_condi,
             strips=0,  # awaits Phase 9 BuffRemovalEvent strip classification.
@@ -455,12 +437,6 @@ def _build_player_readout(
         heal=PlayerReadoutHealOut(
             heal_total=h_row.total_healing,
             hps=h_row.hps,
-            # Phase 3 SCAFFOLD: heal-side barrier columns driven
-            # from the per-player row. Pre-Phase-6-v2 wireshape:
-            # ``barrier_total=0 + barrier_ps=0.0`` (because
-            # :func:`gw2_core.default_barrier_portion_from_healing`
-            # returns ``0`` -- the canonical no-barrier SCAFFOLD
-            # fallback).
             barrier_total=h_row.barrier_total,
             barrier_ps=h_row.barrier_ps,
             cleanses=cleanses,
@@ -505,8 +481,7 @@ def aggregate_combat_readout(
 ) -> FightReadoutOut:
     """Aggregate the Combat readout (4-table layout from design doc §3-6) for one fight.
 
-    Wave 5 SCAFFOLD + Workstream D-extension bridge + Wave 6
-    Phase 3 SCAFFOLD-getter plumbing. Wraps the 4 per-player
+    Wraps the 4 per-player
     aggregators (PlayerDamageAggregator / PlayerHealAggregator /
     PlayerBoonsAggregator / PlayerDefenseAggregator) + the
     per-player attribution map ``agent_id_to_name_map`` into the
@@ -521,10 +496,9 @@ def aggregate_combat_readout(
 
     Why a FightReadoutOut return (Option (a) per Wave 5 think):
     the wire-shape Pydantic IS the domain model after Wave 2
-    SCAFFOLD shipped (the schema is
-    ``ConfigDict(from_attributes=True)`` so ORM-style hydration
-    works; the schema defaults to ``0``/empty so a 0-player
-    fight yields an empty ``players: []`` list cleanly).
+    The schema is ``ConfigDict(from_attributes=True)`` so ORM-style
+    hydration works; defaults to ``0``/empty so a 0-player fight
+    yields an empty ``players: []`` list cleanly.
 
     The 4 per-player roll-ups are independent (no cross-stream
     invariant); each aggregator runs in its own ``.aggregate(...)``
@@ -532,29 +506,19 @@ def aggregate_combat_readout(
     primary sort key (Damage DESC + Heal DESC + Boons DESC +
     Defense ASC-most-targeted-first).
 
-    SCAFFOLD-getter semantics (Phase 3 close-out):
+    Getter semantics (Phase 3 close-out, live since v0.12.1):
 
     - ``dps_split_getter``: forwarded to
-      :meth:`PlayerDamageAggregator.aggregate`. When ``None``, the
-      per-player aggregator substitutes
-      :func:`gw2_core.default_dps_split` -- the wire-shape
-      ``dps_power=0.0 + dps_condi=dps`` path.
+      :meth:`PlayerDamageAggregator.aggregate`. When ``None``,
+      the aggregator skips the split call.
     - ``barrier_portion_getter_heal``: forwarded to
-      :meth:`PlayerHealAggregator.aggregate`. When ``None``, the
-      per-player aggregator substitutes
-      :func:`gw2_core.default_barrier_portion_from_healing` --
-      the wire-shape ``barrier_total=0 + barrier_ps=0.0`` path.
-      Note: the DAMAGE-side barrier (``PlayerDefenseAggregator``)
-      has its own ``barrier_portion_getter`` parameter that
-      defaults to ``None`` here (the parser doesn't yet carry
-      per-damage barrier). A future Phase 6 v2 PR opens a
-      corresponding ``barrier_portion_getter_damage`` parameter.
+      :meth:`PlayerHealAggregator.aggregate`. When ``None``,
+      the aggregator skips the barrier call. Note: the
+      DAMAGE-side barrier has its own parameter that defaults
+      to ``None`` (parser doesn't yet carry per-damage barrier).
     - ``buff_removal_events``: forwarded to
-      :meth:`PlayerBoonsAggregator.aggregate`. When ``None``, the
-      per-player aggregator substitutes an empty iterable -- the
-      wire-shape ``strips_received_in=0`` path. (Phase 6 v2 will
-      materialise the parser-side :class:`BuffRemovalEvent`
-      stream here.)
+      :meth:`PlayerBoonsAggregator.aggregate`. When ``None``,
+      ``strips_received_in`` defaults to 0.
     """
     # Reviewer #2 fix: hoist the identity->name dict allocation to a
     # SINGLE intermediate so the 3 per-player aggregators share ONE
@@ -588,10 +552,6 @@ def aggregate_combat_readout(
         # legacy ``agent_id_to_name_map``) when callers haven't
         # adopted the identity-map contract yet.
         name_map=_identity_name_map,
-        # Phase 3 SCAFFOLD: forward the optional dps-split getter.
-        # When ``None``, the per-player aggregator substitutes
-        # :func:`gw2_core.default_dps_split` -- the canonical
-        # "everything is power" wireshape.
         dps_split_getter=dps_split_getter,
     )
     heal_rows: list[PlayerHealRow] = PlayerHealAggregator().aggregate(
@@ -600,16 +560,7 @@ def aggregate_combat_readout(
         # Tour 6 v0.10.24: heal-side chain to the identity-map's
         # ``name`` attribute (the same name only fallback as damage).
         name_map=_identity_name_map,
-        # Phase 3 SCAFFOLD: forward the optional heal-side barrier
-        # getter. When ``None``, the per-player aggregator
-        # substitutes
-        # :func:`gw2_core.default_barrier_portion_from_healing` --
-        # the canonical no-barrier wireshape.
         barrier_portion_getter=barrier_portion_getter_heal,
-        # Tour 6 v0.10.24 close-out: forward the optional
-        # StunBreakEvent stream for the ``stun_breaks`` column.
-        # When empty (canonical pre-Tour-6 SCAFFOLD path), every
-        # row has ``stun_breaks=0``.
         stun_break_events=stun_break_events,
     )
     boons_rows: list[PlayerBoonsRow] = PlayerBoonsAggregator().aggregate(
@@ -620,10 +571,6 @@ def aggregate_combat_readout(
         # to let callers pass dict[int, str] (a Mapping subtype); we cast at the
         # aggregator boundary to honor the library's invariant contract.
         name_map=cast(dict[int, str | None], skill_id_to_name_map),
-        # Phase 3 SCAFFOLD: forward the optional buff-removal
-        # stream. When ``None``, the per-player aggregator treats
-        # it as an empty iterable -- the canonical
-        # ``strips_received_in=0`` wireshape.
         buff_removal_events=buff_removal_events if buff_removal_events is not None else (),
     )
     # Defense consumes 6 streams (damage / CC / death / dodge / block
@@ -678,12 +625,11 @@ def aggregate_combat_readout(
     # Single pass to build the per-agent PlayerReadoutOut envelope.
     # The 5 shared identity columns (per design doc §2) hydrate
     # from the ``AgentIdentity`` map (Tour 6 v0.10.24 close-out of
-    # the Wave 5 SCAFFOLD NIT placeholders). ``agent_id`` is the
+    # the Wave 5 NIT placeholders). ``agent_id`` is the
     # dispatcher-set value (the key of the per-aspect aggregator
     # outputs); the remaining 5 columns + ``account_name`` come
     # from the OrmFightAgent-hydrated identity slice. ``roles``
-    # stays at ``[]`` (canonical Wave 2 SCAFFOLD default -- the
-    # role classifier is Blocker C deferred to a future cycle).
+    # stays at ``[]`` (role classifier is Blocker C deferred).
     identity_map = agent_id_to_identity_map or {}
     # Intersect the union of per-aspect rows with the identity
     # map keys so NPC targets (target_agent_id in defense row

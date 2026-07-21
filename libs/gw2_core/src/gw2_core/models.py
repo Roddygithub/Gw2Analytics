@@ -257,10 +257,9 @@ class EventType(StrEnum):
     DOWN = "DOWN"
     DEATH = "DEATH"
     STUN_BREAK = "STUN_BREAK"
-    # Wave 5 SCAFFOLD defense-tracking triplet (restored from baseline; the
-    # enum entry MUST be declared BEFORE the Literal[EventType.X] reference
-    # in the matching subclass body so the discriminator resolves at class
-    # definition time).
+    # Wave 5 defense-tracking triplet. These columns are live since
+    # v0.12.0 (dodges/blocks/interrupts filled by the parser's
+    # _result byte dispatch).
     DODGE = "DODGE"
     BLOCK = "BLOCK"
     INTERRUPT = "INTERRUPT"
@@ -299,7 +298,7 @@ class DamageEvent(BaseEvent):
     the hit; for older builds it is metadata (parsed but unused).
     The aggregator-tier DpsSplitGetter decides how to use it based
     on the fight's build date.  Defaults to 0 for backward-compat
-    with pre-Phase-6-v2 streams.
+    with legacy (pre-v0.12.1) streams.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -308,7 +307,7 @@ class DamageEvent(BaseEvent):
     damage: int = Field(..., ge=0)
     #: arcdps ``buff_dmg`` from the raw cbtevent record — the condi
     #: portion of this hit for builds >= 20240501.  Default 0 for
-    #: backward-compat with pre-v0.12.1 streams.
+    #:    backward-compat with legacy (pre-v0.12.1) streams.
     buff_dmg: int = Field(default=0, ge=0)
 
 
@@ -320,7 +319,7 @@ class HealingEvent(BaseEvent):
     encodes the barrier (shield) portion of the hit in ``buff_dmg``;
     this field surfaces it so the HealBarrierGetter can extract it
     without a parser-side side table.  Defaults to 0 for
-    backward-compat with pre-Phase-6-v2 streams.
+    backward-compat with legacy (pre-v0.12.1) streams.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -329,7 +328,7 @@ class HealingEvent(BaseEvent):
     healing: int = Field(..., ge=0)
     #: arcdps ``buff_dmg`` from the raw cbtevent record for heal-class
     #: events — the barrier (shield) portion of this heal hit.
-    #: Default 0 for backward-compat with pre-v0.12.1 streams.
+    #: Default 0 for    backward-compat with legacy (pre-v0.12.1) streams.
     barrier: int = Field(default=0, ge=0)
 
 
@@ -489,7 +488,7 @@ class DownEvent(BaseEvent):
     doc §11 Q4 — "time on ground" semantics). The
     ``PlayerReadoutDefenseOut.time_downed_ms`` column aggregates
     ``downtime_ms`` per-source_agent_id (Phase 6 v2 parser-stream
-    emits the actual value; pre-Phase-6-v2 streams parse cleanly
+    emits the actual value; legacy (pre-v0.12.1) streams parse cleanly
     because ``downtime_ms`` defaults to ``0``).
     """
 
@@ -499,7 +498,7 @@ class DownEvent(BaseEvent):
     # WAVE-8 §6 risk-5 mitigation: see class docstring above. Field added
     # by the Blocker A.3 first-slice followup commit (the original WAVE-8
     # DownEvent draft carried this field; the dedup preserved it on the
-    # canonical Wave 5 SCAFFOLD class).
+    # canonical Wave 5 class).
     downtime_ms: int = Field(default=0, ge=0)
 
 
@@ -511,7 +510,7 @@ class DeathEvent(BaseEvent):
     and ``skill_id`` are ``0``. The ``killed_by_agent_id`` +
     ``killing_skill_id`` Optional fields are forward-compat
     for Phase 6 v2 (when the parser yields the ``kill``
-    tuple from the arcdps state transition); pre-Phase-6-v2
+    tuple from the arcdps state transition); legacy (pre-v0.12.1)
     streams parse cleanly because both fields default to
     ``None`` and Pydantic v2 ``extra="forbid"`` only blocks
     UNKNOWN keys, not unknown-``None`` values on
@@ -526,7 +525,7 @@ class DeathEvent(BaseEvent):
         ge=0,
         description=(
             "Phase 6 v2 forward-compat: the agent responsible for the kill. "
-            "``None`` for pre-Phase-6-v2 streams where the kill attribution "
+            "``None`` for legacy (pre-v0.12.1) streams where the kill attribution "
             "is not derivable from the actor-only statechange record."
         ),
     )
@@ -535,7 +534,7 @@ class DeathEvent(BaseEvent):
         ge=0,
         description=(
             "Phase 6 v2 forward-compat: the skill id responsible for the kill. "
-            "``None`` for pre-Phase-6-v2 streams where the killing skill is "
+            "``None`` for legacy (pre-v0.12.1) streams where the killing skill is "
             "not yet extracted from the arcdps state transition."
         ),
     )
@@ -559,7 +558,7 @@ class StunBreakEvent(BaseEvent):
 # WAVE-8 v0.11.0 Blocker A.3 part 2: 1 NEW subclass (BarrierEvent); the 7
 # other WAVE-8 backlog subclasses (ConditionRemoveEvent + CCEvent +
 # DownEvent + DeathEvent + DodgeEvent + BlockEvent + InterruptEvent)
-# were pre-existing in the Wave 5 SCAFFOLD + Plan 024 baseline, so
+# were pre-existing in the Wave 5 + Plan 024 baseline, so
 # this commit adds ONLY BarrierEvent (the arcdps barrier statechange
 # yield from Phase 6 v2 parser-stream switch). Pattern mirrors
 # :class:`StunBreakEvent` (the Tour 6 v0.10.24-pre shipped subclass):
@@ -671,7 +670,7 @@ class InterruptEvent(BaseEvent):
     :class:`InterruptEvent` rows where ``source_agent_id == player``.
     ``target_agent_id`` + ``skill_id`` carry the per-interrupt
     attribution for the future per-skill forensic layer (Phase 6
-    v2 parser-stream switch yields the actual events; pre-Phase-6-v2
+    v2 parser-stream switch yields the actual events; legacy (pre-v0.12.1)
     streams parse cleanly because all fields fall back to ``0``).
     """
 

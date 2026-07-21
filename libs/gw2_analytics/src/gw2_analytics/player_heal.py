@@ -35,21 +35,16 @@ aggregator pair reads as one design.
   readers do not have to grep the dashboard code to learn the
   abbreviation. Negative duration is rejected.
 
-.. admonition:: Phase 6 v2 SCAFFOLD: barrier-applied split
+.. admonition:: Phase 6 v2: barrier-applied split (live since v0.12.1)
    :class: tip
 
    Wave 6 added the ``barrier_total`` + ``barrier_ps`` rate columns
-   + the pluggable ``barrier_portion_getter`` callable to thread
-   the future parser-side per-heal ``barrier`` side table through
-   the aggregator with ZERO wire-shape mutation cost. The
-   CANONICAL v0.10.23 SCAFFOLD path leaves
-   ``barrier_portion_getter=None`` which the aggregator internally
-   substitutes with
-   :func:`gw2_core._scaffold.default_barrier_portion_from_healing`
-   (the zero-fallback) so the wire-shape stays ``barrier_total=0 +
-   barrier_ps=0.0`` for pre-Phase-6-v2 streams. Phase 6 v2 closes
-   over the parser-side barrier lookup; the SCAFFOLD absorbs the
-   swap with a one-argument constructor change.
+   + the pluggable ``barrier_portion_getter`` callable. Phase 6 v2
+   shipped in v0.12.x: :func:`make_barrier_portion_getter` extracts
+   ``HealingEvent.barrier`` from the parser stream. When
+   ``barrier_portion_getter=None`` (legacy fallback), the aggregator
+   skips the barrier call entirely and ``barrier_total`` and
+   ``barrier_ps`` stay at 0.
 
 Cross-field invariants (validated post-construction; violations
 raise ``ValueError``; Pydantic field constraints also enforce each
@@ -149,29 +144,26 @@ class PlayerHealRow(BaseModel):
     total_healing: int = Field(..., ge=0)
     heal_count: int = Field(..., ge=1)
     hps: float = Field(..., ge=0.0)
-    # Phase 6 v2 SCAFFOLD (Wave 6): barrier-applied total +
-    # barrier-per-second rate. Pre-Phase-6-v2 SCAFFOLD:
-    # ``barrier_total=0, barrier_ps=0.0`` (the canonical
-    # "no side-table" wire shape). Wire-shape contract:
+    # Phase 6 v2 (live since v0.12.1): barrier-applied total +
+    # barrier-per-second rate. Wire-shape contract:
     # ``barrier_ps == barrier_total / duration_s`` within ``1e-6``
     # tolerance for ``duration_s > 0``.
     barrier_total: int = Field(
         default=0,
         ge=0,
         description=(
-            "Phase 6 v2 SCAFFOLD: barrier applied by this player's "
-            "heals across the fight. Pre-Phase-6-v2 streams "
-            "return 0; the SCAFFOLD absorbs the parser-side "
-            "barrier table with zero schema migration."
+            "Phase 6 v2 (live since v0.12.1): barrier applied by "
+            "this player's heals across the fight. Legacy "
+            "(pre-v0.12.x) streams return 0 via the fallback."
         ),
     )
     barrier_ps: float = Field(
         default=_DEFAULT_HPS,
         ge=0.0,
         description=(
-            "Phase 6 v2 SCAFFOLD: barrier per-second rate. Pre-"
-            "Phase-6-v2 streams return 0.0; the SCAFFOLD absorbs "
-            "the parser-side barrier table when Phase 6 v2 lands."
+            "Phase 6 v2 (live since v0.12.1): barrier per-second "
+            "rate. Legacy (pre-v0.12.x) streams return 0.0 via "
+            "the fallback."
         ),
     )
     # Tour 6 v0.10.24 close-out: per-fight count of
@@ -246,13 +238,12 @@ class PlayerHealAggregator:
         per-event ``barrier`` portion of a heal hit (mirrors the
         damage-side :func:`~gw2_analytics.player_defense.PlayerDefenseAggregator.aggregate`'s
         ``barrier_portion_getter``). When ``None`` (the canonical
-        v0.10.23 SCAFFOLD path), the hot loop skips the barrier
+        v0.10.23 legacy path), the hot loop skips the barrier
         call entirely and the ``barrier`` accumulator stays at
         ``0`` -- the no-barrier fallback that preserves the
-        pre-Phase-6-v2 wire shape where
+        legacy wire shape where
         ``barrier_total=0, barrier_ps=0.0``. Phase 6 v2 wires the
-        parser-side barrier lookup; the SCAFFOLD absorbs the swap
-        via one constructor change.
+        parser-side barrier lookup via one constructor change.
 
         ``stun_break_events`` is OPTIONAL and provides the
         :class:`~gw2_core.StunBreakEvent` stream for the
@@ -356,7 +347,7 @@ class PlayerHealAggregator:
     ) -> None:
         """Raise ``ValueError`` if any cross-field invariant is violated.
 
-        Invariants checked (Phase 6 v2 SCAFFOLD addition + Tour 6
+        Invariants checked (Phase 6 v2 addition + Tour 6
         v0.10.24 stun-break conservation):
         1. Sum of ``row.total_healing`` == ``expected_sum`` (no
            event dropped on the source side).

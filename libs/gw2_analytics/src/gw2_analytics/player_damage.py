@@ -41,20 +41,18 @@ aggregator pair reads as one design.
   Negative duration is rejected -- callers can guard at upstream sites
   where ``fight.duration`` is known.
 
-.. admonition:: Phase 6 v2 SCAFFOLD: power vs condi split
+.. admonition:: Phase 6 v2: power vs condi split (live since v0.12.1)
    :class: tip
 
    Wave 6 added the ``dps_power`` + ``dps_condi`` rate columns +
-   the pluggable ``dps_split_getter`` callable to thread the
-   future parser-side ``(condi, power)`` side table through the
-   aggregator with ZERO wire-shape mutation cost. The CANONICAL
-   v0.10.23 SCAFFOLD path leaves ``dps_split_getter=None`` which
-   the aggregator internally substitutes with
-   :func:`gw2_core._scaffold.default_dps_split` (the "everything is
-   power" fallback) so the wire-shape stays ``dps_power=0.0 +
-   dps_condi=dps`` for pre-Phase-6-v2 streams. Phase 6 v2 closes
-   over the parser-side ``condi_portion`` lookup; the SCAFFOLD
-   absorbs the swap with a one-argument constructor change.
+   the pluggable ``dps_split_getter`` callable. Phase 6 v2 shipped
+   in v0.12.x: the ``make_dps_split_getter`` factory in
+   :mod:`gw2analytics_api.routes.fights.aggregators` produces a
+   per-event splitter (new-build: ``event.buff_dmg``, old-build:
+   skill-name lookup against ``KNOWN_CONDI_NAMES``). When
+   ``dps_split_getter=None`` (legacy fallback), the aggregator
+   skips the split call entirely and both ``dps_power`` and
+   ``dps_condi`` stay at 0.0.
 
 Cross-field invariants (validated post-construction; violations
 raise ``ValueError``; Pydantic field constraints also enforce each
@@ -151,33 +149,25 @@ class PlayerDamageRow(BaseModel):
     total_damage: int = Field(..., ge=0)
     attack_count: int = Field(..., ge=1)
     dps: float = Field(..., ge=0.0)
-    # Phase 6 v2 SCAFFOLD (Wave 6): power + condi split rates.
-    # ``dps_power`` is the per-second rate of the power component
-    # across the fight; ``dps_condi`` is the per-second rate of the
-    # condi component. Pre-Phase-6-v2 SCAFFOLD: ``dps_power=0.0,
-    # dps_condi=dps`` (the canonical "everything is power" wire
-    # shape). Wire-shape contract: ``dps_power + dps_condi == dps``
-    # within ``1e-6`` rounding tolerance (``1e-6`` is the default
-    # IEEE-754 float-equality slack so a degenerate 0.0 + 0.0 ==
-    # 0.0 match survives the contract).
+    # Phase 6 v2 (live since v0.12.1): power + condi split rates.
+    # ``dps_power`` is the per-second rate of the power component;
+    # ``dps_condi`` is the per-second rate of the condi component.
+    # Wire-shape contract: ``dps_power + dps_condi == dps_total``
+    # within ``1e-6`` rounding tolerance.
     dps_power: float = Field(
         default=_DEFAULT_DPS,
         ge=0.0,
         description=(
-            "Phase 6 v2 SCAFFOLD: per-second power-damage rate. "
-            "Pre-Phase-6-v2 streams return 0.0; the SCAFFOLD "
-            "absorbs the parser-side split table with zero schema "
-            "migration."
+            "Phase 6 v2 (live since v0.12.1): per-second power-damage rate. "
+            "Legacy (pre-v0.12.x) streams return 0.0."
         ),
     )
     dps_condi: float = Field(
         default=_DEFAULT_DPS,
         ge=0.0,
         description=(
-            "Phase 6 v2 SCAFFOLD: per-second condi-damage rate. "
-            "Pre-Phase-6-v2 streams return the canonical full-DPS "
-            "rate; the SCAFFOLD substitutes the parser-side "
-            "split table when Phase 6 v2 lands."
+            "Phase 6 v2 (live since v0.12.1): per-second condi-damage rate. "
+            "Legacy (pre-v0.12.x) streams return 0.0."
         ),
     )
     # Optional player-name denormalisation (mirrors TargetDpsRow.name
@@ -234,10 +224,10 @@ class PlayerDamageAggregator:
         SCAFFOLD path), the hot loop skips the split call
         entirely and both ``condi`` and ``power`` accumulators
         stay at ``0`` -- the "everything is power" fallback that
-        preserves the pre-Phase-6-v2 wire shape where
+        preserves the legacy wire shape where
         ``dps_power=0.0, dps_condi=0.0``. Phase 6 v2 wires the
-        parser-side ``condi_portion`` lookup; the SCAFFOLD absorbs
-        the swap via one constructor change.
+        parser-side ``condi_portion`` lookup; the getter swap
+        is a one-constructor-change.
 
         Empty input yields ``[]`` -- no placeholder row.
         """
@@ -248,7 +238,7 @@ class PlayerDamageAggregator:
         stats_by_source: dict[int, _DamageAccumulator] = defaultdict(_DamageAccumulator)
 
         # Hoist the split-getter branch outside the hot loop so the
-        # canonical SCAFFOLD path (``dps_split_getter is None``) avoids
+        # canonical legacy path (``dps_split_getter is None``) avoids
         # a Python function call per event. The explicit getter path
         # pays the call cost only when a real parser-side side-table
         # is wired.
@@ -302,7 +292,7 @@ class PlayerDamageAggregator:
     ) -> None:
         """Raise ``ValueError`` if any cross-field invariant is violated.
 
-        Invariants checked (Phase 3 SCAFFOLD close-out):
+        Invariants checked (Phase 3 close-out):
         1. Sum of ``row.total_damage`` == ``expected_sum`` (no event
            dropped on the source side).
         2. ``attack_count >= 1`` (Pydantic field constraint;
@@ -312,19 +302,19 @@ class PlayerDamageAggregator:
 
         Split-getter conservation (``dps_power + dps_condi == dps``)
         is intentionally NOT enforced at the aggregator tier:
-        the SCAFFOLD ``default_dps_split`` returns ``(0, 0)`` to
+        the legacy path (no getter) returns ``(0, 0)`` to
         preserve the pre-Phase-3 wire shape ``dps_power=0.0 +
         dps_condi=0.0`` byte-for-byte, while the post-Phase-6-v2
         explicit getter is responsible for returning ``(condi,
         power)`` tuples where ``condi + power == event.damage``.
         Enforcing the conservation invariant here would force
-        every SCAFFOLD stream to violate it (the canonical
+        every legacy stream to violate it (the canonical
         pre-Phase-6-v2 case) so the check was dropped as part of
         the Phase 3 wire-shape-fidelity fix.
 
         ``duration_s`` is in the signature for call-site stability
         (``_check_invariants(rows, total, duration_s)``); the
-        SCAFFOLD close-out made the conservation check moot so
+        close-out made the conservation check moot so
         ``duration_s`` is unused here -- the unused-argument
         warning is suppressed because the parameter name carries
         API-doc weight (a future re-enablement of the

@@ -353,8 +353,8 @@ class PlayerReadoutDefenseOut(BaseModel):
     Tour 5 v0.10.23 plan 045: Combat readout ``Defense``
     table (per §6 of the design doc). The ``time_downed_ms``
     column requires the parser to track the ``downed`` state
-    per target across events (Phase 6 v2 work); the v0.10.23
-    scaffold leaves it at 0 by default.
+    per target across events (Phase 6 v2, live since v0.12.2);
+    defaults to 0 for legacy streams.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -399,7 +399,7 @@ class PlayerReadoutOut(BaseModel):
     threshold-calibration is a follow-up cycle).
     ``is_commander`` defaults False (the commando-flag is
     ONLY rendered when the ORM exposes it; the v0.10.23
-    scaffold primes the field for the future Phase C
+    primes the field for the future Phase C
     feature where the parser writes the flag).
     """
 

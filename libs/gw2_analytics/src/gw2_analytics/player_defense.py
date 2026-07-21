@@ -11,18 +11,16 @@ attribution on :class:`~gw2_core.DeathEvent`).
 Conventions
 ===========
 
-.. admonition:: Phase 6 v2 forward-compat
+.. admonition:: Phase 6 v2: defense columns (live since v0.12.x)
    :class: tip
 
-   Three columns (``time_downed_ms``, ``dodges``, ``blocks``,
-   ``interrupts``, ``barrier_absorbed``) require NEW Event
-   subclasses / side-table getters that did NOT ship in Wave 2
-   SCAFFOLD. They return ``0`` today; Phase 6 v2 ships the
-   parser-stream switch + the missing event subclasses + the
-   damage-side ``buff_dmg`` bridge that exposes
-   ``barrier_absorbed``. The schema defaults leave every stub
-   field at ``0`` so the wire-shape never crashes; the schema
-   itself is invariant for the v0.10.23 wire contract.
+   The five stub columns (``time_downed_ms``, ``dodges``, ``blocks``,
+   ``interrupts``, ``barrier_absorbed``) are now wired to real
+   parser-stream values via statechange dispatch + result-byte
+   decode (v0.11.0-v0.12.2). ``dodges``/``blocks``/``interrupts``
+   ship via the ``_result`` byte dispatch; ``time_downed_ms`` via
+   the down-state lifecycle tracker (v0.12.2). ``barrier_absorbed``
+   defaults to 0 until the damage-side barrier getter is wired.
 
 - **Target-side damage attribution.** ``damage_taken`` sums every
   :class:`~gw2_core.DamageEvent` whose ``target_agent_id``
@@ -91,14 +89,11 @@ from gw2_core import (
     InterruptEvent,
 )
 
-# Stub sentinel for the Phase 6 v2 forward-compat columns. The
-# parser doesn't yet emit :class:`~gw2_core.DodgeEvent` /
-# :class:`~gw2_core.BlockEvent` / :class:`~gw2_core.InterruptEvent`
-# (3 NEW Event subclasses that don't exist in the Wave 2 SCAFFOLD
-# 9-member union), nor a per-damage ``buff_dmg``-like barrier
-# portion, nor a downed-state lifecycle. Every stub field stays
-# at 0 for the v0.10.23 wire contract; the schema defaults leave
-# them at 0 so the wire-shape never crashes on a missing field.
+# Stub sentinel for forward-compat columns. These were SCAFFOLD-zero
+# pre-v0.12.x; now dodges/blocks/interrupts carry real parser data
+# via statechange dispatch + result-byte decode (v0.11.0-v0.12.2).
+# ``time_downed_ms`` is live since v0.12.2. ``barrier_absorbed``
+# defaults to 0 until the damage-side barrier getter is wired.
 _STUB_ZERO: Final[int] = 0
 
 
@@ -124,33 +119,23 @@ class PlayerDefenseRow(BaseModel):
     damage_taken: int = Field(..., ge=0)
     cc_taken: int = Field(..., ge=0)
     deaths: int = Field(..., ge=0)
-    # Phase 6 v2 forward-compat: total ms spent in the downed
-    # state across the fight. Aggregator returns 0 until Phase 6
-    # v2 ships the down-state lifecycle parser (tools to inventory
-    # down events + their end times via ``ChangeUp`` /
-    # ``ChangeDead`` / out-of-combat sentinel transitions).
+    # Phase 6 v2 (live since v0.12.2): total ms spent in the downed
+    # state across the fight, summed from DownEvent.downtime_ms
+    # via the per-agent down-state lifecycle tracker.
     time_downed_ms: int = Field(default=_STUB_ZERO, ge=0)
-    # Phase 6 v2 forward-compat: count of dodge events where the
-    # player is the actor. Aggregator returns 0 until Phase 6 v2
-    # adds a ``DodgeEvent`` subclass (NEW Event vocabulary beyond
-    # the 9-member Wave 2 SCAFFOLD union).
+    # Phase 6 v2 (live since v0.11.2): count of dodge events where
+    # the player is the actor, dispatched via result-byte (CBTR_EVADE=4).
     dodges: int = Field(default=_STUB_ZERO, ge=0)
-    # Phase 6 v2 forward-compat: count of block events where the
-    # player is the actor. Aggregator returns 0 until Phase 6 v2
-    # adds a ``BlockEvent`` subclass (NEW Event vocabulary beyond
-    # the 9-member Wave 2 SCAFFOLD union).
+    # Phase 6 v2 (live since v0.11.2): count of block events where
+    # the player is the actor, dispatched via result-byte (CBTR_BLOCK=3).
     blocks: int = Field(default=_STUB_ZERO, ge=0)
-    # Phase 6 v2 forward-compat: count of interrupt events where
-    # the player is the SOURCE actor (interrupts an enemy's cast).
-    # Aggregator returns 0 until Phase 6 v2 adds an
-    # ``InterruptEvent`` subclass (NEW Event vocabulary beyond the
-    # 9-member Wave 2 SCAFFOLD union).
+    # Phase 6 v2 (live since v0.11.2): count of interrupt events
+    # where the player is the SOURCE actor, dispatched via
+    # result-byte (CBTR_INTERRUPT=5).
     interrupts: int = Field(default=_STUB_ZERO, ge=0)
-    # Phase 6 v2 forward-compat: total barrier absorbed across all
-    # damage events targeting this player. Aggregator returns 0
-    # until Phase 6 v2 ships the per-damage ``barrier`` side
-    # table (analogous to the ``condi_portion_getter`` on
-    # :mod:`gw2_analytics.condi_power_split`).
+    # Phase 6 v2: total barrier absorbed across all damage events
+    # targeting this player. Defaults to 0 until the damage-side
+    # barrier getter is wired (Phase 6 v2 follow-up).
     barrier_absorbed: int = Field(default=_STUB_ZERO, ge=0)
     # Optional player-name denormalisation (mirrors
     # PlayerDamageRow.name convention). ``None`` when the
