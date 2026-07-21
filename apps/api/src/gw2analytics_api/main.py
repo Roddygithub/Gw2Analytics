@@ -29,6 +29,7 @@ from prometheus_client import generate_latest
 from gw2analytics_api import schema_guard
 from gw2analytics_api.config import get_settings
 from gw2analytics_api.database import get_sessionmaker
+from gw2analytics_api.metrics import SKILLS_CATALOG_FRESHNESS_DAYS
 from gw2analytics_api.routes import (
     account,
     fights,
@@ -157,6 +158,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             loaded,
             skipped,
         )
+        # v0.10.33: set the catalog freshness gauge from the NDJSON
+        # file's modification time so operators can alert on staleness.
+        _set_catalog_freshness_gauge()
     except (
         FileNotFoundError,
         PermissionError,
@@ -235,7 +239,42 @@ app.add_middleware(
 
 @app.get("/healthz", include_in_schema=False)
 def healthz() -> dict[str, str]:
+    """Liveness probe with catalog freshness gauge.
+
+    Returns ``{"status": "ok"}`` when healthy. The Prometheus
+    ``skills_catalog_freshness_days`` gauge (set at startup)
+    surfaces catalog staleness via ``GET /api/v1/metrics``.
+    """
     return {"status": "ok"}
+
+
+def _set_catalog_freshness_gauge() -> None:
+    """Compute the catalog NDJSON file's age in days and set the gauge.
+
+    Reads the file's ``st_mtime`` and compares it to the current time.
+    If the file path cannot be resolved (e.g. test context with a
+    synthetic catalog path), the gauge is not set (no-op).
+    """
+    import time  # noqa: PLC0415
+
+    from gw2_skills.catalog import DEFAULT_CATALOG_PATH  # noqa: PLC0415
+
+    try:
+        mtime = DEFAULT_CATALOG_PATH.stat().st_mtime
+        age_seconds = time.time() - mtime
+        age_days = age_seconds / 86400.0
+        SKILLS_CATALOG_FRESHNESS_DAYS.set(age_days)
+        logger.info(
+            "skills catalog freshness: %.1f days (mtime=%s)",
+            age_days,
+            DEFAULT_CATALOG_PATH,
+        )
+    except (FileNotFoundError, PermissionError, OSError) as exc:
+        logger.warning(
+            "skills catalog freshness gauge not set: %s (%s)",
+            type(exc).__name__,
+            exc,
+        )
 
 
 @app.get("/api/v1/metrics", include_in_schema=False)

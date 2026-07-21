@@ -183,6 +183,15 @@ STUCK_SWEEPER_FAILED_SWEPT = Counter(
     "Total failed-upload rows hard-deleted by the cleanup sweep",
 )
 
+#: v0.10.33: skills catalog freshness in days since the shipped
+#: NDJSON file was last modified. Set by the lifespan handler
+#: in main.py after eager-loading the catalog. A value > 90
+#: signals the catalog is stale and needs re-bootstrapping.
+SKILLS_CATALOG_FRESHNESS_DAYS = Gauge(
+    "skills_catalog_freshness_days",
+    "Age of the skills catalog NDJSON file in days (modification time)",
+)
+
 __all__ = [
     "ARQ_JOBS_COMPLETED",
     "ARQ_JOBS_FAILED",
@@ -193,7 +202,7 @@ __all__ = [
     "ARQ_QUEUE_DEPTH",
     "ARQ_WORKERS_ACTIVE",
     "HEALTH_DRIFT_COUNT",
-    "STUCK_SWEEPER_FAILED_ITERATION_DURATION",
+    "SKILLS_CATALOG_FRESHNESS_DAYS",
     "STUCK_SWEEPER_FAILED_SWEPT",
     "STUCK_SWEEPER_ITERATION_DURATION",
     "STUCK_SWEEPER_MARKED_FAILED",

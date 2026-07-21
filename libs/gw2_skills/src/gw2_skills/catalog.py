@@ -19,7 +19,7 @@ from gw2_skills.models import SkillEntry
 _log = logging.getLogger(__name__)
 
 #: Default NDJSON file shipped inside the package (placeholder, empty by default).
-_DEFAULT_CATALOG_PATH: Final[Path] = Path(__file__).parent / "data" / "gw2_skills.ndjson"
+DEFAULT_CATALOG_PATH: Final[Path] = Path(__file__).parent / "data" / "gw2_skills.ndjson"
 
 
 class SkillCatalog:
@@ -65,7 +65,7 @@ class SkillCatalog:
         level (operator-friendly on stdout, batch-summary below);
         a single WARNING at end of load if any rows were skipped.
         """
-        target = Path(path) if path is not None else _DEFAULT_CATALOG_PATH
+        target = Path(path) if path is not None else DEFAULT_CATALOG_PATH
         if not target.exists():
             return (0, 0)
         loaded = 0
@@ -153,6 +153,7 @@ def load_with_stats(path: Path | str | None = None) -> tuple[int, int]:
 
 
 __all__ = [
+    "DEFAULT_CATALOG_PATH",
     "SkillCatalog",
     "find_skill_by_id",
     "find_skills_by_profession",
