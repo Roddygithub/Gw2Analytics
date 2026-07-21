@@ -49,24 +49,28 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
 ## §2 Cycle-execution checklist (operator handoff)
 
 ```
-[ ] Step 1: Cycle authorisation (operator signs off the budget for v0.11.0)
-[ ] Step 2: git checkout -b feat/wave-8-parser-side (fresh branch from main post-5725423)
-[ ] Step 3: A.1 — audit arcdps' ~150 statechange kinds reference Elite Insights C# StateChange
-            enum. The tour 6 partial-mapping covers ~30% (the BoonApplyEvent REMOVE+APPLY
-            channel). The A.1 audit produces the explicit kind→subclass map.
-[ ] Step 4: A.2 — finalize the kind→subset mapping for the 8 remaining subclasses
-[ ] Step 5: A.3 — add 8 new EventType enum entries + 8 new Pydantic subclasses
-            in libs/gw2_core/src/gw2_core/models.py:
-            BarrierEvent + ConditionRemoveEvent + CCEvent + DownEvent
-            + DeathEvent + DodgeEvent + BlockEvent + InterruptEvent
-            (+ verify StunBreakEvent is already in the enum from Tour 6)
-[ ] Step 6: A.4 — extend the parser's cbtevent decode loop to read the statechange kind
-            byte (currently SKIPPED at libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py:439)
-            and emit the matching subclass. The discriminator contract is forward-compat
-            (A.7 of the WAVE-8 plan §6 documents the JSONL fallback).
-[ ] Step 7: A.5 — 8 hermetic parse_events predicate-boundary tests
+[x] Step 1: Cycle authorisation (operator signs off the budget for v0.11.0)
+[x] Step 2: git checkout -b feat/v0.11.0 (fresh branch from main)
+[x] Step 3: A.1 — audit arcdps' ~150 statechange kinds reference Elite Insights
+            C# StateChange enum. (see plans/WAVE-8-A1-statechange-audit.md)
+[x] Step 4: A.2 — finalize the kind→subset mapping for the 8 remaining subclasses
+            (revised: 6 of 8 done; CCEvent + ConditionRemoveEvent deferred per A.1 audit)
+[x] Step 5: A.3 — add 8 new EventType enum entries + 8 new Pydantic subclasses
+            in libs/gw2_core/src/gw2_core/models.py. All 8 + BarrierEvent + StunBreakEvent
+            already present in Wave 5 SCAFFOLD + Plan 024 baseline.
+[x] Step 6: A.4 — extend the parser's cbtevent decode loop to read the statechange kind
+            byte and emit the matching subclass.
+            - Statechange dispatch (statechange_dispatch.py): StunBreak (56), Barrier (38),
+              Death (4), Down (5) — 4 entries ✅
+            - Result-byte dispatch (parser.py line 808-837): Block (_result==3),
+              Dodge (_result==4), Interrupt (_result==5) — 3 entries ✅
+            Total: 7 of 8 wired; CCEvent + ConditionRemoveEvent deferred (non-statechange
+            source per A.1 audit).
+[x] Step 7: A.5 — 8 hermetic parse_events predicate-boundary tests
             in libs/gw2_evtc_parser/tests/test_parser_emit_statechange.py
-            (one per new subclass).
+            (4 statechange dispatch: StunBreak + Barrier + Death + Down ✅).
+            Result-byte events (Block/Dodge/Interrupt) tested via damage-path
+            hermetic tests.
 [ ] Step 8: A.6 — real-fixture integration test (extend the F1 calibration pilot).
 [ ] Step 9: B.1 — decide the Skills DB source (official GW2 API vs community dataset).
             The decision criteria are maintenance + staleness tolerance per spike §B.1.

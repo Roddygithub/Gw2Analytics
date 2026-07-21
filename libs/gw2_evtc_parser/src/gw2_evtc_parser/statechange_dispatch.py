@@ -24,7 +24,7 @@ import logging
 from collections.abc import Callable
 from typing import Final
 
-from gw2_core import BarrierEvent, Event, StunBreakEvent
+from gw2_core import BarrierEvent, DeathEvent, DownEvent, Event, StunBreakEvent
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,20 @@ STATE_CHANGE_STUN_BREAK: Final[int] = 56
 #: pre-Phase-6-v2 parser-stream surfaces as ``0`` defaults (the
 #: production-realistic yield awaits the parser-stream switch).
 STATE_CHANGE_BARRIER_UPDATE: Final[int] = 38
+
+#: arcdps statechange byte for ChangeDead events (per statechange-ids.md).
+#: The player who died is source_agent_id; target_agent_id and skill_id
+#: are 0 because the statechange record does not carry kill attribution.
+#: The ``killed_by_agent_id`` and ``killing_skill_id`` fields default to
+#: None (Phase 6 v2 forward-compat).
+STATE_CHANGE_DEATH: Final[int] = 4
+
+#: arcdps statechange byte for ChangeDown events (per statechange-ids.md).
+#: The player who went down is source_agent_id; target_agent_id and
+#: skill_id are 0 because the statechange record does not carry a target
+#: or skill attribution. ``downtime_ms`` defaults to 0 (Phase 6 v2
+#: forward-compat).
+STATE_CHANGE_DOWN: Final[int] = 5
 
 
 def _emit_stun_break(
@@ -94,6 +108,52 @@ def _emit_barrier_update(
     )
 
 
+def _emit_death(
+    time_ms: int,
+    src_agent: int,
+    _dst_agent: int,
+    _value: int,
+    _skill_id: int,
+) -> Event:
+    """Emit a :class:`DeathEvent` for arcdps byte 4 (ChangeDead).
+
+    Actor-only shape: the player who died is ``source_agent_id``;
+    ``target_agent_id`` and ``skill_id`` are ``0``. The
+    ``killed_by_agent_id`` and ``killing_skill_id`` fields default
+    to ``None`` (the statechange record does not carry kill
+    attribution -- Phase 6 v2 forward-compat).
+    """
+    del _dst_agent, _value, _skill_id
+    return DeathEvent(
+        time_ms=time_ms,
+        source_agent_id=src_agent,
+        target_agent_id=0,
+        skill_id=0,
+    )
+
+
+def _emit_down(
+    time_ms: int,
+    src_agent: int,
+    _dst_agent: int,
+    _value: int,
+    _skill_id: int,
+) -> Event:
+    """Emit a :class:`DownEvent` for arcdps byte 5 (ChangeDown).
+
+    Actor-only shape: the player who went down is ``source_agent_id``;
+    ``target_agent_id`` and ``skill_id`` are ``0``. ``downtime_ms``
+    defaults to ``0`` (Phase 6 v2 forward-compat).
+    """
+    del _dst_agent, _value, _skill_id
+    return DownEvent(
+        time_ms=time_ms,
+        source_agent_id=src_agent,
+        target_agent_id=0,
+        skill_id=0,
+    )
+
+
 #: Dispatch table mapping arcdps ``is_statechange`` byte -> emit constructor.
 #:
 #: The constructor signature is uniform across all emit functions::
@@ -105,12 +165,17 @@ def _emit_barrier_update(
 #: (DEATH + DOWN + CONDITION_REMOVE + CC) extend this table without
 #: any change to the dispatch wrapper.
 #:
+#: v0.11.0 A.4.3: DEATH (byte 4) and DOWN (byte 5) shipped.
+#: CONDITION_REMOVE + CC remain deferred (non-statechange sources).
+#:
 #: Exposed at module level (NOT underscored) so the F1 calibration
 #: pilot + the parser emit-side diagnostic logger can introspect the
 #: wired kinds via ``statechange_dispatch.STATECHANGE_MAP.keys()``.
 STATECHANGE_MAP: Final[dict[int, Callable[[int, int, int, int, int], Event]]] = {
     STATE_CHANGE_STUN_BREAK: _emit_stun_break,
     STATE_CHANGE_BARRIER_UPDATE: _emit_barrier_update,
+    STATE_CHANGE_DEATH: _emit_death,
+    STATE_CHANGE_DOWN: _emit_down,
 }
 
 
@@ -153,6 +218,8 @@ def dispatch_statechange(
 __all__ = [
     "STATECHANGE_MAP",
     "STATE_CHANGE_BARRIER_UPDATE",
+    "STATE_CHANGE_DEATH",
+    "STATE_CHANGE_DOWN",
     "STATE_CHANGE_STUN_BREAK",
     "dispatch_statechange",
 ]

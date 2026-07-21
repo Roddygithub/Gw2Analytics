@@ -1,11 +1,11 @@
-"""Hermetic tests for WAVE-8 v0.11.0 Blocker A.4.1 statechange event emission.
+"""Hermetic tests for WAVE-8 v0.11.0 Blocker A.4 statechange event emission.
 
-The A.4.1 sub-slice wires the parser's ``is_statechange != 0`` filter
+The A.4 sub-slice wires the parser's ``is_statechange != 0`` filter
 into a dispatch table that emits Pydantic domain events for the
 arcdps statechange kinds that have a matching subclass in
-``libs/gw2_core/src/gw2_core/models.py``. A.4.1 ships 2 emit entries:
-``StunBreakEvent`` (arcdps byte 56, per statechange-ids.md) +
-``BarrierEvent`` (arcdps byte 38, the ``CBTS_BARRIERUPDATE`` statechange).
+``libs/gw2_core/src/gw2_core/models.py``. A.4 ships 4 emit entries:
+``StunBreakEvent`` (byte 56), ``BarrierEvent`` (byte 38),
+``DeathEvent`` (byte 4), ``DownEvent`` (byte 5).
 
 The tests in this file lock the A.4.1 dispatch contract so a future
 refactor that:
@@ -45,11 +45,13 @@ from __future__ import annotations
 import struct
 from typing import Final
 
-from gw2_core import BarrierEvent, DamageEvent, StunBreakEvent
+from gw2_core import BarrierEvent, DamageEvent, DeathEvent, DownEvent, StunBreakEvent
 from gw2_evtc_parser import PythonEvtcParser
 from gw2_evtc_parser.parser import _EVENT_STRUCT
 from gw2_evtc_parser.statechange_dispatch import (
     STATE_CHANGE_BARRIER_UPDATE,
+    STATE_CHANGE_DEATH,
+    STATE_CHANGE_DOWN,
     STATE_CHANGE_STUN_BREAK,
 )
 
@@ -172,7 +174,7 @@ def _build_minimal_evtc(
 
 
 # ---------------------------------------------------------------------------
-# A.4.1 dispatch boundary tests
+# A.4 dispatch boundary tests
 # ---------------------------------------------------------------------------
 
 
@@ -265,10 +267,84 @@ def test_parse_events_dispatch_barrier_update_yields_event() -> None:
     assert e.duration_ms == 0
 
 
+def test_parse_events_dispatch_death_yields_event() -> None:
+    """Statechange byte 4 (ChangeDead) yields ONE DeathEvent (actor-only).
+
+    Locks the A.4.3 dispatch contract: a hand-crafted cbtevent record
+    with ``is_statechange = 4`` (the arcdps ``CBTS_CHANGEDEAD`` kind
+    per :file:`docs/statechange-ids.md`) yields exactly one
+    :class:`~gw2_core.DeathEvent` instance with actor-only shape
+    (target_agent_id=0, skill_id=0, killed_by_agent_id=None,
+    killing_skill_id=None).
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        skills=[(42, "Skill")],
+        events=[
+            _build_event_record(time_ms=1, src_agent=1, dst_agent=1, value=0),
+            _build_event_record(
+                time_ms=12_000,
+                src_agent=77,
+                dst_agent=0,
+                value=0,
+                skill_id=0,
+                is_statechange=STATE_CHANGE_DEATH,  # byte 4
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, DeathEvent)
+    assert e.time_ms == 12_000
+    assert e.source_agent_id == 77
+    assert e.target_agent_id == 0
+    assert e.skill_id == 0
+    # Forward-compat fields: statechange record carries no kill attribution.
+    assert e.killed_by_agent_id is None
+    assert e.killing_skill_id is None
+
+
+def test_parse_events_dispatch_down_yields_event() -> None:
+    """Statechange byte 5 (ChangeDown) yields ONE DownEvent (actor-only).
+
+    Locks the A.4.3 dispatch contract: a hand-crafted cbtevent record
+    with ``is_statechange = 5`` (the arcdps ``CBTS_CHANGEDOWN`` kind
+    per :file:`docs/statechange-ids.md`) yields exactly one
+    :class:`~gw2_core.DownEvent` instance with actor-only shape
+    (target_agent_id=0, skill_id=0, downtime_ms=0).
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        skills=[(42, "Skill")],
+        events=[
+            _build_event_record(time_ms=1, src_agent=1, dst_agent=1, value=0),
+            _build_event_record(
+                time_ms=15_000,
+                src_agent=88,
+                dst_agent=0,
+                value=0,
+                skill_id=0,
+                is_statechange=STATE_CHANGE_DOWN,  # byte 5
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    e = events[0]
+    assert isinstance(e, DownEvent)
+    assert e.time_ms == 15_000
+    assert e.source_agent_id == 88
+    assert e.target_agent_id == 0
+    assert e.skill_id == 0
+    # Forward-compat: statechange record carries no downtime duration.
+    assert e.downtime_ms == 0
+
+
 def test_parse_events_dispatch_unmapped_statechange_yields_no_event() -> None:
     """Unmapped statechange bytes (e.g. byte 3 = ChangeUp) yield ZERO events.
 
-    Locks the A.4.1 dispatch boundary for the 84 arcdps kinds not yet
+    Locks the A.4 dispatch boundary for the arcdps kinds not yet
     modelled in the dispatch table. The upstream filter continues to
     suppress them (the dispatch returns ``None`` so the
     ``if statechange_event is not None: yield`` branch is silent).
