@@ -263,6 +263,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.32] - 2026-07-21
+
+### Added
+- **WAVE-8 A.4.3: DeathEvent + DownEvent dispatch** — the parser's
+  statechange dispatch table now emits ``DeathEvent`` (arcdps byte 4,
+  ChangeDead) and ``DownEvent`` (byte 5, ChangeDown) via
+  ``statechange_dispatch.py``. Both are actor-only shapes (target/skill
+  fields are 0; kill attribution and downtime are Phase 6 v2 forward-compat).
+  4 statechange dispatch entries total: StunBreak (56) + Barrier (38) +
+  Death (4) + Down (5).
+- **A.1 statechange audit** — ``plans/WAVE-8-A1-statechange-audit.md``
+  mapping all 84 arcdps StateChange bytes to v0.11.0 subclasses.
+
+### Discovered (pre-existing)
+- **InterruptEvent, BlockEvent, DodgeEvent** already fully wired in
+  ``parser.py:808-837`` via the ``_result`` byte (CBTR_BLOCK=3,
+  CBTR_EVADE=4, CBTR_INTERRUPT=5). No code change needed for these.
+
+### Docs
+- Updated ``plans/RELEASE-v0.11.0-wave-8-parser.md`` checklist: Steps
+  A.1-A.5 marked complete. 7/8 subclasses wired; CCEvent +
+  ConditionRemoveEvent deferred (non-statechange sources).
+
 ## [0.10.31] - 2026-07-21
 
 ### Fixed
