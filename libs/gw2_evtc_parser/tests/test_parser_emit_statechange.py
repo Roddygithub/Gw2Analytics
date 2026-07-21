@@ -114,7 +114,7 @@ def _build_event_record(
 def _build_minimal_evtc(
     agents: list[tuple[int, int, int, str, bool]],
     *,
-    build: str = "20250925",
+    build: str = "20240925",
     encounter_id: int = 0,
     skills: list[tuple[int, str]] | None = None,
     events: list[bytes] | None = None,
@@ -137,7 +137,7 @@ def _build_minimal_evtc(
     if events is None:
         events = []
     header = struct.pack(
-        "<4s8sBHBI IB",
+        "<4s8sBHBII",
         b"EVTC",
         build.encode("ascii"),
         0,
@@ -145,7 +145,6 @@ def _build_minimal_evtc(
         0,
         len(agents),
         len(skills),
-        0,  # lang
     )
     prefix_fmt = struct.Struct("<QIIhhhh")
     name_buf = b"\x00" * _AGENT_NAME_SIZE
@@ -154,10 +153,16 @@ def _build_minimal_evtc(
         # 24-byte prefix + 72-byte all-null name buffer = 96 bytes
         # (struct ag size) per agent record.
         body += prefix_fmt.pack(aid, prof, elite, 0, 0, 0, 0) + name_buf
+    # Legacy count prefix BEFORE the fixed-size skill records so the
+    # parser's _detect_skill_format correctly identifies the format.
+    # Without this prefix, the first skill_id (e.g. 42 or 777) is
+    # misread as the count, the parser walks inflated skills into
+    # event data, and the remaining bytes fall short of EVENT_SIZE.
+    body += struct.pack("<I", len(skills))
     for skill_id, skill_name in skills:
-        name_bytes = skill_name.encode("utf-8")
-        skill_header = struct.pack("<II", skill_id, len(name_bytes))
-        body += skill_header + name_bytes + b"\x00"
+        name_bytes = skill_name.encode("utf-8")[:64]
+        name_buf = name_bytes.ljust(64, b"\x00")
+        body += struct.pack("<I64s", skill_id, name_buf)
     for ev in events:
         if len(ev) != 64:  # EVENT_SIZE
             msg = f"each event record must be exactly 64 bytes, got {len(ev)}"
@@ -185,6 +190,12 @@ def test_parse_events_dispatch_stun_break_yields_event() -> None:
         [(1, 1, 1, "Src", True)],
         skills=[(42, "Skill")],
         events=[
+            # Dummy no-op event: value=0, is_statechange=0, buff_dmg=0
+            # so parse_events yields nothing.  Required so the parser's
+            # _detect_skill_format_nonzero boundary search has enough
+            # candidate events (>= 2 EVENT_SIZE-aligned reads) to
+            # identify the legacy count prefix.
+            _build_event_record(time_ms=1, src_agent=1, dst_agent=1, value=0),
             _build_event_record(
                 time_ms=7_500,
                 src_agent=42,
@@ -227,6 +238,8 @@ def test_parse_events_dispatch_barrier_update_yields_event() -> None:
         [(1, 1, 1, "Src", True)],
         skills=[(777, "BarrierSkill")],
         events=[
+            # Dummy no-op event (see stun-break test for rationale).
+            _build_event_record(time_ms=1, src_agent=1, dst_agent=1, value=0),
             _build_event_record(
                 time_ms=8_000,
                 src_agent=45,

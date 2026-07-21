@@ -6,6 +6,14 @@ services:
     env_file: ./.env.prod
     depends_on: [postgres, minio, redis]
     restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
   web:
     build: ./web
     env_file: ./.env.prod

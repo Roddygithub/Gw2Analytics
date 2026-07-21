@@ -336,6 +336,36 @@ class OrmFightPlayerSummary(Base):
     condition_cleanses: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class Guild(Base):
+    """One guild from the GW2 API (v0.10.30)."""
+
+    __tablename__ = "guilds"
+
+    id: Mapped[str] = mapped_column(String(72), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    tag: Mapped[str] = mapped_column(String(128), nullable=False)
+
+
+class GuildMember(Base):
+    """One guild membership row (v0.10.30).
+
+    Composite PK on (guild_id, account_name) mirrors the migration's
+    ``uq_guild_member`` unique constraint. No surrogate ``id`` column
+    because the migration deliberately avoids one.
+    """
+
+    __tablename__ = "guild_members"
+
+    guild_id: Mapped[str] = mapped_column(
+        String(72),
+        ForeignKey("guilds.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    account_name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    rank: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+
+
 class OrmWebhookSubscription(Base):
     """One registered webhook subscription (v0.9.0 backend).
 
