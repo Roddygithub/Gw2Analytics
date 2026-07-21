@@ -1,5 +1,8 @@
 # Plan de continuité Gw2Analytics
 
+> **Status: COMPLETED (2026-07-21)** — Phases 1-4 delivered. Phase 5 (guild + multi-fight) remains as future work.
+> See [CHANGELOG v0.12.5](../CHANGELOG.md) for the audit details.
+
 Ce document est le plan de travail prioritaire pour Gw2Analytics. Il a été écrit pour que n'importe quelle IA (ou développeur humain) récupérant le projet puisse reprendre le travail sans avoir à tout redécouvrir.
 
 ---

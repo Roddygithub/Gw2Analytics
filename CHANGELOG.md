@@ -1,3 +1,29 @@
+## [0.12.5] - 2026-07-21
+
+### Changed — Project status audit + plan archival
+- **AI-CONTINUATION-PLAN audit**: verified all 5 phases against
+  production code. Phases 1-4 are fully implemented and deployed:
+  boon uptimes (14) + outgoing boons (13), boon strips + condition
+  cleanses, role detection (`detect_role_lite`), and position
+  heatmaps (`stack_dist`/`dist_to_com`). Only Phase 5 (guild +
+  multi-fight comparison) remains as future work.
+- **BLOCKER-C audit**: C.1 (classifier core) + C.3 (hermetic tests)
+  delivered. C.2 (offline calibration) partially done — weights
+  tuned on 8 WvW fights; full M=4/N=20 corpus calibration deferred.
+- **Plans archived**: 181 historical plan files moved to
+  `plans/archive/` (97 v0.9.x + 46 v0.10.x + 38 RELEASE/AUDIT).
+  Only 12 active files remain.
+
+### Added
+- **`docs/EVTC2025_FORMAT.md`**: comprehensive binary format
+  specification (header, agent table, skill table, event stream,
+  state changes) for builds dated 2025+.
+
+### Validation
+- pytest: 0 failures (1 flaky perf), mypy: clean (144 source files),
+  ruff: clean, vitest: 391/394, Playwright E2E: 34/34
+- Coverage: 92%
+
 ## [0.12.4] - 2026-07-21
 
 ### Changed — Dead code removal + docstring cleanup
