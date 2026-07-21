@@ -16,25 +16,33 @@ def test_list_skills_returns_catalog_entries(client: TestClient) -> None:
     data = resp.json()
     assert isinstance(data, list)
     assert len(data) >= 1
-    # Spot-check Quickness (skill_id 1187)
-    quickness = next((s for s in data if s["id"] == 1187), None)
-    assert quickness is not None
-    assert quickness["name"] == "Quickness"
-    assert quickness["skill_type"] == "boon"
-    # Wire contract: profession is string | null (NOT int). Boon entries
-    # have profession=null (multi-profession usable).
-    assert quickness["profession"] is None
-    assert isinstance(quickness["profession"], (type(None), str))
+    # Spot-check Signet of Restoration (skill_id 5503) — a heal skill
+    # with profession=Elementalist. Uses a real GW2 API-derived entry
+    # (the catalog no longer ships manually-seeded boon entries).
+    signet = next((s for s in data if s["id"] == 5503), None)
+    assert signet is not None, f"skill 5503 not found in catalog ({len(data)} entries)"
+    assert signet["name"] == "Signet of Restoration"
+    assert signet["skill_type"] == "heal"
+    # Wire contract: profession is string | null (NOT int).
+    assert signet["profession"] == "ELEMENTALIST"
+    assert isinstance(signet["profession"], str)
 
 
 def test_get_skill_by_id_returns_entry(client: TestClient) -> None:
-    resp = client.get("/api/v1/skills/1187")
+    """Smoke: get-skill-by-id returns a real API-derived entry.
+
+    Uses Signet of Restoration (5503) — a heal skill with profession.
+    The old fixture used Quickness (1187) which was a manually-seeded
+    boon entry; boons are not in the GW2 /v2/skills API endpoint.
+    """
+    resp = client.get("/api/v1/skills/5503")
     assert resp.status_code == 200, resp.text
     data = resp.json()
-    assert data["id"] == 1187
-    assert data["name"] == "Quickness"
-    assert data["profession"] is None
-    assert data["skill_type"] == "boon"
+    assert data["id"] == 5503
+    assert data["name"] == "Signet of Restoration"
+    assert data["profession"] == "ELEMENTALIST"
+    assert data["skill_type"] == "heal"
+    assert data["is_elite"] is False
 
 
 def test_get_skill_unknown_id_returns_404(client: TestClient) -> None:
@@ -108,7 +116,7 @@ def test_list_skills_catalog_count_meets_minimum(client: TestClient) -> None:
     resp = client.get("/api/v1/skills")
     assert resp.status_code == 200, resp.text
     data = resp.json()
-    assert len(data) >= 30, (
+    assert len(data) >= 4000, (
         f"Catalog should have >= 30 entries (got {len(data)}). "
         "If you removed fixtures, restore from v0.10.25 baseline."
     )
