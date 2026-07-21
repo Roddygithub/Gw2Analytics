@@ -735,8 +735,8 @@ class PythonEvtcParser:
                 # pure-damage and buff-interaction records as SEPARATE
                 # 64-byte rows; a single record never carries both.
                 continue
-            elif _ev_buff != 0 and not (is_evtc_2025 and (value != 0 or buff_dmg != 0)):
-                # Phase 9 Step 3 APPLY-BRANCH (SHIPPED 2026-07-11).
+            elif _ev_buff != 0:
+                # Phase 9 Step 3 APPLY-BRANCH.
                 # Predicate: ``_ev_buff != 0 AND is_buffremove == 0 AND
                 # is_statechange == 0`` -- the arcdps mid-combat APPLY
                 # channel per F1 byte mapping + buff_dispatch realignment
@@ -752,14 +752,16 @@ class PythonEvtcParser:
                 # was written), which is exactly an APPLY for that
                 # ``skill_id`` buff.
                 #
-                # EVTC2025+ refinement: real 2025+ cbtevent records with
-                # ``ev.buff != 0`` but carrying a damage/heal payload
-                # (``value != 0`` or ``buff_dmg != 0``) are condition
-                # damage ticks / strip-carrying events, not mid-combat
-                # applies. Requiring ``value == 0 AND buff_dmg == 0``
-                # for 2025+ suppresses those phantom applies while
-                # preserving the legacy dual-emit contract for older
-                # fixtures whose synthetic tests rely on it.
+                # Real EVTC2025+ logs carry ``value`` / ``buff_dmg`` on
+                # many buff-interaction records (condition ticks,
+                # heal-and-apply combos, etc.). Those records are still
+                # buff applies at the ``ev.buff`` level; downstream
+                # ``BuffStateTracker`` ignores untracked skill_ids, so
+                # condition ticks are safely no-ops. Keep the dedicated
+                # ``continue`` here so the same record does NOT also
+                # emit a DamageEvent/HealingEvent from the ``value``
+                # field, which carries buff metadata rather than real
+                # damage/heal for these interaction records.
                 #
                 # Conservative default ``duration_ms=0``: cbtevent does
                 # not carry a duration field; the buff duration lives
