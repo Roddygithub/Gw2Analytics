@@ -17,17 +17,18 @@ COPY apps/api /app/apps/api
 # Install API + its workspace path deps (libs/) into .venv.
 # The root pyproject.toml is a virtual project (package=false),
 # so uv sync at the root needs --package to pick a member.
-RUN uv sync --frozen --no-dev --package gw2analytics_api
+# --no-editable: install as regular packages (not editable .pth)
+# so the runtime stage only needs the venv, not the source trees.
+RUN uv sync --frozen --no-dev --no-editable --package gw2analytics_api
 
 # --- runtime stage ---
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -rf /var/lib/apt/lists/*
 
-# Copy the entire venv from builder (has all packages installed)
+# Copy the entire venv from builder (has all packages installed non-editably)
 COPY --from=builder /app/.venv /app/.venv
-# Copy API source + alembic for runtime (non-package files like alembic config)
-COPY --from=builder /app/apps/api/src /app/apps/api/src
+# Copy alembic config for runtime migrations (non-package files)
 COPY --from=builder /app/apps/api/alembic /app/apps/api/alembic
 COPY --from=builder /app/apps/api/alembic.ini /app/apps/api/alembic.ini
 
