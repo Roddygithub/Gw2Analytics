@@ -288,6 +288,23 @@ is now in §1.1 cycle shipts (see "v0.10.17 cycle shipts" above).
 - **Wave 4 Workstream D-extension complete** — 2 NEW per-player aggregators (`PlayerBoonsAggregator` + `PlayerDefenseAggregator` in libs/gw2_analytics) close the Workstream D-extension forward-blocker. `PlayerBoonsAggregator` handles the Combat readout §5 Boons table (6 fixed buff-IDs as module constants + dynamic `other_boons_out` bucket) with `kind == "apply"` pre-filter; source-side attribution for `boons_out`, target-side for `boons_in`. `PlayerDefenseAggregator` handles the Combat readout §6 Defense table (target-side for damage + CC, actor-side for deaths) with optional `barrier_portion_getter` for the Phase 6 v2 parser-stream wire-up; sort: `(-damage_taken, agent_id)` per design doc §13 "defensive load is the leading indicator". The 4 stub columns (`time_downed_ms` / `dodges` / `blocks` / `interrupts`) + `barrier_absorbed` are pinned at 0 for the v0.10.23 wire contract — Phase 6 v2 will land the 3 NEW Event subclasses (DodgeEvent / BlockEvent / InterruptEvent) AND the down-state lifecycle parser AND the per-damage barrier portion to fill these in without a schema bump.
 - **Cycle topology** — 4 atomic commits on `main` (2 library commits for Wave 2 + 1 library commit for Wave 3 + 1 library commit for Wave 4 + docs folded into each wave commit per `CONTRIBUTING.md` linear-history rule). ZERO net test-surface delta (the cycle is SCAFFOLD + library-only; the cumulative test count stays at 344 from v0.10.22). 5 forward-blockers REMAINING at Wave 4 close (down from 6): Phase 6 v2 parser-stream switch + Skills DB catalog + `aggregate_combat_readout` dispatcher extension + `GET /api/v1/fights/{fight_id}/readout` artisan route handler + 4 web AG Grid Client Components.
 
+**v0.11.0 WAVE-8 cycle shipts (in progress)** — release branch `feat/v0.11.0`.
+
+- **A.4 parser statechange dispatch**: 7 of 8 new Event subclasses wired.
+  4 statechange-driven (DeathEvent byte 4, DownEvent byte 5, BarrierEvent
+  byte 38, StunBreakEvent byte 56 via `statechange_dispatch.py`) + 3
+  result-byte-driven (BlockEvent `_result==3`, DodgeEvent `_result==4`,
+  InterruptEvent `_result==5` via `parser.py:808-837`). 7 hermetic tests.
+  CCEvent + ConditionRemoveEvent deferred (non-statechange sources).
+- **B.1 Skills DB source**: official GW2 v2 REST API chosen.
+- **B.3 Catalog populated**: 4,610 skills from `/v2/skills` API
+  (`libs/gw2_skills/scripts/bootstrap_catalog.py`).
+- **B.4 Catalog wired**: eager-loaded in API lifespan with
+  `SKILLS_CATALOG_FRESHNESS_DAYS` Prometheus gauge.
+- **A.6 Real-fixture test**: extended to count 10 event kinds
+  (adds death + down + barrier + stunbreak to the 6-kind sum).
+- **A.1 Statechange audit**: all 84 arcdps kinds mapped.
+
 **Pre-existing drift note (operator action**): the v0.10.22 (Tour 4 Skill build analyser — plan 044) cycle-shipts entry was never landed in this §1.1 (the prior session added the SHIPPED table-row but not the section header per the project's per-cycle closure protocol). The v0.10.22 cycle is fully documented in CHANGELOG `## [0.10.22]` + `plans/RELEASE-v0.10.22.md` + `plans/AUDIT-2026-07-15-v0.10.22.md` so the §1.1 entry is back-fill, not a missing canonical record. Recommend the operator add a `**v0.10.22 cycle shipts** (...) ` entry back-fill (cross-fixes the historical gap) in the same follow-up cycle that closes Workstream D-extension. The v0.10.20 PARTIAL-FIX entryback-fill is similar.
 
 ## 2. Tech debt / performance (signaled in the CHANGELOG, never resolved)

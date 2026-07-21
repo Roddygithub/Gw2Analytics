@@ -94,8 +94,11 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
 [x] Step 15: B.7 — 5+ hermetic catalog tests.
              → 17 tests: test_catalog.py (7) + test_profession_validator.py (10).
              All pass with 4610-skill API-derived catalog.
-[ ] Step 16: A.7 — update docs/v0.10.11-phase-9-conditions.md + docs/ROADMAP.md §1.1
-             cycle shipts (Phase 9 step 4-STEPS).
+[x] Step 16: A.7 — update docs.
+             → docs/ROADMAP.md §1.1: added v0.11.0 WAVE-8 cycle shipts entry
+             (7/8 subclasses wired, Skills DB populated, freshness gauge).
+             advisor-plans/026-phase-9-conditions.md: already documents
+             F1 calibration reversal + parser emit surface (no update needed).
 [ ] Step 17: OpenAPI regeneration -- re-run the apps/api openapi dump +
              regenerate web/src/lib/api/schema.d.ts + reconcile the manual
              # noqa: wire-followup marker (consume it; the regenerated schema
