@@ -459,10 +459,7 @@ def list_players(
     # detected role from the aggregated totals. The same
     # ``detect_role_lite`` weights apply to summed magnitudes,
     # giving a stable per-account primary role for the UI.
-    return [
-        _profile_to_list_row(p)
-        for p in page
-    ]
+    return [_profile_to_list_row(p) for p in page]
 
 
 @router.get("/{account_name:path}/timeline", response_model=PlayerTimelineOut)

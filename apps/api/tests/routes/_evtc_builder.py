@@ -58,9 +58,7 @@ def build_2025_string(suffix: str | None = None) -> str:
     If ``suffix`` is empty or too short, falls back to ``"0925"`` so
     the resulting string is still 8 digits long.
     """
-    digits = (
-        f"{int(suffix[:4], 16) % 10000:04d}" if suffix and len(suffix) >= 4 else "0925"
-    )
+    digits = f"{int(suffix[:4], 16) % 10000:04d}" if suffix and len(suffix) >= 4 else "0925"
     return f"2025{digits}"
 
 

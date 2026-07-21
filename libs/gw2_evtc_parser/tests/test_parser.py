@@ -200,12 +200,7 @@ def _build_agent_record_2025(
     if account_name is None:
         raw = name.encode("utf-8") + b"\x00"
     else:
-        raw = (
-            name.encode("utf-8")
-            + b"\x00"
-            + account_name.encode("utf-8")
-            + b"\x00"
-        )
+        raw = name.encode("utf-8") + b"\x00" + account_name.encode("utf-8") + b"\x00"
         if subgroup is not None:
             raw += subgroup.encode("utf-8") + b"\x00"
         else:
