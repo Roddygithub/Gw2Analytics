@@ -66,14 +66,13 @@ client = TestClient(app)
 # 24-byte header caused a 1-byte shift in all agent name reads
 # (truncating the first character of every agent name and breaking
 # source-side event attribution).
-_HEADER_FMT = "<4s8sBHBI IB"
-_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 25
+_HEADER_FMT = "<4s8sBHBII"
+_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 24
 _AGENT_RECORD_FMT = "<QIIhhhh"
 _AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)  # 24
 _AGENT_NAME_SIZE = 72
 _AGENT_SIZE = _AGENT_PREFIX_SIZE + _AGENT_NAME_SIZE  # 96
-_SKILL_HEADER_FMT = "<II"
-_SKILL_HEADER_SIZE = struct.calcsize(_SKILL_HEADER_FMT)  # 8
+_SKILL_RECORD_SIZE = 68  # skill_id(u32) + name(64s)
 _EVENT_FMT = "<QQQiiIIHHHbbbbbbbbIIbb"
 _EVENT_SIZE = struct.calcsize(_EVENT_FMT)  # 64
 
@@ -166,7 +165,6 @@ def _make_minimal_zevtc(
             # skill records before checking for the event stream. Setting
             # this to 0 causes the fallback to MAX_SKILLS, which walks
             # into event data and finds a spurious skill.
-            0,  # trailing byte (v0.5.0 parser header bump from 24 to 25 bytes)
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()
@@ -192,12 +190,15 @@ def _make_minimal_zevtc(
             name_buf = raw + b"\x00" * (_AGENT_NAME_SIZE - len(raw))
             assert len(name_buf) == _AGENT_NAME_SIZE
             body += prefix + name_buf
+        # Legacy format: 4-byte skill_count prefix before the records
+        # (the parser's _detect_skill_format reads this to determine the
+        # table layout). Without it, the heuristic may misidentify the
+        # skill_id as a count prefix and read events from the wrong offset.
+        body += struct.pack("<I", len(skills))
         for skill_id, skill_name in skills:
-            name_bytes = skill_name.encode("utf-8")
-            skill_record = (
-                struct.pack(_SKILL_HEADER_FMT, skill_id, len(name_bytes)) + name_bytes + b"\x00"
-            )
-            body += skill_record
+            name_bytes = skill_name.encode("utf-8")[:64]
+            name_buf = name_bytes + b"\x00" * (_SKILL_RECORD_SIZE - 4 - len(name_bytes))
+            body += struct.pack("<I64s", skill_id, name_buf)
         for ev in events:
             # ``ev`` is a pre-packed 64-byte cbtevent record from
             # :func:`_make_cbtevent` -- no further packing here.
@@ -211,7 +212,13 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     # agent_id) and fight_skills (fight_id, skill_id) unique across
     # re-runs, so no CASCADE truncate is required.
     suffix = _uuid.uuid4().hex[:8]
-    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    # Legacy (pre-2025) build: the local _make_minimal_zevtc +
+    # _make_cbtevent helpers below use the legacy EVTC wire format
+    # (uint64 agent_id, variable skill records, legacy event struct).
+    # A 2025+ build string would make the parser use the EVTC2025+
+    # layout (uint32 addr, no skill count prefix, 2025 event struct),
+    # causing a layout mismatch and garbage reads.
+    build = "20240925"
     base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_id_b = base_id_a + 1
     base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
@@ -235,21 +242,11 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
     # and strips a boon from the target). One strip-only record
     # (``is_nondamage == 1``, ``value == 0``, ``buff_dmg > 0``) yields
     # ONLY a ``BuffRemovalEvent`` -- the pure-strip path.
+    # Events MUST be in non-decreasing time_ms order so
+    # ``_validate_event_candidate`` can confirm the event stream
+    # boundary (its monotonicity check rejects backwards timestamps).
     events = [
-        _make_cbtevent(
-            time_ms=1_500,
-            src=base_id_a,
-            dst=base_id_b,
-            value=1_234,
-            skill_id=base_skill_a,
-        ),
-        _make_cbtevent(
-            time_ms=2_500,
-            src=base_id_a,
-            dst=base_id_b,
-            value=567,
-            skill_id=base_skill_b,
-        ),
+        # t=1500: dual-emit (heal=800 + strip=300) B→A
         _make_cbtevent(
             time_ms=1_500,
             src=base_id_b,
@@ -259,24 +256,41 @@ def test_uploads_e2e_happy_path() -> None:  # noqa: PLR0915  -- single happy pat
             skill_id=base_skill_a,
             is_nondamage=1,
         ),
+        # t=1500: damage=1234 A→B
         _make_cbtevent(
-            time_ms=2_500,
-            src=base_id_b,
-            dst=base_id_a,
-            value=400,
-            skill_id=base_skill_b,
-            is_nondamage=1,
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
         ),
-        # Phase 8 pure-strip record: B strips a buff from A, no heal
-        # component. The roll-up lands on target A (alongside the
-        # dual-emit strip from above), exercising the same-target
-        # roll-up invariant for the BPS aggregator.
+        # t=2000: pure-strip=200 B→A (no heal component)
+        # The roll-up lands on target A (alongside the dual-emit
+        # strip from above), exercising the same-target roll-up
+        # invariant for the BPS aggregator.
         _make_cbtevent(
             time_ms=2_000,
             src=base_id_b,
             dst=base_id_a,
             value=0,
             buff_dmg=200,
+            skill_id=base_skill_b,
+            is_nondamage=1,
+        ),
+        # t=2500: damage=567 A→B
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=567,
+            skill_id=base_skill_b,
+        ),
+        # t=2500: heal=400 B→A
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=400,
             skill_id=base_skill_b,
             is_nondamage=1,
         ),
@@ -601,7 +615,8 @@ def _post_minimal_fight(
     pre-existing callers.
     """
     suffix = suffix or _uuid.uuid4().hex[:8]
-    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    # Legacy build: the local helpers use the legacy EVTC wire format.
+    build = "20240925"
     base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_id_b = base_id_a + 1
     base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
@@ -812,21 +827,9 @@ def test_fight_squads_returns_per_subgroup_rollup() -> None:
     base_id_b = base_id_a + 1
     base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_skill_b = base_skill_a + 1
+    # Events MUST be in non-decreasing time_ms order (see
+    # ``test_uploads_e2e_happy_path`` for the rationale).
     events = [
-        _make_cbtevent(
-            time_ms=1_500,
-            src=base_id_a,
-            dst=base_id_b,
-            value=1_234,
-            skill_id=base_skill_a,
-        ),
-        _make_cbtevent(
-            time_ms=2_500,
-            src=base_id_a,
-            dst=base_id_b,
-            value=567,
-            skill_id=base_skill_b,
-        ),
         _make_cbtevent(
             time_ms=1_500,
             src=base_id_b,
@@ -837,12 +840,11 @@ def test_fight_squads_returns_per_subgroup_rollup() -> None:
             is_nondamage=1,
         ),
         _make_cbtevent(
-            time_ms=2_500,
-            src=base_id_b,
-            dst=base_id_a,
-            value=400,
-            skill_id=base_skill_b,
-            is_nondamage=1,
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
         ),
         _make_cbtevent(
             time_ms=2_000,
@@ -850,6 +852,21 @@ def test_fight_squads_returns_per_subgroup_rollup() -> None:
             dst=base_id_a,
             value=0,
             buff_dmg=200,
+            skill_id=base_skill_b,
+            is_nondamage=1,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=567,
+            skill_id=base_skill_b,
+        ),
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_b,
+            dst=base_id_a,
+            value=400,
             skill_id=base_skill_b,
             is_nondamage=1,
         ),
@@ -883,21 +900,10 @@ def test_fight_skills_returns_per_skill_rollup() -> None:
     base_id_b = base_id_a + 1
     base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
     base_skill_b = base_skill_a + 1
+    # Events MUST be in non-decreasing time_ms order (see
+    # ``test_uploads_e2e_happy_path`` for the rationale).
     events = [
-        _make_cbtevent(
-            time_ms=1_500,
-            src=base_id_a,
-            dst=base_id_b,
-            value=1_234,
-            skill_id=base_skill_a,
-        ),
-        _make_cbtevent(
-            time_ms=2_500,
-            src=base_id_a,
-            dst=base_id_b,
-            value=567,
-            skill_id=base_skill_b,
-        ),
+        # t=1500: dual-emit (heal=800 + strip=300) B→A, skill A
         _make_cbtevent(
             time_ms=1_500,
             src=base_id_b,
@@ -906,6 +912,22 @@ def test_fight_skills_returns_per_skill_rollup() -> None:
             buff_dmg=300,
             skill_id=base_skill_a,
             is_nondamage=1,
+        ),
+        # t=1500: damage=1234 A→B, skill A
+        _make_cbtevent(
+            time_ms=1_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=1_234,
+            skill_id=base_skill_a,
+        ),
+        # t=2500: damage=567 A→B, skill B
+        _make_cbtevent(
+            time_ms=2_500,
+            src=base_id_a,
+            dst=base_id_b,
+            value=567,
+            skill_id=base_skill_b,
         ),
     ]
     fight_id = _post_minimal_fight(events, suffix=suffix)
@@ -1005,7 +1027,7 @@ def test_player_timeline_returns_paginated_recency_first_points() -> None:
             (base_id_a, 2, 18, f"V08 Warrior {suffix_b}", True),
             (base_id_b, 1, 27, f"V08 Guard {suffix_b}", True),
         ],
-        build=f"2025{int(suffix_b[:4], 16) % 10000:04d}",
+        build="20240925",  # legacy: local helper uses legacy layout
         skills=[
             (base_skill_c, f"Whirlwind B {suffix_b}"),
             (base_skill_d, f"Burning B {suffix_b}"),
@@ -1272,7 +1294,7 @@ def test_player_timeline_day_bucket_splits_across_days() -> None:
             (base_id_a, 2, 18, f"V81 Warrior {suffix_2}", True),
             (base_id_b, 1, 27, f"V81 Guard {suffix_2}", True),
         ],
-        build=f"2025{int(suffix_2[:4], 16) % 10000:04d}",
+        build="20240925",  # legacy: local helper uses legacy layout
         skills=[(base_skill_b, f"V81 Skill {suffix_2}")],
         events=events_2,
     )
@@ -2237,7 +2259,7 @@ def test_background_task_session_alive_at_invocation(
 
     blob = _make_minimal_zevtc(
         agents=[(123456789, 0, 0, "Player.One.1234", True)],
-        build="20250925",
+        build="20240925",  # legacy: local helper uses legacy layout
     )
     resp = client.post(
         "/api/v1/uploads",

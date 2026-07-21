@@ -131,7 +131,7 @@ class Settings(BaseSettings):
         validation_alias="STUCK_SWEEPER_INTERVAL_S",
     )
     stuck_sweeper_threshold_s: int = Field(
-        default=300,
+        default=650,
         validation_alias="STUCK_SWEEPER_THRESHOLD_S",
     )
     # v0.10.26-pre plan 170: failed-upload retention window (days)

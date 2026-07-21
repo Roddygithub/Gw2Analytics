@@ -58,6 +58,14 @@ from gw2analytics_api.main import app
 from gw2analytics_api.models import OrmFightSkill
 from gw2analytics_api.services import MAX_NAME_LEN, _sanitize_name
 
+# EVTC skill name buffer is 64 bytes (fixed-size 68-byte records:
+# 4-byte skill_id + 64-byte name). The parser can never yield a
+# skill name longer than 64 chars from the fixed-record format.
+# ``MAX_NAME_LEN = 128`` is the DB column limit; ``_sanitize_name``
+# truncates to 128, but the parser's 64-byte buffer is the actual
+# ceiling for skill names from EVTC.
+_EVTC_SKILL_NAME_MAX = 64
+
 client: TestClient = TestClient(app)
 
 
@@ -88,7 +96,10 @@ def test_overlong_skill_name_is_truncated_to_max_name_len() -> None:
     # contamination from prior uploads.
     overlong_skill_id = 98_765_432
     raw_skill_name = "X" * 200
-    expected_truncated_name = "X" * MAX_NAME_LEN  # == "X" * 128
+    # The pure-function _sanitize_name truncates to MAX_NAME_LEN (128),
+    # but the EVTC skill name buffer is 64 bytes, so the E2E name is
+    # truncated to 64 chars by the fixture before the parser even sees it.
+    expected_e2e_name = "X" * _EVTC_SKILL_NAME_MAX
     blob = make_minimal_zevtc(
         agents=[(11111, 2, 18, f"Player {suffix}", True)],
         skills=[(overlong_skill_id, raw_skill_name)],
@@ -99,7 +110,7 @@ def test_overlong_skill_name_is_truncated_to_max_name_len() -> None:
     # truncates the 200-char name to 128 chars. This is a
     # defensive check in case the helper signature regresses;
     # the E2E assertion below is the canonical pin.
-    assert _sanitize_name(raw_skill_name) == expected_truncated_name
+    assert _sanitize_name(raw_skill_name) == "X" * MAX_NAME_LEN
     assert len(_sanitize_name(raw_skill_name)) == MAX_NAME_LEN
 
     # POST the zevtc. The conftest's autouse fixture sets
@@ -150,12 +161,13 @@ def test_overlong_skill_name_is_truncated_to_max_name_len() -> None:
             f"expected exactly 1 fight_skill with the overlong skill_id, "
             f"got {len(skills)} (truncation or INSERT failed)"
         )
-        assert len(skills[0].name) == MAX_NAME_LEN, (
-            f"expected the name to be truncated to {MAX_NAME_LEN} chars, "
-            f"got {len(skills[0].name)} chars (truncation not applied)"
+        assert len(skills[0].name) == _EVTC_SKILL_NAME_MAX, (
+            f"expected the name to be truncated to {_EVTC_SKILL_NAME_MAX} chars "
+            f"(EVTC skill name buffer limit), got {len(skills[0].name)} chars"
         )
-        assert skills[0].name == expected_truncated_name, (
-            f"expected the first {MAX_NAME_LEN} chars to be preserved, got {skills[0].name!r}"
+        assert skills[0].name == expected_e2e_name, (
+            f"expected the first {_EVTC_SKILL_NAME_MAX} chars to be preserved, "
+            f"got {skills[0].name!r}"
         )
 
 
@@ -175,18 +187,19 @@ def test_overlong_skill_name_with_nul_byte_is_truncated_post_strip() -> None:
     build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
 
     overlong_skill_id = 98_765_433  # different from the other test for hermeticity
-    # 200 'A's + 1 NUL + 200 'B's = 401 chars. After
-    # NUL-strip: 400 chars. After truncation: 128 'A's.
+    # 200 'A's + 1 NUL + 200 'B's = 401 chars. The fixture truncates
+    # to 64 bytes BEFORE the NUL, so the E2E name is "A" * 64.
     raw_skill_name = "A" * 200 + "\x00" + "B" * 200
-    expected_truncated_name = "A" * MAX_NAME_LEN
+    expected_e2e_name = "A" * _EVTC_SKILL_NAME_MAX
     blob = make_minimal_zevtc(
         agents=[(22222, 2, 18, f"Player {suffix}", True)],
         skills=[(overlong_skill_id, raw_skill_name)],
         build=build,
     )
 
-    # Defensive sanity-check on the helper.
-    assert _sanitize_name(raw_skill_name) == expected_truncated_name
+    # Defensive sanity-check on the helper (pure function truncates
+    # to 128 after NUL strip: "A" * 200 + "B" * 200 -> 400 chars -> 128).
+    assert _sanitize_name(raw_skill_name) == "A" * MAX_NAME_LEN
 
     resp = client.post(
         "/api/v1/uploads",
@@ -216,12 +229,12 @@ def test_overlong_skill_name_with_nul_byte_is_truncated_post_strip() -> None:
             .all()
         )
         assert len(skills) == 1
-        assert len(skills[0].name) == MAX_NAME_LEN
-        # The first 128 chars of the post-strip string are
-        # all "A" (the B's are beyond the truncation cap).
-        assert skills[0].name == expected_truncated_name, (
-            f"expected first 128 chars of post-strip string to be 'A's, got {skills[0].name!r}"
+        assert len(skills[0].name) == _EVTC_SKILL_NAME_MAX
+        # The fixture truncates to 64 bytes before the NUL, so the
+        # E2E name is all "A"s (the B's are beyond the 64-byte buffer).
+        assert skills[0].name == expected_e2e_name, (
+            f"expected first {_EVTC_SKILL_NAME_MAX} chars to be 'A's, got {skills[0].name!r}"
         )
         # Defensive: the truncated name contains NO NUL bytes
-        # (the strip pass happened before the truncation).
+        # (the fixture's 64-byte buffer cut off before the NUL).
         assert "\x00" not in skills[0].name

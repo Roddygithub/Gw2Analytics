@@ -259,13 +259,10 @@ upload_one() {
         fi
         return 0
         ;;
-      curl_error|parse_error|rate_limited|queued)
-        # Retry on transient or back-pressure errors.
-        ;;
-      *)
-        echo "FAILED $(basename "$file_path"): $status" >&2
-        echo "FAIL" >> "$result_file"
-        return 1
+      curl_error|parse_error|rate_limited|queued|failed)
+        # Retry on transient errors.  "failed" means the server previously
+        # failed to parse this file but re-enqueued it on re-upload; the
+        # next attempt should return pending/completed.
         ;;
     esac
 
@@ -284,7 +281,7 @@ upload_one() {
 # Worker that uploads a file and then returns a token to the semaphore.
 # Arguments: <file_path> <result_file> <progress_file> <fd>
 worker() {
-  local fd="$4"
+  WORKER_FD="$4"
   local rc=0
 
   # Always release the semaphore slot, even if a `set -e` abort is
@@ -292,7 +289,7 @@ worker() {
   # forever waiting for a token that will never arrive.
   # This helper is invoked both by the EXIT trap and manually below.
   __release_token() {
-    echo "token" >&"$fd" || true
+    echo "token" >&"${WORKER_FD:-}" 2>/dev/null || true
   }
   trap '__release_token' EXIT
 

@@ -30,6 +30,12 @@ from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app
 from gw2analytics_api.models import OrmFight, OrmFightAgent, Upload
 
+# Legacy (pre-2025) build string. MAX_UINT64 (2^64 - 1) cannot fit in
+# the uint32 ``addr`` field of the EVTC2025+ agent layout, so this test
+# MUST use the legacy layout where ``agent_id`` is packed as ``Q``
+# (unsigned 64-bit) in ``_AGENT_RECORD_FMT``.
+_LEGACY_BUILD = "20240925"
+
 # 2^64 - 1 = 18,446,744,073,709,551,615 (max uint64). Picked as the
 # boundary value because it is the LEAST likely to be representable
 # in any signed-integer column (signed 64-bit BIGINT can hold at
@@ -65,7 +71,10 @@ def test_max_uint64_agent_id_persists_without_overflow() -> None:
     NUMERIC type family, which handles the full uint64 range.
     """
     suffix = _uuid.uuid4().hex[:8]
-    build = f"2025{suffix[:4]}" if len(suffix) >= 4 else "20250925"
+    # Use the legacy build so the agent record uses ``<Q`` (uint64) for
+    # the agent_id field, which can hold MAX_UINT64. The EVTC2025+ layout
+    # packs ``addr`` as ``<I`` (uint32), which would overflow.
+    build = _LEGACY_BUILD
 
     blob = make_minimal_zevtc(
         agents=[(MAX_UINT64, 2, 18, f"V102 Warrior {suffix}", True)],

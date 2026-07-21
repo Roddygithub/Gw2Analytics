@@ -32,8 +32,15 @@ _EVENT_SIZE_2025 = struct.calcsize(_EVENT_FMT_2025)
 
 
 def _is_evtc2025(build: str) -> bool:
-    """Return True for builds dated 2025 or later."""
-    if len(build) >= 4 and build[:4].isdigit():
+    """Return True for builds dated 2025 or later.
+
+    Mirrors the parser's ``_build_version_from_build_str`` logic:
+    the build string must be exactly 8 ASCII digits (yyyymmdd) and
+    the year component must be >= 2025. Hex-derived suffixes from
+    ``uuid.uuid4().hex`` that produce non-digit build strings are
+    treated as legacy (matching the parser's fallback to revision 0).
+    """
+    if len(build) == 8 and build.isdigit():
         return int(build[:4]) >= 2025
     return False
 

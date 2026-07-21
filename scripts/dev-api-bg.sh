@@ -76,7 +76,8 @@ export S3_ACCESS_KEY=$(printf '%q' "$S3_ACCESS_KEY")
 export S3_SECRET_KEY=$(printf '%q' "$S3_SECRET_KEY")
 export S3_BUCKET=$(printf '%q' "$S3_BUCKET")
 export SECRETS_KEK=$(printf '%q' "$SECRETS_KEK")
-export ALLOW_INREQUEST_PARSE_FALLBACK=$(printf '%q' "$ALLOW_INREQUEST_PARSE_FALLBACK")
+export ALLOW_INREQUEST_PARSE_FALLBACK=$(printf '%q' "${ALLOW_INREQUEST_PARSE_FALLBACK:-0}")
+export STUCK_SWEEPER_THRESHOLD_S=$(printf '%q' "${STUCK_SWEEPER_THRESHOLD_S:-650}")
 rm -f "\$0"
 exec ${command} 2>&1 | tee ${log_file}
 EOF

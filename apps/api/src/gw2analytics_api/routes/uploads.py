@@ -195,9 +195,12 @@ async def create_upload(
         select(Upload).where(Upload.sha256 == sha),
     ).scalar_one_or_none()
     if existing is not None:
-        # If the previous attempt failed, retry it via the Arq job;
-        # otherwise return the existing record untouched.
+        # If the previous attempt failed, retry it via the Arq job
+        # and surface "pending" so clients know a parse is in flight
+        # (the old "failed" status confused upload-batch.sh).
         if existing.status == "failed":
+            existing.status = "pending"
+            db.flush()
             await _enqueue_parse(request, existing.id, raw)
         return UploadCreatedResponse(
             id=existing.id,
