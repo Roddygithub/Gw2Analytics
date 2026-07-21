@@ -17,18 +17,24 @@ COPY apps/api /app/apps/api
 # Install API + its workspace path deps (libs/) into .venv.
 # The root pyproject.toml is a virtual project (package=false),
 # so uv sync at the root needs --package to pick a member.
-# --no-editable: install as regular packages (not editable .pth)
-# so the runtime stage only needs the venv, not the source trees.
-RUN uv sync --frozen --no-dev --no-editable --package gw2analytics_api
+# Editable install (default) so __file__-based path resolution
+# in schema_guard.py finds alembic.ini relative to the source tree.
+RUN uv sync --frozen --no-dev --package gw2analytics_api
 
 # --- runtime stage ---
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -rf /var/lib/apt/lists/*
 
-# Copy the entire venv from builder (has all packages installed non-editably)
+# Copy the entire venv from builder (editable .pth files point to source)
 COPY --from=builder /app/.venv /app/.venv
-# Copy alembic config for runtime migrations (non-package files)
+# Copy workspace source trees (needed by editable .pth files + alembic)
+COPY --from=builder /app/libs/gw2_core /app/libs/gw2_core
+COPY --from=builder /app/libs/gw2_evtc_parser /app/libs/gw2_evtc_parser
+COPY --from=builder /app/libs/gw2_analytics /app/libs/gw2_analytics
+COPY --from=builder /app/libs/gw2_api_client /app/libs/gw2_api_client
+COPY --from=builder /app/libs/gw2_skills /app/libs/gw2_skills
+COPY --from=builder /app/apps/api/src /app/apps/api/src
 COPY --from=builder /app/apps/api/alembic /app/apps/api/alembic
 COPY --from=builder /app/apps/api/alembic.ini /app/apps/api/alembic.ini
 
