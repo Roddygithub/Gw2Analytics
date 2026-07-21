@@ -1,7 +1,7 @@
 # --- builder stage ---
 FROM node:22-bookworm-slim AS builder
 
-RUN corepack enable && corepack prepare pnpm@11 --activate
+RUN corepack enable && corepack prepare pnpm@11.13 --activate
 
 ARG API_BASE_URL=http://api:8000
 ENV API_BASE_URL=${API_BASE_URL}
@@ -9,12 +9,7 @@ ENV API_BASE_URL=${API_BASE_URL}
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml /app/
-# --no-frozen-lockfile: the lockfile was generated locally (pnpm 11.13.0,
-# Node 26) while Docker runs pnpm@11 on Node 22. The minor version delta
-# causes ERR_PNPM_LOCKFILE_CONFIG_MISMATCH on the overrides section.
-# Dropping the frozen flag is pragmatic — the lockfile is committed and
-# verified locally via CI.
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 COPY . /app
 RUN pnpm build
