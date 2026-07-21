@@ -263,6 +263,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.31] - 2026-07-21
+
+### Fixed
+- **Pre-existing parser test failures (4 tests)**: ``test_parser_emit_statechange.py``
+  (3 dispatch tests) + ``test_parser_skill_table_formats.py`` (legacy count test).
+  Root causes: 25-byte header (now 24), 2025+ build on legacy fixtures (now
+  20240925), variable-length skill records (now fixed 68-byte), missing count
+  prefix, and boundary detection needing enough events for ``_validate_event_candidate``.
+- **``docker-compose.prod.yml`` missing redis**: the ``api`` service depends on
+  ``redis`` but the service was not defined. Added ``redis:7-alpine`` mirroring
+  the dev compose.
+- **mypy 6 errors → 0**: added ``Guild`` + ``GuildMember`` ORM models with
+  composite PK matching migration 0021, and removed an unused ``# type: ignore``
+  in ``test_buff_state.py``.
+
+### Changed
+- **Ruff format applied** to 3 files (whitespace only): ``routes/players.py``,
+  ``_evtc_builder.py``, ``test_parser.py``.
+
+### Cleanup
+- **Branches**: deleted all local + remote branches except ``main``.
+  ``git fetch --prune`` cleaned up stale remote refs.
+
 ## [0.10.30] - 2026-07-21
 
 ### Added (F-series polish — F7 batch_size threading + F8 audit leftover + F7 polish, 3 commits)
