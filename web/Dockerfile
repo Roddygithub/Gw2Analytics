@@ -1,5 +1,5 @@
 # --- builder stage ---
-FROM node:22-bookworm-slim AS builder
+FROM node:23-bookworm-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@11.13 --activate
 
@@ -22,7 +22,7 @@ COPY . /app
 RUN pnpm build
 
 # --- runtime stage ---
-FROM node:22-bookworm-slim
+FROM node:23-bookworm-slim
 
 # API_BASE_URL needed at runtime for SSR + rewrites.
 # env.ts requires it in production (NODE_ENV=production).

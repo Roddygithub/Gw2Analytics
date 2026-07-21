@@ -1,0 +1,52 @@
+# Root .dockerignore — shared by all Dockerfiles in the monorepo.
+# Individual services can add their own .dockerignore overrides.
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+*.egg-info
+dist
+build
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Node (web)
+node_modules
+.next
+pnpm-store
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.prod
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+
+# Test artifacts
+playwright-report
+test-results
+.visual-regression-output
