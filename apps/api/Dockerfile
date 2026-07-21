@@ -3,22 +3,31 @@ FROM astral/uv:python3.12-bookworm AS builder
 
 WORKDIR /app
 
-# Install prod deps only (lockfile-resolved exact versions)
+# Copy workspace root config + lockfile
 COPY pyproject.toml uv.lock /app/
-RUN uv sync --frozen --no-dev
 
-# Copy application code
-COPY apps/api/src /app/apps/api/src
-COPY apps/api/alembic /app/apps/api/alembic
-COPY apps/api/alembic.ini /app/apps/api/alembic.ini
+# Copy all workspace members so uv can resolve path dependencies
+COPY libs/gw2_core /app/libs/gw2_core
+COPY libs/gw2_evtc_parser /app/libs/gw2_evtc_parser
+COPY libs/gw2_analytics /app/libs/gw2_analytics
+COPY libs/gw2_api_client /app/libs/gw2_api_client
+COPY libs/gw2_skills /app/libs/gw2_skills
+COPY apps/api /app/apps/api
+
+# Install all deps (path deps + transitive) into .venv
+RUN uv sync --frozen --no-dev
 
 # --- runtime stage ---
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -rf /var/lib/apt/lists/*
 
+# Copy the entire venv from builder (has all packages installed)
 COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/apps/api /app/apps/api
+# Copy API source + alembic for runtime (non-package files like alembic config)
+COPY --from=builder /app/apps/api/src /app/apps/api/src
+COPY --from=builder /app/apps/api/alembic /app/apps/api/alembic
+COPY --from=builder /app/apps/api/alembic.ini /app/apps/api/alembic.ini
 
 ENV PATH="/app/.venv/bin:$PATH"
 
