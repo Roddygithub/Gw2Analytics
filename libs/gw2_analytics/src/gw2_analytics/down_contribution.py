@@ -1,7 +1,8 @@
 """Per-player down-contribution DPS + kill attribution.
 
-Phase C v0.11.0: replaces the ``down_contribution_dps=0.0`` and
-``kills=0`` SCAFFOLD stubs in the Combat readout Damage table.
+Phase C v0.11.0: live down-contribution DPS and kill attribution
+in the Combat readout Damage table (shipped v0.11.0; kills
+wired via Phase 6 v2 parser since v0.12.1).
 
 Down-contribution DPS
 =====================
@@ -25,11 +26,11 @@ Downed-state tracking without a ``ChangeUp`` (rally) event:
 
 Kill attribution
 ================
-- ``DeathEvent.killed_by_agent_id`` is a ``Forward-compat``
-  Optional field (Phase 6 v2 parser yields the actual value).
-- Pre-Phase-6-v2 streams: ``killed_by_agent_id`` is ``None``
-  → kills stay at ``0`` for all players.
-- Post-Phase-6-v2: each ``DeathEvent`` with a non-``None``
+- ``DeathEvent.killed_by_agent_id`` is an Optional field
+  (Phase 6 v2 parser yields the actual value since v0.12.1).
+- Legacy (pre-v0.12.x) streams: ``killed_by_agent_id`` is
+  ``None`` → kills stay at ``0`` for all players.
+- v0.12.1+: each ``DeathEvent`` with a non-``None``
   ``killed_by_agent_id`` increments that agent's kill count.
 """
 
@@ -49,8 +50,8 @@ class DownContributionRow(BaseModel):
 
     Model is frozen (immutable) and schema is forward-compat
     (``extra="forbid"``). Both fields default to ``0`` so the
-    wire shape is stable for pre-Phase-6-v2 streams where kills
-    are not yet attributable.
+    wire shape is stable for legacy (pre-v0.12.x) streams where
+    kills are not yet attributable.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

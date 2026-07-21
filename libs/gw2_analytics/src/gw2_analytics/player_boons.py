@@ -44,19 +44,17 @@ Conventions
    :class:`~gw2_analytics.player_damage.PlayerDamageRow` and
    :class:`~gw2_analytics.player_heal.PlayerHealRow`.)
 
-.. admonition:: Phase 6 v2 SCAFFOLD: strips-received target-side count
+.. admonition:: Phase 6 v2: strips-received target-side count (live since v0.12.1)
    :class: tip
 
    Wave 6 added the ``strips_received_in`` integer column +
    the pluggable ``buff_removal_events`` iterable to thread the
-   future parser-side buff-removal events through the aggregator
-   with ZERO wire-shape mutation cost. The CANONICAL v0.10.23
-   SCAFFOLD path leaves ``buff_removal_events=()`` (empty
-   iterable) which the aggregator interprets as "no strip data"
-   so the wire-shape stays ``strips_received_in=0`` for
-   pre-Phase-6-v2 streams. Phase 6 v2 closes over the parser's
-   :class:`~gw2_core.BuffRemovalEvent` stream; the SCAFFOLD
-   absorbs the swap via one constructor change.
+   parser-side buff-removal events through the aggregator
+   with ZERO wire-shape mutation cost. Legacy (pre-v0.12.x)
+   streams pass ``buff_removal_events=()`` (empty iterable)
+   which surfaces ``strips_received_in=0``. v0.12.1+ closes
+   over the parser's :class:`~gw2_core.BuffRemovalEvent`
+   stream directly.
 
 - **Deterministic ordering.** Rows sorted by ``(-boons_out, agent_id)``
   -- highest boons-applied first; ties broken by ascending ``agent_id``.
@@ -111,7 +109,7 @@ each per-cell constraint):
 - Sum of ``row.strips_received_in`` across all rows == count of
   :class:`~gw2_core.BuffRemovalEvent` rows where
   ``target_agent_id`` is a player-observed agent (the
-  Phase 6 v2 SCAFFOLD conservation contract).
+  Phase 6 v2 conservation contract, live since v0.12.1).
 - Rows monotonically non-increasing by ``boons_out``; ties broken
   by ascending ``agent_id``.
 
@@ -218,27 +216,18 @@ class PlayerBoonsRow(BaseModel):
     superspeed_out: int = Field(..., ge=0)
     stealth_out: int = Field(..., ge=0)
     other_boons_out: dict[str, int] = Field(default_factory=dict)
-    # Phase 6 v2 SCAFFOLD (Wave 6): target-side strip count. The
-    # number of :class:`~gw2_core.BuffRemovalEvent` rows where this
-    # player is the TARGET (i.e. the player was stripped of a
-    # boon). Pre-Phase-6-v2 SCAFFOLD: ``strips_received_in=0`` (the
-    # canonical "no strip data" wire shape). Wire-shape contract:
-    # ``strips_received_in`` is the per-player target-side mirror of
-    # the source-side ``strips_out`` count on the Wire schema's
-    # ``PlayerReadoutDamageOut`` (which I'm NOT touching here --
-    # that one stays wired through the ``PlayerDamageAggregator``
-    # in a future tour; the boons aggregator owns the
-    # target-side received-strips count because it owns the
-    # canonical buffs-removal stream).
+    # Phase 6 v2 (Wave 6, live since v0.12.1): target-side strip
+    # count. The number of :class:`~gw2_core.BuffRemovalEvent` rows
+    # where this player is the TARGET (i.e. the player was stripped
+    # of a boon). Legacy (pre-v0.12.x) streams return 0 (the
+    # canonical "no strip data" wire shape).
     strips_received_in: int = Field(
         default=0,
         ge=0,
         description=(
-            "Phase 6 v2 SCAFFOLD: count of BuffRemovalEvent rows "
-            "where this player is the TARGET (strip target). "
-            "Pre-Phase-6-v2 streams return 0; the SCAFFOLD "
-            "absorbs the parser-side buff-removal stream with "
-            "zero schema migration."
+            "Phase 6 v2 (live since v0.12.1): count of BuffRemovalEvent "
+            "rows where this player is the TARGET (strip target). "
+            "Legacy (pre-v0.12.x) streams return 0."
         ),
     )
     # Optional player-name denormalisation (mirrors PlayerDamageRow.name
@@ -294,10 +283,9 @@ class PlayerBoonsAggregator:
         ``buff_removal_events`` is OPTIONAL and provides the
         :class:`~gw2_core.BuffRemovalEvent` stream for the
         target-side strips-received count. The empty iterable
-        (canonical v0.10.23 SCAFFOLD path) drives
-        ``strips_received_in=0`` for every row. Phase 6 v2 wires the
-        parser-side buff-removal stream; the SCAFFOLD absorbs the
-        swap via one constructor change.
+        (legacy path) drives
+        ``strips_received_in=0`` for every row. v0.12.1+ wires the
+        parser-side buff-removal stream directly.
 
         Empty input across BOTH streams (apply + buff-removal) yields ``[]`` --
         no placeholder row.
@@ -349,15 +337,15 @@ class PlayerBoonsAggregator:
                 key = resolved_name if resolved_name is not None else f"Unknown ({skill_id})"
                 source_metrics.other_boons[key] += 1
 
-        # Phase 6 v2 SCAFFOLD: target-side strip count from the
-        # buff-removal stream. Pre-filter at the aggregator
+        # Phase 6 v2 (live since v0.12.1): target-side strip count
+        # from the buff-removal stream. Pre-filter at the aggregator
         # boundary so NPC strips + world strips (target_agent_id
         # = 0 OR skill_id = 0) don't leak into the per-player
         # roll-up. Pydantic field constraint ``ge=0`` on
-        # ``BuffRemovalEvent.target_agent_id`` admits ``0`` so
-        # the SCAFFOLD behaviour is "drop zero-id targets"
-        # (silently). The post-Phase-6-v2 path materialises every
-        # event with ``target_agent_id > 0`` into the row.
+        # ``BuffRemovalEvent.target_agent_id`` admits ``0`` so the
+        # legacy behaviour is "drop zero-id targets" (silently).
+        # The v0.12.1+ path materialises every event with
+        # ``target_agent_id > 0`` into the row.
         for bre in buff_removal_events:
             if bre.target_agent_id > 0:
                 metrics_by_player[bre.target_agent_id].strips_received_in += 1
@@ -374,9 +362,9 @@ class PlayerBoonsAggregator:
         # ``name=None`` on the row, which is the intended
         # "unresolved" sentinel. No need to distinguish.
         row_names = safe_name_map
-        # Phase 6 v2 SCAFFOLD row-builder patch (close-out): UNITE source +
-        # target keys so a pure-target agent (the player RECEIVING a boon
-        # but never APPLYING one) surfaces a row. Pre-fix, the loop
+        # Phase 6 v2 row-builder patch (close-out, live since v0.12.1): UNITE
+        # source + target keys so a pure-target agent (the player RECEIVING
+        # a boon but never APPLYING one) surfaces a row. Pre-fix, the loop
         # iterated over ``total_out_by_player`` only, so a target-only
         # agent was silently dropped -- ``sum(row.boons_in) !=
         # grand_total_in`` would fire at the invariants check.
