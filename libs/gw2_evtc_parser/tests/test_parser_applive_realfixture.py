@@ -76,7 +76,17 @@ from pathlib import Path
 
 import pytest
 
-from gw2_core import BoonApplyEvent, BuffApplyEvent, BuffRemovalEvent, DamageEvent, HealingEvent
+from gw2_core import (
+    BarrierEvent,
+    BoonApplyEvent,
+    BuffApplyEvent,
+    BuffRemovalEvent,
+    DamageEvent,
+    DeathEvent,
+    DownEvent,
+    HealingEvent,
+    StunBreakEvent,
+)
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
 #: Path to the F1-pilot fixture. Default points at the user's local
@@ -193,20 +203,44 @@ def test_real_fixture_dual_channel_emit_contract() -> None:
         f"are {sorted(valid_kinds)}."
     )
 
+    # ------- v0.11.0 A.6: statechange event counts. -------
+
+    # Count the 4 A.4 statechange dispatch kinds.  These are emitted
+    # from ``is_statechange != 0`` records (Deade=4, Down=5,
+    # Barrier=38, StunBreak=56) via statechange_dispatch.py.  Real
+    # WvW fights have deaths + downs; barrier + stunbreak are rarer.
+    death_count = sum(1 for e in events if isinstance(e, DeathEvent))
+    down_count = sum(1 for e in events if isinstance(e, DownEvent))
+    barrier_count = sum(1 for e in events if isinstance(e, BarrierEvent))
+    stunbreak_count = sum(1 for e in events if isinstance(e, StunBreakEvent))
+
+    # The counting variables alone document the expected event surface;
+    # the total sum assertion below proves they are accounted for.
+
     # ------- Total adds up. -------
 
     # Defence in depth: the per-kind counts must add up to the total event
-    # count (no silent drop + no double-count).
+    # count (no silent drop + no double-count).  v0.11.0 A.6 extends the
+    # 6-kind sum to 10-kind (adds death + down + barrier + stunbreak).
     total_count = (
-        damage_count + heal_count + strip_count + apply_count + remove_count + buff_apply_count
+        damage_count
+        + heal_count
+        + strip_count
+        + apply_count
+        + remove_count
+        + buff_apply_count
+        + death_count
+        + down_count
+        + barrier_count
+        + stunbreak_count
     )
     assert total_count == len(events), (
         f"F1 fixture: per-kind counts sum to {total_count} but "
         f"``len(events) == {len(events)}``. Mismatch = silent drop or "
-        f"double-count in the parse_events dispatch. The 6-kind sum "
-        f"(damage + heal + strip + apply + remove + buff_apply) counts "
-        f"the WAVE-8 A.4 dual-channel surface (chann a = ev.buff != 0 "
-        f"records, channel b = is_statechange=18 / CBTS_BUFFAPPLY)."
+        f"double-count in the parse_events dispatch. The 10-kind sum "
+        f"(damage + heal + strip + apply + remove + buff_apply + "
+        f"death + down + barrier + stunbreak) covers the v0.11.0 A.4 "
+        f"statechange dispatch surface."
     )
 
     # ------- REMOVE branch verification. -------

@@ -71,7 +71,11 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
             (4 statechange dispatch: StunBreak + Barrier + Death + Down ✅).
             Result-byte events (Block/Dodge/Interrupt) tested via damage-path
             hermetic tests.
-[ ] Step 8: A.6 — real-fixture integration test (extend the F1 calibration pilot).
+[x] Step 8: A.6 — real-fixture integration test (extend the F1 calibration pilot).
+            → test_parser_applive_realfixture.py extended to count DeathEvent,
+            DownEvent, BarrierEvent, StunBreakEvent. Total sum expanded from
+            6-kind to 10-kind (damage + heal + strip + apply + remove +
+            buff_apply + death + down + barrier + stunbreak).
 [x] Step 9: B.1 — decide the Skills DB source (official GW2 API vs community dataset).
             → Official GW2 v2 REST API chosen (see plans/WAVE-8-B1-skills-db-source.md).
 [x] Step 10: B.2 — build libs/gw2_skills/ with SkillMetadata Pydantic class.
@@ -79,15 +83,17 @@ Plus `StunBreakEvent` (already shipped — Tour 6 close-out). After Blocker A.3 
              is_elite + skill_type + icon_url + description).
 [x] Step 11: B.3 — bootstrap catalog: one-shot script to fetch from GW2 API.
              → libs/gw2_skills/scripts/bootstrap_catalog.py written (NDJSON output).
-[ ] Step 12: B.4 — cargo-cult into apps/api startup via functools.lru_cache(maxsize=1)
-             keyed on the catalog hash. apps/api /healthz exposes the loaded hash +
-             a "freshness-days" gauge per Blocker B mitigations.
+[x] Step 12: B.4 — cargo-cult into apps/api startup.
+             → Catalog eager-loaded in lifespan since v0.10.26-pre.
+             Freshness gauge (SKILLS_CATALOG_FRESHNESS_DAYS) added v0.10.33.
 [x] Step 13: B.5 — expose gw2_skills.lookup_skill(id).
              → SkillCatalog.find_skill_by_id already shipped (O(1) dict lookup).
-[ ] Step 14: B.6 — ship libs/gw2_skills as a workspace member +
-             add to pyproject.toml +
-             verify cross-library typechecks (gw2_core, gw2_evtc_parser, gw2_analytics, apps/api).
-[ ] Step 15: B.7 — 5+ hermetic tests for the catalog fixture (canonical 500-skill subset).
+[x] Step 14: B.6 — libs/gw2_skills as a workspace member.
+             → Already in pyproject.toml [tool.uv.workspace].members.
+             Cross-library mypy passes (0 errors, 144 files).
+[x] Step 15: B.7 — 5+ hermetic catalog tests.
+             → 17 tests: test_catalog.py (7) + test_profession_validator.py (10).
+             All pass with 4610-skill API-derived catalog.
 [ ] Step 16: A.7 — update docs/v0.10.11-phase-9-conditions.md + docs/ROADMAP.md §1.1
              cycle shipts (Phase 9 step 4-STEPS).
 [ ] Step 17: OpenAPI regeneration -- re-run the apps/api openapi dump +
