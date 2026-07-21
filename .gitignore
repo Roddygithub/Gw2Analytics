@@ -131,3 +131,4 @@ web/screenshots/
 # transfer-artefact pattern at the top of the file.
 /real_fight.zevtc
 /.playwright-mcp/
+web/.pnpm-store/
