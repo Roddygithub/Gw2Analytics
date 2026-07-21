@@ -16,6 +16,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response as FastAPIResponse
 from fastapi_mcp import FastApiMCP  # type: ignore[import-untyped]
 from prometheus_client import generate_latest
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.middleware import SlowAPIMiddleware
+
+from gw2analytics_api.limiter import limiter
 
 # v0.10.8 plan 140 plan 140 Fix-E: switched from module-local binding to
 # live attribute lookup. The module-local binding (``from ... import
@@ -235,6 +239,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiting (slowapi) — v0.13.4.
+# Uses X-Forwarded-For when behind a reverse proxy (Caddy),
+# falling back to the direct client IP.
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.get("/healthz", include_in_schema=False)

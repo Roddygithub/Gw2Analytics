@@ -19,6 +19,8 @@ import hashlib
 import logging
 import uuid
 
+from gw2analytics_api.limiter import limiter
+
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from minio.error import S3Error
 from sqlalchemy import select
@@ -113,6 +115,7 @@ async def _enqueue_parse(
     sf = get_sessionmaker()
     await asyncio.to_thread(process_parse, sf, upload_id, raw)
     await dispatch_for_upload(sf, upload_id)
+@limiter.limit("5/minute")
 
 
 @router.post(

@@ -1,0 +1,40 @@
+# Docker build verification CI (v0.13.4)
+#
+# Builds API + Web Docker images on every push to main and every PR.
+# Does NOT push to registry — this gate only verifies the Dockerfiles
+# compile successfully. Pushing to ghcr.io is handled by docker-publish.yml.
+#
+# Runs in parallel with the main CI (ci.yml) since Docker builds are
+# I/O-heavy and independent of the lint/test pipeline.
+
+name: Docker build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-api:
+    name: Build API image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build API Docker image
+        run: docker build -f apps/api/Dockerfile -t gw2analytics-api:ci .
+
+  build-web:
+    name: Build Web image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build Web Docker image
+        run: docker build -f web/Dockerfile -t gw2analytics-web:ci ./web
