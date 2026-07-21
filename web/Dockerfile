@@ -31,6 +31,11 @@ COPY --from=builder /app/.next/standalone /app
 COPY --from=builder /app/.next/static /app/.next/static
 COPY --from=builder /app/public /app/public
 
+# Run as non-root for security (principle of least privilege).
+RUN useradd --create-home --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 3000
 
 CMD ["node", "server.js"]

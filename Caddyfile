@@ -1,10 +1,24 @@
 # GW2Analytics — Caddy reverse-proxy for self-hosted deployment.
 #
-# BEFORE deploying to production, replace every `{placeholder.tld}` token by
-# setting the placeholder snippet (`{placeholder.tld}`) — Caddy ships the
-# snippet evaluator for `*.{placeholder.tld}` matches. The wildcard matches
-# all subdomains of your real domain; for a single-domain deployment, drop
-# the wildcard and use literal hostnames.
+# === PRODUCTION SETUP (3 steps) ===
+#
+# 1. Replace `{placeholder.tld}` with your real domain below.
+#    Example: if your domain is `gw2a.example.com`:
+#      - `api.{placeholder.tld}` → `api.gw2a.example.com`
+#      - `{placeholder.tld}`     → `gw2a.example.com`
+#
+# 2. Ensure DNS A/AAAA records point to this server's public IP:
+#      api.gw2a.example.com  → <server-ip>
+#      gw2a.example.com      → <server-ip>
+#
+# 3. Caddy auto-obtains Let's Encrypt TLS certificates on first
+#    request. No manual cert setup needed — Caddy handles renewal
+#    automatically. Ports 80 + 443 must be reachable from the
+#    internet for the ACME HTTP-01 challenge.
+#
+# For internal/VPN-only deployments (no public DNS), use Caddy's
+# `tls internal` directive instead of Let's Encrypt:
+#    api.internal.local { tls internal ... }
 #
 # Security policy (plan 008, v0.10.x hardening):
 #   - Strict-Transport-Security: 2-year HSTS with includeSubDomains + preload.
