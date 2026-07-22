@@ -354,7 +354,7 @@ def aggregate_combat_readout(
             else:
                 strips_counter[event.source_agent_id] += 1
         elif isinstance(event, DamageEvent):
-            cleave_targets_by_source.setdefault(event.source_agent_id, set()).add(event.target_agent_id)
+            cleave_targets_by_source.setdefault(event.source_agent_id, set()).add(event.target_agent_id)  # noqa: E501
 
     damage_sources_by_target: dict[int, set[int]] = {}
     for de in damage_events:

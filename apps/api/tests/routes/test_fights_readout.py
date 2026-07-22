@@ -760,9 +760,9 @@ def test_readout_cleave_targets() -> None:
 
     # Player a damages b (twice, same target), c (once), and a dummy.
     events = [
-        DamageEvent(time_ms=1_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=100),
-        DamageEvent(time_ms=2_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=200),
-        DamageEvent(time_ms=3_000, source_agent_id=a, target_agent_id=c, skill_id=dmg_skill, damage=300),
+        DamageEvent(time_ms=1_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=100),  # noqa: E501
+        DamageEvent(time_ms=2_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=200),  # noqa: E501
+        DamageEvent(time_ms=3_000, source_agent_id=a, target_agent_id=c, skill_id=dmg_skill, damage=300),  # noqa: E501
     ]
 
     aid_to_identity = {

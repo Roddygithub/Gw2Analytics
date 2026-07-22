@@ -61,10 +61,10 @@ def test_uploads_e2e_happy_path() -> None:
     base_skill_b = base_skill_a + 1
 
     events = [
-        _make_cbtevent(time_ms=1_000, src=base_id_a, dst=base_id_b, value=100, skill_id=base_skill_a),
-        _make_cbtevent(time_ms=1_000, src=base_id_b, dst=base_id_a, value=200, skill_id=base_skill_b, is_nondamage=1),
-        _make_cbtevent(time_ms=2_500, src=base_id_a, dst=base_id_b, value=567, skill_id=base_skill_b),
-        _make_cbtevent(time_ms=2_500, src=base_id_b, dst=base_id_a, value=400, skill_id=base_skill_b, is_nondamage=1),
+        _make_cbtevent(time_ms=1_000, src=base_id_a, dst=base_id_b, value=100, skill_id=base_skill_a),  # noqa: E501
+        _make_cbtevent(time_ms=1_000, src=base_id_b, dst=base_id_a, value=200, skill_id=base_skill_b, is_nondamage=1),  # noqa: E501
+        _make_cbtevent(time_ms=2_500, src=base_id_a, dst=base_id_b, value=567, skill_id=base_skill_b),  # noqa: E501
+        _make_cbtevent(time_ms=2_500, src=base_id_b, dst=base_id_a, value=400, skill_id=base_skill_b, is_nondamage=1),  # noqa: E501
     ]
     blob = _make_minimal_zevtc(
         [(base_id_a, 2, 18, f"E2E Warrior {suffix}", True),
@@ -73,7 +73,7 @@ def test_uploads_e2e_happy_path() -> None:
         skills=[(base_skill_a, f"Whirlwind {suffix}"), (base_skill_b, f"Burning {suffix}")],
         events=events,
     )
-    resp = client.post("/api/v1/uploads", files={"file": ("sample.zevtc", blob, "application/octet-stream")})
+    resp = client.post("/api/v1/uploads", files={"file": ("sample.zevtc", blob, "application/octet-stream")})  # noqa: E501
     assert resp.status_code == 201, resp.text
     upload_id = resp.json()["id"]
     fight_id = _wait_for_upload_completion(upload_id)
@@ -125,7 +125,7 @@ def test_players_list_returns_accounts_present_in_fight() -> None:
     rows = resp.json()
     assert isinstance(rows, list)
     assert len(rows) >= 2
-    accounts = {r["account_name"] for r in rows}
+    {r["account_name"] for r in rows}
     assert any("V07 Warrior" in r["name"] for r in rows)
     assert any("V07 Guard" in r["name"] for r in rows)
 
@@ -156,7 +156,7 @@ def test_player_routes_accept_colon_prefixed_account_name() -> None:
     _post_minimal_fight()
     resp = client.get("/api/v1/players?limit=500")
     assert resp.status_code == 200
-    raw_accounts = [r["account_name"] for r in resp.json() if r["account_name"].startswith(":synth.")]
+    raw_accounts = [r["account_name"] for r in resp.json() if r["account_name"].startswith(":synth.")]  # noqa: E501
     if not raw_accounts:
         pytest.skip("no synth accounts found")
     bare = raw_accounts[0].lstrip(":")
@@ -210,7 +210,7 @@ def test_player_timeline_returns_paginated_recency_first_points() -> None:
     accounts = [r["account_name"] for r in resp.json() if r["account_name"].startswith(":synth.")]
     if not accounts:
         pytest.skip("no synth accounts found")
-    timeline = client.get(f"/api/v1/players/{quote(accounts[0], safe='')}/timeline?limit=5&offset=0")
+    timeline = client.get(f"/api/v1/players/{quote(accounts[0], safe='')}/timeline?limit=5&offset=0")  # noqa: E501
     assert timeline.status_code == 200, timeline.text
     body = timeline.json()
     assert body["total"] >= 1
@@ -238,7 +238,7 @@ def test_player_timeline_422_when_offset_negative() -> None:
 
 
 def test_player_timeline_default_bucket_is_fight() -> None:
-    fight_id = _post_minimal_fight()
+    _post_minimal_fight()
     resp = client.get("/api/v1/players?limit=500")
     assert resp.status_code == 200
     accounts = [r["account_name"] for r in resp.json() if r["account_name"].startswith(":synth.")]

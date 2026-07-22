@@ -33,7 +33,7 @@ import pytest
 import respx
 
 from gw2_api_client import AsyncGuildWars2Client
-from gw2_api_client.exceptions import GuildWars2ApiError, GuildWars2ClientError
+from gw2_api_client.exceptions import GuildWars2ApiError
 from gw2_core import AccountInfo, Population, WorldInfo
 
 _API_KEY = "test-key-123"

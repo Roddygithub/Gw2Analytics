@@ -9,7 +9,7 @@ from typing import Any, Final
 
 import httpx
 
-from gw2_api_client.exceptions import GuildWars2ApiError, GuildWars2ClientError
+from gw2_api_client.exceptions import GuildWars2ApiError
 from gw2_core import AccountInfo, WorldInfo
 
 _BASE_URL: Final[str] = "https://api.guildwars2.com/v2"

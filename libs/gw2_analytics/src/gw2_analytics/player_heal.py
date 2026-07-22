@@ -319,7 +319,7 @@ class PlayerHealAggregator:
         # We sum the per-source-agent counter map because the
         # :class:`~gw2_core.StunBreakEvent` shape is actor-only
         # (one event = ``+1`` to the source-agent's counter).
-        expected_stun_break_total = sum(acc.stun_breaks for acc in stats_by_source.values())
+        sum(acc.stun_breaks for acc in stats_by_source.values())
         return rows
 
 

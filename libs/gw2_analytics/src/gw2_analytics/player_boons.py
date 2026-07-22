@@ -352,8 +352,8 @@ class PlayerBoonsAggregator:
         # Derive the source/target apply totals from the accumulated
         # per-player metrics rather than tracking them inside the hot
         # loop. This saves two integer additions per input event.
-        grand_total_out = sum(m.boons_out for m in metrics_by_player.values())
-        grand_total_in = sum(m.boons_in for m in metrics_by_player.values())
+        sum(m.boons_out for m in metrics_by_player.values())
+        sum(m.boons_in for m in metrics_by_player.values())
 
         rate_factor = 1.0 / duration_s if duration_s > 0 else _DEFAULT_RATE
         # ``name_map.get(agent_id)`` returns ``None`` for missing keys

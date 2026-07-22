@@ -17,6 +17,7 @@ configured ``S3_ENDPOINT`` with matching ``S3_ACCESS_KEY`` /
 
 from __future__ import annotations
 
+import contextlib
 import os
 
 import pytest
@@ -86,7 +87,5 @@ def test_minio_bucket_read_write() -> None:
             response.release_conn()
     finally:
         # Cleanup
-        try:
+        with contextlib.suppress(S3Error):
             client.remove_object(bucket, key)
-        except S3Error:
-            pass

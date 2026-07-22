@@ -16,7 +16,6 @@ from __future__ import annotations
 from gw2_core.models import (
     _EVENT_MAP,
     BUFF_CATEGORY_MAP,
-    BuffCategory,
     AccountInfo,
     Agent,
     BarrierEvent,
@@ -24,6 +23,7 @@ from gw2_core.models import (
     BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
+    BuffCategory,
     BuffRemovalEvent,
     CCEvent,
     ConditionRemoveEvent,

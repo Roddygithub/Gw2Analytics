@@ -230,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--fight-id", type=str, default=None)
     parser.add_argument("--roles-only", action="store_true")
-    parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])  # noqa: E501
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -254,13 +254,13 @@ def main(argv: list[str] | None = None) -> int:
             updated, skipped, failed = backfill_role_detection(
                 session, fight_id=args.fight_id, limit=args.limit, dry_run=args.dry_run,
             )
-            print(f"role backfill complete: updated={updated} skipped={skipped} failed={failed} {'(dry-run)' if args.dry_run else ''}")
+            print(f"role backfill complete: updated={updated} skipped={skipped} failed={failed} {'(dry-run)' if args.dry_run else ''}")  # noqa: E501
         else:
             backfilled, skipped, failed = run_backfill(
                 session, fight_id=args.fight_id, limit=args.limit,
                 dry_run=args.dry_run, progress_callback=_progress_cb,
             )
-            print(f"backfill complete: backfilled={backfilled} skipped={skipped} failed={failed} {'(dry-run)' if args.dry_run else ''}")
+            print(f"backfill complete: backfilled={backfilled} skipped={skipped} failed={failed} {'(dry-run)' if args.dry_run else ''}")  # noqa: E501
     finally:
         session.close()
 
