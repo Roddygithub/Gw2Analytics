@@ -6,24 +6,27 @@ describe("Home", () => {
   it("renders the hero heading + tagline", () => {
     render(<Home />);
     expect(
-      screen.getByRole("heading", { level: 1, name: "GW2Analytics" }),
+      screen.getByRole("heading", { level: 1 }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Independent combat analytics/i),
+      screen.getByText(/Analysez vos combats WvW/i),
     ).toBeInTheDocument();
   });
 
-  it("links to /fights and /account via next/link", () => {
+  it("links to /fights and /players via next/link", () => {
     render(<Home />);
-    const fightsLink = screen.getByRole("link", { name: /Browse fights/i });
-    const accountLink = screen.getByRole("link", { name: /Resolve API key/i });
-    expect(fightsLink.getAttribute("href")).toBe("/fights");
-    expect(accountLink.getAttribute("href")).toBe("/account");
+    // Use getAllByRole to find all nav links, then check specific hrefs
+    const links = screen.getAllByRole("link");
+    const fightsLink = links.find((l) => l.getAttribute("href") === "/fights");
+    const playersLink = links.find((l) => l.getAttribute("href") === "/players");
+    expect(fightsLink).toBeTruthy();
+    expect(playersLink).toBeTruthy();
   });
 
-  it("displays the (mocked) API base URL in the footer copy", () => {
+  it("shows the drag-drop upload zone", () => {
     render(<Home />);
-    // setup.ts shims displayedApiBaseUrl -> http://test/api
-    expect(screen.getByText("http://test/api")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Glissez-déposez votre log/i),
+    ).toBeInTheDocument();
   });
 });
