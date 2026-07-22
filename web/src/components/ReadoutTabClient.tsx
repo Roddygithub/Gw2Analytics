@@ -332,10 +332,30 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
     );
   }
 
-  const windows = events.event_windows;
+  const raw = events.event_windows;
+  const MAX_BARS = 200;
+
+  // Downsample: if >MAX_BARS windows, merge adjacent windows into groups.
+  const windows = useMemo(() => {
+    if (raw.length <= MAX_BARS) return raw;
+    const groupSize = Math.ceil(raw.length / MAX_BARS);
+    const result: typeof raw = [];
+    for (let i = 0; i < raw.length; i += groupSize) {
+      const slice = raw.slice(i, i + groupSize);
+      result.push({
+        start_ms: slice[0].start_ms,
+        end_ms: slice[slice.length - 1].end_ms,
+        damage_total: slice.reduce((s, w) => s + w.damage_total, 0),
+        healing_total: slice.reduce((s, w) => s + w.healing_total, 0),
+        event_count: slice.reduce((s, w) => s + w.event_count, 0),
+      });
+    }
+    return result;
+  }, [raw]);
+
   const maxDmg = Math.max(...windows.map((w) => w.damage_total), 1);
   const maxHeal = Math.max(...windows.map((w) => w.healing_total), 1);
-  const durationMin = (windows[windows.length - 1]?.end_ms ?? 0) / 60000;
+  const durationMin = (raw[raw.length - 1]?.end_ms ?? 0) / 60000;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -349,7 +369,8 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
           Heal
         </span>
         <span style={{ marginLeft: "auto", opacity: 0.6 }}>
-          {windows.length} buckets · {durationMin.toFixed(1)} min
+          {raw.length} buckets · {durationMin.toFixed(1)} min
+          {windows.length < raw.length && ` (affiché: ${windows.length})`}
         </span>
       </div>
       <div
