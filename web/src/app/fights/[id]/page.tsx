@@ -840,7 +840,7 @@ export default async function FightEventsPage({
                   "var(--font-geist-sans), Arial, Helvetica, sans-serif",
               }}
             >
-              Readout
+              Analyse
             </a>
           </div>
         </div>

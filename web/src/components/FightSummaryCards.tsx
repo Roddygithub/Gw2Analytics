@@ -169,6 +169,43 @@ function SummaryPlayerRow({
         {player.name}
       </span>
 
+      {/* Role badge(s) */}
+      {player.roles.length > 0 && (
+        <span
+          style={{
+            display: "inline-flex",
+            gap: 2,
+            flexShrink: 0,
+          }}
+        >
+          {player.roles.map((role) => {
+            const colors: Record<string, { bg: string; fg: string }> = {
+              DPS: { bg: "rgba(239,68,68,0.15)", fg: "#f87171" },
+              Heal: { bg: "rgba(34,197,94,0.15)", fg: "#4ade80" },
+              Support: { bg: "rgba(168,85,247,0.15)", fg: "#c084fc" },
+            };
+            const c = colors[role] ?? { bg: "rgba(255,255,255,0.06)", fg: "var(--foreground)" };
+            return (
+              <span
+                key={role}
+                style={{
+                  padding: "0 5px",
+                  borderRadius: 3,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  lineHeight: "15px",
+                  background: c.bg,
+                  color: c.fg,
+                  letterSpacing: "0.03em",
+                }}
+              >
+                {role}
+              </span>
+            );
+          })}
+        </span>
+      )}
+
       {/* Spacer + value */}
       <span
         style={{

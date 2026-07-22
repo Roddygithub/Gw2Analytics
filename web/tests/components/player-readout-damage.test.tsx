@@ -89,6 +89,8 @@ function makeRow(overrides: Partial<PlayerReadoutOut> = {}): PlayerReadoutOut {
       dps_total: 1500,
       kills: 2,
       strips: 4,
+      cleave_targets: 0,
+      kill_participation: 0,
     },
     defense: {
       barrier_absorbed: 0,
