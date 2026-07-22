@@ -40,8 +40,8 @@ import time
 import uuid as _uuid
 
 import pytest
-from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
+from tests._fixtures import make_minimal_zevtc
 
 from apps.api.tests.routes._evtc_builder import build_2025_string
 from gw2analytics_api.models import OrmFight, Upload

@@ -27,12 +27,12 @@ from __future__ import annotations
 
 import uuid as _uuid
 
-from _fixtures import (
+from fastapi.testclient import TestClient
+from sqlalchemy import delete, select
+from tests._fixtures import (
     make_cbtevent,
     post_minimal_fight,
 )
-from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app

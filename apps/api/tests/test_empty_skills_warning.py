@@ -42,8 +42,8 @@ import time
 import uuid as _uuid
 
 import pytest
-from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
+from tests._fixtures import make_minimal_zevtc
 
 from gw2_evtc_parser.parser import logger as parser_logger
 from gw2analytics_api.main import app

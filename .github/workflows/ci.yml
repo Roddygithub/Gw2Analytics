@@ -71,7 +71,7 @@ jobs:
           ! grep -rn 'db\.query(' apps/api/src/ libs/ --include='*.py'
 
       - name: Mypy
-        run: uv run mypy libs apps --no-incremental --exclude '_evtc_builder'
+        run: uv run mypy libs apps --no-incremental
 
       - name: pip-audit (Python deps, vulnerability scan)
         run: uv run pip-audit --strict --vulnerability-service osv
@@ -423,20 +423,19 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       minio:
-        image: minio/minio:latest
+        image: bitnami/minio:latest
         ports:
           - 9000:9000
           - 9001:9001
         env:
           MINIO_ROOT_USER: gw2analytics
           MINIO_ROOT_PASSWORD: gw2analytics-secret
+          MINIO_DEFAULT_BUCKETS: gw2analytics
         options: >-
           --health-cmd "curl -s http://localhost:9000/minio/health/live"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-        entrypoint: sh
-        command: -c 'mkdir -p /data/gw2analytics && minio server /data --console-address ":9001"'
 
     steps:
       - uses: actions/checkout@v7

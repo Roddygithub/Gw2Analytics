@@ -32,7 +32,7 @@ def test_upload_rate_limit_returns_429_after_5_per_minute() -> None:
     (SHA-256 dedup) treats them as distinct files. The rate limiter
     counts HTTP requests independently of the dedup logic.
     """
-    from _fixtures import make_minimal_zevtc
+    from tests._fixtures import make_minimal_zevtc
 
     build = "20240925"  # legacy format for minimal fixture
 
@@ -76,7 +76,7 @@ def test_rate_limit_resets_between_tests() -> None:
     limiter.reset() clears accumulated state, not just that
     the first upload after reset works.
     """
-    from _fixtures import make_minimal_zevtc
+    from tests._fixtures import make_minimal_zevtc
 
     build = "20240925"
 

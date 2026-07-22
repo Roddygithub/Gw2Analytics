@@ -48,8 +48,8 @@ import uuid as _uuid
 import zipfile
 
 import pytest
-from _fixtures import build_2025_string, make_minimal_zevtc
 from fastapi.testclient import TestClient
+from tests._fixtures import build_2025_string, make_minimal_zevtc
 
 from gw2_evtc_parser import __version__ as PARSER_VERSION  # noqa: N812
 from gw2analytics_api.main import app

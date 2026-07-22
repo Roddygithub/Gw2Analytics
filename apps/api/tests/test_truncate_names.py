@@ -49,9 +49,9 @@ import time
 import uuid as _uuid
 
 import pytest
-from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 from sqlalchemy import BigInteger, cast
+from tests._fixtures import make_minimal_zevtc
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app

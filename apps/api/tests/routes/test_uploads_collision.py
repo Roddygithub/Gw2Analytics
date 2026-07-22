@@ -74,11 +74,12 @@ import time
 import uuid as _uuid
 from unittest.mock import patch
 
-# NOTE: _uuid.UUID is still used for upload_id parsing below
-# but fight_id is now SHA-256 hex (gw2_core Fight.id).
-from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
+
+# NOTE: _uuid.UUID is still used for upload_id parsing below
+# but fight_id is now SHA-256 hex (gw2_core Fight.id).
+from tests._fixtures import make_minimal_zevtc
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app
