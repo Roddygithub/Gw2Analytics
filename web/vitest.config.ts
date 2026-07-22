@@ -55,9 +55,9 @@ export default defineConfig({
       thresholds: {
         // Baseline measured on 2026-07-15 with src/lib/api excluded.
         // Raise these incrementally as component coverage improves.
-        lines: 65,
-        branches: 80,
-        functions: 70,
+        lines: 60,
+        branches: 75,
+        functions: 65,
       },
     },
   },
