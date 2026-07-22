@@ -12,7 +12,6 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from gw2analytics_api.config import get_settings
-from gw2analytics_api.limiter import limiter
 from gw2analytics_api.main import app
 
 client = TestClient(app)
@@ -20,7 +19,6 @@ client = TestClient(app)
 
 def test_upload_413_oversized_body() -> None:
     """File exceeding max_upload_size_bytes returns 413."""
-    limiter.reset()
     max_size = get_settings().max_upload_size_bytes
     oversized = b"x" * (max_size + 1)
     resp = client.post(
@@ -31,8 +29,11 @@ def test_upload_413_oversized_body() -> None:
 
 
 def test_upload_413_content_length_header() -> None:
-    """Content-Length header exceeding max returns 413 before reading body."""
-    limiter.reset()
+    """Content-Length header > max returns 413 BEFORE reading body.
+
+    Exercises the defense-in-depth #1 check in uploads.py, distinct
+    from the post-read size check exercised by test_upload_413_oversized_body.
+    """
     max_size = get_settings().max_upload_size_bytes
     oversized = b"x" * (max_size + 1)
     resp = client.post(
@@ -44,8 +45,7 @@ def test_upload_413_content_length_header() -> None:
 
 
 def test_upload_empty_file() -> None:
-    """Empty .zevtc file returns 201 (will parse as empty fight)."""
-    limiter.reset()
+    """Empty .zevtc file — should not crash."""
     resp = client.post(
         "/api/v1/uploads",
         files={"file": ("empty.zevtc", b"", "application/octet-stream")},
