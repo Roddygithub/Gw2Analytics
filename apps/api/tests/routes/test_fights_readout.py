@@ -915,6 +915,60 @@ def test_readout_dual_role_heal_support() -> None:
 # -----------------------------------------------------------------
 
 
+def test_readout_cleanser_role() -> None:
+    """A player with >10 cleanses gets the "Cleanser" role.
+
+    Seeds a player with 11 BuffRemovalEvents on conditions (Bleeding=736).
+    Verifies roles includes "Cleanser" alongside DPS.
+    """
+    from gw2_core import BuffRemovalEvent
+
+    a = 970_001  # cleanser
+    b = a + 1   # target
+    cl_skill = 9_700_001
+
+    # 11 cleanse events — all condition buff_ids (Bleeding=736)
+    cleanse_events = [
+        BuffRemovalEvent(
+            time_ms=i * 500,
+            source_agent_id=a,
+            target_agent_id=b,
+            skill_id=cl_skill,
+            buff_id=736,  # Bleeding (condition, not boon)
+            stacks=1,
+            duration_remaining_ms=0,
+        )
+        for i in range(11)
+    ]
+
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a, name=f"Cleanser {a}", subgroup=0,
+            account_name=f"synth.{a}", profession="PROF(1)", elite_spec="ELITE(62)",
+            is_player=True, is_commander=False,
+        ),
+        b: AgentIdentity(
+            agent_id=b, name=f"Target {b}", subgroup=0,
+            account_name=f"synth.{b}", profession="PROF(2)", elite_spec="ELITE(18)",
+            is_player=True, is_commander=False,
+        ),
+    }
+    out = aggregate_combat_readout(
+        events=cleanse_events,
+        skill_id_to_name_map={cl_skill: "Cleanse"},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=5.0,
+        fight_id="cleanser-role-test",
+    )
+
+    a_readout = next(p for p in out.players if p.agent_id == a)
+    # 11 cleanses > 10 → role includes "Cleanser"
+    assert "Cleanser" in a_readout.roles, (
+        f"expected 'Cleanser' in roles for 11 cleanses, got {a_readout.roles}"
+    )
+    assert a_readout.heal.cleanses == 11
+
+
 def test_readout_strip_role() -> None:
     """A player with >5 strips gets the "Strip" role.
 

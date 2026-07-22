@@ -757,6 +757,8 @@ def aggregate_combat_readout(
             roles.append("Support")
         if strips_counter.get(agent_id, 0) > 5:
             roles.append("Strip")
+        if cleanses_counter.get(agent_id, 0) > 10:
+            roles.append("Cleanser")
         if not roles:
             roles.append("DPS")
         roles_by_agent[agent_id] = roles

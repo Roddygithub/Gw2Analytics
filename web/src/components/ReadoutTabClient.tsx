@@ -240,6 +240,48 @@ function BoonsBarCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
 }
 
 /* ------------------------------------------------------------------ *
+ *  Role badge cell renderer — coloured pills matching FightSummaryCards
+ * ------------------------------------------------------------------ */
+
+const ROLE_COLORS: Record<string, { bg: string; fg: string }> = {
+  DPS: { bg: "rgba(239,68,68,0.15)", fg: "#f87171" },
+  Heal: { bg: "rgba(34,197,94,0.15)", fg: "#4ade80" },
+  Support: { bg: "rgba(168,85,247,0.15)", fg: "#c084fc" },
+  Strip: { bg: "rgba(251,191,36,0.15)", fg: "#fbbf24" },
+  Cleanser: { bg: "rgba(6,182,212,0.15)", fg: "#22d3ee" },
+};
+const ROLE_FALLBACK = { bg: "rgba(255,255,255,0.06)", fg: "var(--foreground)" };
+
+function RoleBadgeCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
+  const roles = params.value as string[] | undefined;
+  if (!Array.isArray(roles) || roles.length === 0) return <span>—</span>;
+  return (
+    <span style={{ display: "inline-flex", gap: 2, flexWrap: "wrap", alignItems: "center", height: "100%" }}>
+      {roles.map((role) => {
+        const c = ROLE_COLORS[role] ?? ROLE_FALLBACK;
+        return (
+          <span
+            key={role}
+            style={{
+              padding: "0 5px",
+              borderRadius: 3,
+              fontSize: 9,
+              fontWeight: 700,
+              lineHeight: "15px",
+              background: c.bg,
+              color: c.fg,
+              letterSpacing: "0.03em",
+            }}
+          >
+            {role}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  *  Shared column definitions
  * ------------------------------------------------------------------ */
 
@@ -269,11 +311,12 @@ const SHARED_COLUMNS: ColDef<PlayerReadoutOut>[] = [
     cellRenderer: CommanderCellRenderer,
   },
   {
-    field: "roles",
+    colId: "roles",
     headerName: "Rôles",
-    width: 120,
-    valueFormatter: (p) =>
-      Array.isArray(p.value) ? (p.value as string[]).join("/") : "",
+    width: 130,
+    valueGetter: (params) => params.data?.roles ?? [],
+    valueFormatter: () => "",
+    cellRenderer: RoleBadgeCellRenderer,
   },
 ];
 
