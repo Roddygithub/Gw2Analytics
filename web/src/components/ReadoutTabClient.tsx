@@ -1,0 +1,699 @@
+"use client";
+
+/**
+ * Client-side tab that fetches the combat readout + positions + events
+ * and renders the full fight analysis view:
+ *   - Summary cards (Top 3 per category)
+ *   - Timeline chart
+ *   - 4 tables (Damage, Heal, Boons, Defense) with horizontal bars
+ *
+ * Fetches client-side using relative URLs (Next.js rewrite proxy)
+ * to avoid the RSC → Client Component prop serialization gap that
+ * caused "No Rows To Show" despite data being loaded.
+ */
+
+import { useCallback, useEffect, useState } from "react";
+import type { ColDef, ICellRendererParams, SortModelItem } from "ag-grid-community";
+import { AgGridReact } from "ag-grid-react";
+
+import {
+  fetchFightReadout,
+  fetchFightPositions,
+  fetchFightEvents,
+  type FightReadoutOut,
+  type FightPositionsOut,
+  type FightEventsSummaryRow,
+  type PlayerReadoutOut,
+} from "@/lib/api";
+import { appGridTheme } from "./ag-grid-setup";
+import { FightSummaryCards } from "./FightSummaryCards";
+import {
+  EliteSpecCellRenderer,
+  CommanderCellRenderer,
+} from "./PlayerReadoutCells";
+
+/* ------------------------------------------------------------------ *
+ *  Shared helpers
+ * ------------------------------------------------------------------ */
+
+const NUMERIC_COMPARATOR = (a: unknown, b: unknown) =>
+  Number(a ?? 0) - Number(b ?? 0) || 0;
+
+const GRID_CONTAINER_STYLE: React.CSSProperties = {
+  width: "100%",
+  height: 400,
+};
+
+const EMPTY_STYLE: React.CSSProperties = {
+  padding: "12px 16px",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  color: "var(--foreground)",
+  opacity: 0.7,
+};
+
+/* ------------------------------------------------------------------ *
+ *  Bar cell renderers — with gradients, tooltips, and hover effects
+ * ------------------------------------------------------------------ */
+
+const BAR_BG = "rgba(255,255,255,0.04)";
+const BAR_HEIGHT = 18;
+const BAR_RADIUS = 4;
+
+/**
+ * Render a gradient bar segment with label on hover.
+ * Uses inline gradients for smooth color transitions.
+ */
+function BarSegment({
+  pct,
+  gradient,
+  label,
+}: {
+  pct: number;
+  gradient: string;
+  label: string;
+}) {
+  return (
+    <div
+      style={{
+        width: `${Math.max(pct, 1.5)}%`,
+        height: "100%",
+        background: gradient,
+        transition: "width 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s",
+        opacity: pct > 1 ? 1 : 0.4,
+        position: "relative",
+      }}
+      title={label}
+    >
+      {/* Subtle shimmer overlay on hover — visible via parent hover */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%)",
+          transition: "opacity 0.3s",
+          opacity: 0,
+        }}
+        className="bar-shimmer"
+      />
+    </div>
+  );
+}
+
+/** Horizontal stacked bar with label */
+function BarStack({
+  segments,
+  total,
+}: {
+  segments: { pct: number; gradient: string; label: string }[];
+  total: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        height: "100%",
+        padding: "2px 0",
+      }}
+    >
+      {/* Bar track */}
+      <div
+        style={{
+          flex: 1,
+          height: BAR_HEIGHT,
+          background: BAR_BG,
+          borderRadius: BAR_RADIUS,
+          overflow: "hidden",
+          display: "flex",
+          minWidth: 80,
+          boxShadow: "inset 0 1px 2px rgba(0,0,0,0.3)",
+        }}
+        title={segments.map((s) => s.label).join(" · ")}
+      >
+        {segments.map((s, i) => (
+          <BarSegment key={i} pct={s.pct} gradient={s.gradient} label={s.label} />
+        ))}
+      </div>
+
+      {/* Total value */}
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          fontVariantNumeric: "tabular-nums",
+          whiteSpace: "nowrap",
+          minWidth: 52,
+          textAlign: "right",
+          letterSpacing: "0.01em",
+          color: "var(--foreground)",
+          opacity: 0.9,
+        }}
+      >
+        {total}
+      </span>
+    </div>
+  );
+}
+
+/** DPS stacked bar: power (amber) + condi (red) */
+function DpsBarCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
+  const d = params.data;
+  if (!d) return null;
+  const power = d.damage.dps_power;
+  const condi = d.damage.dps_condi;
+  const total = d.damage.dps_total || power + condi;
+  const max = total || 1;
+  return (
+    <BarStack
+      segments={[
+        {
+          pct: (power / max) * 100,
+          gradient: "linear-gradient(135deg, #f59e0b, #d97706)",
+          label: `Power DPS: ${power.toFixed(0)}`,
+        },
+        {
+          pct: (condi / max) * 100,
+          gradient: "linear-gradient(135deg, #ef4444, #dc2626)",
+          label: `Condi DPS: ${condi.toFixed(0)}`,
+        },
+      ]}
+      total={total.toFixed(0)}
+    />
+  );
+}
+
+/** Heal stacked bar: heal (green) + barrier (cyan) */
+function HealBarCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
+  const d = params.data;
+  if (!d) return null;
+  const hps = d.heal.hps;
+  const bps = d.heal.barrier_ps;
+  const total = hps + bps || 1;
+  return (
+    <BarStack
+      segments={[
+        {
+          pct: (hps / total) * 100,
+          gradient: "linear-gradient(135deg, #22c55e, #16a34a)",
+          label: `Heal/s: ${hps.toFixed(1)}`,
+        },
+        {
+          pct: (bps / total) * 100,
+          gradient: "linear-gradient(135deg, #06b6d4, #0891b2)",
+          label: `Barrier/s: ${bps.toFixed(1)}`,
+        },
+      ]}
+      total={(d.heal.heal_total ?? 0).toFixed(0)}
+    />
+  );
+}
+
+/** Boons stacked bar: out (purple) + in (indigo) */
+function BoonsBarCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
+  const d = params.data;
+  if (!d) return null;
+  const outRate = d.boons.boons_out_rate ?? 0;
+  const inRate = d.boons.boons_in_rate ?? 0;
+  const max = Math.max(outRate, inRate, 1);
+  return (
+    <BarStack
+      segments={[
+        {
+          pct: (outRate / max) * 100,
+          gradient: "linear-gradient(135deg, #a855f7, #9333ea)",
+          label: `Boons out/s: ${outRate.toFixed(1)}`,
+        },
+        {
+          pct: (inRate / max) * 100,
+          gradient: "linear-gradient(135deg, #6366f1, #4f46e5)",
+          label: `Boons in/s: ${inRate.toFixed(1)}`,
+        },
+      ]}
+      total={`${outRate.toFixed(1)}/s`}
+    />
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ *  Shared column definitions
+ * ------------------------------------------------------------------ */
+
+const SHARED_COLUMNS: ColDef<PlayerReadoutOut>[] = [
+  {
+    field: "subgroup",
+    headerName: "Groupe",
+    width: 80,
+    valueFormatter: (p) => {
+      const v = p.value;
+      if (v == null) return "(no squad)";
+      if (typeof v === "number") return v === 0 ? "(no squad)" : `Sub ${v}`;
+      return String(v);
+    },
+  },
+  { field: "name", headerName: "Nom", width: 160 },
+  {
+    field: "elite_spec",
+    headerName: "Spécialisation",
+    width: 180,
+    cellRenderer: EliteSpecCellRenderer,
+  },
+  {
+    field: "is_commander",
+    headerName: "Cmd",
+    width: 60,
+    cellRenderer: CommanderCellRenderer,
+  },
+  {
+    field: "roles",
+    headerName: "Rôles",
+    width: 120,
+    valueFormatter: (p) =>
+      Array.isArray(p.value) ? (p.value as string[]).join("/") : "",
+  },
+];
+
+/* ------------------------------------------------------------------ *
+ *  Damage columns
+ * ------------------------------------------------------------------ */
+
+const DAMAGE_COLUMNS: ColDef<PlayerReadoutOut>[] = [
+  {
+    headerName: "DPS (power / condi)",
+    width: 230,
+    cellRenderer: DpsBarCellRenderer,
+    comparator: (a: unknown, b: unknown, nodeA, nodeB) => {
+      const aVal = nodeA.data?.damage.dps_total ?? 0;
+      const bVal = nodeB.data?.damage.dps_total ?? 0;
+      return bVal - aVal;
+    },
+  },
+  { field: "damage.strips", headerName: "Strips", width: 90 },
+  { field: "damage.cc_applied", headerName: "CC", width: 70 },
+  { field: "damage.down_contribution_dps", headerName: "Down DPS", width: 110 },
+];
+
+const DAMAGE_SORT: SortModelItem[] = [
+  { colId: "subgroup", sort: "asc" },
+  { colId: "damage.down_contribution_dps", sort: "desc" },
+];
+
+/* ------------------------------------------------------------------ *
+ *  Heal columns
+ * ------------------------------------------------------------------ */
+
+const HEAL_COLUMNS: ColDef<PlayerReadoutOut>[] = [
+  {
+    headerName: "Heal / Barrier",
+    width: 230,
+    cellRenderer: HealBarCellRenderer,
+    comparator: (a: unknown, b: unknown, nodeA, nodeB) => {
+      const aVal =
+        (nodeA.data?.heal.hps ?? 0) + (nodeA.data?.heal.barrier_ps ?? 0);
+      const bVal =
+        (nodeB.data?.heal.hps ?? 0) + (nodeB.data?.heal.barrier_ps ?? 0);
+      return bVal - aVal;
+    },
+  },
+  { field: "heal.cleanses", headerName: "Cleanses", width: 100 },
+  { field: "heal.stun_breaks", headerName: "Breakstun", width: 110 },
+];
+
+const HEAL_SORT: SortModelItem[] = [
+  { colId: "subgroup", sort: "asc" },
+  { colId: "heal.stun_breaks", sort: "desc" },
+];
+
+/* ------------------------------------------------------------------ *
+ *  Boons columns
+ * ------------------------------------------------------------------ */
+
+const BOONS_COLUMNS: ColDef<PlayerReadoutOut>[] = [
+  {
+    colId: "boons",
+    headerName: "Boons in / out",
+    width: 220,
+    cellRenderer: BoonsBarCellRenderer,
+    comparator: (a: unknown, b: unknown, nodeA, nodeB) => {
+      const aVal = nodeA.data?.boons.boons_out_rate ?? 0;
+      const bVal = nodeB.data?.boons.boons_out_rate ?? 0;
+      return bVal - aVal;
+    },
+  },
+  { field: "boons.stability_out", headerName: "Stabilité", width: 100 },
+  { field: "boons.alacrity_out", headerName: "Célérité", width: 90 },
+  { field: "boons.resistance_out", headerName: "Résistance", width: 110 },
+  { field: "boons.aegis_out", headerName: "Égide", width: 80 },
+  { field: "boons.superspeed_out", headerName: "Superspeed", width: 110 },
+  { field: "boons.stealth_out", headerName: "Stealth", width: 90 },
+];
+
+const BOONS_SORT: SortModelItem[] = [
+  { colId: "subgroup", sort: "asc" },
+  { colId: "boons", sort: "desc" },
+];
+
+/* ------------------------------------------------------------------ *
+ *  Defense columns
+ * ------------------------------------------------------------------ */
+
+const DEFENSE_COLUMNS: ColDef<PlayerReadoutOut>[] = [
+  { field: "defense.damage_taken", headerName: "Dmg reçu", width: 110 },
+  { field: "defense.cc_taken", headerName: "CC reçus", width: 100 },
+  { field: "defense.deaths", headerName: "Morts", width: 80 },
+  { field: "defense.time_downed_ms", headerName: "Down (ms)", width: 110 },
+  { field: "defense.dodges", headerName: "Esquives", width: 100 },
+  { field: "defense.blocks", headerName: "Blocages", width: 100 },
+  { field: "defense.interrupts", headerName: "Interrupt.", width: 110 },
+  { field: "defense.barrier_absorbed", headerName: "Barrier abs.", width: 120 },
+];
+
+const DEFENSE_SORT: SortModelItem[] = [
+  { colId: "subgroup", sort: "asc" },
+  { colId: "defense.damage_taken", sort: "desc" },
+];
+
+/* ------------------------------------------------------------------ *
+ *  Timeline mini chart component
+ * ------------------------------------------------------------------ */
+
+function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null }) {
+  if (!events || events.event_windows.length === 0) {
+    return (
+      <div style={EMPTY_STYLE}>
+        Aucune donnée temporelle disponible.
+      </div>
+    );
+  }
+
+  const windows = events.event_windows;
+  const maxDmg = Math.max(...windows.map((w) => w.damage_total), 1);
+  const maxHeal = Math.max(...windows.map((w) => w.healing_total), 1);
+  const durationMin = (windows[windows.length - 1]?.end_ms ?? 0) / 60000;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 12 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: "#f59e0b" }} />
+          Damage
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: "#22c55e" }} />
+          Heal
+        </span>
+        <span style={{ marginLeft: "auto", opacity: 0.6 }}>
+          {windows.length} buckets · {durationMin.toFixed(1)} min
+        </span>
+      </div>
+      <div
+        style={{
+          width: "100%",
+          height: 80,
+          display: "flex",
+          alignItems: "flex-end",
+          gap: 1,
+          background: "rgba(255,255,255,0.03)",
+          borderRadius: 4,
+          padding: "4px 0",
+          overflow: "hidden",
+        }}
+      >
+        {windows.map((w, i) => {
+          const dmgPct = (w.damage_total / maxDmg) * 100;
+          const healPct = (w.healing_total / maxHeal) * 100;
+          return (
+            <div
+              key={i}
+              style={{
+                flex: 1,
+                height: "100%",
+                display: "flex",
+                flexDirection: "column-reverse",
+                alignItems: "center",
+                gap: 1,
+                minWidth: 2,
+              }}
+              title={`${(w.start_ms / 1000).toFixed(0)}s: dmg=${w.damage_total}, heal=${w.healing_total}`}
+            >
+              <div
+                style={{
+                  width: "100%",
+                  height: `${Math.max(healPct, 1)}%`,
+                  background: "#22c55e",
+                  opacity: 0.6,
+                  borderRadius: "1px 1px 0 0",
+                  transition: "height 0.2s",
+                }}
+              />
+              <div
+                style={{
+                  width: "100%",
+                  height: `${Math.max(dmgPct, 1)}%`,
+                  background: "#f59e0b",
+                  opacity: 0.8,
+                  borderRadius: "1px 1px 0 0",
+                  transition: "height 0.2s",
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ *  Positions summary
+ * ------------------------------------------------------------------ */
+
+function PositionsSummary({
+  positions,
+}: {
+  positions: FightPositionsOut | null;
+}) {
+  if (!positions || positions.players.length === 0) {
+    return <div style={EMPTY_STYLE}>Aucune donnée de position.</div>;
+  }
+
+  const closePlayers = [...positions.players]
+    .sort((a, b) => (a.stack_dist ?? 9999) - (b.stack_dist ?? 9999))
+    .slice(0, 5);
+
+  return (
+    <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
+      <p style={{ opacity: 0.7, margin: 0 }}>
+        {positions.players.length} joueurs trackés ·{" "}
+        {closePlayers[0]?.stack_dist
+          ? `Plus proche stack: ${closePlayers[0].name} (${closePlayers[0].stack_dist?.toFixed(1)}u)`
+          : ""}
+      </p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ *  ReadoutTabClient — main component
+ * ------------------------------------------------------------------ */
+
+interface ReadoutTabClientProps {
+  fightId: string;
+}
+
+export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
+  // State
+  const [readout, setReadout] = useState<FightReadoutOut | null>(null);
+  const [positions, setPositions] = useState<FightPositionsOut | null>(null);
+  const [events, setEvents] = useState<FightEventsSummaryRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch all data on mount
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [r, p, e] = await Promise.all([
+        fetchFightReadout(fightId),
+        fetchFightPositions(fightId).catch(() => null), // non-fatal
+        fetchFightEvents(fightId).catch(() => null), // non-fatal
+      ]);
+      setReadout(r);
+      setPositions(p);
+      setEvents(e);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load combat data",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [fightId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Loading state
+  if (loading) {
+    return (
+      <div
+        style={{
+          padding: "24px 0",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          opacity: 0.7,
+        }}
+      >
+        <span aria-label="Chargement">⏳</span>
+        Chargement des données de combat…
+      </div>
+    );
+  }
+
+  // Error state
+  if (error || !readout) {
+    return (
+      <div
+        style={{
+          padding: "16px 20px",
+          border: "1px solid var(--accent)",
+          borderRadius: 4,
+          color: "var(--accent)",
+        }}
+        role="alert"
+      >
+        {error ?? "Impossible de charger les données de combat."}
+      </div>
+    );
+  }
+
+  const players = readout.players;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Status banner */}
+      <p
+        style={{
+          padding: "10px 14px",
+          border: "1px solid var(--border)",
+          borderRadius: 4,
+          fontSize: 13,
+          opacity: 0.8,
+        }}
+      >
+        {players.length} joueurs · durée {readout.duration_s.toFixed(1)}s
+      </p>
+
+      {/* Summary cards */}
+      <FightSummaryCards players={players} />
+
+      {/* Timeline */}
+      <section>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
+          Timeline des événements
+        </h2>
+        <TimelineMiniChart events={events} />
+      </section>
+
+      {/* Positions */}
+      {positions && (
+        <section>
+          <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
+            Positions
+          </h2>
+          <PositionsSummary positions={positions} />
+        </section>
+      )}
+
+      {/* Tableau 1: Damage */}
+      <section>
+      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
+      Dégâts
+    </h2>
+        <div style={GRID_CONTAINER_STYLE}>
+          <AgGridReact<PlayerReadoutOut>
+            theme={appGridTheme}
+            rowData={players}
+            columnDefs={[...SHARED_COLUMNS, ...DAMAGE_COLUMNS]}
+            defaultColDef={{
+              comparator: NUMERIC_COMPARATOR,
+              resizable: true,
+            }}
+            animateRows
+            getRowId={(p) => String(p.data.agent_id)}
+            initialState={{ sort: { sortModel: DAMAGE_SORT } }}
+          />
+        </div>
+      </section>
+
+      {/* Tableau 2: Heal */}
+      <section>
+      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
+      Soins
+    </h2>
+        <div style={GRID_CONTAINER_STYLE}>
+          <AgGridReact<PlayerReadoutOut>
+            theme={appGridTheme}
+            rowData={players}
+            columnDefs={[...SHARED_COLUMNS, ...HEAL_COLUMNS]}
+            defaultColDef={{
+              comparator: NUMERIC_COMPARATOR,
+              resizable: true,
+            }}
+            animateRows
+            getRowId={(p) => String(p.data.agent_id)}
+            initialState={{ sort: { sortModel: HEAL_SORT } }}
+          />
+        </div>
+      </section>
+
+      {/* Tableau 3: Boons */}
+      <section>
+      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
+      Boons
+    </h2>
+        <div style={GRID_CONTAINER_STYLE}>
+          <AgGridReact<PlayerReadoutOut>
+            theme={appGridTheme}
+            rowData={players}
+            columnDefs={[...SHARED_COLUMNS, ...BOONS_COLUMNS]}
+            defaultColDef={{
+              comparator: NUMERIC_COMPARATOR,
+              resizable: true,
+            }}
+            animateRows
+            getRowId={(p) => String(p.data.agent_id)}
+            initialState={{ sort: { sortModel: BOONS_SORT } }}
+          />
+        </div>
+      </section>
+
+      {/* Tableau 4: Defense */}
+      <section>
+      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
+      Défense
+    </h2>
+        <div style={GRID_CONTAINER_STYLE}>
+          <AgGridReact<PlayerReadoutOut>
+            theme={appGridTheme}
+            rowData={players}
+            columnDefs={[...SHARED_COLUMNS, ...DEFENSE_COLUMNS]}
+            defaultColDef={{
+              comparator: NUMERIC_COMPARATOR,
+              resizable: true,
+            }}
+            animateRows
+            getRowId={(p) => String(p.data.agent_id)}
+            initialState={{ sort: { sortModel: DEFENSE_SORT } }}
+          />
+        </div>
+      </section>
+    </div>
+  );
+}

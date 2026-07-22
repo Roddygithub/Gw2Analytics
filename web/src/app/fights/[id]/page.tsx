@@ -97,10 +97,7 @@ import { ReplayPlayer } from "@/components/ReplayPlayer";
 //
 // :file:`web/tests/components/section-error-chip.test.tsx`.
 import { SectionErrorChip } from "@/components/SectionErrorChip";
-import { PlayerReadoutDamage } from "@/components/PlayerReadoutDamage";
-import { PlayerReadoutHeal } from "@/components/PlayerReadoutHeal";
-import { PlayerReadoutBoons } from "@/components/PlayerReadoutBoons";
-import { PlayerReadoutDefense } from "@/components/PlayerReadoutDefense";
+import { ReadoutTabClient } from "@/components/ReadoutTabClient";
 import { PlayerPositionGrid } from "@/components/PlayerPositionGrid";
 import { fetchReplayTimeline } from "@/lib/replayFetcher";
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
@@ -305,9 +302,10 @@ export default async function FightEventsPage({
   // Workstream F).
   const activeTab: "overview" | "replay" | "readout" = (() => {
     const t = (tab_raw ?? "").toLowerCase();
+    if (t === "overview") return "overview";
     if (t === "replay") return "replay";
-    if (t === "readout") return "readout";
-    return "overview";
+    // Default to readout (Analyse) — it's the most useful view
+    return "readout";
   })();
 
   let summary: FightEventsSummaryRow | null = null;
@@ -432,23 +430,7 @@ export default async function FightEventsPage({
     accountSkillsError = fightDetailsError ?? FAILED_TO_LOAD_FIGHT_DETAILS;
   }
 
-  // Tour 6 v0.12.x (Phase 6 v2): Combat-readout payload fetch for
-  // the ?tab=readout path. Conditional fetch so the /readout
-  // network round-trip only fires when the analyst lands on
-  // the readout tab. All columns (dps_power, dps_condi,
-  // barrier_total, barrier_ps, dodges, blocks, interrupts,
-  // time_downed_ms) are wired to real parser-stream values
-  // via the v0.12.x aggregator getter plumbing + parser
-  // statechange dispatch.
-  let readoutData: FightReadoutOut | null = null;
-  let readoutError: string | null = null;
-  if (activeTab === "readout") {
-    try {
-      readoutData = await fetchCached<FightReadoutOut>(`${base}/readout`);
-    } catch (err) {
-      readoutError = formatApiError(err);
-    }
-  }
+
 
   if (fetchError || !summary) {
     const isEventsUnavailable =
@@ -561,26 +543,11 @@ export default async function FightEventsPage({
           (r) => r.target_agent_id === targetFilter,
         );
 
-  // v0.10.17 D1: the Replay tab is a URL-routed alternate view
-  // of the SAME page. When ``tab=replay`` is set, we render
-  // ONLY the :class:`ReplayPlayer` (the per-target roll-ups
-  // + per-bucket windows + per-subgroup + per-skill + per-fight
-  // timeline sections are all suppressed because they share
-  // data with the ReplayPlayer and would crowd the viewport).
-  // The fetch pipeline above still runs for BOTH tabs so the
-  // LRU ``/timeline`` cache stays warm for a tab toggle (and
-  // the per-section error map above still feeds the diagnostic
-  // chimp on the Replay tab's empty-state path).
-  // Tour 6 Wave 7 (Workstream F): Combat-readout tab. The
-  // ``tab=readout`` URL fragment renders ONLY the 4 Combat-readout
-  // tables (per docs/v0.9.0-combat-readout-design.md §3-6) so the
-  // analyst can focus on the per-aspect roll-up without the
-  // per-target + per-skill + per-fight timeline noise. SCAFFOLD-time:
-  // the live ``fetchFightReadout`` payload wires in once the v0.11.0
-  // forward-blocker (apps/api ``GET /api/v1/fights/{id}/readout``
-  // route handler) lands; pre-routehandler renders surface the
-  // SCAFFOLD-zero contract inline so the empty-state panels
-  // document the gap.
+  // Readout tab: delegates to a Client Component that fetches
+  // its own data (readout + positions + events) using the fixed
+  // relative-URL pattern. This avoids the RSC → Client Component
+  // prop serialization gap that caused "No Rows To Show" when the
+  // data was fetched server-side.
   if (activeTab === "readout") {
     return (
       <main
@@ -605,8 +572,7 @@ export default async function FightEventsPage({
               Fight {summary.fight_id}
             </h1>
             <p style={{ opacity: 0.7 }}>
-              Combat readout: per-player Damage / Heal / Boons / Defense
-              (Tour 6 Wave 7 Workstream F).
+              Analyse complète du combat : résumé, timeline, dégâts, soins, boons, défense.
             </p>
           </div>
           <div
@@ -669,63 +635,12 @@ export default async function FightEventsPage({
                   "var(--font-geist-sans), Arial, Helvetica, sans-serif",
               }}
             >
-              Readout
+              Analyse
             </a>
           </div>
         </header>
 
-        <p
-          data-testid="readout-tab-status"
-          style={{
-            padding: "12px 16px",
-            border: readoutError ? "1px solid var(--accent)" : "1px solid var(--border)",
-            borderRadius: 4,
-            color: readoutError ? "var(--accent)" : "var(--foreground)",
-            opacity: 0.9,
-            fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-            fontSize: 13,
-          }}
-        >
-          {readoutError !== null ? (
-            <>{COMBAT_READOUT_FETCH_FAILED} {readoutError}</>
-          ) : readoutData === null ? (
-            <>{COMBAT_READOUT_LOADING}</>
-          ) : (
-            <>
-              Combat readout loaded · {readoutData.players.length} players ·
-              duration {readoutData.duration_s.toFixed(1)} s. All columns are
-              wired to real parser-stream values:{" "}
-              <code>dps_power</code> + <code>dps_condi</code> +
-              <code>heal.barrier_total</code> + <code>heal.barrier_ps</code> +
-              <code>defense.dodges</code> + <code>defense.blocks</code> +
-              <code>defense.interrupts</code>.{" "}
-              <code>defense.time_downed_ms</code> is aggregator-wired (parser
-              emits downtime from down-state lifecycle tracking;
-              may be 0 for fights without captured down-state cycles).
-              All columns below are live.
-            </>
-          )}
-        </p>
-
-        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Damage</h2>
-          <PlayerReadoutDamage rows={readoutData?.players ?? []} />
-        </section>
-
-        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Heal</h2>
-          <PlayerReadoutHeal rows={readoutData?.players ?? []} />
-        </section>
-
-        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Boons</h2>
-          <PlayerReadoutBoons rows={readoutData?.players ?? []} />
-        </section>
-
-        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Defense</h2>
-          <PlayerReadoutDefense rows={readoutData?.players ?? []} />
-        </section>
+        <ReadoutTabClient fightId={id} />
       </main>
     );
   }

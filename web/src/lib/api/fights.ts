@@ -116,9 +116,6 @@ export interface PlayerSkillUsageRow {
 export interface PlayerSkillLoadout {
   profession: string;
   elite_spec: string;
-  /** Optional: parser-layer equipped-skill extraction is deferred to v0.11.0;
-   * the backend always emits ``[]`` today (the V1 stub) but optionality
-   * keeps the contract forward-compat with future wire-format changes. */
   equipped_skill_ids?: number[];
 }
 
@@ -166,22 +163,6 @@ export interface FightPlayerTimeline {
   series: PerPlayerTimelineSeries[];
 }
 
-// ============================================================================
-// Tour 6 Wave 7 (Workstream F): Combat-readout wire-shape types.
-//
-// Mirrors apps/api/src/gw2analytics_api/schemas/fight.py :: PlayerReadout{Damage,Heal,Boons,Defense}Out + PlayerReadoutOut + FightReadoutOut.
-//
-// Note on the `subgroup` type drift: the existing AgentOut schema uses
-// `subgroup: string | null` (the legacy per-target contract) while
-// PlayerReadoutOut uses `subgroup: int` (the per-player readout contract).
-// Per thinker's recommendation A, we ACCEPT the type drift at the
-// consumer boundary rather than coerce AgentOut to int — the existing
-// TargetRollupsGrid + SquadRollupsGrid depend on string-typed subgroups
-// (their `subgroup` column is a string label), so changing AgentOut
-// would break their rendering. The Readout grid maps int -> `Sub N`
-// label inline.
-// ============================================================================
-
 export interface PlayerReadoutDamageOut {
   dps_total: number;
   dps_power: number;
@@ -228,13 +209,6 @@ export interface PlayerReadoutOut {
   agent_id: number;
   subgroup: number;
   name: string;
-  // Tour 6 v0.10.24-pre follow-up wire-contract widening: the
-  // account_name is now string | null (the schema widening
-  // completed in lockstep with the apps/api schema change). The
-  // arcdps None-vs-empty-string distinction now survives the wire
-  // so consumers can attribute the two cases independently. The
-  // Tier-2 consumers (PlayersGrid, CrossAccountTimelineChart,
-  // PerPlayerTimelineChart) handle the null path explicitly.
   account_name: string | null;
   profession: string;
   elite_spec: string;
@@ -266,10 +240,19 @@ export interface FightPositionsOut {
   players: PlayerPositionOut[];
 }
 
+// Helper: on the client side (browser), use an empty string so the
+// Next.js rewrite proxy (next.config.ts rewrites /api/v1/:path*)
+// handles the request. On the server side (SSR), use API_BASE_URL
+// directly (Docker DNS resolution works server-side).
+function apiBase(path: string): string {
+  const base = typeof window === "undefined" ? API_BASE_URL : "";
+  return `${base}${path}`;
+}
+
 export async function fetchFightReadout(
   fightId: string,
 ): Promise<FightReadoutOut> {
-  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/readout`;
+  const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}/readout`);
   const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
@@ -280,7 +263,7 @@ export async function fetchFightReadout(
 export async function fetchFightPositions(
   fightId: string,
 ): Promise<FightPositionsOut> {
-  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/positions`;
+  const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}/positions`);
   const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
@@ -289,16 +272,13 @@ export async function fetchFightPositions(
 }
 
 export async function fetchFights(): Promise<FightRow[]> {
-  const resp = await fetch(`${API_BASE_URL}/api/v1/fights`, {
+  const resp = await fetch(apiBase("/api/v1/fights"), {
     cache: "no-store",
   });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
   }
   const data: unknown = await resp.json();
-  // v0.10.12: the backend returns a paginated page object
-  // { fights, limit, offset }; the fights array is what the
-  // grid consumes.
   const page =
     data !== null && typeof data === "object" && "fights" in data
       ? (data as { fights: unknown }).fights
@@ -318,9 +298,9 @@ export async function fetchFightEvents(
     params.set("window_s", String(opts.windowS));
   }
   const qs = params.toString();
-  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/events${
+  const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}/events${
     qs ? `?${qs}` : ""
-  }`;
+  }`);
   const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
@@ -331,7 +311,7 @@ export async function fetchFightEvents(
 export async function fetchFightSquads(
   fightId: string,
 ): Promise<FightSquads> {
-  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/squads`;
+  const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}/squads`);
   const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
@@ -342,7 +322,7 @@ export async function fetchFightSquads(
 export async function fetchFightSkills(
   fightId: string,
 ): Promise<FightSkills> {
-  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/skills`;
+  const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}/skills`);
   const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
@@ -351,12 +331,7 @@ export async function fetchFightSkills(
 }
 
 export async function fetchFight(fightId: string): Promise<FightOut> {
-  // Tour 4 v0.10.13 plan 044: backend ``GET /api/v1/fights/{id}``
-  // (the existing ::func::``get_fight`` route handler) returns the
-  // full :class::``OrmFight`` row + the embedded :class::``OrmFightAgent``
-  // row list required for the per-player dropdown. The page wires
-  // this into the ``?account=`` URL search-param filter contract.
-  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}`;
+  const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}`);
   const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
@@ -368,7 +343,7 @@ export async function fetchFightPlayerSkills(
   fightId: string,
   accountName: string,
 ): Promise<PlayerSkills> {
-  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/players/${encodeURIComponent(accountName)}/skills`;
+  const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}/players/${encodeURIComponent(accountName)}/skills`);
   const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
@@ -385,9 +360,9 @@ export async function fetchFightTimeline(
     params.set("window_s", String(opts.windowS));
   }
   const qs = params.toString();
-  const url = `${API_BASE_URL}/api/v1/fights/${encodeURIComponent(fightId)}/timeline${
+  const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}/timeline${
     qs ? `?${qs}` : ""
-  }`;
+  }`);
   const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new ApiError(resp.status, await resp.text());
@@ -404,14 +379,6 @@ export async function fetchFightPlayerTimeline(
     params.set("window_s", String(opts.windowS));
   }
   const qs = params.toString();
-  // On the client side, use a relative URL so the Next.js rewrite
-  // proxy (``next.config.ts`` rewrites ``/api/v1/:path*``) handles
-  // the request. Using ``API_BASE_URL`` directly on the client would
-  // bypass the rewrite and hit the wrong host/port (the env var is
-  // server-side only -- not NEXT_PUBLIC_ prefixed -- so it falls back
-  // to ``http://localhost:8000`` in dev, which is not the mock server
-  // port). This matches the pattern used by other Client Component
-  // fetches (e.g. the upload wizard).
   const base = typeof window === "undefined" ? API_BASE_URL : "";
   const url = `${base}/api/v1/fights/${encodeURIComponent(fightId)}/timeline/players${
     qs ? `?${qs}` : ""

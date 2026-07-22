@@ -108,6 +108,13 @@ a:focus-visible {
    dropped (vestibular symptoms track motion, not colour
    crossfades). Colour hover transitions remain so brand
    links + file-chip borders still fade in normally. */
+/* Bar segment shimmer — visible on hover (the transparent overlay
+   covers the full bar segment area, so hitting it via mouse is easy).
+   The inline style sets `opacity: 0`; the :hover overrides it. */
+.bar-shimmer:hover {
+  opacity: 1 !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
