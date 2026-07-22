@@ -284,6 +284,140 @@ def _build_player_readout(
     )
 
 
+
+class _CombatCounters:
+    """Aggregated counters extracted from raw events."""
+
+    __slots__ = (
+        "cc",
+        "cleanses",
+        "cleave_targets",
+        "downtime",
+        "kill_participation",
+        "strips",
+    )
+
+    def __init__(self) -> None:
+        self.cleanses: Counter[int] = Counter()
+        self.strips: Counter[int] = Counter()
+        self.cleave_targets: dict[int, set[int]] = {}
+        self.kill_participation: Counter[int] = Counter()
+        self.cc: Counter[int] = Counter()
+        self.downtime: Counter[int] = Counter()
+
+
+def _compute_combat_counters(
+    events: list[Event],
+    damage_events: list[DamageEvent],
+    death_events: list[DeathEvent],
+    down_events: list[DownEvent],
+) -> _CombatCounters:
+    """Extract buff removal, cleave, kill participation, CC, and downtime counters."""
+    counters = _CombatCounters()
+
+    for event in events:
+        if isinstance(event, BuffRemovalEvent):
+            if is_condition(event.buff_id):
+                counters.cleanses[event.source_agent_id] += 1
+            else:
+                counters.strips[event.source_agent_id] += 1
+        elif isinstance(event, DamageEvent):
+            counters.cleave_targets.setdefault(
+                event.source_agent_id, set(),
+            ).add(event.target_agent_id)
+        elif isinstance(event, CCEvent):
+            counters.cc[event.source_agent_id] += 1
+
+    damage_sources_by_target: dict[int, set[int]] = {}
+    for de in damage_events:
+        damage_sources_by_target.setdefault(de.target_agent_id, set()).add(de.source_agent_id)
+    for death in death_events:
+        contributors = damage_sources_by_target.get(death.source_agent_id, set())
+        for src in contributors:
+            counters.kill_participation[src] += 1
+
+    for de in down_events:
+        if de.downtime_ms > 0:
+            counters.downtime[de.source_agent_id] += de.downtime_ms
+
+    return counters
+
+
+def _compute_presence(
+    events: list[Event],
+    identity_map: dict[int, AgentIdentity],
+    duration_s: float,
+) -> dict[int, float]:
+    """Compute per-agent presence percentage based on 5-second buckets."""
+    total_duration_ms = int(duration_s * 1000)
+    bucket_count = max(1, (total_duration_ms // 5000) + (1 if total_duration_ms % 5000 else 0))
+    active_buckets_by_agent: dict[int, set[int]] = {}
+    for event in events:
+        bucket = event.time_ms // 5000
+        source_id = event.source_agent_id
+        target_id = getattr(event, "target_agent_id", None)
+        for agent_id in (source_id, target_id):
+            if agent_id is not None and agent_id in identity_map:
+                active_buckets_by_agent.setdefault(agent_id, set()).add(bucket)
+    return {
+        aid: min(100.0, (len(buckets) / bucket_count) * 100.0)
+        for aid, buckets in active_buckets_by_agent.items()
+    }
+
+
+def _detect_agent_roles(
+    agent_id: int,
+    identity: AgentIdentity,
+    damage_by_id: dict[int, PlayerDamageRow],
+    heal_lookup: dict[int, PlayerHealRow],
+    strips_counter: Counter[int],
+    cleanses_counter: Counter[int],
+    cc_counter: Counter[int],
+) -> list[str]:
+    """Detect combat roles for a single agent."""
+    prof_str = identity.profession
+    if prof_str.startswith("PROF("):
+        try:
+            prof_int = int(prof_str[5:-1])
+        except ValueError:
+            prof_int = 0
+    else:
+        prof_int = 0
+    elite_str = identity.elite_spec
+    if elite_str == "BASE":
+        elite_int = 0
+    elif elite_str.startswith("ELITE("):
+        try:
+            elite_int = int(elite_str[6:-1])
+        except ValueError:
+            elite_int = 0
+    else:
+        try:
+            elite_int = EliteSpec[elite_str.upper()].value
+        except KeyError:
+            elite_int = 0
+
+    hr = heal_lookup.get(agent_id)
+    dr = damage_by_id.get(agent_id)
+    primary_role, _tags = detect_role_lite(
+        total_damage=dr.total_damage if dr else 0,
+        total_healing=hr.total_healing if hr else 0,
+        total_buff_removal=strips_counter.get(agent_id, 0),
+        profession_int=prof_int,
+        elite_spec_int=elite_int,
+    )
+    roles: list[str] = []
+    if primary_role in _DETECTED_ROLE_LABELS:
+        roles.append(_DETECTED_ROLE_LABELS[primary_role])
+    if cleanses_counter.get(agent_id, 0) > 10:
+        roles.append("Cleanser")
+    if cc_counter.get(agent_id, 0) > 3:
+        roles.append("CC")
+    if not roles:
+        roles.append("DPS")
+    return roles
+
+
 def aggregate_combat_readout(
     events: list[Event],
     *,
@@ -344,36 +478,7 @@ def aggregate_combat_readout(
         name_map=_identity_name_map,
     )
 
-    cleanses_counter: Counter[int] = Counter()
-    strips_counter: Counter[int] = Counter()
-    cleave_targets_by_source: dict[int, set[int]] = {}
-    for event in events:
-        if isinstance(event, BuffRemovalEvent):
-            if is_condition(event.buff_id):
-                cleanses_counter[event.source_agent_id] += 1
-            else:
-                strips_counter[event.source_agent_id] += 1
-        elif isinstance(event, DamageEvent):
-            cleave_targets_by_source.setdefault(event.source_agent_id, set()).add(event.target_agent_id)  # noqa: E501
-
-    damage_sources_by_target: dict[int, set[int]] = {}
-    for de in damage_events:
-        damage_sources_by_target.setdefault(de.target_agent_id, set()).add(de.source_agent_id)
-    kill_participation_counter: Counter[int] = Counter()
-    for death in death_events:
-        contributors = damage_sources_by_target.get(death.source_agent_id, set())
-        for src in contributors:
-            kill_participation_counter[src] += 1
-
-    cc_counter: Counter[int] = Counter()
-    for event in events:
-        if isinstance(event, CCEvent):
-            cc_counter[event.source_agent_id] += 1
-
-    downtime_counter: Counter[int] = Counter()
-    for de in down_events:
-        if de.downtime_ms > 0:
-            downtime_counter[de.source_agent_id] += de.downtime_ms
+    counters = _compute_combat_counters(events, damage_events, death_events, down_events)
 
     damage_by_id: dict[int, PlayerDamageRow] = {r.source_agent_id: r for r in damage_rows}
     heal_by_id: dict[int, PlayerHealRow] = {r.source_agent_id: r for r in heal_rows}
@@ -381,20 +486,7 @@ def aggregate_combat_readout(
     defense_by_id: dict[int, PlayerDefenseRow] = {r.agent_id: r for r in defense_rows}
 
     identity_map = agent_id_to_identity_map or {}
-    total_duration_ms = int(duration_s * 1000)
-    bucket_count = max(1, (total_duration_ms // 5000) + (1 if total_duration_ms % 5000 else 0))
-    active_buckets_by_agent: dict[int, set[int]] = {}
-    for event in events:
-        bucket = event.time_ms // 5000
-        source_id = event.source_agent_id
-        target_id = getattr(event, "target_agent_id", None)
-        for agent_id in (source_id, target_id):
-            if agent_id is not None and agent_id in identity_map:
-                active_buckets_by_agent.setdefault(agent_id, set()).add(bucket)
-    presence_by_agent: dict[int, float] = {
-        aid: min(100.0, (len(buckets) / bucket_count) * 100.0)
-        for aid, buckets in active_buckets_by_agent.items()
-    }
+    presence_by_agent = _compute_presence(events, identity_map, duration_s)
 
     down_contribution_rows: list[DownContributionRow] = DownContributionAggregator().aggregate(
         damage_events,
@@ -408,49 +500,18 @@ def aggregate_combat_readout(
     }
 
     heal_lookup: dict[int, PlayerHealRow] = {r.source_agent_id: r for r in heal_rows}
-    roles_by_agent: dict[int, list[str]] = {}
-    for agent_id in identity_map:
-        ident = identity_map[agent_id]
-        prof_str = ident.profession
-        if prof_str.startswith("PROF("):
-            try:
-                prof_int = int(prof_str[5:-1])
-            except ValueError:
-                prof_int = 0
-        else:
-            prof_int = 0
-        elite_str = ident.elite_spec
-        if elite_str == "BASE":
-            elite_int = 0
-        elif elite_str.startswith("ELITE("):
-            try:
-                elite_int = int(elite_str[6:-1])
-            except ValueError:
-                elite_int = 0
-        else:
-            try:
-                elite_int = EliteSpec[elite_str.upper()].value
-            except KeyError:
-                elite_int = 0
-        hr = heal_lookup.get(agent_id)
-        dr = damage_by_id.get(agent_id)
-        primary_role, _tags = detect_role_lite(
-            total_damage=dr.total_damage if dr else 0,
-            total_healing=hr.total_healing if hr else 0,
-            total_buff_removal=strips_counter.get(agent_id, 0),
-            profession_int=prof_int,
-            elite_spec_int=elite_int,
+    roles_by_agent: dict[int, list[str]] = {
+        agent_id: _detect_agent_roles(
+            agent_id,
+            identity_map[agent_id],
+            damage_by_id,
+            heal_lookup,
+            counters.strips,
+            counters.cleanses,
+            counters.cc,
         )
-        roles: list[str] = []
-        if primary_role in _DETECTED_ROLE_LABELS:
-            roles.append(_DETECTED_ROLE_LABELS[primary_role])
-        if cleanses_counter.get(agent_id, 0) > 10:
-            roles.append("Cleanser")
-        if cc_counter.get(agent_id, 0) > 3:
-            roles.append("CC")
-        if not roles:
-            roles.append("DPS")
-        roles_by_agent[agent_id] = roles
+        for agent_id in identity_map
+    }
 
     identity_map = agent_id_to_identity_map or {}
     valid_agent_ids = (
@@ -465,13 +526,13 @@ def aggregate_combat_readout(
             heal_by_id.get(agent_id),
             boons_by_id.get(agent_id),
             defense_by_id.get(agent_id),
-            cleanses=cleanses_counter.get(agent_id, 0),
-            strips=strips_counter.get(agent_id, 0),
-            cc_applied=cc_counter.get(agent_id, 0),
-            cleave_targets=len(cleave_targets_by_source.get(agent_id, set())),
-            kill_participation=kill_participation_counter.get(agent_id, 0),
+            cleanses=counters.cleanses.get(agent_id, 0),
+            strips=counters.strips.get(agent_id, 0),
+            cc_applied=counters.cc.get(agent_id, 0),
+            cleave_targets=len(counters.cleave_targets.get(agent_id, set())),
+            kill_participation=counters.kill_participation.get(agent_id, 0),
             down_contrib=down_contrib_by_id.get(agent_id),
-            time_downed_ms=downtime_counter.get(agent_id, 0),
+            time_downed_ms=counters.downtime.get(agent_id, 0),
             roles=roles_by_agent.get(agent_id, []),
             boon_uptimes=(
                 boon_uptimes_by_account.get(identity_map[agent_id].account_name)
@@ -514,13 +575,14 @@ def _downsample_positions(
     return samples, [[e.time_ms, e.x, e.y] for e in selected]
 
 
-def aggregate_player_positions(
+def _collect_position_samples(
     events: Iterable[Event],
     agent_id_to_identity_map: dict[int, AgentIdentity],
-) -> list[PlayerPositionOut]:
-    if not agent_id_to_identity_map:
-        return []
-
+) -> tuple[
+    dict[str, list[list[float]]],
+    dict[str, list[PositionSampleOut]],
+]:
+    """Collect and downsample position events per account."""
     raw_by_agent: dict[int, list[PositionEvent]] = {}
     for event in events:
         if not isinstance(event, PositionEvent):
@@ -528,9 +590,6 @@ def aggregate_player_positions(
         agent_id = event.source_agent_id
         if agent_id in agent_id_to_identity_map:
             raw_by_agent.setdefault(agent_id, []).append(event)
-
-    if not raw_by_agent:
-        return []
 
     player_samples: dict[str, list[list[float]]] = {}
     samples_by_account: dict[str, list[PositionSampleOut]] = {}
@@ -546,11 +605,14 @@ def aggregate_player_positions(
         samples_by_account[account] = samples
         player_samples[account] = samples_for_analysis
 
-    if not player_samples:
-        return []
+    return player_samples, samples_by_account
 
-    metrics = compute_position_metrics(player_samples)
 
+def _compute_commander_distances(
+    player_samples: dict[str, list[list[float]]],
+    agent_id_to_identity_map: dict[int, AgentIdentity],
+) -> dict[str, float]:
+    """Compute distance to commander for each account."""
     commander_account: str | None = None
     commander_samples: list[list[float]] = []
     for _agent_id, identity in agent_id_to_identity_map.items():
@@ -560,28 +622,42 @@ def aggregate_player_positions(
             break
 
     dist_to_commander_by_account: dict[str, float] = {}
-    if commander_account and commander_samples:
-        cmd_pos_by_time: dict[int, tuple[float, float]] = {}
-        for sample in commander_samples:
-            t_ms = int(sample[0])
-            cmd_pos_by_time[t_ms] = (sample[1], sample[2])
-        for account, samples in player_samples.items():
-            if account == commander_account:
-                dist_to_commander_by_account[account] = 0.0
-                continue
-            total_dist = 0.0
-            matched = 0
-            for sample in samples:
-                t_ms = int(sample[0])
-                cmd_pos = cmd_pos_by_time.get(t_ms)
-                if cmd_pos is not None:
-                    dx = sample[1] - cmd_pos[0]
-                    dy = sample[2] - cmd_pos[1]
-                    total_dist += (dx * dx + dy * dy) ** 0.5
-                    matched += 1
-            if matched > 0:
-                dist_to_commander_by_account[account] = total_dist / matched
+    if not commander_account or not commander_samples:
+        return dist_to_commander_by_account
 
+    cmd_pos_by_time: dict[int, tuple[float, float]] = {}
+    for sample in commander_samples:
+        t_ms = int(sample[0])
+        cmd_pos_by_time[t_ms] = (sample[1], sample[2])
+
+    for account, samples in player_samples.items():
+        if account == commander_account:
+            dist_to_commander_by_account[account] = 0.0
+            continue
+        total_dist = 0.0
+        matched = 0
+        for sample in samples:
+            t_ms = int(sample[0])
+            cmd_pos = cmd_pos_by_time.get(t_ms)
+            if cmd_pos is not None:
+                dx = sample[1] - cmd_pos[0]
+                dy = sample[2] - cmd_pos[1]
+                total_dist += (dx * dx + dy * dy) ** 0.5
+                matched += 1
+        if matched > 0:
+            dist_to_commander_by_account[account] = total_dist / matched
+
+    return dist_to_commander_by_account
+
+
+def _build_position_results(
+    raw_by_agent: dict[int, list[PositionEvent]],
+    agent_id_to_identity_map: dict[int, AgentIdentity],
+    metrics: dict[str, dict[str, float]],
+    samples_by_account: dict[str, list[PositionSampleOut]],
+    dist_to_commander_by_account: dict[str, float],
+) -> list[PlayerPositionOut]:
+    """Build the final PlayerPositionOut list from processed data."""
     result: list[PlayerPositionOut] = []
     for agent_id in sorted(
         raw_by_agent,
@@ -604,8 +680,39 @@ def aggregate_player_positions(
                 samples=samples_by_account.get(account, []),
             ),
         )
-
     return result
+
+
+def aggregate_player_positions(
+    events: Iterable[Event],
+    agent_id_to_identity_map: dict[int, AgentIdentity],
+) -> list[PlayerPositionOut]:
+    if not agent_id_to_identity_map:
+        return []
+
+    player_samples, samples_by_account = _collect_position_samples(
+        events, agent_id_to_identity_map,
+    )
+    if not player_samples or not samples_by_account:
+        return []
+
+    metrics = compute_position_metrics(player_samples)
+    dist_to_commander_by_account = _compute_commander_distances(
+        player_samples, agent_id_to_identity_map,
+    )
+
+    raw_by_agent: dict[int, list[PositionEvent]] = {}
+    for event in events:
+        if isinstance(event, PositionEvent) and event.source_agent_id in agent_id_to_identity_map:
+            raw_by_agent.setdefault(event.source_agent_id, []).append(event)
+
+    return _build_position_results(
+        raw_by_agent,
+        agent_id_to_identity_map,
+        metrics,
+        samples_by_account,
+        dist_to_commander_by_account,
+    )
 
 
 __all__ = [

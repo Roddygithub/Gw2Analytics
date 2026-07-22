@@ -52,47 +52,8 @@ from gw2analytics_api.workers.webhook_scheduler import lifespan_scheduler
 logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """App-wide lifespan.
-
-    v0.10.1 plan 010: schema-drift guard + Arq pool init are the
-    first two steps. The webhook retry+DLQ scheduler (v0.9.1) keeps
-    running in-process as before.
-
-    Order of operations
-    -------------------
-    1. **Schema-drift guard** (fail-fast): if the live DB
-       ``alembic_version`` does not match the alembic head on
-       disk, raise :class:`RuntimeError` BEFORE any other init.
-       A misconfigured DB schema would otherwise produce a
-       silent log-spam failure (every scheduler tick would
-       fail with ``UndefinedColumn``).
-    2. **Arq pool init** (graceful fallback): try to connect
-       to the Redis broker. On success, the CPU-bound parser
-       pipeline runs in a dedicated Arq worker process (no
-       GIL contention with the API event loop). On failure
-       (Redis down, port misconfigured), log a WARNING + set
-       the pool to ``None``; the upload route's
-       ``BackgroundTasks`` fallback then handles parses
-       synchronously. The API still serves traffic, just
-       slower at high upload volume.
-    3. **Webhook retry+DLQ scheduler** (v0.9.1, unchanged):
-       5s poll loop, runs in-process.
-    """
-    # Step 1: schema-drift guard. Raises RuntimeError on
-    # drift (with an actionable operator-facing message
-    # naming both heads). Set ``SKIP_SCHEMA_GUARD=1`` to
-    # bypass in emergencies.
-    schema_guard.check_schema_drift()
-
-    # Step 1b: MinIO connectivity check (v0.10.26-pre). Attempt
-    # to list buckets; a SignatureDoesNotMatch / InvalidAccessKey
-    # indicates misconfigured S3 credentials, while a connection
-    # timeout indicates the MinIO server is unreachable. The
-    # check is non-fatal (the API starts anyway) but logs a
-    # loud WARNING so the operator catches misconfiguration
-    # at deploy time rather than on the first real upload.
+def _check_minio_connectivity() -> None:
+    """Check MinIO connectivity at startup, logging warnings on failure."""
     s = get_settings()
     try:
         minio_client = get_minio()
@@ -128,18 +89,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             type(exc).__name__,
         )
 
-    # Step 2: Arq pool init with retry + graceful fallback.
-    # v0.15.1: added retry loop (3 attempts, 2s→4s→8s backoff)
-    # because Redis is often not ready when the API starts
-    # (healthcheck passes but Redis hasn't loaded its dataset
-    # or is briefly unresponsive post-restart). The retry
-    # catches transient failures; 3 attempts with 8s max
-    # backoff keeps startup under 30s.
-    #
-    # The except tuple is intentionally narrow: AttributeError /
-    # KeyError / ImportError must propagate so a misconfigured
-    # deployment surfaces loudly rather than being masked.
-    _app.state.arq_pool = None
+
+async def _init_arq_pool(app: FastAPI) -> None:
+    """Initialise Arq pool with retry + graceful fallback.
+
+    v0.15.1: added retry loop (3 attempts, 2s→4s→8s backoff)
+    because Redis is often not ready when the API starts.
+    """
     retry_attempts = 3
     retry_base_s = 2.0
     for attempt in range(1, retry_attempts + 1):
@@ -151,7 +107,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 WorkerSettings,
             )
 
-            _app.state.arq_pool = await create_pool(
+            app.state.arq_pool = await create_pool(
                 WorkerSettings.redis_settings,
             )
             logger.info(
@@ -159,7 +115,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 WorkerSettings.redis_settings.host,
                 attempt,
             )
-            break
+            return
         except (
             ConnectionError,
             OSError,
@@ -186,6 +142,49 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     retry_attempts,
                     type(exc).__name__,
                 )
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """App-wide lifespan.
+
+    v0.10.1 plan 010: schema-drift guard + Arq pool init are the
+    first two steps. The webhook retry+DLQ scheduler (v0.9.1) keeps
+    running in-process as before.
+
+    Order of operations
+    -------------------
+    1. **Schema-drift guard** (fail-fast): if the live DB
+       ``alembic_version`` does not match the alembic head on
+       disk, raise :class:`RuntimeError` BEFORE any other init.
+       A misconfigured DB schema would otherwise produce a
+       silent log-spam failure (every scheduler tick would
+       fail with ``UndefinedColumn``).
+    2. **Arq pool init** (graceful fallback): try to connect
+       to the Redis broker. On success, the CPU-bound parser
+       pipeline runs in a dedicated Arq worker process (no
+       GIL contention with the API event loop). On failure
+       (Redis down, port misconfigured), log a WARNING + set
+       the pool to ``None``; the upload route's
+       ``BackgroundTasks`` fallback then handles parses
+       synchronously. The API still serves traffic, just
+       slower at high upload volume.
+    3. **Webhook retry+DLQ scheduler** (v0.9.1, unchanged):
+       5s poll loop, runs in-process.
+    """
+    # Step 1: schema-drift guard. Raises RuntimeError on
+    # drift (with an actionable operator-facing message
+    # naming both heads). Set ``SKIP_SCHEMA_GUARD=1`` to
+    # bypass in emergencies.
+    schema_guard.check_schema_drift()
+
+    # Step 1b: MinIO connectivity check (v0.10.26-pre).
+    _check_minio_connectivity()
+
+    # Step 2: Arq pool init with retry + graceful fallback.
+    # v0.15.1: added retry loop (3 attempts, 2s→4s→8s backoff).
+    _app.state.arq_pool = None
+    await _init_arq_pool(_app)
 
     # Step 3: webhook retry+DLQ scheduler (v0.9.1, unchanged).
     scheduler_task = asyncio.create_task(lifespan_scheduler(get_sessionmaker()))
