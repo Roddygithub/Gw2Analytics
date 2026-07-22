@@ -13,6 +13,7 @@
 
 | Release | Highlights |
 | --- | --- |
+| **v0.14.2** | Plan 173: 14 boon uptimes + presence % + 14 outgoing boons in Combat Readout. Grouped bars + tooltips. |
 | **v0.14.1** | Slow-path blob walk tests (3 hermetic tests for `_contributions_from_blob_walk`). |
 | **v0.14.0** | CI guard against legacy `db.query()` reintroduction. Coverage plan updated. |
 | **v0.13.9** | Zero legacy SQLAlchemy queries — last `db.query()` migrated to `select()`. |
@@ -30,7 +31,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full per-release history.
 - 🎭 **Heuristic role detection** — per-(fight, account) DPS / HEAL / STRIP / BOON / MIXED classification from the 3 magnitudes + spec/profession hint table.
 - 📊 **Per-player timeline overlay** — one per-bucket series per player agent for multi-line chart overlays.
 - 🎨 **GW2Mists-inspired frontend** — dark palette, sticky glass header, inline SVG logo, favicon, and Next.js `<Link>` navigation.
-- ⚔️ **Combat-readout UI** — per-player Damage / Heal / Boons / Defense 4-table roll-up via `/fights/[id]?tab=readout`.
+- ⚔️ **Combat-readout UI** — per-player Damage / Heal / Boons / Defense 4-table roll-up via `/fights/[id]?tab=readout`, with boon uptime grouped bars (Offensifs/Défensifs/Mobilité/Furtivité), outgoing boon totals, and event-window presence percentage.
 - 🧪 **Comprehensive multi-layer test suite** — `pytest` (libs + apps) + `vitest` (web components) + Playwright e2e (web flows), 117 tests, 84% coverage, all gated and green.
 - 🛡️ **Audit hardening** — Caddyfile HSTS/CSP, CI `pip-audit`/`pnpm-audit`, Next.js error boundaries, headers() defense-in-depth.
 - 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js).

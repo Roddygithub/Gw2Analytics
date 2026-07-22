@@ -6,10 +6,10 @@
  * Positioning").
  *
  * AG Grid Community 34 Client Component for per-player defense
- * roll-up. Renders the 8 defense-aspect columns
+ * roll-up. Renders the 9 defense-aspect columns
  * (``damage_taken`` / ``cc_taken`` / ``deaths`` /
  * ``time_downed_ms`` / ``dodges`` / ``blocks`` / ``interrupts``
- * / ``barrier_absorbed``) PREPENDED with the 5 SHARED_COLUMNS.
+ * / ``barrier_absorbed`` / ``presence_pct``) PREPENDED with the 5 SHARED_COLUMNS.
  *
  * Default sort per design doc §13 ("defensive load is the
  * leading indicator"):

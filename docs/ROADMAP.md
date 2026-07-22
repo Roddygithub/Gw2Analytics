@@ -1,8 +1,9 @@
 # Roadmap
 
-**Status:** Living document. Last refreshed AT v0.11.4 cycle
-close-out (2026-07-21) — WAVE-8 COMPLETE (8/8 subclasses shipped,
-ConditionRemoveEvent wired end-to-end via buff ID lookup table).
+**Status:** Living document. Last refreshed AT v0.14.2 cycle
+close-out (2026-07-22) — Plan 173 COMPLETE (14 boon uptimes +
+presence % + 14 outgoing boons in Combat Readout, grouped bar
+columns, 2 hermetic backend tests, E2E mock server + Playwright test).
 
 This file is the **single source of truth** for "what's left to do" on
 the project. It supersedes any ad-hoc "what's next" list in the README
@@ -10,9 +11,9 @@ or the CHANGELOG. It is meant to be edited at every release tag so
 that the next session can pick up exactly where the previous one left
 off.
 
----## Current state (post-WAVE-8 v0.11.4)
+---## Current state (post-Plan-173 v0.14.2)
 
-**WAVE-8 COMPLETE** — 5 releases (v0.11.0→v0.11.4), 8/8 Event subclasses dispatched:
+**Plan 173 COMPLETE** — 1 feature release, Combat Readout enriched with per-player boon uptimes, outgoing boons, and presence percentage. **WAVE-8** (v0.11.0→v0.11.4, 8/8 Event subclasses dispatched) was already complete prior.
 
 | Subclass | Dispatch | Shipped |
 |---|---|---|
@@ -38,7 +39,7 @@ ConditionRemoveEvent ✅, buff ID lookup table ✅.
 **Remaining**: Phase 6 v2 parser-stream (dps_power/condi split,
 barrier_ps, time_downed_ms), F17 frontend verification with real data.
 
-- **Latest tag:** v0.11.4
+- **Latest tag:** v0.14.2
 - **Test surface:** pytest ~500+ / vitest 391 / Playwright 28
 - **Architecture:** gw2_evtc_parser → gw2_core → gw2_analytics →
   apps/api (FastAPI) + gw2_api_client → web (Next.js 16)
@@ -76,12 +77,10 @@ Shipped features are documented in CHANGELOG.md. Key milestones:
 1. **F17 frontend verification** — rebuild Docker with v0.11.4, upload
    real WvW logs, verify SCAFFOLD-zero columns (deaths, dodges, blocks,
    interrupts, barrier_total, cleanses) populate correctly.
-2. **Phase 6 v2 parser-stream switch** — dps_power/condi split,
-   barrier_ps aggregator, time_downed_ms tracking (see
-   `docs/v0.9.0-combat-readout-design.md` §3-6).
-3. **Combat readout frontend** — 4 AG Grid Client Components
-   (PlayerReadoutDamage, PlayerReadoutHeal, PlayerReadoutBoons,
-   PlayerReadoutDefense) already scaffolded, need real-data verification.
+2. ~~**Phase 6 v2 parser-stream switch**~~ — SHIPPED v0.12.1-v0.12.4.
+3. ~~**Combat readout frontend**~~ — SHIPPED v0.10.25-v0.14.2. The 4
+   AG Grid Client Components now display live data with Plan 173
+   enrichments (uptime grouped bars, outgoing boons, presence %).
 
 ## 2. Tech debt / performance (signaled in the CHANGELOG, never resolved)
 
