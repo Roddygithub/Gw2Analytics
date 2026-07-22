@@ -334,6 +334,11 @@ class OrmFightPlayerSummary(Base):
     # approximation until a definitive condition skill-id map exists).
     boon_strips: Mapped[int | None] = mapped_column(Integer, nullable=True)
     condition_cleanses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # v0.14.6: multi-role classification from the readout aggregator.
+    # Stored as a JSON array of strings (e.g. ["DPS", "Strip"]).
+    # Nullable so pre-migration rows keep NULL; populated by
+    # _persist_player_summaries on new/re-parsed fights.
+    roles: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
 
 class Guild(Base):

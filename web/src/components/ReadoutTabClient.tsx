@@ -841,6 +841,20 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
   const players = readout.players;
 
+  // Role filter state
+  const [roleFilter, setRoleFilter] = useState<string | null>(null);
+  const allRoles = useMemo(() => {
+    const seen = new Set<string>();
+    for (const p of players) {
+      for (const r of p.roles) seen.add(r);
+    }
+    return [...seen].sort();
+  }, [players]);
+  const filteredPlayers = useMemo(() => {
+    if (!roleFilter) return players;
+    return players.filter((p) => p.roles.includes(roleFilter));
+  }, [players, roleFilter]);
+
   const exportCsv = (gridRef: React.RefObject<AgGridReact<PlayerReadoutOut> | null>, filename: string) => {
     const api = gridRef.current?.api;
     if (!api) return;
@@ -849,6 +863,33 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Role filter */}
+      {allRoles.length > 1 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <label style={{ fontSize: 12, opacity: 0.7 }}>Filtrer par rôle :</label>
+          <select
+            value={roleFilter ?? ""}
+            onChange={(e) => setRoleFilter(e.target.value || null)}
+            style={{
+              padding: "3px 8px",
+              borderRadius: 4,
+              border: "1px solid var(--border)",
+              background: "var(--surface)",
+              color: "var(--foreground)",
+              fontSize: 12,
+              fontFamily: "var(--font-geist-sans, sans-serif)",
+            }}
+          >
+            <option value="">Tous ({players.length})</option>
+            {allRoles.map((r) => (
+              <option key={r} value={r}>
+                {r} ({players.filter((p) => p.roles.includes(r)).length})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Status banner */}
       <p
         style={{
@@ -909,7 +950,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
           <AgGridReact<PlayerReadoutOut>
             ref={damageGridRef}
             theme={appGridTheme}
-            rowData={players}
+            rowData={filteredPlayers}
             columnDefs={[...SHARED_COLUMNS, ...DAMAGE_COLUMNS]}
             defaultColDef={{ comparator: NUMERIC_COMPARATOR, resizable: true }}
             animateRows
@@ -945,7 +986,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
           <AgGridReact<PlayerReadoutOut>
             ref={healGridRef}
             theme={appGridTheme}
-            rowData={players}
+            rowData={filteredPlayers}
             columnDefs={[...SHARED_COLUMNS, ...HEAL_COLUMNS]}
             defaultColDef={{ comparator: NUMERIC_COMPARATOR, resizable: true }}
             animateRows
@@ -981,7 +1022,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
           <AgGridReact<PlayerReadoutOut>
             ref={boonsGridRef}
             theme={appGridTheme}
-            rowData={players}
+            rowData={filteredPlayers}
             columnDefs={[...SHARED_COLUMNS, ...BOONS_COLUMNS]}
             defaultColDef={{ comparator: NUMERIC_COMPARATOR, resizable: true }}
             animateRows
@@ -1017,7 +1058,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
           <AgGridReact<PlayerReadoutOut>
             ref={defenseGridRef}
             theme={appGridTheme}
-            rowData={players}
+            rowData={filteredPlayers}
             columnDefs={[...SHARED_COLUMNS, ...defenseColumns]}
             defaultColDef={{ comparator: NUMERIC_COMPARATOR, resizable: true }}
             animateRows
