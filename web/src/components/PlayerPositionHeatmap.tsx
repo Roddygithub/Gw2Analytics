@@ -145,6 +145,20 @@ export function PlayerPositionHeatmap({ fightId }: PlayerPositionHeatmapProps) {
     const rect = canvas.getBoundingClientRect();
     const cssW = rect.width;
     const cssH = rect.height;
+
+    // Guard: don't draw if the canvas hasn't been laid out yet
+    // (getBoundingClientRect may return 0 during initial render).
+    // Retry up to 10 frames, then give up to avoid infinite loop.
+    if (cssW === 0 || cssH === 0) {
+      const retries = (canvas as unknown as Record<string, number>)._heatmapRetries || 0;
+      if (retries < 10) {
+        (canvas as unknown as Record<string, number>)._heatmapRetries = retries + 1;
+        requestAnimationFrame(() => draw());
+      }
+      return;
+    }
+    (canvas as unknown as Record<string, number>)._heatmapRetries = 0;
+
     if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
       canvas.width = cssW * dpr;
       canvas.height = cssH * dpr;
@@ -154,8 +168,14 @@ export function PlayerPositionHeatmap({ fightId }: PlayerPositionHeatmapProps) {
 
     // Compute viewport bounds from ALL samples so the rendering
     // is stable across the whole fight.
-    const allX = players.flatMap((p) => p.samples.map((s) => s[1]));
-    const allY = players.flatMap((p) => p.samples.map((s) => s[2]));
+    const allX: number[] = [];
+    const allY: number[] = [];
+    for (const p of players) {
+      for (const s of p.samples) {
+        allX.push(s[1]);
+        allY.push(s[2]);
+      }
+    }
     if (allX.length === 0) return;
     const minX = Math.min(...allX);
     const maxX = Math.max(...allX);

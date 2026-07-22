@@ -389,9 +389,12 @@ def _build_player_readout(
     defense_row: PlayerDefenseRow | None,
     *,
     cleanses: int = 0,
+    strips: int = 0,
+    cc_applied: int = 0,
     time_downed_ms: int = 0,
     boon_uptimes: dict[str, float] | None = None,
     presence_pct: float | None = None,
+    roles: list[str] | None = None,
 ) -> PlayerReadoutOut:
     """Build a single :class:`PlayerReadoutOut` from aspect rows + identity.
 
@@ -427,13 +430,13 @@ def _build_player_readout(
         profession=identity.profession,
         elite_spec=identity.elite_spec,
         is_commander=identity.is_commander,
-        roles=[],  # Blocker C deferred (role classifier).
+        roles=roles or [],
         damage=PlayerReadoutDamageOut(
             dps_total=d_row.dps,
             dps_power=d_row.dps_power,
             dps_condi=d_row.dps_condi,
-            strips=0,  # awaits Phase 9 BuffRemovalEvent strip classification.
-            cc_applied=0,  # awaits CCEvent source attribution (Phase 9 v2 yields).
+            strips=strips,
+            cc_applied=cc_applied,
             down_contribution_dps=0.0,  # awaits Phase 9 v2 'is target down' attribution.
             kills=0,  # awaits DeathEvent + DPS stream cross-walk (Phase 9 v2).
         ),
@@ -633,9 +636,20 @@ def aggregate_combat_readout(
     # Boon strips (buff_id is a boon like Might=740) remain as
     # generic BuffRemovalEvent and are NOT reclassified here.
     cleanses_counter: Counter[int] = Counter()
+    strips_counter: Counter[int] = Counter()
     for event in events:
-        if isinstance(event, BuffRemovalEvent) and is_condition(event.buff_id):
-            cleanses_counter[event.source_agent_id] += 1
+        if isinstance(event, BuffRemovalEvent):
+            if is_condition(event.buff_id):
+                cleanses_counter[event.source_agent_id] += 1
+            else:
+                # Boon strip (boon removal, not condition cleanse).
+                strips_counter[event.source_agent_id] += 1
+
+    # v0.14.4: count CC events per source_agent_id.
+    cc_counter: Counter[int] = Counter()
+    for event in events:
+        if isinstance(event, CCEvent):
+            cc_counter[event.source_agent_id] += 1
 
     # v0.12.0: sum DownEvent.downtime_ms per source_agent_id.
     # The parser currently emits downtime_ms=0 (down-state lifecycle
@@ -680,6 +694,28 @@ def aggregate_combat_readout(
         for aid, buckets in active_buckets_by_agent.items()
     }
 
+    # v0.14.4: basic role detection — DPS / Heal / Support based on
+    # heal share relative to the squad. If a player contributes >30%
+    # of the squad's total healing, they're flagged as "Heal".
+    # Boon-focused players (>2 boons/s out) are flagged as "Support".
+    # Everyone else is "DPS". Iterates ALL player agents from the
+    # identity map so every player gets a role.
+    total_squad_healing = sum(r.total_healing for r in heal_rows)
+    boons_lookup: dict[int, PlayerBoonsRow] = {r.agent_id: r for r in boons_rows}
+    heal_lookup: dict[int, PlayerHealRow] = {r.source_agent_id: r for r in heal_rows}
+    roles_by_agent: dict[int, list[str]] = {}
+    for agent_id in identity_map:
+        roles: list[str] = []
+        hr = heal_lookup.get(agent_id)
+        if hr and total_squad_healing > 0 and (hr.total_healing / total_squad_healing) > 0.30:
+            roles.append("Heal")
+        br = boons_lookup.get(agent_id)
+        if br and br.boons_out_rate > 2.0:
+            roles.append("Support")
+        if not roles:
+            roles.append("DPS")
+        roles_by_agent[agent_id] = roles
+
     # Single pass to build the per-agent PlayerReadoutOut envelope.
     # The 5 shared identity columns (per design doc §2) hydrate
     # from the ``AgentIdentity`` map (Tour 6 v0.10.24 close-out of
@@ -719,7 +755,10 @@ def aggregate_combat_readout(
             boons_by_id.get(agent_id),
             defense_by_id.get(agent_id),
             cleanses=cleanses_counter.get(agent_id, 0),
+            strips=strips_counter.get(agent_id, 0),
+            cc_applied=cc_counter.get(agent_id, 0),
             time_downed_ms=downtime_counter.get(agent_id, 0),
+            roles=roles_by_agent.get(agent_id, []),
             boon_uptimes=(
                 boon_uptimes_by_account.get(identity_map[agent_id].account_name)
                 if boon_uptimes_by_account and identity_map[agent_id].account_name

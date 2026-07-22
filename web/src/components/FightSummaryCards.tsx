@@ -77,20 +77,16 @@ function ProfessionOrEliteCell({
         style={{
           display: "inline-flex",
           alignItems: "center",
-          gap: 4,
-          fontSize: 11,
-          opacity: 0.8,
+          flexShrink: 0,
         }}
         data-testid="summary-elite-cell"
+        title={getEliteLabel(eliteSpecWire, professionWire) ?? undefined}
       >
         <EliteSpecIcon
           wire={eliteSpecWire}
           professionWire={professionWire}
-          size={16}
+          size={18}
         />
-        <span>
-          {getEliteLabel(eliteSpecWire, professionWire) ?? "—"}
-        </span>
       </span>
     );
   }
@@ -101,14 +97,12 @@ function ProfessionOrEliteCell({
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 4,
-        fontSize: 11,
-        opacity: 0.8,
+        flexShrink: 0,
       }}
       data-testid="summary-profession-cell"
+      title={profLabel ?? undefined}
     >
-      <ProfessionIcon wire={professionWire} size={16} />
-      <span>{profLabel ?? "—"}</span>
+      <ProfessionIcon wire={professionWire} size={18} />
     </span>
   );
 }
@@ -220,7 +214,8 @@ function SummaryCard({
         border: "1px solid var(--border)",
         borderRadius: 6,
         padding: "10px 14px",
-        minWidth: 180,
+        minWidth: 200,
+        flex: "0 0 auto",
       }}
     >
       {/* Card header */}
@@ -237,7 +232,7 @@ function SummaryCard({
         {title}
       </p>
 
-      {/* Player rows */}
+      {/* Player rows — compact single-line layout */}
       {sorted.map((p, i) => (
         <SummaryPlayerRow
           key={p.agent_id}
@@ -291,9 +286,12 @@ export function FightSummaryCards({
       </h2>
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 12,
+          display: "flex",
+          flexDirection: "row",
+          flexWrap: "nowrap",
+          gap: 10,
+          overflowX: "auto",
+          paddingBottom: 4,
         }}
       >
         <SummaryCard
