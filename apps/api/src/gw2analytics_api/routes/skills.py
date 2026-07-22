@@ -37,8 +37,8 @@ def load_skills() -> dict[int, dict]:
     if not path.exists():
         return skills
     with path.open("r", encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
+        for raw_line in fh:
+            line = raw_line.strip()
             if not line:
                 continue
             try:

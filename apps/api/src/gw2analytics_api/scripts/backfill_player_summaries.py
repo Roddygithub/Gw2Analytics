@@ -190,7 +190,7 @@ def _backfill_pre_phase7(
         delete(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight.id),
     )
     for agent in player_agents:
-        assert agent.account_name is not None
+        assert agent.account_name is not None  # noqa: S101
         db.add(
             OrmFightPlayerSummary(
                 fight_id=fight.id,

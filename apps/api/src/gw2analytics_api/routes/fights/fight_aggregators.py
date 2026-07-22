@@ -53,10 +53,12 @@ def _aggregate_per_target_rollup(
     duration_s: float,
     event_cls: type[Event],
 ) -> Sequence[TargetDpsRow | TargetHealingRow | TargetBuffRemovalRow]:
-    assert all(isinstance(e, event_cls) for e in events), (
-        f"_aggregate_per_target_rollup: caller must pre-filter events to "
-        f"{event_cls.__name__}; got mixed event stream"
-    )
+    if not all(isinstance(e, event_cls) for e in events):  # noqa: S101
+        msg = (
+            f"_aggregate_per_target_rollup: caller must pre-filter events to "
+            f"{event_cls.__name__}; got mixed event stream"
+        )
+        raise AssertionError(msg)
     if event_cls is DamageEvent:
         return TargetDpsAggregator().aggregate(
             cast(Iterable[DamageEvent], events),
