@@ -12,7 +12,7 @@
  * caused "No Rows To Show" despite data being loaded.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, ICellRendererParams, SortModelItem } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 
@@ -703,6 +703,12 @@ interface ReadoutTabClientProps {
 }
 
 export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
+  // Grid refs for CSV export
+  const damageGridRef = useRef<AgGridReact<PlayerReadoutOut>>(null);
+  const healGridRef = useRef<AgGridReact<PlayerReadoutOut>>(null);
+  const boonsGridRef = useRef<AgGridReact<PlayerReadoutOut>>(null);
+  const defenseGridRef = useRef<AgGridReact<PlayerReadoutOut>>(null);
+
   // State
   const [readout, setReadout] = useState<FightReadoutOut | null>(null);
   const [positions, setPositions] = useState<FightPositionsOut | null>(null);
@@ -797,6 +803,12 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
   const players = readout.players;
 
+  const exportCsv = (gridRef: React.RefObject<AgGridReact<PlayerReadoutOut> | null>, filename: string) => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    api.exportDataAsCsv({ fileName: filename });
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {/* Status banner */}
@@ -835,9 +847,29 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
       {/* Tableau 1: Damage */}
       <section>
-        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Dégâts</h2>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Dégâts</h2>
+          <button
+            onClick={() => exportCsv(damageGridRef, `${fightId}-damage.csv`)}
+            style={{
+              padding: "2px 8px",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              background: "var(--surface)",
+              color: "var(--foreground)",
+              cursor: "pointer",
+              fontSize: 11,
+              fontFamily: "var(--font-geist-sans, sans-serif)",
+              opacity: 0.7,
+            }}
+            title="Télécharger en CSV"
+          >
+            ⬇ CSV
+          </button>
+        </div>
         <div style={GRID_CONTAINER_STYLE}>
           <AgGridReact<PlayerReadoutOut>
+            ref={damageGridRef}
             theme={appGridTheme}
             rowData={players}
             columnDefs={[...SHARED_COLUMNS, ...DAMAGE_COLUMNS]}
@@ -851,9 +883,29 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
       {/* Tableau 2: Heal */}
       <section>
-        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Soins</h2>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Soins</h2>
+          <button
+            onClick={() => exportCsv(healGridRef, `${fightId}-heal.csv`)}
+            style={{
+              padding: "2px 8px",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              background: "var(--surface)",
+              color: "var(--foreground)",
+              cursor: "pointer",
+              fontSize: 11,
+              fontFamily: "var(--font-geist-sans, sans-serif)",
+              opacity: 0.7,
+            }}
+            title="Télécharger en CSV"
+          >
+            ⬇ CSV
+          </button>
+        </div>
         <div style={GRID_CONTAINER_STYLE}>
           <AgGridReact<PlayerReadoutOut>
+            ref={healGridRef}
             theme={appGridTheme}
             rowData={players}
             columnDefs={[...SHARED_COLUMNS, ...HEAL_COLUMNS]}
@@ -867,9 +919,29 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
       {/* Tableau 3: Boons */}
       <section>
-        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Boons</h2>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Boons</h2>
+          <button
+            onClick={() => exportCsv(boonsGridRef, `${fightId}-boons.csv`)}
+            style={{
+              padding: "2px 8px",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              background: "var(--surface)",
+              color: "var(--foreground)",
+              cursor: "pointer",
+              fontSize: 11,
+              fontFamily: "var(--font-geist-sans, sans-serif)",
+              opacity: 0.7,
+            }}
+            title="Télécharger en CSV"
+          >
+            ⬇ CSV
+          </button>
+        </div>
         <div style={GRID_CONTAINER_STYLE}>
           <AgGridReact<PlayerReadoutOut>
+            ref={boonsGridRef}
             theme={appGridTheme}
             rowData={players}
             columnDefs={[...SHARED_COLUMNS, ...BOONS_COLUMNS]}
@@ -883,9 +955,29 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
       {/* Tableau 4: Defense */}
       <section>
-        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Défense &amp; Positionnement</h2>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Défense &amp; Positionnement</h2>
+          <button
+            onClick={() => exportCsv(defenseGridRef, `${fightId}-defense.csv`)}
+            style={{
+              padding: "2px 8px",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              background: "var(--surface)",
+              color: "var(--foreground)",
+              cursor: "pointer",
+              fontSize: 11,
+              fontFamily: "var(--font-geist-sans, sans-serif)",
+              opacity: 0.7,
+            }}
+            title="Télécharger en CSV"
+          >
+            ⬇ CSV
+          </button>
+        </div>
         <div style={GRID_CONTAINER_STYLE}>
           <AgGridReact<PlayerReadoutOut>
+            ref={defenseGridRef}
             theme={appGridTheme}
             rowData={players}
             columnDefs={[...SHARED_COLUMNS, ...defenseColumns]}

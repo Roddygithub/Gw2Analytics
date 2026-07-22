@@ -104,6 +104,17 @@ export function PlayerPositionHeatmap({ fightId }: PlayerPositionHeatmapProps) {
     load();
   }, [load]);
 
+  // Auto-play for 2 seconds on first load so positions are immediately
+  // visible (at t=0 the canvas renders but dots may be hard to spot
+  // without movement context).
+  useEffect(() => {
+    if (players.length > 0 && durationMs > 0) {
+      setPlaying(true);
+      const timer = setTimeout(() => setPlaying(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [players.length, durationMs]);
+
   // ---- animation loop -------------------------------------------------------
 
   useEffect(() => {
