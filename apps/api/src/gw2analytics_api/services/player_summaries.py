@@ -129,6 +129,38 @@ def _boon_fields_for_account(
     }
 
 
+def _compute_account_roles(
+    *,
+    healing: int,
+    total_squad_healing: int,
+    boons_out_rate: float,
+    strips: int,
+    cleanses: int,
+    cc_applied: int,
+) -> list[str]:
+    """Determine role badges for a single account using the same
+    thresholds as ``aggregate_combat_readout``.
+
+    Extracted as a module-level function so both
+    ``_persist_player_summaries`` and the unit test suite
+    can import it directly.
+    """
+    roles_out: list[str] = []
+    if total_squad_healing > 0 and (healing / total_squad_healing) > 0.10:
+        roles_out.append("Heal")
+    if boons_out_rate > 1.0:
+        roles_out.append("Support")
+    if strips > 5:
+        roles_out.append("Strip")
+    if cleanses > 10:
+        roles_out.append("Cleanser")
+    if cc_applied > 3:
+        roles_out.append("CC")
+    if not roles_out:
+        roles_out.append("DPS")
+    return roles_out
+
+
 def _persist_player_summaries(  # noqa: PLR0912,PLR0915
     db: Session,
     orm_fight: OrmFight,
@@ -152,35 +184,18 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
     _known_condi_names = KNOWN_CONDI_NAMES
     _skill_name_map_get = skill_name_map.get
 
-    # v0.10.11 fix for test_uploads_e2e::test_players_list_returns_accounts_present_in_fight:
-    # ONLY when ``events`` is empty, pre-seed per_account with one
-    # zero-totals bucket per attending player agent. Pre-fix, the
-    # event loop below was the only source of bucket creation, so an
-    # empty ``events`` list produced 0 buckets and 0 rows; the
-    # /players fast-path then returned 0 rows for an N-attending
-    # -agent fight. Post-fix, every attending agent gets a 0-totals
-    # row when events is empty (matches the v0.8.4 contract that
-    # ATTENDING agents always surface in the cross-fight roll-up).
-    #
-    # The pre-seed is INTENTIONALLY conditional on empty events.
-    # For non-empty events, the pre-fix per-event bucket semantics
-    # are preserved (the test_persist_player_summaries.py unit suite
-    # asserts ``len(rows) == 1`` for a 1-event-from-2-agents fixture;
-    # this contract is preserved by NOT pre-seeding when events != []).
+    # v0.10.11 fix: pre-seed per_account with zero-totals buckets
+    # for every attending player agent when events is empty.
     if not events:
         for agent in source_map.values():
             account = agent.account_name
-            assert account is not None  # noqa: S101  -- narrowed by source_map filter
+            assert account is not None  # noqa: S101
             if account not in per_account:
                 per_account[account] = _make_bucket(agent)
 
     for event in events:
         if isinstance(event, (BoonApplyEvent, BuffApplyEvent)):
             buff_tracker.process(event)
-            # A player can attend purely as a boon source or target (e.g.
-            # a healer that only applies quickness/fury, or a DPS that
-            # only receives them). Make sure both sides get a summary
-            # bucket so their uptime/outgoing metrics are persisted.
             for _agent_id in (event.source_agent_id, event.target_agent_id):
                 evt_agent = source_map.get(_agent_id)
                 if evt_agent is not None:
@@ -188,8 +203,7 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
                     assert account is not None  # noqa: S101
                     if account not in per_account:
                         per_account[account] = _make_bucket(evt_agent)
-            # Count tracked-boon strips vs condition cleanses from the
-            # source of any non-apply boon state change.
+            # Count tracked-boon strips vs condition cleanses
             if isinstance(event, BoonApplyEvent) and event.kind != "apply":
                 source = source_map.get(event.source_agent_id)
                 if source is not None:
@@ -210,9 +224,7 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
             per_account[account] = _make_bucket(evt_agent)
         bucket = per_account[account]
 
-        # Inline event application to avoid per-event function-call
-        # overhead in this hot loop. ``isinstance`` is required because
-        # the event types inherit from ``Event``.
+        # Inline event application
         if isinstance(event, DamageEvent):
             bucket.damage += event.damage
             skill_name = _skill_name_map_get(event.skill_id)
@@ -224,14 +236,19 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
             bucket.healing += event.healing
         elif isinstance(event, BuffRemovalEvent):
             bucket.strip += event.buff_removal
-            # cbtevent.buff_dmg strips are offensive boon strips; route
-            # their magnitude into the dedicated boon_strips column.
             bucket.boon_strips += event.buff_removal
         elif isinstance(event, CCEvent):
             bucket.cc_applied += 1
 
+    # Compute boon uptimes / outgoing across all processed buff events.
+    duration_s: float = 0.0
+    if events:
+        last_time_ms = max((e.time_ms for e in events), default=0)
+        duration_s = last_time_ms / 1000.0
+    uptimes_by_agent = buff_tracker.compute_all_uptimes(duration_s)
+    outgoing_by_agent = buff_tracker.compute_all_outgoing(duration_s)
+
     # Compute boons_out_rate per account from the buff tracker.
-    # aggregate per-agent outgoing rates into per-account totals.
     boons_out_by_account: dict[str, float] = {}
     for account, agent_ids in account_to_agent_ids.items():
         total_stacks = 0
@@ -244,36 +261,6 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
     # Compute total squad healing for Heal role threshold.
     total_squad_healing = sum(b.healing for b in per_account.values())
 
-def _compute_account_roles(
-    *,
-    healing: int,
-    total_squad_healing: int,
-    boons_out_rate: float,
-    strips: int,
-    cleanses: int,
-    cc_applied: int,
-) -> list[str]:
-    """Determine role badges for a single account using the same
-    thresholds as :func:`aggregate_combat_readout`.
-
-    Extracted as a module-level function so both
-    :func:`_persist_player_summaries` and the unit test suite
-    can import it directly."""
-    roles_out: list[str] = []
-    if total_squad_healing > 0 and (healing / total_squad_healing) > 0.10:
-        roles_out.append("Heal")
-    if boons_out_rate > 1.0:
-        roles_out.append("Support")
-    if strips > 5:
-        roles_out.append("Strip")
-    if cleanses > 10:
-        roles_out.append("Cleanser")
-    if cc_applied > 3:
-        roles_out.append("CC")
-    if not roles_out:
-        roles_out.append("DPS")
-    return roles_out
-
     if not per_account and source_map:
         logger.warning(
             "fight %s: %d player agent(s) with account_name but 0 summary "
@@ -282,16 +269,6 @@ def _compute_account_roles(
             orm_fight.id,
             len(source_map),
         )
-
-    # Compute boon uptimes / outgoing across all processed buff events.
-    # duration_s is derived from the last event timestamp; empty fights
-    # keep all boon metrics at None (no duration to divide by).
-    duration_s: float = 0.0
-    if events:
-        last_time_ms = max((e.time_ms for e in events), default=0)
-        duration_s = last_time_ms / 1000.0
-    uptimes_by_agent = buff_tracker.compute_all_uptimes(duration_s)
-    outgoing_by_agent = buff_tracker.compute_all_outgoing(duration_s)
 
     db.execute(
         delete(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == orm_fight.id),
