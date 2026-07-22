@@ -314,9 +314,22 @@ export function FightSummaryCards({
         gap: 8,
       }}
     >
-      <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
-        Fight Summary
-      </h2>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
+          Fight Summary
+        </h2>
+        <span
+          title="DPS: dégâts · Heal: >10% soins squad · Support: >1 boon/s · Strip: >5 strips · Cleanser: >10 cleanses · CC: >3 contrôles"
+          style={{
+            fontSize: 10,
+            opacity: 0.5,
+            cursor: "help",
+            borderBottom: "1px dashed var(--border)",
+          }}
+        >
+          Légende rôles
+        </span>
+      </div>
       <div
         style={{
           display: "flex",
