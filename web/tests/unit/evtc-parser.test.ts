@@ -7,7 +7,7 @@ import {
 } from "@/lib/evtc-parser";
 
 /**
- * Vitest module for the EVTC parser SCAFFOLD.
+ * Vitest module for the EVTC parser stub fixture.
  *
  * The parser is exercised against the 648-byte stub fixture shipped
  * in ``tests/fixtures/zevtc/test_combat.evtc``. The assertion set
@@ -20,7 +20,7 @@ import {
  *    ``Sword Strike``)
  *  - error path on magic mismatch + short buffer
  *
- * Real ArcDPS combat-event decoding is OUT-OF-SCOPE for this SCAFFOLD.
+ * Real ArcDPS combat-event decoding is out-of-scope for this stub fixture test.
  */
 const FIXTURE_PATH = join(
   __dirname,
@@ -30,7 +30,7 @@ const FIXTURE_PATH = join(
   "test_combat.evtc",
 );
 
-describe("evtc-parser (SCAFFOLD)", () => {
+describe("evtc-parser (stub fixture)", () => {
   describe("parseEvtcFile", () => {
     it("loads + parses the stub fixture", () => {
       const result = parseEvtcFile(FIXTURE_PATH);

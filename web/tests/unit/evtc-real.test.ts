@@ -19,7 +19,7 @@ import {
  *
  * The assertion set covers:
  *  - ``detectEvtcFormat`` returns ``"real"`` on the authentic log + ``"stub"`` on the existing
- *    SCAFFOLD fixture (so the two paths stay non-overlapping);
+ *    stub fixture (so the two paths stay non-overlapping);
  *  - the 32-byte real-format header is parsed into typed fields (magic,
  *    ASCII year, ASCII day stamp, plus the 5 uint32 metadata fields);
  *  - at least one agent record is extracted with ``name + ": <account>"``
@@ -49,7 +49,7 @@ describe("evtc-parser (REAL ArcDPS format)", () => {
       expect(detectEvtcFormat(buf)).toBe("real");
     });
 
-    it("returns 'stub' for the upstream SCAFFOLD stub fixture", () => {
+    it("returns 'stub' for the upstream stub fixture", () => {
       const buf = readFileSync(STUB_FIXTURE_PATH);
       expect(detectEvtcFormat(buf)).toBe("stub");
     });

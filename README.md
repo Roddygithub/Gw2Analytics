@@ -13,6 +13,8 @@
 
 | Release | Highlights |
 | --- | --- |
+| **v0.15.0** | GlobalStatsBar, timeline activity toggle, CSV removal, heatmap in Analyse, arq-worker, tab fix, unit tests. |
+| **v0.14.3** | PlayerPositionHeatmap canvas component + presence_pct math fix. |
 | **v0.14.2** | Plan 173: 14 boon uptimes + presence % + 14 outgoing boons in Combat Readout. Grouped bars + tooltips. |
 | **v0.14.1** | Slow-path blob walk tests (3 hermetic tests for `_contributions_from_blob_walk`). |
 | **v0.14.0** | CI guard against legacy `db.query()` reintroduction. Coverage plan updated. |
@@ -31,11 +33,12 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full per-release history.
 - 🎭 **Heuristic role detection** — per-(fight, account) DPS / HEAL / STRIP / BOON / MIXED classification from the 3 magnitudes + spec/profession hint table.
 - 📊 **Per-player timeline overlay** — one per-bucket series per player agent for multi-line chart overlays.
 - 🎨 **GW2Mists-inspired frontend** — dark palette, sticky glass header, inline SVG logo, favicon, and Next.js `<Link>` navigation.
-- ⚔️ **Combat-readout UI** — per-player Damage / Heal / Boons / Defense 4-table roll-up via `/fights/[id]?tab=readout`, with boon uptime grouped bars (Offensifs/Défensifs/Mobilité/Furtivité), outgoing boon totals, and event-window presence percentage.
+- ⚔️ **Combat-readout UI** — per-player Damage / Heal / Boons / Defense 4-table roll-up via `/fights/[id]?tab=readout` (default tab), with native HTML sortable tables, boon In/Out columns (14 boons), GlobalStatsBar (squad DPS/Heal/Strips/Cleanses/CC/Healers/Supports), compact FightSummaryCards (Top 3 per category), timeline activity toggle ("Toute la durée" / "Activité seulement"), and 2D position heatmap with play/pause animation.
 - 🧪 **Comprehensive multi-layer test suite** — `pytest` (libs + apps) + `vitest` (web components) + Playwright e2e (web flows), 117 tests, 84% coverage, all gated and green.
 - 🛡️ **Audit hardening** — Caddyfile HSTS/CSP, CI `pip-audit`/`pnpm-audit`, Next.js error boundaries, headers() defense-in-depth.
 - 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js).
 - 🔧 **Zero legacy SQLAlchemy** — all production queries use `select()` (SQLAlchemy 2.x style). CI guard prevents regression.
+- ⚡ **Arq worker** — dedicated background worker process for .zevtc parsing, eliminating in-request GIL contention on parallel uploads.
 
 ## Architecture
 
@@ -105,8 +108,14 @@ uv sync
 # 3. Install git hooks
 uv run pre-commit install
 
-# 4. Bring up the infra (Postgres + MinIO)
+# 4. Bring up the infra (Postgres + MinIO + Redis + arq-worker)
+#    The arq-worker handles .zevtc parsing in a dedicated background
+#    process with its own GIL, avoiding in-request latency.
 docker compose up -d
+
+#    If the infra is already running from a previous version, start
+#    just the new arq-worker:
+#    docker compose up -d arq-worker
 
 # 5. Configure local app env (DB + S3 creds; never commit the real .env)
 cp .env.example .env
