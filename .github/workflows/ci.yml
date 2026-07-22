@@ -396,3 +396,4 @@ jobs:
           | Database migrations | ✅ |
           | ARQ worker tests | ✅ |
           EOF
+
