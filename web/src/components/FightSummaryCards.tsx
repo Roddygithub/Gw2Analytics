@@ -133,8 +133,8 @@ function SummaryPlayerRow({
         display: "flex",
         alignItems: "center",
         gap: 6,
-        padding: "3px 0",
-        fontSize: 13,
+        padding: "1px 0",
+        fontSize: 11,
       }}
     >
       {/* Medal */}
@@ -214,13 +214,13 @@ function SummaryPlayerRow({
 
       {/* Spacer + value */}
       <span
-        style={{
-          marginLeft: "auto",
-          fontWeight: 600,
-          fontSize: 12,
-          flexShrink: 0,
-          paddingLeft: 8,
-        }}
+      style={{
+        marginLeft: "auto",
+        fontWeight: 600,
+        fontSize: 11,
+        flexShrink: 0,
+        paddingLeft: 6,
+      }}
       >
         {value}
       </span>
@@ -257,21 +257,21 @@ function SummaryCard({
       style={{
         background: "var(--surface)",
         border: "1px solid var(--border)",
-        borderRadius: 6,
-        padding: "10px 14px",
-        minWidth: 200,
+        borderRadius: 5,
+        padding: "6px 10px",
+        minWidth: 180,
         flex: "0 0 auto",
       }}
     >
       {/* Card header */}
       <p
         style={{
-          fontSize: 10,
+          fontSize: 9,
           fontWeight: 700,
-          opacity: 0.6,
+          opacity: 0.55,
           textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          margin: "0 0 6px 0",
+          letterSpacing: "0.05em",
+          margin: "0 0 4px 0",
         }}
       >
         {title}

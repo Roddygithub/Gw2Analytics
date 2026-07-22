@@ -473,6 +473,80 @@ function TableWrapper({ children }: { children: React.ReactNode }) {
 }
 
 /* ------------------------------------------------------------------ *
+ *  Stats badge for the global squad summary bar
+ * ------------------------------------------------------------------ */
+
+function StatBadge({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "2px 8px",
+        borderRadius: 4,
+        background: `color-mix(in srgb, ${color} 12%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
+        fontSize: 12,
+        fontVariantNumeric: "tabular-nums",
+      }}
+      title={`${label}: ${value}`}
+    >
+      <span style={{ fontWeight: 700, color }}>{value}</span>
+      <span style={{ opacity: 0.6, fontSize: 10 }}>{label}</span>
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ *  Global stats bar — squad-level aggregates
+ * ------------------------------------------------------------------ */
+
+function GlobalStatsBar({ players, durationS }: { players: PlayerReadoutOut[]; durationS: number }) {
+  const stats = useMemo(() => {
+    const totalDps = players.reduce((s, p) => s + p.damage.dps_total, 0);
+    const totalHps = players.reduce((s, p) => s + p.heal.hps, 0);
+    const totalStrips = players.reduce((s, p) => s + p.damage.strips, 0);
+    const totalCleanses = players.reduce((s, p) => s + p.heal.cleanses, 0);
+    const totalCc = players.reduce((s, p) => s + p.damage.cc_applied, 0);
+    const healers = players.filter((p) => p.roles.includes("Heal")).length;
+    const supports = players.filter((p) => p.roles.includes("Support")).length;
+    const durationMin = durationS / 60;
+    return { totalDps, totalHps, totalStrips, totalCleanses, totalCc, healers, supports, durationMin };
+  }, [players, durationS]);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 12,
+        padding: "8px 14px",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        fontSize: 13,
+      }}
+    >
+      <span style={{ fontWeight: 600, opacity: 0.6, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 4 }}>
+        Squad
+      </span>
+      <StatBadge label="DPS" value={stats.totalDps.toFixed(0)} color="#f59e0b" />
+      <StatBadge label="Heal/s" value={stats.totalHps.toFixed(0)} color="#22c55e" />
+      <StatBadge label="Strips" value={String(stats.totalStrips)} color="#a855f7" />
+      <StatBadge label="Cleanses" value={String(stats.totalCleanses)} color="#06b6d4" />
+      <StatBadge label="CC" value={String(stats.totalCc)} color="#f97316" />
+      {stats.healers > 0 && <StatBadge label="Healers" value={String(stats.healers)} color="#22c55e" />}
+      {stats.supports > 0 && <StatBadge label="Supports" value={String(stats.supports)} color="#3b82f6" />}
+      <span style={{ marginLeft: "auto", opacity: 0.5, fontSize: 11 }}>
+        {stats.durationMin.toFixed(0)} min
+      </span>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  *  ReadoutTabClient — main component
  * ------------------------------------------------------------------ */
 
@@ -625,6 +699,9 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
           </button>
         </div>
       )}
+
+      {/* Global stats bar — computed once with useMemo */}
+      <GlobalStatsBar players={players} durationS={readout.duration_s} />
 
       <p style={{ padding: "10px 14px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13, opacity: 0.8 }}>
         {players.length} joueurs · durée {readout.duration_s.toFixed(1)}s

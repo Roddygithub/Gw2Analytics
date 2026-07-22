@@ -35,12 +35,9 @@ import {
 } from "ag-grid-community";
 import { appGridTheme } from "./ag-grid-setup";
 import type { PlayerListRow } from "@/lib/api";
-import type { CsvColumn } from "@/lib/csv";
-import { CsvDownloadButton } from "./CsvDownloadButton";
 import {
   EMPTY_STYLE,
   FLEX_COLUMN_STYLE,
-  FLEX_END_STYLE,
   gridContainerStyle,
   LINK_STYLE,
 } from "@/shared/styles";
@@ -49,39 +46,10 @@ const GRID_HEIGHT_PX = 480;
 
 const GRID_CONTAINER_STYLE = gridContainerStyle(GRID_HEIGHT_PX);
 
-/**
- * CSV column spec for the ``/players`` paginated list. The order
- * matches the on-screen column order so the downloaded file
- * reads naturally. ``fights_attended`` + the 3 totals are
- * unformatted integers (raw values); the column spec deliberately
- * omits ``decimals`` for these.
- */
-const CSV_COLUMNS: CsvColumn<PlayerListRow>[] = [
-  { field: "account_name", headerName: "Account" },
-  { field: "name", headerName: "Character" },
-  { field: "profession", headerName: "Profession" },
-  { field: "elite_spec", headerName: "Elite spec" },
-  { field: "detected_role", headerName: "Role" },
-  { field: "detected_tags", headerName: "Tags" },
-  { field: "fights_attended", headerName: "Fights" },
-  { field: "total_damage", headerName: "Total damage" },
-  { field: "total_healing", headerName: "Total healing" },
-  { field: "total_buff_removal", headerName: "Total strip" },
-];
-
 export function PlayersGrid({
   rows,
-  filename,
 }: {
   rows: PlayerListRow[];
-  /**
-   * Optional output filename for the "Download CSV" button. When
-   * set, a button is rendered next to the grid (hidden when
-   * ``rows`` is empty). The CSV column spec is the inline
-   * ``CSV_COLUMNS`` constant above so the downloaded file
-   * matches the on-screen column order.
-   */
-  filename?: string;
 }) {
   const colDefs = useMemo<ColDef<PlayerListRow>[]>(
     () => [
@@ -178,11 +146,6 @@ export function PlayersGrid({
 
   return (
     <div style={FLEX_COLUMN_STYLE}>
-      {filename ? (
-        <div style={FLEX_END_STYLE}>
-          <CsvDownloadButton rows={rows} columns={CSV_COLUMNS} filename={filename} />
-        </div>
-      ) : null}
       <div style={GRID_CONTAINER_STYLE}>
         <AgGridReact<PlayerListRow>
           theme={appGridTheme}

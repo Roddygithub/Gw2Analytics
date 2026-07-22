@@ -849,7 +849,7 @@ export default async function FightEventsPage({
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Per-target damage</h2>
-        <TargetRollupsGrid rows={filteredDps} columns={DPS_COLUMNS} filename={`${id}-damage.csv`} />
+        <TargetRollupsGrid rows={filteredDps} columns={DPS_COLUMNS} />
       </section>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -859,7 +859,6 @@ export default async function FightEventsPage({
         <TargetRollupsGrid
           rows={filteredHealing}
           columns={HEALING_COLUMNS}
-          filename={`${id}-healing.csv`}
         />
       </section>
 
@@ -870,7 +869,6 @@ export default async function FightEventsPage({
         <TargetRollupsGrid
           rows={filteredBuffRemoval}
           columns={BUFF_REMOVAL_COLUMNS}
-          filename={`${id}-buff-removal.csv`}
         />
       </section>
 
@@ -887,7 +885,6 @@ export default async function FightEventsPage({
         <SquadRollupsGrid
           rows={squads?.squads ?? []}
           columns={SQUAD_COLUMNS}
-          filename={`${id}-squads.csv`}
         />
       </section>
 
@@ -899,7 +896,7 @@ export default async function FightEventsPage({
             message={`Failed to load skills: ${sectionErrors.skills}`}
           />
         )}
-        <SkillUsageTable rows={skills?.skills ?? []} filename={`${id}-skills.csv`} />
+        <SkillUsageTable rows={skills?.skills ?? []} />
       </section>
 
       {/* Tour 4 v0.10.13 plan 044: per-player skill attribution.
@@ -956,7 +953,7 @@ export default async function FightEventsPage({
         ) : accountSkills === null ? null : (
           <PlayerSkillUsageTable
             playerSkills={accountSkills}
-            filename={`${id}-player-skills-${accountSkills.account_name.replace(/\./g, "_")}.csv`}
+
           />
         )}
       </section>

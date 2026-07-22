@@ -150,7 +150,7 @@ export default async function PlayersPage(props: {
       {fetchError ? (
         <p style={{ color: "var(--accent)" }}>{fetchError}</p>
       ) : (
-        <PlayersGrid rows={rows} filename="players.csv" />
+        <PlayersGrid rows={rows} />
       )}
     </main>
   );

@@ -44,18 +44,7 @@
  */
 import React from "react";
 
-import type { PlayerSkills, PlayerSkillUsageRow } from "@/lib/api";
-import type { CsvColumn } from "@/lib/csv";
-import { CsvDownloadButton } from "./CsvDownloadButton";
-
-const CSV_COLUMNS: CsvColumn<PlayerSkillUsageRow>[] = [
-  { field: "skill_id", headerName: "Skill id" },
-  { field: "skill_name", headerName: "Skill name" },
-  { field: "hit_count", headerName: "Hit count" },
-  { field: "total_damage", headerName: "Total damage" },
-  { field: "total_healing", headerName: "Total healing" },
-  { field: "total_buff_removal", headerName: "Total strip" },
-];
+import type { PlayerSkills } from "@/lib/api";
 
 const LOADOUT_BAR_STYLE: React.CSSProperties = {
   display: "flex",
@@ -153,17 +142,8 @@ function _formatEquipped(ids: number[] | undefined): string {
 
 export function PlayerSkillUsageTable({
   playerSkills,
-  filename,
 }: {
   playerSkills: PlayerSkills;
-  /**
-   * Optional output filename for the "Download CSV" button.
-   * When set, a button is rendered above the table (hidden
-   * when ``playerSkills.skills`` is empty). The CSV column
-   * spec is the inline ``CSV_COLUMNS`` constant above so the
-   * downloaded file matches the on-screen column order.
-   */
-  filename?: string;
 }) {
   const { account_name, loadout, skills } = playerSkills;
 
@@ -192,13 +172,6 @@ export function PlayerSkillUsageTable({
           <span style={VALUE_TEXT}>{_formatEquipped(loadout.equipped_skill_ids)}</span>
         </div>
       </div>
-
-      {/* CSV download row (only when filename + non-empty skills). */}
-      {filename && skills.length > 0 ? (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <CsvDownloadButton rows={skills} columns={CSV_COLUMNS} filename={filename} />
-        </div>
-      ) : null}
 
       {/* Skill table OR empty-state panel. */}
       {skills.length === 0 ? (

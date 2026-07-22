@@ -46,11 +46,9 @@ import {
   type ValueFormatterParams,
 } from "ag-grid-community";
 import { appGridTheme } from "./ag-grid-setup";
-import { CsvDownloadButton } from "./CsvDownloadButton";
 import {
   EMPTY_STYLE,
   FLEX_COLUMN_STYLE,
-  FLEX_END_STYLE,
   gridContainerStyle,
 } from "@/shared/styles";
 
@@ -84,21 +82,13 @@ export interface TargetRollupsGridProps<TRow> {
    * rendered -- the page-level ``<h2>`` carries the label.
    */
   caption?: string;
-  /**
-   * Optional output filename for the "Download CSV" button. When
-   * set, a button is rendered next to the grid (hidden when
-   * ``rows`` is empty). The CSV column spec reuses the grid's
-   * ``columns`` prop, so the downloaded file matches the
-   * on-screen column order + decimal formatting exactly.
-   */
-  filename?: string;
+
 }
 
 export function TargetRollupsGrid<TRow extends { target_agent_id: number }>({
   rows,
   columns,
   caption,
-  filename,
 }: TargetRollupsGridProps<TRow>) {
   const colDefs = useMemo<ColDef<TRow>[]>(
     () =>
@@ -156,11 +146,6 @@ export function TargetRollupsGrid<TRow extends { target_agent_id: number }>({
 
   return (
     <div style={FLEX_COLUMN_STYLE}>
-      {filename ? (
-        <div style={FLEX_END_STYLE}>
-          <CsvDownloadButton rows={rows} columns={columns} filename={filename} />
-        </div>
-      ) : null}
       <div style={GRID_CONTAINER_STYLE}>
         <AgGridReact<TRow>
           theme={appGridTheme}

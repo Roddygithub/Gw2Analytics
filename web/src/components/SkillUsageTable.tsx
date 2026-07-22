@@ -32,7 +32,6 @@
 import React from "react";
 
 import type { SkillUsageRow } from "@/lib/api";
-import type { CsvColumn } from "@/lib/csv";
 import {
   SKILL_USAGE_TABLE_COLUMN_HIT_COUNT,
   SKILL_USAGE_TABLE_COLUMN_SKILL_ID,
@@ -42,23 +41,6 @@ import {
   SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP,
   SKILL_USAGE_TABLE_EMPTY_STATE,
 } from "@/lib/copy/skill-usage-table";
-import { CsvDownloadButton } from "./CsvDownloadButton";
-
-/**
- * CSV column spec for the per-skill roll-up. Order matches the
- * on-screen table; ``hit_count`` + the 3 totals are unformatted
- * integers (raw values). The skill_id + skill_name pair is the
- * canonical join key for analysts who want to look up the
- * official description on the wiki.
- */
-const CSV_COLUMNS: CsvColumn<SkillUsageRow>[] = [
-  { field: "skill_id",    headerName: SKILL_USAGE_TABLE_COLUMN_SKILL_ID },
-  { field: "skill_name",    headerName: SKILL_USAGE_TABLE_COLUMN_SKILL_NAME },
-  { field: "hit_count",    headerName: SKILL_USAGE_TABLE_COLUMN_HIT_COUNT },
-  { field: "total_damage",    headerName: SKILL_USAGE_TABLE_COLUMN_TOTAL_DAMAGE },
-  { field: "total_healing",    headerName: SKILL_USAGE_TABLE_COLUMN_TOTAL_HEALING },
-  { field: "total_buff_removal",    headerName: SKILL_USAGE_TABLE_COLUMN_TOTAL_STRIP },
-];
 
 const TABLE_STYLE: React.CSSProperties = {
   width: "100%",
@@ -111,17 +93,8 @@ const EMPTY_STYLE: React.CSSProperties = {
 
 export function SkillUsageTable({
   rows,
-  filename,
 }: {
   rows: SkillUsageRow[];
-  /**
-   * Optional output filename for the "Download CSV" button. When
-   * set, a button is rendered above the table (hidden when
-   * ``rows`` is empty). The CSV column spec is the inline
-   * ``CSV_COLUMNS`` constant above so the downloaded file
-   * matches the on-screen column order.
-   */
-  filename?: string;
 }) {
   if (rows.length === 0) {
     return <div style={EMPTY_STYLE}>{SKILL_USAGE_TABLE_EMPTY_STATE}</div>;
@@ -129,11 +102,6 @@ export function SkillUsageTable({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {filename ? (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <CsvDownloadButton rows={rows} columns={CSV_COLUMNS} filename={filename} />
-        </div>
-      ) : null}
       <table style={TABLE_STYLE}>
       <thead>
         <tr>
