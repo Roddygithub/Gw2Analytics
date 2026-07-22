@@ -251,25 +251,14 @@ jobs:
           EOF
 
   # ---------------------------------------------------------------------------
-  # Playwright tests (matrix: chromium + visual-regression).
-  #
-  # Chromium E2E runs on every push/PR; visual-regression is PR-only.
-  # Each matrix entry runs on its own GHA runner so they execute in
-  # parallel (chromium ~4 min, visual-regression ~2 min). The Playwright
-  # browser cache (~/.cache/ms-playwright) and the cache-warmup workflow
-  # mitigate the cost of per-entry setup duplication.
+  # Playwright E2E tests (chromium).
+  # Runs on every push/PR. Browser cache (~/.cache/ms-playwright) and
+  # the cache-warmup workflow mitigate setup cost.
   # ---------------------------------------------------------------------------
-  playwright:
-    name: Playwright (${{ matrix.project }})
+  playwright-chromium:
+    name: Playwright (chromium)
     needs: lint-web
-    strategy:
-      matrix:
-        project: [chromium]
-        include:
-          - project: visual-regression
     runs-on: ubuntu-latest
-    # visual-regression only on PRs; chromium always.
-    if: ${{ matrix.project != 'visual-regression' || github.event_name == 'pull_request' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -292,15 +281,15 @@ jobs:
         working-directory: web
         run: pnpm exec playwright install-deps chromium
 
-      - name: Playwright tests
+      - name: Playwright tests (chromium)
         working-directory: web
-        run: pnpm exec playwright test --project=${{ matrix.project }}
+        run: pnpm exec playwright test --project=chromium
 
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report-${{ matrix.project }}
+          name: playwright-report-chromium
           path: web/playwright-report/
           retention-days: 7
 
@@ -308,12 +297,74 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-traces-${{ matrix.project }}
+          name: playwright-traces-chromium
+          path: web/test-results/
+          retention-days: 7
+
+      - name: Playwright summary
+        if: success()
+        run: |
+          cat <<'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 🎭 Playwright (chromium) results
+
+          | Check | Status |
+          |-------|--------|
+          | E2E tests | ✅ |
+          EOF
+
+  # ---------------------------------------------------------------------------
+  # Playwright visual regression tests.
+  # PR-only because there's no baseline to compare against on main.
+  # ---------------------------------------------------------------------------
+  playwright-visual-regression:
+    name: Playwright (visual-regression)
+    needs: lint-web
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-web
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('web/pnpm-lock.yaml') }}
+
+      - name: Install Playwright chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: web
+        run: pnpm exec playwright install chromium
+
+      - name: Install Playwright system dependencies
+        working-directory: web
+        run: pnpm exec playwright install-deps chromium
+
+      - name: Playwright tests (visual-regression)
+        working-directory: web
+        run: pnpm exec playwright test --project=visual-regression
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-visual-regression
+          path: web/playwright-report/
+          retention-days: 7
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces-visual-regression
           path: web/test-results/
           retention-days: 7
 
       - name: Upload visual regression diffs on failure
-        if: ${{ failure() && matrix.project == 'visual-regression' }}
+        if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: visual-regression-diffs
@@ -324,11 +375,11 @@ jobs:
         if: success()
         run: |
           cat <<'EOF' >> $GITHUB_STEP_SUMMARY
-          ## 🎭 Playwright (${{ matrix.project }}) results
+          ## 🎭 Playwright (visual-regression) results
 
           | Check | Status |
           |-------|--------|
-          | ${{ matrix.project }} tests | ✅ |
+          | Visual regression tests | ✅ |
           EOF
 
   # ---------------------------------------------------------------------------
