@@ -237,6 +237,10 @@ export interface PlayerReadoutDefenseOut {
   barrier_absorbed: number;
   // Plan 173 Phase E: presence percentage [0, 100], null when unavailable.
   presence_pct: number | null;
+  // v0.15.x: average distance to commander in game units, null when unavailable.
+  dist_to_commander: number | null;
+  // v0.15.x: number of unique kills the player contributed damage to.
+  kill_participation: number;
 }
 
 export interface PlayerReadoutOut {
