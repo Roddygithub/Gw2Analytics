@@ -2,11 +2,14 @@
 
 **Date** : 2026-07-22  
 **Baseline** : 82% (5180 statements, ~913 missing)  
-**Cible** : 90% (~520 missing → ~393 additional covered lines)
+**Cible** : 90% (~520 missing → ~393 additional covered lines)  
+**Actuel** : **84%** ✅ (+2% depuis le début des améliorations)
 
 ---
 
-## Progrès réalisé (v0.13.5)
+## Progrès réalisé
+
+### v0.13.5 — Audit fixes (P0-P3)
 
 | Fichier | Avant | Après | Delta |
 |---|---|---|---|
@@ -18,78 +21,65 @@
 | `aggregators.py` | 18% | **88%** | +70% |
 | `webhooks.py` | 34% | **95%** | +61% |
 
----
+18 tests ajoutés dans `test_players_routes.py` (parse_profession_filter, combine_day_midnight, timelines, labels).
 
-## Gaps restants (par priorité)
+### v0.13.6 — P1 guilds (0% → 70%)
 
-### 🔴 Priorité 1 : guilds.py (0% → 50%)
-
-**Fichier** : `apps/api/src/gw2analytics_api/routes/guilds.py` (34 lignes)  
-**Effort estimé** : 1h  
-**Tests** : `test_guilds.py` (~15 lignes)
-
-Route GET `/api/v1/guilds/{guild_id}` — retourne les infos d'une guilde. 
-- `test_guild_200`: upload un fight avec un membre de guilde, GET guild → 200
-- `test_guild_404`: GET guild inconnue → 404
-
-### 🟡 Priorité 2 : guild_service.py (0% → 60%)
-
-**Fichier** : `apps/api/src/gw2analytics_api/services/guild_service.py` (~30 lignes)  
-**Effort estimé** : 1h  
-**Tests** : `test_guild_service.py` (~20 lignes)
-
-Service de guildes appelé par guilds.py.
-- `test_get_guild_data_known`: test avec données mockées
-- `test_get_guild_data_unknown`: guild inconnue
-- `test_get_guild_data_empty`: guild sans membres
-
-### 🟡 Priorité 3 : __main__.py (0% → 80%)
-
-**Fichier** : `apps/api/src/gw2analytics_api/__main__.py` (7 lignes)  
-**Effort estimé** : 30min  
-**Tests** : `test_main_cli.py` (~10 lignes)
-
-Entrypoint CLI pour `python -m gw2analytics_api`.
-- `test_main_runs_uvicorn`: mock uvicorn.run et vérifie l'appel
-
-### 🟢 Priorité 4 : players.py (69% → 85%)
-
-**Fichier** : `apps/api/src/gw2analytics_api/routes/players.py` (180 lignes, ~126 → ~54 uncovered)  
-**Effort estimé** : 2h  
-**Tests** : déjà 18 nouveaux tests dans `test_players_routes.py`
-
-Reste : slow-path blob walk, `_contributions_from_blob_walk`, `_load_slow_path_contributions` — ces branches sont difficiles à tester en unitaire car elles nécessitent un blob MinIO valide.
-
-### 🟢 Priorité 5 : uploads.py (85% → 95%)
-
-**Fichier** : `apps/api/src/gw2analytics_api/routes/uploads.py` (80 lignes)  
-**Effort estimé** : 1h
-
-Ajouter :
-- `test_upload_empty_file` : fichier vide → 201 ou 422 ?
-- `test_upload_no_filename` : multipart sans filename
-- `test_upload_content_length_413`: Content-Length > max → 413
-
-### 🟢 Priorité 6 : backfill.py (67% → 85%)
-
-**Fichier** : `apps/api/src/gw2analytics_api/backfill.py` (95 lignes, ~74 → ~31 uncovered)  
-**Effort estimé** : 1h
-
-Les nouvelles branches (role detection backfill) dans `backfill_role_detection` ne sont pas testées.
-- `test_backfill_role_detection_updates_rows` : test unitaire avec rows mockés
-
----
-
-## Résumé des efforts
-
-| Priorité | Fichier | Lignes | Effort |
+| Fichier | Avant | Après | Delta |
 |---|---|---|---|
-| 🔴 P1 | `guilds.py` | 34 | 1h |
-| 🟡 P2 | `guild_service.py` | 30 | 1h |
-| 🟡 P3 | `__main__.py` | 7 | 30min |
-| 🟢 P4 | `players.py` | 126→54 | 2h |
-| 🟢 P5 | `uploads.py` | 54→12 | 1h |
-| 🟢 P6 | `backfill.py` | 95→31 | 1h |
-| **Total** | | **~250 lignes** | **~6h** |
+| `guilds.py` | 0% | **~70%** | +70% |
+| `guild_service.py` | 0% | **~40%** | +40% |
 
-**Stratégie** : P1+P2 (guilds) donnent le meilleur rapport effort/impact (~64 lignes à 0%). P3 (main) est trivial. Avec ces 3, on gagne ~70 lignes → couverture ~84%. P4+P5+P6 ajoutent ~80 lignes → ~86%. Pour atteindre 90%, il faudrait couvrir ~600 lignes supplémentaires — l'effort le plus productif est P1+P2+P3 (gain rapide).
+5 tests de route dans `test_guilds.py` (list 200, list empty, detail 200, detail 404, multi-member).
+Fix : routeur guilds jamais monté dans `main.py` — corrigé.
+
+### v0.13.7 — P3 __main__ + P5 uploads edge cases
+
+| Fichier | Avant | Après | Delta |
+|---|---|---|---|
+| `__main__.py` | 0% | **100%** | +100% |
+| `uploads.py` | 85% | **~93%** | +8% |
+
+- `test_main_cli.py`: mock uvicorn.run, vérifie host/port
+- `test_upload_edge_cases.py`: 413 oversized, 413 Content-Length, empty file
+- Conftest: Guild+GuildMember ajoutés au cleanup (8 tables)
+
+### v0.13.8 — P6 backfill_role_detection (67% → 85%)
+
+| Fichier | Avant | Après | Delta |
+|---|---|---|---|
+| `backfill.py` | 67% | **~85%** | +18% |
+
+4 tests dans `test_backfill_role_detection.py` (update null rows, idempotency, dry_run, empty DB).
+Seed complet Upload → OrmFight → OrmFightPlayerSummary (FK chain).
+
+### v0.13.9 — Modernisation SQL (0 legacy db.query())
+
+- Audit complet : **ZÉRO** `db.query()` legacy restant dans `apps/api/src/`
+- `guild_service.py`: `select().join().where()` remplace le dernier `query().join().filter()`
+
+---
+
+## Résumé des efforts réalisés
+
+| Priorité | Fichier | Avant | Après | Effort réel |
+|---|---|---|---|---|
+| 🔴 P1 | `guilds.py` | 0% | ~70% | 30min |
+| 🟡 P2 | `guild_service.py` | 0% | ~40% | 15min |
+| 🟡 P3 | `__main__.py` | 0% | 100% | 10min |
+| 🟢 P4 | `players.py` | 30% | 69% | 1h |
+| 🟢 P5 | `uploads.py` | 85% | ~93% | 20min |
+| 🟢 P6 | `backfill.py` | 67% | ~85% | 30min |
+| ♻️ | Legacy queries | 2 files | 0 | 10min |
+| **Total** | | **82%** | **84%** | **~3h** |
+
+## Gaps restants
+
+Les fichiers les plus bas restants sont :
+- `__main__.py` : 0% → 100% ✅ **DONE**
+- `guilds.py` : 0% → ~70% ✅ **DONE**
+- `guild_service.py` : 0% → ~40% (la fonction `sync_guilds` stub est difficile à tester sans mock API)
+- `players.py` : 30% → 69% (slow-path blob walk difficile à tester sans blob MinIO valide)
+- `backfill.py` : 67% → ~85% ✅ **DONE**
+
+Pour atteindre 90%, il faudrait couvrir les chemins lent du blob walk dans `players.py` (~60 lignes) et `backfill.py` (~20 lignes) à l'aide de données de test EVTC réelles.

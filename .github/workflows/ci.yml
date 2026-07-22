@@ -100,6 +100,16 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check
 
+      # v0.13.9 guard: block any reintroduction of legacy
+      # ``db.query()`` calls in production source code (the modern
+      # ``select()`` pattern is now used everywhere). The grep
+      # checks apps/api/src/ and libs/ (excluding __pycache__).
+      # ``exit 1`` fails the build if any match is found.
+      - name: Guard against legacy db.query()
+        run: |
+          echo "Checking for legacy db.query() calls (modern select() required)..."
+          ! grep -rn 'db\.query(' apps/api/src/ libs/ --include='*.py'
+
       - name: Mypy
         run: uv run mypy libs apps --no-incremental
 
