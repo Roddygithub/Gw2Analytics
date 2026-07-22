@@ -824,3 +824,57 @@ def test_readout_dist_to_commander_no_commander() -> None:
     assert result[0].dist_to_commander is None, (
         f"expected None when no commander, got {result[0].dist_to_commander}"
     )
+
+
+def test_readout_dist_to_commander_with_commander() -> None:
+    """When a commander exists, dist_to_commander is computed for all players.
+
+    Seeds a commander (agent c, is_commander=True) and a regular player
+    (agent a). Both have PositionEvents at matching timestamps. Verifies
+    that the commander gets dist_to_commander=0.0 and the regular player
+    gets the Euclidean distance to the commander.
+    """
+    from gw2analytics_api.routes.fights.aggregators import aggregate_player_positions
+
+    a = 900_002  # regular player
+    c = 900_003  # commander
+
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a, name=f"Player {a}", subgroup=0,
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            is_player=True, is_commander=False,
+        ),
+        c: AgentIdentity(
+            agent_id=c, name=f"Cmd {c}", subgroup=0,
+            account_name=f"synth.{c}", profession="PROF(1)", elite_spec="ELITE(27)",
+            is_player=True, is_commander=True,
+        ),
+    }
+    # Commander at (0, 0), player at (300, 400) — distance = 500 units
+    # at the same timestamps so matching is exact.
+    events = [
+        PositionEvent(time_ms=1_000, source_agent_id=a, x=300.0, y=400.0),
+        PositionEvent(time_ms=1_000, source_agent_id=c, x=0.0, y=0.0),
+        PositionEvent(time_ms=2_000, source_agent_id=a, x=600.0, y=800.0),
+        PositionEvent(time_ms=2_000, source_agent_id=c, x=0.0, y=0.0),
+    ]
+    result = aggregate_player_positions(
+        events=events,
+        agent_id_to_identity_map=aid_to_identity,
+    )
+    assert len(result) == 2
+
+    # Commander's own distance is 0.
+    cmd_row = next(r for r in result if r.account_name == f"synth.{c}")
+    assert cmd_row.dist_to_commander == 0.0, (
+        f"expected commander dist=0.0, got {cmd_row.dist_to_commander}"
+    )
+
+    # Player a: avg distance to commander at (0,0).
+    # t=1000: sqrt(300²+400²)=500, t=2000: sqrt(600²+800²)=1000
+    # avg = (500+1000)/2 = 750.0
+    player_row = next(r for r in result if r.account_name == f"synth.{a}")
+    assert player_row.dist_to_commander == pytest.approx(750.0, abs=1.0), (
+        f"expected dist≈750.0, got {player_row.dist_to_commander}"
+    )

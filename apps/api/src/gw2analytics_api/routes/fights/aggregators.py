@@ -737,9 +737,9 @@ def aggregate_combat_readout(
     }
 
     # v0.14.4: basic role detection — DPS / Heal / Support based on
-    # heal share relative to the squad. If a player contributes >30%
+    # heal share relative to the squad. If a player contributes >10%
     # of the squad's total healing, they're flagged as "Heal".
-    # Boon-focused players (>2 boons/s out) are flagged as "Support".
+    # Boon-focused players (>1 boon/s out) are flagged as "Support".
     # Everyone else is "DPS". Iterates ALL player agents from the
     # identity map so every player gets a role.
     total_squad_healing = sum(r.total_healing for r in heal_rows)
@@ -749,10 +749,10 @@ def aggregate_combat_readout(
     for agent_id in identity_map:
         roles: list[str] = []
         hr = heal_lookup.get(agent_id)
-        if hr and total_squad_healing > 0 and (hr.total_healing / total_squad_healing) > 0.30:
+        if hr and total_squad_healing > 0 and (hr.total_healing / total_squad_healing) > 0.10:
             roles.append("Heal")
         br = boons_lookup.get(agent_id)
-        if br and br.boons_out_rate > 2.0:
+        if br and br.boons_out_rate > 1.0:
             roles.append("Support")
         if not roles:
             roles.append("DPS")
