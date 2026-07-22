@@ -48,6 +48,7 @@ import {
   type UploadCreatedRow,
   type UploadStatusRow,
 } from "@/lib/api";
+import { formatBytes } from "@/lib/format";
 
 import styles from "./page.module.css";
 
@@ -733,12 +734,4 @@ function DoneStep({
   );
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KiB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-}
+

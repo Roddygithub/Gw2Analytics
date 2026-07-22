@@ -140,10 +140,26 @@ function _formatEquipped(ids: number[] | undefined): string {
   return ids.join(", ");
 }
 
+function _downloadCsv(filename: string, skills: PlayerSkills["skills"]): void {
+  const header = "skill_id,skill_name,hit_count,total_damage,total_healing,total_buff_removal";
+  const rows = skills.map(
+    (r) => `${r.skill_id},"${r.skill_name}",${r.hit_count},${r.total_damage},${r.total_healing},${r.total_buff_removal}`,
+  );
+  const blob = new Blob([header, ...rows].join("\n"), { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function PlayerSkillUsageTable({
   playerSkills,
+  filename,
 }: {
   playerSkills: PlayerSkills;
+  filename?: string;
 }) {
   const { account_name, loadout, skills } = playerSkills;
 
@@ -204,6 +220,11 @@ export function PlayerSkillUsageTable({
             ))}
           </tbody>
         </table>
+        {filename && (
+          <button onClick={() => _downloadCsv(filename, skills)}>
+            Download CSV
+          </button>
+        )}
       )}
     </div>
   );

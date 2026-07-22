@@ -1,19 +1,17 @@
-"""SQLAlchemy 2.0 engine, sessionmaker, and declarative base.
-
-Engine is constructed **lazily** so importing this module does not require
-the database to be reachable. The :func:`get_session` dependency is what
-FastAPI routes use; tests can call it directly.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from functools import cache
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from gw2analytics_api.config import get_settings
+
+
+def utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):

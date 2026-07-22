@@ -1,8 +1,8 @@
 packages: []
 
 allowBuilds:
-  esbuild: set this to true or false
-  sharp: set this to true or false
+  esbuild: true
+  sharp: true
 
 # Security overrides: force patched versions of transitive dependencies
 # to silence `pnpm audit` findings. These can be removed once Next.js

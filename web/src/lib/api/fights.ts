@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../env";
+import { fetchCached } from "@/lib/fetchCached";
 import { ApiError } from "./errors";
 
 export interface FightRow {
@@ -292,22 +293,14 @@ export async function fetchFightReadout(
   fightId: string,
 ): Promise<FightReadoutOut> {
   const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}/readout`);
-  const resp = await fetch(url, { cache: "no-store" });
-  if (!resp.ok) {
-    throw new ApiError(resp.status, await resp.text());
-  }
-  return (await resp.json()) as FightReadoutOut;
+  return await fetchCached<FightReadoutOut>(url, { cache: "no-store" });
 }
 
 export async function fetchFightPositions(
   fightId: string,
 ): Promise<FightPositionsOut> {
   const url = apiBase(`/api/v1/fights/${encodeURIComponent(fightId)}/positions`);
-  const resp = await fetch(url, { cache: "no-store" });
-  if (!resp.ok) {
-    throw new ApiError(resp.status, await resp.text());
-  }
-  return (await resp.json()) as FightPositionsOut;
+  return await fetchCached<FightPositionsOut>(url, { cache: "no-store" });
 }
 
 export async function fetchFights(): Promise<FightRow[]> {

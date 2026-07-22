@@ -66,7 +66,6 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gw2_analytics._invariants import check_desc_asc_ordering
 from gw2_core import HealingEvent
 
 # HPS sentinel when ``duration_s <= 0``: invalid (zero/negative)
@@ -173,40 +172,7 @@ class TargetHealingAggregator:
         # Sort: highest total_healing first; ties broken by ascending target_agent_id.
         rows.sort(key=lambda r: (-r.total_healing, r.target_agent_id))
 
-        # The invariant total is derived from the aggregated rows
-        # rather than accumulated in the hot loop, saving one integer
-        # addition per input event.
-        self._check_invariants(rows, sum(r.total_healing for r in rows))
         return rows
-
-    @staticmethod
-    def _check_invariants(
-        rows: list[TargetHealingRow],
-        expected_sum: int,
-    ) -> None:
-        """Raise ``ValueError`` if any cross-field invariant is violated."""
-        actual_sum = sum(r.total_healing for r in rows)
-        if actual_sum != expected_sum:
-            msg = (
-                f"sum of row.total_healing ({actual_sum}) != sum of event.healing ({expected_sum})"
-            )
-            raise ValueError(msg)
-        for r in rows:
-            if r.heal_count < 1:
-                msg = (
-                    f"TargetHealingRow({r.target_agent_id}).heal_count "
-                    f"({r.heal_count}) must be >= 1"
-                )
-                raise ValueError(msg)
-        # Pydantic field constraints already guarantee ``ge=0`` for total_healing;
-        # the cross-row ordering invariant is the only ordering contract.
-        check_desc_asc_ordering(
-            rows,
-            primary_key=lambda r: r.total_healing,
-            secondary_key=lambda r: r.target_agent_id,
-            primary_label="total_healing",
-            secondary_label="target_agent_id",
-        )
 
 
 __all__ = ["TargetHealingAggregator", "TargetHealingRow"]

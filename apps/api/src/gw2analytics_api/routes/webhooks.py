@@ -76,7 +76,7 @@ atexit.register(_DNS_EXECUTOR.shutdown)
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 
 
-def _utcnow() -> datetime:
+def utcnow() -> datetime:
     return datetime.now(tz=UTC)
 
 
@@ -265,7 +265,7 @@ def create_webhook(
     # ``filter`` -- we shadow it on the ORM class to avoid collision
     # with the Python builtin ``filter()``).
     new_sub.filter_payload = payload.filter
-    new_sub.created_at = _utcnow()
+    new_sub.created_at = utcnow()
     db.add(new_sub)
     db.commit()
 
@@ -379,7 +379,7 @@ def revoke_webhook(
             detail=f"webhook subscription {subscription_id} not found",
         )
     if row.revoked_at is None:
-        row.revoked_at = _utcnow()
+        row.revoked_at = utcnow()
         db.commit()
 
 
@@ -467,7 +467,7 @@ def replay_dlq_delivery(
         attempt=1,
     )
     new_delivery.payload = dlq.payload
-    new_delivery.next_attempt_at = _utcnow()
+    new_delivery.next_attempt_at = utcnow()
 
     db.add(new_delivery)
     db.delete(dlq)

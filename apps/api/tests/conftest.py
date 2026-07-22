@@ -184,7 +184,7 @@ def _clear_settings_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _clear_blob_caches() -> None:
-    """Clear all 3 blob-cache layers (LRU + per-URI locks + in-flight Futures).
+    """Clear the blob cache for test isolation.
 
     Centralised isolation helper for the cache primitive in
     :mod:`gw2analytics_api.routes.fights.blob_cache`. The helper

@@ -50,3 +50,9 @@ docker-compose.override.yml
 playwright-report
 test-results
 .visual-regression-output
+
+# Large dirs unnecessary for API/worker Docker builds
+web/
+docs/
+advisor-plans/
+plans/

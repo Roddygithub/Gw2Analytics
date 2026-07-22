@@ -113,25 +113,27 @@ from gw2_core import (
 from gw2analytics_api.database import get_session
 from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightPlayerSummary
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession
-from gw2analytics_api.routes.fights.aggregators import (
+from gw2analytics_api.routes.fights.blob_cache import _cached_get_events
+from gw2analytics_api.routes.fights.blob_loader import _duration_s_from_events, _load_fight_events
+from gw2analytics_api.routes.fights.fight_aggregators import (
     _split_three_event_streams,
-    aggregate_combat_readout,
-    aggregate_player_positions,
     aggregate_skill_usage,
     aggregate_squad_rollup,
     make_barrier_portion_getter,
     make_dps_split_getter,
 )
-from gw2analytics_api.routes.fights.blob_cache import _cached_get_events
-from gw2analytics_api.routes.fights.blob_loader import _load_fight_events
 from gw2analytics_api.routes.fights.mappers import (
+    _to_fight_out,
     agent_id_to_identity,
     agent_id_to_name,
     agent_id_to_subgroup,
     skill_id_to_name,
 )
+from gw2analytics_api.routes.fights.player_aggregators import (
+    aggregate_combat_readout,
+    aggregate_player_positions,
+)
 from gw2analytics_api.schemas import (
-    AgentOut,
     EventBucketOut,
     FightEventsSummaryOut,
     FightOut,
@@ -148,7 +150,6 @@ from gw2analytics_api.schemas import (
     PlayerSkillLoadoutOut,
     PlayerSkillsOut,
     PlayerSkillUsageRowOut,
-    SkillOut,
     SkillUsageRowOut,
     SquadRollupRowOut,
     TargetBuffRemovalRowOut,
@@ -160,17 +161,6 @@ logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/v1/fights", tags=["fights"])
-
-
-def _duration_s_from_events(events: list[Event]) -> float:
-    """Compute fight duration from the highest event timestamp.
-
-    The V1.3 EVTC header does not carry a wall-clock duration
-    scalar, so the canonical duration sentinel is
-    ``max(event.time_ms) / 1000.0``. Centralised here so every
-    fight endpoint uses the same computation.
-    """
-    return max(e.time_ms for e in events) / 1000.0
 
 
 # Module-level single-source-of-truth for window-S bounds.
@@ -1084,25 +1074,4 @@ def get_fight_readout(
     )
 
 
-def _to_fight_out(fight: OrmFight) -> FightOut:
-    return FightOut(
-        id=fight.id,
-        build_version=fight.build_version,
-        encounter_id=fight.encounter_id,
-        agent_count=fight.agent_count,
-        started_at=fight.started_at,
-        game_type=fight.game_type,
-        agents=[
-            AgentOut(
-                agent_id=a.agent_id,
-                name=a.name,
-                profession=format_profession(a.profession),
-                elite_spec=format_elite_spec(a.elite_spec),
-                is_player=a.is_player,
-                account_name=a.account_name,
-                subgroup=a.subgroup,
-            )
-            for a in fight.agents
-        ],
-        skills=[SkillOut(id=s.skill_id, name=s.name) for s in fight.skills],
-    )
+

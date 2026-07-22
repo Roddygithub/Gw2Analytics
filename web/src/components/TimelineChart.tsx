@@ -370,23 +370,8 @@ export function buildTimelineLayout<
  * enough that 8 ticks fit in the 48px left padding without
  * truncation.
  */
-export function formatLogTick(v: number): string {
-  if (v === 0) return "0";
-  if (v < 1000) return v.toString();
-  if (v < 1_000_000) {
-    const k = v / 1000;
-    return k === Math.floor(k) ? `${k}k` : `${k.toFixed(1)}k`;
-  }
-  if (v < 1_000_000_000) {
-    const m = v / 1_000_000;
-    return m === Math.floor(m) ? `${m}M` : `${m.toFixed(1)}M`;
-  }
-  // v0.8.2 of web: B-suffix branch for values >= 1B. Without
-  // this, a 1.5B damage renders as ``1500M`` which is
-  // technically correct but harder to read at a glance.
-  const b = v / 1_000_000_000;
-  return b === Math.floor(b) ? `${b}B` : `${b.toFixed(1)}B`;
-}
+import { formatLogTick } from "@/lib/format";
+export { formatLogTick };
 
 // ---------------------------------------------------------------------------
 // Memoized SVG sub-component

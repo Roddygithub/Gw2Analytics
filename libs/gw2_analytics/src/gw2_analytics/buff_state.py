@@ -119,8 +119,6 @@ def _max_stacks_for(name: str) -> int:
 class _BuffStack:
     """Mutable per-(agent, buff) stack tracking state."""
 
-    __slots__ = ("cumulative_stack_ms", "last_time_ms", "name", "stacks")
-
     def __init__(self, name: str) -> None:
         self.stacks: int = 0
         self.last_time_ms: int = 0
@@ -130,8 +128,6 @@ class _BuffStack:
 
 class _OutgoingAccumulator:
     """Mutable per-(agent, buff) outgoing boon generation accumulator."""
-
-    __slots__ = ("total_ms",)
 
     def __init__(self) -> None:
         self.total_ms: int = 0

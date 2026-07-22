@@ -129,28 +129,7 @@ const METRIC_LABEL: Record<CrossAccountMetric, string> = {
   strip: CROSS_ACCOUNT_TIMELINE_METRIC_STRIP_CHART_LABEL,
 };
 
-/**
- * Format a Y-axis tick value for the log scale. Strict
- * parallel of :func:`TimelineChart.formatLogTick` -- kept as
- * a local copy because the cross-account chart is
- * intentionally decoupled from the per-account chart's
- * TimelineChart base (different data shape, different
- * rendering path).
- */
-function formatLogTick(v: number): string {
-  if (v === 0) return "0";
-  if (v < 1000) return v.toString();
-  if (v < 1_000_000) {
-    const k = v / 1000;
-    return k === Math.floor(k) ? `${k}k` : `${k.toFixed(1)}k`;
-  }
-  if (v < 1_000_000_000) {
-    const m = v / 1_000_000;
-    return m === Math.floor(m) ? `${m}M` : `${m.toFixed(1)}M`;
-  }
-  const b = v / 1_000_000_000;
-  return b === Math.floor(b) ? `${b}B` : `${b.toFixed(1)}B`;
-}
+import { formatLogTick } from "@/lib/format";
 
 interface AlignedSeries {
   account_name: string;

@@ -16,16 +16,14 @@ Cross-field / behavioral contracts locked down here:
 
 - ``AccountInfo.id`` / ``name`` / ``world_id`` survive the rename
   (``alias="world"`` -> ``world_id``).
-- 401 is mapped to :class:`GuildWars2HttpError`; 429 retries up to
-  3 times and raises :class:`GuildWars2RateLimitError` on
-  exhaustion.
+- 401 is mapped to :class:`GuildWars2ApiError`; 429 retries up to
+  3 times and raises :class:`GuildWars2ApiError` on exhaustion.
 - Network-level errors (httpx.ConnectError etc.) are wrapped to
-  :class:`GuildWars2HttpError` so the public error surface is
-  transport-agnostic.
+  :class:`GuildWars2ApiError`.
 - ``worlds_get([])`` short-circuits client-side without an HTTP
   round-trip.
 - ``from_env`` reads the env var once; missing key ->
-  :class:`MissingApiKeyError`.
+  ``ValueError``.
 """
 
 from __future__ import annotations
@@ -34,12 +32,8 @@ import httpx
 import pytest
 import respx
 
-from gw2_api_client import AsyncGuildWars2Client, GuildWars2Client
-from gw2_api_client.exceptions import (
-    GuildWars2HttpError,
-    GuildWars2RateLimitError,
-    MissingApiKeyError,
-)
+from gw2_api_client import AsyncGuildWars2Client
+from gw2_api_client.exceptions import GuildWars2ApiError, GuildWars2ClientError
 from gw2_core import AccountInfo, Population, WorldInfo
 
 _API_KEY = "test-key-123"
@@ -79,33 +73,33 @@ async def test_account_get_happy_path_returns_account_info() -> None:
 
 @pytest.mark.asyncio
 async def test_account_get_401_raises_http_error() -> None:
-    """401 with auth_required -> GuildWars2HttpError (and not RateLimitError)."""
+    """401 with auth_required -> GuildWars2ApiError."""
     with respx.mock(base_url=_BASE_URL) as mock:
         mock.get("/v2/account").mock(
             return_value=httpx.Response(401, json={"text": "invalid token"}),
         )
         async with _client() as c:
-            with pytest.raises(GuildWars2HttpError, match="401"):
+            with pytest.raises(GuildWars2ApiError, match="401"):
                 await c.account_get()
 
 
 @pytest.mark.asyncio
 async def test_account_get_network_error_raises_http_error() -> None:
-    """httpx.ConnectError is wrapped into GuildWars2HttpError."""
+    """httpx.ConnectError is wrapped into GuildWars2ApiError."""
     with respx.mock(base_url=_BASE_URL) as mock:
         mock.get("/v2/account").mock(side_effect=httpx.ConnectError("boom"))
         async with _client() as c:
-            with pytest.raises(GuildWars2HttpError, match="transport error"):
+            with pytest.raises(GuildWars2ApiError, match="transport error"):
                 await c.account_get()
 
 
 @pytest.mark.asyncio
 async def test_account_get_429_retries_then_raises_rate_limit_error() -> None:
-    """3 consecutive 429s exhaust the retry budget and raise RateLimitError."""
+    """3 consecutive 429s exhaust the retry budget and raise GuildWars2ApiError."""
     with respx.mock(base_url=_BASE_URL) as mock:
         route = mock.get("/v2/account").mock(return_value=httpx.Response(429))
         async with _client() as c:
-            with pytest.raises(GuildWars2RateLimitError, match="rate-limited"):
+            with pytest.raises(GuildWars2ApiError, match="rate-limited"):
                 await c.account_get()
         # Exactly the retry budget (3 attempts).
         assert route.call_count == 3
@@ -176,15 +170,14 @@ def test_from_env_with_key_present_returns_client(
     monkeypatch.setenv("GW2_API_KEY", _API_KEY)
     client = AsyncGuildWars2Client.from_env()
     assert isinstance(client, AsyncGuildWars2Client)
-    assert isinstance(client, GuildWars2Client)  # Protocol duck-type
 
 
-def test_from_env_with_missing_key_raises_missing_api_key_error(
+def test_from_env_with_missing_key_raises_value_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """from_env without GW2_API_KEY -> MissingApiKeyError."""
+    """from_env without GW2_API_KEY -> ValueError."""
     monkeypatch.delenv("GW2_API_KEY", raising=False)
-    with pytest.raises(MissingApiKeyError, match="GW2_API_KEY"):
+    with pytest.raises(ValueError, match="GW2_API_KEY"):
         AsyncGuildWars2Client.from_env()
 
 
@@ -231,10 +224,10 @@ async def test_account_get_silently_drops_unknown_extra_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_account_get_429_cascade_exactly_three_attempts() -> None:
-    """v0.10.5 R3.3: 3 consecutive 429s raise RateLimitError on the 3rd (not 4th) attempt."""
+    """v0.10.5 R3.3: 3 consecutive 429s raise GuildWars2ApiError on the 3rd (not 4th) attempt."""
     with respx.mock(base_url=_BASE_URL) as mock:
         route = mock.get("/v2/account").mock(return_value=httpx.Response(429))
         async with _client() as c:
-            with pytest.raises(GuildWars2RateLimitError, match="rate-limited"):
+            with pytest.raises(GuildWars2ApiError, match="rate-limited"):
                 await c.account_get()
     assert route.call_count == 3

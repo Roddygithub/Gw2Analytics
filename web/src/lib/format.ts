@@ -1,21 +1,24 @@
-/**
- * Shared formatting helpers for the web frontend.
- *
- * These utilities are intentionally tiny and presentation-only;
- * they live in ``lib/`` so multiple components can share the same
- * formatting contract without importing across component modules.
- */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
 
-/**
- * Format a millisecond offset as a ``M:SS`` label.
- *
- * ``window_start_ms=0`` -> ``"0:00"`` (the fight-start bucket).
- * ``window_start_ms=65000`` -> ``"1:05"`` (1 min 5 sec into the
- * fight). The 2-digit zero-padding on seconds keeps the axis labels
- * aligned vertically (without the pad, a ``"0:5"`` label would shift
- * the ``"0:15"`` label to the right by 1 character width and break
- * the X-axis tick alignment).
- */
+export function formatLogTick(v: number): string {
+  if (v === 0) return "0";
+  if (v < 1000) return v.toString();
+  if (v < 1_000_000) {
+    const k = v / 1000;
+    return k === Math.floor(k) ? `${k}k` : `${k.toFixed(1)}k`;
+  }
+  if (v < 1_000_000_000) {
+    const m = v / 1_000_000;
+    return m === Math.floor(m) ? `${m}M` : `${m.toFixed(1)}M`;
+  }
+  const b = v / 1_000_000_000;
+  return b === Math.floor(b) ? `${b}B` : `${b.toFixed(1)}B`;
+}
+
 export function formatSecondsLabel(ms: number): string {
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);

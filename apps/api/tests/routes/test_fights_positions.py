@@ -8,10 +8,8 @@ from fastapi.testclient import TestClient
 import gw2analytics_api.routes.fights as routes_module
 from gw2_core import PositionEvent
 from gw2analytics_api.main import app
-from gw2analytics_api.routes.fights.aggregators import (
-    AgentIdentity,
-    aggregate_player_positions,
-)
+from gw2analytics_api.routes.fights.mappers import AgentIdentity
+from gw2analytics_api.routes.fights.player_aggregators import aggregate_player_positions
 
 client = TestClient(app)
 

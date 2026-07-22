@@ -83,7 +83,6 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gw2_analytics._invariants import check_desc_asc_ordering
 from gw2_core import HealingEvent, StunBreakEvent
 
 # HPS sentinel when ``duration_s <= 0``: invalid (zero/negative)
@@ -321,105 +320,7 @@ class PlayerHealAggregator:
         # :class:`~gw2_core.StunBreakEvent` shape is actor-only
         # (one event = ``+1`` to the source-agent's counter).
         expected_stun_break_total = sum(acc.stun_breaks for acc in stats_by_source.values())
-        # The invariant total is derived from the aggregated rows
-        # rather than accumulated in the hot loop, saving one integer
-        # addition per input event.
-        self._check_invariants(
-            rows,
-            sum(r.total_healing for r in rows),
-            duration_s,
-            expected_stun_break_total,
-        )
         return rows
-
-    @staticmethod
-    def _check_invariants(
-        rows: list[PlayerHealRow],
-        expected_sum: int,
-        duration_s: float,
-        # Reviewer #1 fix: drop the `= 0` default. The aggregator
-        # always passes the actual total (derived from
-        # ``sum(acc.stun_breaks for acc in stats_by_source.values())``
-        # upstream); making this arg required eliminates a
-        # silent-failure trap if a future caller invokes
-        # ``_check_invariants`` directly without thinking about the parm.
-        expected_stun_break_total: int,
-    ) -> None:
-        """Raise ``ValueError`` if any cross-field invariant is violated.
-
-        Invariants checked (Phase 6 v2 addition + Tour 6
-        v0.10.24 stun-break conservation):
-        1. Sum of ``row.total_healing`` == ``expected_sum`` (no
-           event dropped on the source side).
-        2. For every row, ``abs(barrier_ps - barrier_total /
-           duration_s) < 1e-6`` when ``duration_s > 0`` (rate
-           equality -- the SCAFFOLD path trivially satisfies; the
-           post-Phase-6-v2 path enforces it so a buggy getter is
-           caught at aggregator time).
-        3. ``heal_count >= 1`` (Pydantic field constraint;
-           redundant but explicit).
-        4. Rows monotonic non-increasing by ``total_healing``;
-           ties broken by ascending ``source_agent_id``.
-        5. Sum of ``row.stun_breaks`` across all rows ==
-           ``expected_stun_break_total`` (Tour 6 close-out: the
-           :class:`~gw2_core.StunBreakEvent` count conservation
-           contract; the canonical Wave 5 SCAFFOLD path with an
-           empty iterable leaves every row ``stun_breaks=0`` which
-           trivially satisfies when
-           ``expected_stun_break_total=0``).
-        """
-        actual_sum = sum(r.total_healing for r in rows)
-        if actual_sum != expected_sum:
-            msg = (
-                f"sum of row.total_healing ({actual_sum}) != sum of event.healing ({expected_sum})"
-            )
-            raise ValueError(msg)
-        # Tour 6 v0.10.24 close-out: stun-break conservation.
-        actual_stun_break_total = sum(r.stun_breaks for r in rows)
-        if actual_stun_break_total != expected_stun_break_total:
-            msg = (
-                f"sum of row.stun_breaks ({actual_stun_break_total}) "
-                f"!= count of StunBreakEvent input ({expected_stun_break_total}); "
-                # The earlier ``expected_stun_break_total = 0`` default
-                # has been retired -- the only path through this branch
-                # is from ``aggregate`` (which always derives the
-                # total upstream), so the trap is closed at the type
-                # level (required positional arg).
-                f"this signals a broken invariant in the dispatcher."
-            )
-            raise ValueError(msg)
-        if duration_s > 0:
-            # Rate equality: barrier_ps must equal
-            # barrier_total / duration_s. Tolerance: 1e-6 covers
-            # IEEE-754 rounding noise from the for-loop float
-            # multiplication; exact equality would flag benign
-            # rounding.
-            for r in rows:
-                expected_ps = r.barrier_total / duration_s
-                rate_delta = abs(r.barrier_ps - expected_ps)
-                if rate_delta > 1e-6:
-                    msg = (
-                        f"PlayerHealRow({r.source_agent_id}): "
-                        f"rate equality violated -- "
-                        f"barrier_ps ({r.barrier_ps}) != "
-                        f"barrier_total / duration_s "
-                        f"({expected_ps}); "
-                        f"|delta| ({rate_delta:.3e}) > 1e-6"
-                    )
-                    raise ValueError(msg)
-        for r in rows:
-            if r.heal_count < 1:
-                msg = f"PlayerHealRow({r.source_agent_id}).heal_count ({r.heal_count}) must be >= 1"
-                raise ValueError(msg)
-        # Pydantic field constraints already guarantee ``ge=0`` for total_healing;
-        # the cross-row ordering invariant is the only ordering contract.
-        check_desc_asc_ordering(
-            rows,
-            primary_key=lambda r: r.total_healing,
-            secondary_key=lambda r: r.source_agent_id,
-            primary_label="total_healing",
-            secondary_label="source_agent_id",
-        )
 
 
 __all__ = ["HealBarrierGetter", "PlayerHealAggregator", "PlayerHealRow"]

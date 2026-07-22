@@ -53,13 +53,13 @@ from _fixtures import make_cbtevent, post_minimal_fight
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import selectinload
 
-from gw2analytics_api.backfill import _backfill_pre_phase7
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (
     OrmFight,
     OrmFightAgent,
     OrmFightPlayerSummary,
 )
+from gw2analytics_api.scripts.backfill_player_summaries import _backfill_pre_phase7
 from gw2analytics_api.services import MAX_NAME_LEN
 
 

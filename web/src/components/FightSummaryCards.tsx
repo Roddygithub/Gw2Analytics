@@ -138,7 +138,7 @@ function SummaryPlayerRow({
       }}
     >
       {/* Medal */}
-      <span style={{ flexShrink: 0, width: 18, textAlign: "center" }}>
+      <span role="img" aria-label={`${rank + 1} place`} style={{ flexShrink: 0, width: 18, textAlign: "center" }}>
         {medal}
       </span>
 

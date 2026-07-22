@@ -13,7 +13,6 @@ import gzip
 import inspect
 
 from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
-from gw2analytics_api import backfill
 from gw2analytics_api._event_dispatch import (
     EVENT_TYPE_ADAPTER,
     build_event_iterator,
@@ -21,6 +20,7 @@ from gw2analytics_api._event_dispatch import (
 from gw2analytics_api.routes import fights as fights_module
 from gw2analytics_api.routes import players as players_module
 from gw2analytics_api.routes.fights import blob_loader
+from gw2analytics_api.scripts import backfill_player_summaries as backfill
 
 
 def _event_line(event: Event) -> bytes:

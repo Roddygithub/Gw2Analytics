@@ -78,7 +78,6 @@ members = [
     "libs/gw2_analytics",
     "libs/gw2_api_client",
     "apps/api",
-    "libs/gw2_skills"
 ]
 
 [tool.uv.sources]
@@ -86,7 +85,6 @@ gw2_core = { workspace = true }
 gw2_evtc_parser = { workspace = true }
 gw2_analytics = { workspace = true }
 gw2_api_client = { workspace = true }
-gw2_skills = { workspace = true }
 
 [tool.uv]
 package = false

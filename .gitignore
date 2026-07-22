@@ -42,17 +42,11 @@ next-env.d.ts
 
 # Local infra data
 data/
-# v0.10.26-pre followup-1: GW2 skills package ships a static
-# catalogue NDJSON inside ``data/``; the broad ``data/`` rule above
-# would silently .gitignore it. The exception below re-tracks only
-# THIS specific package's ``data/`` (Hatchling default INCLUDE rule
-# per libs/gw2_skills/pyproject.toml includes src/gw2_skills in
-# the wheel build so the file still ships to consumers at runtime
-# via importlib.resources -- the exception here only controls git
-# tracking, not wheel content).
-!libs/gw2_skills/src/gw2_skills/data/
-!libs/gw2_skills/src/gw2_skills/data/*.ndjson
 logs/
+
+# Skills catalog NDJSON shipped inside apps/api for the inline skills route.
+!apps/api/src/gw2analytics_api/data/
+!apps/api/src/gw2analytics_api/data/*.ndjson
 
 # v0.10.26-pre followup-4: load-test fixtures are GENERATED artifacts
 # (regenerated on every ``uv run python

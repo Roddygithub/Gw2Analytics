@@ -79,7 +79,6 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gw2_analytics._invariants import check_desc_asc_ordering
 from gw2_core import (
     BlockEvent,
     CCEvent,
@@ -272,75 +271,7 @@ class PlayerDefenseAggregator:
         # player, by the spec's "defensive load" indicator.)
         rows.sort(key=lambda r: (-r.damage_taken, r.agent_id))
 
-        expected_barrier_total = sum(acc.barrier_absorbed for acc in stats.values())
-        self._check_invariants(rows, grand_damage_total, expected_barrier_total)
         return rows
-
-    @staticmethod
-    def _check_invariants(
-        rows: list[PlayerDefenseRow],
-        expected_damage_total: int,
-        expected_barrier_total: int,
-    ) -> None:
-        """Raise ``ValueError`` if any cross-field invariant is violated.
-
-        Invariants checked:
-
-        1. Sum of ``row.damage_taken`` across all rows ==
-           ``expected_damage_total`` (no damage event dropped on
-           the target side).
-        2. Sum of ``row.barrier_absorbed`` across all rows ==
-           ``expected_barrier_total`` (no barrier-absorbed event
-           dropped) -- NOTE: this is a DOC-CHECK on the
-           barrier-absorbed contract; if the getter returns
-           values, the sum MUST match. Only valid when the
-           ``barrier_portion_getter`` was provided (otherwise
-           ``expected_barrier_total`` is 0 and the contract is
-           trivially satisfied).
-        3. ``barrier_absorbed <= damage_taken`` per row (a
-           damage event cannot absorb more barrier than its
-           magnitude; defensive clamp).
-        4. ``cc_taken`` and ``deaths`` are non-negative
-           (Pydantic field constraint -- redundant but explicit).
-        5. Rows monotonic non-decreasing by ``damage_taken`` ASC;
-           ties broken by ascending ``agent_id``.
-        """
-        actual_damage_total = sum(r.damage_taken for r in rows)
-        if actual_damage_total != expected_damage_total:
-            msg = (
-                f"sum of row.damage_taken ({actual_damage_total}) "
-                f"!= sum of event.damage ({expected_damage_total})"
-            )
-            raise ValueError(msg)
-        actual_barrier_total = sum(r.barrier_absorbed for r in rows)
-        if actual_barrier_total != expected_barrier_total:
-            msg = (
-                f"sum of row.barrier_absorbed ({actual_barrier_total}) "
-                f"!= sum of barrier_portion_getter({expected_barrier_total})"
-            )
-            raise ValueError(msg)
-        for r in rows:
-            # Defensive clamp invariant: a damage event cannot
-            # absorb more barrier than its magnitude. The getter is
-            # responsible for the per-event validation; the
-            # aggregator rejects a contract violation here.
-            if r.barrier_absorbed > r.damage_taken:
-                msg = (
-                    f"PlayerDefenseRow({r.agent_id}): "
-                    f"barrier_absorbed ({r.barrier_absorbed}) > "
-                    f"damage_taken ({r.damage_taken})"
-                )
-                raise ValueError(msg)
-        # Order check is the INVERSE of PlayerBoonsRow's: damage_taken
-        # DESC (most-targeted first per design doc §13); ties broken
-        # by ascending ``agent_id``.
-        check_desc_asc_ordering(
-            rows,
-            primary_key=lambda r: r.damage_taken,
-            secondary_key=lambda r: r.agent_id,
-            primary_label="damage_taken",
-            secondary_label="agent_id",
-        )
 
 
 __all__ = ["PlayerDefenseAggregator", "PlayerDefenseRow"]

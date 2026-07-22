@@ -35,12 +35,12 @@ from fastapi.testclient import TestClient
 
 from apps.api.tests.routes._evtc_builder import build_2025_string
 from gw2_core import DamageEvent, DeathEvent, DownEvent, HealingEvent, PositionEvent, StunBreakEvent
-from gw2analytics_api.routes.fights.aggregators import (
-    aggregate_combat_readout,
+from gw2analytics_api.routes.fights.fight_aggregators import (
     make_barrier_portion_getter,
     make_dps_split_getter,
 )
 from gw2analytics_api.routes.fights.mappers import AgentIdentity
+from gw2analytics_api.routes.fights.player_aggregators import aggregate_combat_readout
 
 from ._evtc_builder import make_cbtevent, make_minimal_zevtc, post_upload
 
@@ -433,8 +433,8 @@ def test_readout_boon_uptimes_and_presence_pct() -> None:
     # For a single-boon apply at t=1000 and duration=8000ms (max time_ms=5000
     # from damage event), the tail uptime is significant.
     boon_uptimes_by_account: dict[str, dict[str, float]] = {
-        f"synth.{a}": {name: 85.0 for name in TRACKED_BUFFS},
-        f"synth.{b}": {name: 10.0 for name in TRACKED_BUFFS},
+        f"synth.{a}": dict.fromkeys(TRACKED_BUFFS, 85.0),
+        f"synth.{b}": dict.fromkeys(TRACKED_BUFFS, 10.0),
     }
     # Also add outgoing boons for player b (the source).
     for account in (f"synth.{a}", f"synth.{b}"):
@@ -804,7 +804,7 @@ def test_readout_cleave_targets() -> None:
 
 def test_readout_dist_to_commander_no_commander() -> None:
     """When no commander exists, dist_to_commander is None for all players."""
-    from gw2analytics_api.routes.fights.aggregators import aggregate_player_positions
+    from gw2analytics_api.routes.fights.player_aggregators import aggregate_player_positions
 
     a = 900_001
     aid_to_identity = {
@@ -1122,7 +1122,7 @@ def test_readout_dist_to_commander_with_commander() -> None:
     that the commander gets dist_to_commander=0.0 and the regular player
     gets the Euclidean distance to the commander.
     """
-    from gw2analytics_api.routes.fights.aggregators import aggregate_player_positions
+    from gw2analytics_api.routes.fights.player_aggregators import aggregate_player_positions
 
     a = 900_002  # regular player
     c = 900_003  # commander

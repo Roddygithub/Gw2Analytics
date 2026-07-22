@@ -31,11 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from gw2_api_client import AsyncGuildWars2Client
-from gw2_api_client.exceptions import (
-    GuildWars2ClientError,
-    GuildWars2HttpError,
-    GuildWars2RateLimitError,
-)
+from gw2_api_client.exceptions import GuildWars2ApiError, GuildWars2ClientError
 from gw2analytics_api.schemas import AccountEnrichedOut
 
 logger = logging.getLogger(__name__)
@@ -70,23 +66,17 @@ async def get_account_enriched(
         async with AsyncGuildWars2Client(api_key=api_key) as client:
             account = await client.account_get()
             worlds = await client.worlds_get([account.world_id])
-    except GuildWars2RateLimitError as exc:
-        logger.warning("/api/v1/account upstream rate-limited: %s", exc)
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "upstream rate-limited",
-        ) from exc
-    except GuildWars2HttpError as exc:
-        # ``str(exc)`` carries the upstream status code via two
-        # ``_get_with_retries`` message formats (see
-        # ``libs/gw2_api_client/client.py``):
-        #   - auth-required 401 -> ``"<url>: 401 unauthorized (...)"``
-        #   - other 4xx/5xx ->    ``"<url>: HTTP <code>: <body[:200]>"``
-        # Match the two message forms exactly so a 5xx response whose
-        # body happens to contain the literal ``"401"`` does not get
-        # misrouted to our 401.
-        logger.warning("/api/v1/account upstream http error: %s", exc)
+    except GuildWars2ApiError as exc:
         msg = str(exc)
+        # Check for rate-limit first.
+        if "rate-limited" in msg:
+            logger.warning("/api/v1/account upstream rate-limited: %s", exc)
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "upstream rate-limited",
+            ) from exc
+        # 401 vs other HTTP errors.
+        logger.warning("/api/v1/account upstream http error: %s", exc)
         if "401 unauthorized" in msg or "HTTP 401:" in msg:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,

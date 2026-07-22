@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from gw2_core._buff_ids import (
+from gw2_core.models import (
     _BOON_IDS,
     _CONDITION_CONTROL_IDS,
     _CONDITION_DAMAGE_IDS,

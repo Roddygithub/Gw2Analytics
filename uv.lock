@@ -13,7 +13,6 @@ members = [
     "gw2-api-client",
     "gw2-core",
     "gw2-evtc-parser",
-    "gw2-skills",
     "gw2analytics-api",
     "gw2analytics-root",
 ]
@@ -888,21 +887,6 @@ requires-dist = [
 dev = []
 
 [[package]]
-name = "gw2-skills"
-version = "0.10.25"
-source = { editable = "libs/gw2_skills" }
-dependencies = [
-    { name = "gw2-core" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gw2-core", editable = "libs/gw2_core" },
-    { name = "pydantic", specifier = ">=2.9" },
-]
-
-[[package]]
 name = "gw2analytics-api"
 version = "0.10.25"
 source = { editable = "apps/api" }
@@ -916,7 +900,6 @@ dependencies = [
     { name = "gw2-api-client" },
     { name = "gw2-core" },
     { name = "gw2-evtc-parser" },
-    { name = "gw2-skills" },
     { name = "httpx" },
     { name = "minio" },
     { name = "prometheus-client" },
@@ -941,7 +924,6 @@ requires-dist = [
     { name = "gw2-api-client", editable = "libs/gw2_api_client" },
     { name = "gw2-core", editable = "libs/gw2_core" },
     { name = "gw2-evtc-parser", editable = "libs/gw2_evtc_parser" },
-    { name = "gw2-skills", editable = "libs/gw2_skills" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "minio", specifier = ">=7.2" },
     { name = "prometheus-client", specifier = ">=0.20" },

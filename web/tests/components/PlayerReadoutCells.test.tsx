@@ -108,6 +108,8 @@ function makeRow(overrides: Partial<PlayerReadoutOut>): PlayerReadoutOut {
       interrupts: 0,
       barrier_absorbed: 0,
       presence_pct: null,
+      dist_to_commander: null,
+      kill_participation: 0,
     },
     ...overrides,
   };

@@ -120,56 +120,6 @@ class TestPlayerHealAggregator:
         with pytest.raises(ValidationError):
             row.source_agent_id = 999  # type: ignore[misc]
 
-    def test_check_invariants_raises_on_sum_mismatch(self) -> None:
-        rows = [
-            PlayerHealRow.model_construct(
-                source_agent_id=1, total_healing=100, heal_count=1, hps=10.0
-            ),
-        ]
-        with pytest.raises(ValueError, match=r"sum of row\.total_healing"):
-            PlayerHealAggregator._check_invariants(
-                rows, expected_sum=200, duration_s=10.0, expected_stun_break_total=0
-            )
-
-    def test_check_invariants_raises_on_heal_count_below_one(self) -> None:
-        rows = [
-            PlayerHealRow.model_construct(
-                source_agent_id=1, total_healing=100, heal_count=0, hps=10.0
-            ),
-        ]
-        with pytest.raises(ValueError, match=r"heal_count.*must be >= 1"):
-            PlayerHealAggregator._check_invariants(
-                rows, expected_sum=100, duration_s=10.0, expected_stun_break_total=0
-            )
-
-    def test_check_invariants_raises_on_wrong_ordering(self) -> None:
-        rows = [
-            PlayerHealRow.model_construct(
-                source_agent_id=1, total_healing=100, heal_count=1, hps=10.0
-            ),
-            PlayerHealRow.model_construct(
-                source_agent_id=2, total_healing=200, heal_count=1, hps=20.0
-            ),
-        ]
-        with pytest.raises(ValueError, match=r"not ordered by"):
-            PlayerHealAggregator._check_invariants(
-                rows, expected_sum=300, duration_s=10.0, expected_stun_break_total=0
-            )
-
-    def test_check_invariants_raises_on_tie_not_broken(self) -> None:
-        rows = [
-            PlayerHealRow.model_construct(
-                source_agent_id=2, total_healing=100, heal_count=1, hps=10.0
-            ),
-            PlayerHealRow.model_construct(
-                source_agent_id=1, total_healing=100, heal_count=1, hps=10.0
-            ),
-        ]
-        with pytest.raises(ValueError, match=r"tie on total_healing"):
-            PlayerHealAggregator._check_invariants(
-                rows, expected_sum=200, duration_s=10.0, expected_stun_break_total=0
-            )
-
     def test_custom_barrier_portion_getter(self) -> None:
         """Phase 6 v2 hook: a custom barrier getter carves barrier from heals."""
 

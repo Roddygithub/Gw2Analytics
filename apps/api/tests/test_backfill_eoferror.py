@@ -15,9 +15,9 @@ from _fixtures import make_cbtevent, post_minimal_fight
 from sqlalchemy import delete
 
 from gw2analytics_api import storage
-from gw2analytics_api.backfill import run_backfill
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import OrmFightPlayerSummary
+from gw2analytics_api.scripts.backfill_player_summaries import run_backfill
 
 # Module-level ``original_get_events`` is bound at PATCH time below
 # (inside the test); the storage import at module scope avoids

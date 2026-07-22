@@ -71,8 +71,9 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gw2analytics_api.models import OrmFightAgent, OrmFightSkill
+from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightSkill
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession
+from gw2analytics_api.schemas import AgentOut, FightOut, SkillOut
 
 
 def agent_id_to_name(db: Session, fight_id: str) -> dict[int, str | None]:
@@ -140,12 +141,33 @@ def skill_id_to_name(db: Session, fight_id: str) -> dict[int, str]:
     }
 
 
-# Public surface lives ABOVE the new Combat-readout identity
-# helpers added in Tour 6 v0.10.24. The __all__ block enumerates
-# the module's stable re-export surface for grep-ability +
-# future maintainer onboarding.
+def _to_fight_out(fight: OrmFight) -> FightOut:
+    return FightOut(
+        id=fight.id,
+        build_version=fight.build_version,
+        encounter_id=fight.encounter_id,
+        agent_count=fight.agent_count,
+        started_at=fight.started_at,
+        game_type=fight.game_type,
+        agents=[
+            AgentOut(
+                agent_id=a.agent_id,
+                name=a.name,
+                profession=format_profession(a.profession),
+                elite_spec=format_elite_spec(a.elite_spec),
+                is_player=a.is_player,
+                account_name=a.account_name,
+                subgroup=a.subgroup,
+            )
+            for a in fight.agents
+        ],
+        skills=[SkillOut(id=s.skill_id, name=s.name) for s in fight.skills],
+    )
+
+
 __all__ = [
     "AgentIdentity",
+    "_to_fight_out",
     "agent_id_to_identity",
     "agent_id_to_name",
     "agent_id_to_subgroup",
@@ -260,7 +282,7 @@ def agent_id_to_identity(db: Session, fight_id: str) -> dict[int, AgentIdentity]
 
     Filters to ``is_player=True`` so the map keys are exclusively
     player agent_ids. The dispatcher in
-    :mod:`gw2analytics_api.routes.fights.aggregators` intersects this
+    :mod:`gw2analytics_api.routes.fights.player_aggregators` intersects this
     map with the union of the per-aspect aggregator rows so NPC
     agents in the damage-side defense roll-up are silently dropped.
 

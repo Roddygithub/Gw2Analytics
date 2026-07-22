@@ -117,6 +117,47 @@ import { ApiError } from "@/lib/api/errors";
 
 export const dynamic = "force-dynamic";
 
+const TAB_STYLE: React.CSSProperties = {
+  padding: "6px 12px",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  fontSize: 13,
+  textDecoration: "none",
+  color: "var(--foreground)",
+  background: "var(--surface)",
+  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+};
+
+const ACTIVE_TAB_STYLE: React.CSSProperties = {
+  ...TAB_STYLE,
+  border: "1px solid var(--accent)",
+  color: "var(--accent-foreground, #fff)",
+  background: "var(--accent)",
+};
+
+function TabButton({
+  href,
+  label,
+  isActive,
+  testId,
+}: {
+  href: string;
+  label: string;
+  isActive: boolean;
+  testId: string;
+}) {
+  return (
+    <a
+      href={href}
+      data-testid={testId}
+      {...(isActive ? { "data-active": "true" as const, "aria-current": "page" as const } : {})}
+      style={isActive ? ACTIVE_TAB_STYLE : TAB_STYLE}
+    >
+      {label}
+    </a>
+  );
+}
+
 /**
  * Parse the URL ``?window_s=`` query param into a typed integer,
  * clamping invalid / out-of-range values to the gateway default
@@ -324,12 +365,7 @@ export default async function FightEventsPage({
   // diagnostic chimps added next to each roll-up grid; the
   // events-only failure mode retains the page-level banner.
   let fetchError: string | null = null;
-  const sectionErrors: {
-    squads?: string;
-    skills?: string;
-    timeline?: string;
-    playerTimeline?: string;
-  } = {};
+  const sectionErrors: Record<string, string | undefined> = {};
   // ``fetchCached`` wraps each gateway call in an LRU (8 entries)
   // + TTL (60 s) cache with in-flight dedup so repeated
   // navigations to the same fight are served from cache.
@@ -586,59 +622,9 @@ export default async function FightEventsPage({
             }}
             data-testid="page-tab-strip"
           >
-            <a
-              href={buildTabHref(id, windowS, targetFilter, "overview")}
-              data-testid="page-tab-overview"
-              style={{
-                padding: "6px 12px",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                fontSize: 13,
-                textDecoration: "none",
-                color: "var(--foreground)",
-                background: "var(--surface)",
-                fontFamily:
-                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-              }}
-            >
-              Overview
-            </a>
-            <a
-              href={buildTabHref(id, windowS, targetFilter, "replay")}
-              data-testid="page-tab-replay"
-              style={{
-                padding: "6px 12px",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                fontSize: 13,
-                textDecoration: "none",
-                color: "var(--foreground)",
-                background: "var(--surface)",
-                fontFamily:
-                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-              }}
-            >
-              Replay
-            </a>
-            <a
-              href={buildTabHref(id, windowS, targetFilter, "readout")}
-              data-testid="page-tab-readout"
-              data-active="true"
-              aria-current="page"
-              style={{
-                padding: "6px 12px",
-                border: "1px solid var(--accent)",
-                borderRadius: 4,
-                fontSize: 13,
-                textDecoration: "none",
-                color: "var(--accent-foreground, #fff)",
-                background: "var(--accent)",
-                fontFamily:
-                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-              }}
-            >
-              Analyse
-            </a>
+            <TabButton href={buildTabHref(id, windowS, targetFilter, "overview")} label="Overview" isActive={false} testId="page-tab-overview" />
+            <TabButton href={buildTabHref(id, windowS, targetFilter, "replay")} label="Replay" isActive={false} testId="page-tab-replay" />
+            <TabButton href={buildTabHref(id, windowS, targetFilter, "readout")} label="Analyse" isActive={true} testId="page-tab-readout" />
           </div>
         </header>
 
@@ -683,42 +669,8 @@ export default async function FightEventsPage({
             }}
             data-testid="page-tab-strip"
           >
-            <a
-              href={buildTabHref(id, windowS, targetFilter, "overview")}
-              data-testid="page-tab-overview"
-              style={{
-                padding: "6px 12px",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                fontSize: 13,
-                textDecoration: "none",
-                color: "var(--foreground)",
-                background: "var(--surface)",
-                fontFamily:
-                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-              }}
-            >
-              Overview
-            </a>
-            <a
-              href={buildTabHref(id, windowS, targetFilter, "replay")}
-              data-testid="page-tab-replay"
-              data-active="true"
-              aria-current="page"
-              style={{
-                padding: "6px 12px",
-                border: "1px solid var(--accent)",
-                borderRadius: 4,
-                fontSize: 13,
-                textDecoration: "none",
-                color: "var(--accent-foreground, #fff)",
-                background: "var(--accent)",
-                fontFamily:
-                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-              }}
-            >
-              Replay
-            </a>
+            <TabButton href={buildTabHref(id, windowS, targetFilter, "overview")} label="Overview" isActive={false} testId="page-tab-overview" />
+            <TabButton href={buildTabHref(id, windowS, targetFilter, "replay")} label="Replay" isActive={true} testId="page-tab-replay" />
           </div>
         </header>
         {timeline === null ? (
@@ -790,59 +742,9 @@ export default async function FightEventsPage({
             }}
             data-testid="page-tab-strip"
           >
-            <a
-              href={buildTabHref(id, windowS, targetFilter, "overview")}
-              data-testid="page-tab-overview"
-              data-active="true"
-              aria-current="page"
-              style={{
-                padding: "6px 12px",
-                border: "1px solid var(--accent)",
-                borderRadius: 4,
-                fontSize: 13,
-                textDecoration: "none",
-                color: "var(--accent-foreground, #fff)",
-                background: "var(--accent)",
-                fontFamily:
-                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-              }}
-            >
-              Overview
-            </a>
-            <a
-              href={buildTabHref(id, windowS, targetFilter, "replay")}
-              data-testid="page-tab-replay"
-              style={{
-                padding: "6px 12px",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                fontSize: 13,
-                textDecoration: "none",
-                color: "var(--foreground)",
-                background: "var(--surface)",
-                fontFamily:
-                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-              }}
-            >
-              Replay
-            </a>
-            <a
-              href={buildTabHref(id, windowS, targetFilter, "readout")}
-              data-testid="page-tab-readout"
-              style={{
-                padding: "6px 12px",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                fontSize: 13,
-                textDecoration: "none",
-                color: "var(--foreground)",
-                background: "var(--surface)",
-                fontFamily:
-                  "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-              }}
-            >
-              Analyse
-            </a>
+            <TabButton href={buildTabHref(id, windowS, targetFilter, "overview")} label="Overview" isActive={true} testId="page-tab-overview" />
+            <TabButton href={buildTabHref(id, windowS, targetFilter, "replay")} label="Replay" isActive={false} testId="page-tab-replay" />
+            <TabButton href={buildTabHref(id, windowS, targetFilter, "readout")} label="Analyse" isActive={false} testId="page-tab-readout" />
           </div>
         </div>
       </header>

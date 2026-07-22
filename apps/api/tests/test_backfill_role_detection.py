@@ -12,9 +12,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select as sa_select
 
-from gw2analytics_api.backfill import backfill_role_detection
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary, Upload
+from gw2analytics_api.scripts.backfill_player_summaries import backfill_role_detection
 
 
 def _seed_summary_row(

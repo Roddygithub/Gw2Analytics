@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response as FastAPIResponse
 from fastapi_mcp import FastApiMCP
+from minio.error import S3Error
 from prometheus_client import generate_latest
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
@@ -44,8 +45,6 @@ from gw2analytics_api.routes import (
     uploads,
     webhooks,
 )
-from minio.error import S3Error
-
 from gw2analytics_api.storage import get_minio
 from gw2analytics_api.workers.stuck_upload_sweeper import lifespan_stuck_upload_sweeper
 from gw2analytics_api.workers.webhook_scheduler import lifespan_scheduler
@@ -147,6 +146,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         try:
             import redis.exceptions  # noqa: PLC0415
             from arq import create_pool  # noqa: PLC0415
+
             from gw2analytics_api.workers.parser_settings import (  # noqa: PLC0415
                 WorkerSettings,
             )
@@ -194,40 +194,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     sweeper_task = asyncio.create_task(
         lifespan_stuck_upload_sweeper(get_sessionmaker()),
     )
-    # Step 4: skills catalog eager-load (v0.10.26-pre). The catalog
-    # is small (~30 entries today; expected 600 once WAVE-8 C
-    # populates the full DB). ``load_with_stats`` returns
-    # ``(loaded, skipped)`` tuples so data drift in the shipped
-    # NDJSON surfaces in the startup log at INFO / WARNING level
-    # without crashing the API. If 0 entries load (placeholder
-    # NDJSON missing or empty), the ``GET /api/v1/skills`` endpoint
-    # returns ``[]`` per libs/gw2_skills SLO-014.
+    # Step 4: skills catalog eager-load.
     try:
-        from gw2_skills.catalog import SkillCatalog  # noqa: PLC0415
-
-        catalog = SkillCatalog()
-        loaded, skipped = catalog.load_with_stats()
+        catalog = skills.load_skills()
         _app.state.skill_catalog = catalog
-        logger.info(
-            "skills catalog eager-loaded: %d entries, %d skipped",
-            loaded,
-            skipped,
-        )
-        # v0.10.33: set the catalog freshness gauge from the NDJSON
-        # file's modification time so operators can alert on staleness.
+        logger.info("skills catalog eager-loaded: %d entries", len(catalog))
         _set_catalog_freshness_gauge()
-    except (
-        FileNotFoundError,
-        PermissionError,
-        ValueError,
-        OSError,
-        UnicodeDecodeError,
-    ) as exc:
-        # Plan 032 hardening: narrow catch to the documented
-        # SkillCatalog.load_with_stats raise surface. ImportError is
-        # NOT caught -- a missing libs/gw2_skills dep is an operator
-        # fixable misconfiguration that must surface loudly rather
-        # than being masked as a generic catalog-unavailable warning.
+    except (FileNotFoundError, PermissionError, OSError) as exc:
         logger.warning(
             "skills catalog eager-load failed (type=%s); "
             "/api/v1/skills endpoint will return 503 SKILLS_UNAVAILABLE",
@@ -322,17 +295,15 @@ def _set_catalog_freshness_gauge() -> None:
     """
     import time  # noqa: PLC0415
 
-    from gw2_skills.catalog import DEFAULT_CATALOG_PATH  # noqa: PLC0415
-
     try:
-        mtime = DEFAULT_CATALOG_PATH.stat().st_mtime
+        mtime = skills._SKILLS_DATA_PATH.stat().st_mtime
         age_seconds = time.time() - mtime
         age_days = age_seconds / 86400.0
         SKILLS_CATALOG_FRESHNESS_DAYS.set(age_days)
         logger.info(
             "skills catalog freshness: %.1f days (mtime=%s)",
             age_days,
-            DEFAULT_CATALOG_PATH,
+            skills._SKILLS_DATA_PATH,
         )
     except (FileNotFoundError, PermissionError, OSError) as exc:
         logger.warning(

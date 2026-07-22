@@ -77,7 +77,7 @@ _MAX_ATTEMPTS = 3
 _USER_AGENT = "Gw2Analytics-Webhook/0.9.1"
 
 
-def _utcnow() -> datetime:
+def utcnow() -> datetime:
     return datetime.now(tz=UTC)
 
 
@@ -114,7 +114,7 @@ def process_scheduled_retries(session_factory: Callable[[], Session]) -> int:
       ``attempt < max``.
     - ``attempt >= max`` after a failure -> caller promotes to DLQ.
     """
-    now = _utcnow()
+    now = utcnow()
     delivered_count = 0
     failed_count = 0
     with session_factory() as db:
@@ -203,7 +203,7 @@ def _attempt_retry(
         )
         delivery.attempt += 1
         delivery.error = f"subscription {delivery.subscription_id} missing or revoked at retry time"
-        delivery.next_attempt_at = _utcnow()
+        delivery.next_attempt_at = utcnow()
         return False
 
     if not subscription.ciphertext or delivery.payload is None:
@@ -213,7 +213,7 @@ def _attempt_retry(
         )
         delivery.attempt += 1
         delivery.error = "missing subscription ciphertext or preserved payload"
-        delivery.next_attempt_at = _utcnow()
+        delivery.next_attempt_at = utcnow()
         return False
 
     # Post-plan-009 Step 1: ``delivery.payload`` is LargeBinary (raw
@@ -279,7 +279,7 @@ def _attempt_retry(
 
     delivery.status_code = resp.status_code
     if resp.is_success:
-        delivery.delivered_at = _utcnow()
+        delivery.delivered_at = utcnow()
         delivery.error = None
         logger.info(
             "retry success: delivery_id=%s attempt=%d status_code=%d",
@@ -323,7 +323,7 @@ def _promote_to_dlq(db: Session, delivery: OrmWebhookDelivery) -> OrmWebhookDlq:
         upload_id=delivery.upload_id,
         payload=delivery.payload if delivery.payload is not None else b"",
         last_error=delivery.error,
-        moved_to_dlq_at=_utcnow(),
+        moved_to_dlq_at=utcnow(),
     )
     db.add(dlq)
     db.delete(delivery)

@@ -24,7 +24,7 @@ Three model families live here:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import IntEnum, StrEnum
+from enum import Enum, IntEnum, StrEnum
 from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, WrapValidator
@@ -842,8 +842,84 @@ class WorldInfo(BaseModel):
     population: Population
 
 
+# ---------------------------------------------------------------------------
+# Buff/effect ID classification (moved from _buff_ids.py in refactor pass)
+# ---------------------------------------------------------------------------
+
+
+class BuffCategory(Enum):
+    """Semantic category of a GW2 buff/effect."""
+
+    BOON = "boon"
+    CONDITION_DAMAGE = "condition_damage"
+    CONDITION_CONTROL = "condition_control"
+
+
+_BOON_IDS: Final[frozenset[int]] = frozenset(
+    {
+        740,  # Might (+power, +condi damage per stack)
+        725,  # Fury (+20% critical chance)
+        717,  # Protection (-33% incoming strike damage)
+        718,  # Regeneration (heal over time)
+        719,  # Swiftness (+33% movement speed)
+        726,  # Vigor (+50% endurance regeneration)
+        743,  # Aegis (block the next incoming attack)
+        1122,  # Alacrity (+25% skill recharge rate)
+        1187,  # Quickness (+50% action speed)
+        873,  # Resistance (immune to non-damaging conditions)
+        5974,  # Stability (immune to control effects; modern ID)
+        30336,  # Superspeed (+100% movement speed, max 5s cap)
+        13017,  # Stealth (invisible to enemies)
+        26980,  # Resolution (-33% incoming condition damage; EoD 2022)
+    }
+)
+
+_CONDITION_DAMAGE_IDS: Final[frozenset[int]] = frozenset(
+    {
+        736,  # Bleeding (physical damage over time)
+        737,  # Burning (fire damage over time, high stack cap)
+        721,  # Poison (-33% incoming healing + damage over time)
+        722,  # Confusion (damage on skill activation)
+        723,  # Torment (damage over time, doubled while moving)
+    }
+)
+
+_CONDITION_CONTROL_IDS: Final[frozenset[int]] = frozenset(
+    {
+        727,  # Chilled (-66% movement speed, -40% skill recharge)
+        728,  # Blind (next outgoing attack misses)
+        730,  # Weakness (-50% endurance regen, 50% chance to glance)
+        731,  # Vulnerability (+1% incoming strike/condi damage per stack)
+        732,  # Crippled (-50% movement speed)
+        733,  # Fear (forced movement away from source; counts as CC)
+        734,  # Taunt (forced movement toward source; counts as CC)
+        735,  # Slow (-50% action speed)
+        742,  # Immobilize (cannot move; can still act)
+    }
+)
+
+BUFF_CATEGORY_MAP: Final[dict[int, BuffCategory]] = {
+    **dict.fromkeys(_BOON_IDS, BuffCategory.BOON),
+    **dict.fromkeys(_CONDITION_DAMAGE_IDS, BuffCategory.CONDITION_DAMAGE),
+    **dict.fromkeys(_CONDITION_CONTROL_IDS, BuffCategory.CONDITION_CONTROL),
+}
+
+
+def classify_buff(buff_id: int) -> BuffCategory | None:
+    """Return the semantic category of a GW2 buff/effect ID."""
+    return BUFF_CATEGORY_MAP.get(buff_id)
+
+
+def is_condition(buff_id: int) -> bool:
+    """Return True if the buff ID is a condition (damage or control)."""
+    cat = BUFF_CATEGORY_MAP.get(buff_id)
+    return cat in (BuffCategory.CONDITION_DAMAGE, BuffCategory.CONDITION_CONTROL)
+
+
 __all__ = [
     "_EVENT_MAP",
+    "BUFF_CATEGORY_MAP",
+    "BuffCategory",
     "AccountInfo",
     "Agent",
     "BarrierEvent",
@@ -872,4 +948,6 @@ __all__ = [
     "StunBreakEvent",
     "WorldInfo",
     "_dispatch_event",
+    "classify_buff",
+    "is_condition",
 ]

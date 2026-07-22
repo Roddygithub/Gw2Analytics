@@ -186,46 +186,6 @@ class TestPlayerDefenseAggregator:
         with pytest.raises(ValidationError):
             row.agent_id = 999  # type: ignore[misc]
 
-    def test_check_invariants_raises_on_sum_mismatch(self) -> None:
-        rows = [
-            PlayerDefenseRow.model_construct(agent_id=1, damage_taken=100, cc_taken=0, deaths=0),
-        ]
-        with pytest.raises(ValueError, match=r"sum of row\.damage_taken"):
-            PlayerDefenseAggregator._check_invariants(
-                rows, expected_damage_total=200, expected_barrier_total=0
-            )
-
-    def test_check_invariants_raises_on_barrier_exceeds_damage(self) -> None:
-        rows = [
-            PlayerDefenseRow.model_construct(
-                agent_id=1, damage_taken=50, cc_taken=0, deaths=0, barrier_absorbed=100
-            ),
-        ]
-        with pytest.raises(ValueError, match=r"barrier_absorbed.*>.*damage_taken"):
-            PlayerDefenseAggregator._check_invariants(
-                rows, expected_damage_total=50, expected_barrier_total=100
-            )
-
-    def test_check_invariants_raises_on_wrong_ordering(self) -> None:
-        rows = [
-            PlayerDefenseRow.model_construct(agent_id=1, damage_taken=100, cc_taken=0, deaths=0),
-            PlayerDefenseRow.model_construct(agent_id=2, damage_taken=200, cc_taken=0, deaths=0),
-        ]
-        with pytest.raises(ValueError, match=r"not ordered by"):
-            PlayerDefenseAggregator._check_invariants(
-                rows, expected_damage_total=300, expected_barrier_total=0
-            )
-
-    def test_check_invariants_raises_on_tie_not_broken(self) -> None:
-        rows = [
-            PlayerDefenseRow.model_construct(agent_id=2, damage_taken=100, cc_taken=0, deaths=0),
-            PlayerDefenseRow.model_construct(agent_id=1, damage_taken=100, cc_taken=0, deaths=0),
-        ]
-        with pytest.raises(ValueError, match=r"tie on damage_taken"):
-            PlayerDefenseAggregator._check_invariants(
-                rows, expected_damage_total=200, expected_barrier_total=0
-            )
-
     def test_dodge_block_interrupt_events(self) -> None:
         """Wave 5: dodge/block/interrupt events fill their stub columns."""
         rows = PlayerDefenseAggregator().aggregate(

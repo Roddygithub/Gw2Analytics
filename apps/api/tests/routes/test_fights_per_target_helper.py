@@ -41,7 +41,7 @@ from gw2_analytics.target_buff_removal import TargetBuffRemovalRow
 from gw2_analytics.target_dps import TargetDpsRow
 from gw2_analytics.target_healing import TargetHealingRow
 from gw2_core import BuffRemovalEvent, DamageEvent, HealingEvent
-from gw2analytics_api.routes.fights.aggregators import _aggregate_per_target_rollup
+from gw2analytics_api.routes.fights.fight_aggregators import _aggregate_per_target_rollup
 
 
 def test_per_target_helper_dispatches_damage_event_to_dps_aggregator() -> None:

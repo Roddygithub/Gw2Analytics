@@ -199,7 +199,7 @@ def test_account_upstream_connect_timeout_maps_to_502() -> None:
     """Network timeout (httpx.ConnectTimeout) -> 502 Bad Gateway.
 
     The gateway wraps ``httpx.HTTPError`` subclasses into
-    :class:`GuildWars2HttpError` upstream; the route must surface
+    :class:`GuildWars2ApiError` upstream; the route must surface
     any transport failure (not just 5xx) as 502.
     """
     with respx.mock(base_url=_BASE_URL) as mock:

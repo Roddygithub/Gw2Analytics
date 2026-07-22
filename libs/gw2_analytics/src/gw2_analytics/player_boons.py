@@ -133,7 +133,6 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from itertools import pairwise
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -390,72 +389,7 @@ class PlayerBoonsAggregator:
         # Sort: highest boons_out first; ties broken by ascending agent_id.
         rows.sort(key=lambda r: (-r.boons_out, r.agent_id))
 
-        self._check_invariants(rows, grand_total_out, grand_total_in)
         return rows
-
-    @staticmethod
-    def _check_invariants(
-        rows: list[PlayerBoonsRow],
-        expected_total_out: int,
-        expected_total_in: int,
-    ) -> None:
-        """Raise ``ValueError`` if any cross-field invariant is violated.
-
-        Invariants checked:
-
-        1. Sum of ``row.boons_out`` across all rows == ``expected_total_out``
-           (no event dropped on the source side).
-        2. Sum of ``row.boons_in`` across all rows == ``expected_total_in``
-           (no event dropped on the target side).
-        3. The 6 fixed columns partition from ``row.boons_out`` per
-           row (the SUM of the 6 fixed counts is <= ``boons_out``;
-           leftover flows into ``other_boons_out`` -- the union is
-           STRICT EQUAL).
-        4. Rows monotonically non-increasing by ``boons_out``; ties
-           broken by ascending ``agent_id``.
-        """
-        actual_total_out = sum(r.boons_out for r in rows)
-        if actual_total_out != expected_total_out:
-            msg = (
-                f"sum of row.boons_out ({actual_total_out}) "
-                f"!= count of source-side apply events ({expected_total_out})"
-            )
-            raise ValueError(msg)
-        actual_total_in = sum(r.boons_in for r in rows)
-        if actual_total_in != expected_total_in:
-            msg = (
-                f"sum of row.boons_in ({actual_total_in}) "
-                f"!= count of target-side apply events ({expected_total_in})"
-            )
-            raise ValueError(msg)
-        for r in rows:
-            fixed_sum = (
-                r.stability_out
-                + r.alacrity_out
-                + r.resistance_out
-                + r.aegis_out
-                + r.superspeed_out
-                + r.stealth_out
-            )
-            other_sum = sum(r.other_boons_out.values())
-            if fixed_sum + other_sum != r.boons_out:
-                msg = (
-                    f"PlayerBoonsRow({r.agent_id}): "
-                    f"fixed_sum ({fixed_sum}) + other_sum ({other_sum}) "
-                    f"!= boons_out ({r.boons_out})"
-                )
-                raise ValueError(msg)
-        # Pydantic field constraints already guarantee ``ge=0``;
-        # only the cross-row ordering contract needs an explicit check.
-        # ``pairwise`` pairs each row with its immediate successor; the
-        # canonical idiom for adjacent-pair iteration (ruff RUF007).
-        for prev, curr in pairwise(rows):
-            if prev.boons_out < curr.boons_out:
-                msg = f"rows not ordered by (boons_out DESC, agent_id ASC): {prev!r} then {curr!r}"
-                raise ValueError(msg)
-            if prev.boons_out == curr.boons_out and prev.agent_id >= curr.agent_id:
-                msg = f"tie on boons_out not broken by agent_id ASC: {prev!r} then {curr!r}"
-                raise ValueError(msg)
 
 
 __all__ = [

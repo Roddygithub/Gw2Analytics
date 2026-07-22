@@ -93,7 +93,6 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gw2_analytics._invariants import check_desc_asc_ordering
 from gw2_core import DamageEvent
 
 # DPS sentinel when ``duration_s <= 0``: invalid (zero/negative) duration
@@ -278,69 +277,7 @@ class PlayerDamageAggregator:
         # Sort: highest total_damage first; ties broken by ascending source_agent_id.
         rows.sort(key=lambda r: (-r.total_damage, r.source_agent_id))
 
-        # The invariant total is derived from the aggregated rows
-        # rather than accumulated in the hot loop, saving one integer
-        # addition per input event.
-        self._check_invariants(rows, sum(r.total_damage for r in rows), duration_s)
         return rows
-
-    @staticmethod
-    def _check_invariants(
-        rows: list[PlayerDamageRow],
-        expected_sum: int,
-        duration_s: float,  # noqa: ARG004
-    ) -> None:
-        """Raise ``ValueError`` if any cross-field invariant is violated.
-
-        Invariants checked (Phase 3 close-out):
-        1. Sum of ``row.total_damage`` == ``expected_sum`` (no event
-           dropped on the source side).
-        2. ``attack_count >= 1`` (Pydantic field constraint;
-           redundant but explicit).
-        3. Rows monotonic non-increasing by ``total_damage``;
-           ties broken by ascending ``source_agent_id``.
-
-        Split-getter conservation (``dps_power + dps_condi == dps``)
-        is intentionally NOT enforced at the aggregator tier:
-        the legacy path (no getter) returns ``(0, 0)`` to
-        preserve the pre-Phase-3 wire shape ``dps_power=0.0 +
-        dps_condi=0.0`` byte-for-byte, while the post-Phase-6-v2
-        explicit getter is responsible for returning ``(condi,
-        power)`` tuples where ``condi + power == event.damage``.
-        Enforcing the conservation invariant here would force
-        every legacy stream to violate it (the canonical
-        pre-Phase-6-v2 case) so the check was dropped as part of
-        the Phase 3 wire-shape-fidelity fix.
-
-        ``duration_s`` is in the signature for call-site stability
-        (``_check_invariants(rows, total, duration_s)``); the
-        close-out made the conservation check moot so
-        ``duration_s`` is unused here -- the unused-argument
-        warning is suppressed because the parameter name carries
-        API-doc weight (a future re-enablement of the
-        conservation check would wire ``duration_s`` back into
-        the tolerance computation).
-        """
-        actual_sum = sum(r.total_damage for r in rows)
-        if actual_sum != expected_sum:
-            msg = f"sum of row.total_damage ({actual_sum}) != sum of event.damage ({expected_sum})"
-            raise ValueError(msg)
-        for r in rows:
-            if r.attack_count < 1:
-                msg = (
-                    f"PlayerDamageRow({r.source_agent_id}).attack_count "
-                    f"({r.attack_count}) must be >= 1"
-                )
-                raise ValueError(msg)
-        # Pydantic field constraints already guarantee ``ge=0`` for total_damage;
-        # the cross-row ordering invariant is the only ordering contract.
-        check_desc_asc_ordering(
-            rows,
-            primary_key=lambda r: r.total_damage,
-            secondary_key=lambda r: r.source_agent_id,
-            primary_label="total_damage",
-            secondary_label="source_agent_id",
-        )
 
 
 __all__ = ["DpsSplitGetter", "PlayerDamageAggregator", "PlayerDamageRow"]

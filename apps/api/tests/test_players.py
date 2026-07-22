@@ -1,172 +1,18 @@
 """End-to-end tests for the v0.9.0 ``?profession=`` filter on ``GET /api/v1/players``.
-
-v0.9.0 plan/002 adds a server-side profession filter to the
-cross-fight player roll-up. The filter is applied AFTER the
-cross-fight roll-up (so it sees the aggregated modal profession)
-and BEFORE the offset/limit (so pagination is consistent on the
-filtered set).
-
-Each test is SELF-CONTAINED: it POSTs its own .zevtc fixture
-with specific profession values, then queries the API. The
-``_post_minimal_fight_with_professions`` helper threads a uuid
-suffix + a per-agent profession tuple through the existing
-``_make_minimal_zevtc`` + ``_post_minimal_fight`` infrastructure
-so the parser-assigned agent_ids in the per-fight agents table
-match the source_agent_id values in the cbtevent records (the
-route's source-side attribution silently drops events when the
-agent_ids do not match, leaving the player with 0 contributions
-and 404ing the test).
-
-The :class:`Profession` enum (libs/gw2_core/src/gw2_core/models.py)
-maps the integer values to GW2 class names:
-- UNKNOWN = 0
-- GUARDIAN = 1, WARRIOR = 2, ENGINEER = 3, RANGER = 4, THIEF = 5,
-  ELEMENTALIST = 6, MESMER = 7, NECROMANCER = 8, REVENANT = 9
-
-The aggregator's modal profession is the most-common profession
-across the player's attended fights. The fixture seeds EXACTLY
-1 profession per player per fight, so the modal is deterministic
-(equal to the seeded value).
-
-Test pollution
-==============
-The test database accumulates state across runs (no DB cleanup
-between tests). To keep the assertions stable, each test:
-1. Uses a large ``base_id_a`` (``1_000_000_000 + int(suffix, 16)``)
-   so the seeded account_names are unique per test run (the EVTC
-   agent_id field is uint64, so the range ``1_000_000_000..``
-   is well within the 64-bit limit).
-2. Passes ``limit=500`` to every ``GET /api/v1/players`` call so
-   the seeded players (which the aggregator sorts to the bottom
-   by total_damage DESC) are NOT cut off by the default 50-row
-   pagination.
-3. Filters the response by the unique ``:synth.<base_id_a>``
-   prefix so prior test runs' :synth.* accounts do not pollute
-   the membership checks.
 """
 
 from __future__ import annotations
 
-import struct as _struct
 import time
 import uuid as _uuid
-import zipfile
-from io import BytesIO
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
+from tests._fixtures import _make_cbtevent, _make_minimal_zevtc
 
 from gw2analytics_api.main import app
 
 client = TestClient(app)
-
-
-def _make_cbtevent(
-    time_ms: int,
-    src: int,
-    dst: int,
-    value: int,
-    skill_id: int,
-    *,
-    is_statechange: int = 0,
-    is_nondamage: int = 0,
-) -> bytes:
-    """Pack one 64-byte cbtevent record matching the parser's struct layout.
-
-    Local copy of :func:`test_uploads_e2e._make_cbtevent` to keep
-    this test file self-contained (avoids an import dependency
-    on the e2e module's private helpers).
-    """
-    fmt = "<QQQiiIIHHHbbbbbbbbIIbb"
-    return _struct.pack(
-        fmt,
-        time_ms,
-        src,
-        dst,
-        value,
-        0,  # buff_dmg
-        0,  # overstack_value
-        skill_id,
-        0,  # src_instid
-        0,  # dst_instid
-        0,  # translocated
-        0,  # is_cleanup
-        is_nondamage,
-        is_statechange,
-        0,  # is_flanking
-        0,  # is_shields
-        0,  # is_offcycle
-        0,  # pad61
-        0,  # pad62
-        0,  # pad63
-        0,  # pad64
-        0,  # pad65
-        0,  # pad66
-    )[:64]
-
-
-def _make_minimal_zevtc(
-    agents: list[tuple[int, int, int, str, bool]],
-    build: str,
-    skills: list[tuple[int, str]] | None = None,
-    events: list[bytes] | None = None,
-) -> bytes:
-    """Local copy of :func:`test_uploads_e2e._make_minimal_zevtc` for self-containment."""
-    if skills is None:
-        skills = []
-    if events is None:
-        events = []
-    header_fmt = "<4s8sBHBII"
-    header_size = _struct.calcsize(header_fmt)
-    agent_record_fmt = "<QIIhhhh"
-    agent_name_size = 72
-    skill_record_size = 68
-    buf = BytesIO()
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
-        header = _struct.pack(
-            header_fmt,
-            b"EVTC",
-            build.encode("ascii"),
-            0,
-            0,
-            0,
-            len(agents),
-            len(skills),
-        )
-        assert len(header) == header_size
-        body = bytearray()
-        for aid, prof, elite, name, is_player in agents:
-            prefix = _struct.pack(
-                agent_record_fmt,
-                aid,
-                prof,
-                elite,
-                0,
-                0,
-                0,
-                0,
-            )
-            if is_player:
-                raw = name.encode() + b"\x00" + f":synth.{aid}".encode() + b"\x00\x00"
-            else:
-                raw = name.encode() + b"\x00"
-            if len(raw) > agent_name_size:
-                msg = f"agent name region {len(raw)} > {agent_name_size}"
-                raise ValueError(msg)
-            name_buf = raw + b"\x00" * (agent_name_size - len(raw))
-            body += prefix + name_buf
-        # Legacy format: 4-byte skill_count prefix before the records
-        # (the parser's _detect_skill_format reads this to determine the
-        # table layout).
-        body += _struct.pack("<I", len(skills))
-        for skill_id, skill_name in skills:
-            name_bytes = skill_name.encode("utf-8")[:64]
-            name_buf = name_bytes + b"\x00" * (skill_record_size - 4 - len(name_bytes))
-            body += _struct.pack("<I64s", skill_id, name_buf)
-        for ev in events:
-            body += ev
-        zf.writestr("fight.evtc", header + bytes(body))
-    return buf.getvalue()
 
 
 def _post_minimal_fight_with_professions(

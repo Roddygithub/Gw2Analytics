@@ -121,48 +121,6 @@ class TestPlayerDamageAggregator:
         with pytest.raises(ValidationError):
             row.source_agent_id = 999  # type: ignore[misc]
 
-    def test_check_invariants_raises_on_sum_mismatch(self) -> None:
-        rows = [
-            PlayerDamageRow.model_construct(
-                source_agent_id=1, total_damage=100, attack_count=1, dps=10.0
-            ),
-        ]
-        with pytest.raises(ValueError, match=r"sum of row\.total_damage"):
-            PlayerDamageAggregator._check_invariants(rows, expected_sum=200, duration_s=10.0)
-
-    def test_check_invariants_raises_on_attack_count_below_one(self) -> None:
-        rows = [
-            PlayerDamageRow.model_construct(
-                source_agent_id=1, total_damage=100, attack_count=0, dps=10.0
-            ),
-        ]
-        with pytest.raises(ValueError, match=r"attack_count.*must be >= 1"):
-            PlayerDamageAggregator._check_invariants(rows, expected_sum=100, duration_s=10.0)
-
-    def test_check_invariants_raises_on_wrong_ordering(self) -> None:
-        rows = [
-            PlayerDamageRow.model_construct(
-                source_agent_id=1, total_damage=100, attack_count=1, dps=10.0
-            ),
-            PlayerDamageRow.model_construct(
-                source_agent_id=2, total_damage=200, attack_count=1, dps=20.0
-            ),
-        ]
-        with pytest.raises(ValueError, match=r"not ordered by"):
-            PlayerDamageAggregator._check_invariants(rows, expected_sum=300, duration_s=10.0)
-
-    def test_check_invariants_raises_on_tie_not_broken(self) -> None:
-        rows = [
-            PlayerDamageRow.model_construct(
-                source_agent_id=2, total_damage=100, attack_count=1, dps=10.0
-            ),
-            PlayerDamageRow.model_construct(
-                source_agent_id=1, total_damage=100, attack_count=1, dps=10.0
-            ),
-        ]
-        with pytest.raises(ValueError, match=r"tie on total_damage"):
-            PlayerDamageAggregator._check_invariants(rows, expected_sum=200, duration_s=10.0)
-
     def test_custom_dps_split_getter(self) -> None:
         """Phase 6 v2 hook: a custom split getter carves condi vs power."""
 

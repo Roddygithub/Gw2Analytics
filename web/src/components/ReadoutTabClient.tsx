@@ -625,12 +625,44 @@ interface ReadoutTabClientProps {
   fightId: string;
 }
 
+const TABLE_TABS = ["damage", "heal", "boons", "defense"] as const;
+type TableTab = (typeof TABLE_TABS)[number];
+
+const TAB_BTN_STYLE: React.CSSProperties = {
+  padding: "4px 14px",
+  borderRadius: 6,
+  fontSize: 12,
+  fontFamily: "var(--font-geist-sans, sans-serif)",
+  cursor: "pointer",
+  border: "1px solid var(--border)",
+  background: "var(--surface)",
+  color: "var(--foreground)",
+  opacity: 0.6,
+  transition: "all 0.15s",
+};
+
+const ACTIVE_TAB_BTN_STYLE: React.CSSProperties = {
+  ...TAB_BTN_STYLE,
+  opacity: 1,
+  border: "1px solid var(--accent)",
+  background: "var(--accent)",
+  color: "var(--accent-foreground, #fff)",
+};
+
+const TAB_LABELS: Record<TableTab, string> = {
+  damage: "Dégâts",
+  heal: "Soins",
+  boons: "Boons",
+  defense: "Défense",
+};
+
 export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
   const [readout, setReadout] = useState<FightReadoutOut | null>(null);
   const [positions, setPositions] = useState<FightPositionsOut | null>(null);
   const [events, setEvents] = useState<FightEventsSummaryRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTableTab, setActiveTableTab] = useState<TableTab>("damage");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -801,8 +833,20 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
         </section>
       )}
 
-      {/* Tableau 1: Dégâts */}
-      <section>
+      {/* Table tabs */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {TABLE_TABS.map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTableTab(tab)}
+            style={activeTableTab === tab ? ACTIVE_TAB_BTN_STYLE : TAB_BTN_STYLE}
+          >
+            {TAB_LABELS[tab]}
+          </button>
+        ))}
+      </div>
+
+      {activeTableTab === "damage" && <section>
         <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Dégâts</h2>
         <TableWrapper>
           <table style={TABLE_STYLE}>
@@ -840,10 +884,9 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             </tbody>
           </table>
         </TableWrapper>
-      </section>
+      </section>}
 
-      {/* Tableau 2: Soins */}
-      <section>
+      {activeTableTab === "heal" && <section>
         <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Soins</h2>
         <TableWrapper>
           <table style={TABLE_STYLE}>
@@ -871,10 +914,9 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             </tbody>
           </table>
         </TableWrapper>
-      </section>
+      </section>}
 
-      {/* Tableau 3: Boons — one column per boon with In (uptime%) / Out (total) */}
-      <section>
+      {activeTableTab === "boons" && <section>
         <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Boons</h2>
         <TableWrapper>
           <table style={TABLE_STYLE}>
@@ -926,10 +968,9 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             </tbody>
           </table>
         </TableWrapper>
-      </section>
+      </section>}
 
-      {/* Tableau 4: Défense */}
-      <section>
+      {activeTableTab === "defense" && <section>
         <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Défense &amp; Positionnement</h2>
         <TableWrapper>
           <table style={TABLE_STYLE}>
@@ -977,7 +1018,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             </tbody>
           </table>
         </TableWrapper>
-      </section>
+      </section>}
     </div>
   );
 }

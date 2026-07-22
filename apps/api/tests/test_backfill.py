@@ -41,9 +41,9 @@ from _fixtures import (
 )
 from sqlalchemy import delete, select, update
 
-from gw2analytics_api.backfill import run_backfill
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary
+from gw2analytics_api.scripts.backfill_player_summaries import run_backfill
 
 
 def test_backfill_recreates_summary_rows_from_blob() -> None:

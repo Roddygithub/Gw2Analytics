@@ -153,7 +153,7 @@ function readStoredScale(): TimelineScale {
   }
   return "linear";
 }
-void readStoredScale; // re-exported for unit testability below
+
 
 // v0.9.0 of web: the time-zone selector for the day-bucketed
 // started_at. Client-state driver (NOT URL-driven): deviating

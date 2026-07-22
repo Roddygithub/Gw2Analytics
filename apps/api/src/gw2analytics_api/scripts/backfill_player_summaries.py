@@ -1,54 +1,16 @@
-"""v0.8.5: CLI entrypoint for the per-(fight, account) summary backfill.
+"""v0.8.5: backfill the ``OrmFightPlayerSummary`` table for pre-v0.8.4 fights.
 
-The one-shot backfill that closes the v0.7.0 perf debt for
-EXISTING users: the v0.8.4 migration created the
-``fight_player_summaries`` table but did NOT populate it for
-pre-v0.8.4 fights, so those fights still fall through to the
-slow-path blob-walk on every player-route request. This CLI
-iterates all such fights and materialises the summary rows.
+The v0.8.4 migration created the ``fight_player_summaries`` table but
+did NOT populate it for existing fights. Pre-v0.8.4 fights therefore
+fall through to the slow-path blob-walk on every player-route request.
+This module is the one-shot backfill that closes the debt for existing
+users; new uploads are handled by the v0.8.4 write path in services.
 
-Usage
------
-
-::
-
-    # Backfill all fights without summary rows (the canonical
-    # one-shot run after a production deploy of v0.8.4).
-    python -m gw2analytics_api.scripts.backfill_player_summaries
-
-    # Backfill the first 100 fights (operational "verify the
-    # script behaves correctly on a small batch before
-    # unleashing it on the full dataset" pattern).
-    python -m gw2analytics_api.scripts.backfill_player_summaries --limit 100
-
-    # Backfill a single fight (targeted retry after a known
-    # failure, or manual verification that the script produces
-    # the expected output for a specific fight id).
-    python -m gw2analytics_api.scripts.backfill_player_summaries \\
-        --fight-id abc123def456
-
-    # Dry-run: log what WOULD be backfilled but skip the
-    # commit. The counts are still reported.
-    python -m gw2analytics_api.scripts.backfill_player_summaries --dry-run
-
-    # Progress-every 10: log a progress line per 10 fights
-    # (canonical for 10K+ fight backfills; default: every 100).
-    python -m gw2analytics_api.scripts.backfill_player_summaries \\
-        --progress-every 10
-
-The script is safe to interrupt (``Ctrl+C``) and re-run: the
-per-fight commit means at most one in-flight transaction is
-lost; the discovery query on the next run retries the failed
-fights (they still have zero summary rows). See
-:mod:`gw2analytics_api.backfill` for the library contract.
-
-Validation
-----------
-
-v0.9.10 plan 035 added ``--limit`` + ``--progress-every``
-``_positive_int`` validation so a typoed ``--limit -1`` is
-rejected with a clear argparse error (instead of crashing
-Postgres with a cryptic syntax error on ``LIMIT -1``).
+Public surface
+--------------
+- :func:`run_backfill` is the importable library entrypoint.
+- :func:`backfill_role_detection` backfills role detection on existing rows.
+- :mod:`__main__` is the thin CLI wrapper (argparse + a single call).
 """
 
 from __future__ import annotations
@@ -56,103 +18,219 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections.abc import Callable
 
-from gw2analytics_api.backfill import backfill_role_detection, run_backfill
+from minio.error import S3Error
+from pydantic import ValidationError
+from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, selectinload
+
+from gw2_analytics.role_detection import detect_role_lite
+from gw2analytics_api import storage
+from gw2analytics_api._event_dispatch import build_event_iterator
 from gw2analytics_api.database import get_sessionmaker
+from gw2analytics_api.models import (
+    OrmFight,
+    OrmFightAgent,
+    OrmFightPlayerSummary,
+)
+from gw2analytics_api.services import _persist_player_summaries, _sanitize_name
+
+logger = logging.getLogger(__name__)
+
+ProgressCallback = Callable[[int, int, int, str | None], None]
+
+
+# ---------------------------------------------------------------------------
+# Library entrypoints
+# ---------------------------------------------------------------------------
+
+
+def run_backfill(
+    db: Session,
+    *,
+    fight_id: str | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+    progress_callback: ProgressCallback | None = None,
+) -> tuple[int, int, int]:
+    fights = _discover_fights(db, fight_id=fight_id, limit=limit)
+    backfilled = 0
+    skipped = 0
+    failed = 0
+
+    for fight in fights:
+        player_agents = [a for a in fight.agents if a.is_player and a.account_name]
+        if not player_agents:
+            logger.debug("fight %s has no player agents; skipping", fight.id)
+            skipped += 1
+            if progress_callback is not None:
+                progress_callback(backfilled, skipped, failed, fight.id)
+            continue
+
+        try:
+            _backfill_one_fight(db, fight, player_agents, dry_run=dry_run)
+        except (S3Error, OSError, EOFError, SQLAlchemyError, ValidationError) as exc:
+            logger.exception("failed backfilling fight %s: %s", fight.id, exc)
+            db.rollback()
+            failed += 1
+            if progress_callback is not None:
+                progress_callback(backfilled, skipped, failed, fight.id)
+            continue
+
+        if not dry_run:
+            db.commit()
+        backfilled += 1
+        logger.info("backfilled fight %s (%d player agents)", fight.id, len(player_agents))
+        if progress_callback is not None:
+            progress_callback(backfilled, skipped, failed, fight.id)
+
+    return backfilled, skipped, failed
+
+
+def backfill_role_detection(
+    db: Session,
+    *,
+    fight_id: str | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+) -> tuple[int, int, int]:
+    stmt = select(OrmFightPlayerSummary).where(
+        OrmFightPlayerSummary.detected_role.is_(None),
+    )
+    if fight_id is not None:
+        stmt = stmt.where(OrmFightPlayerSummary.fight_id == fight_id)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+
+    rows = list(db.execute(stmt).scalars().all())
+    updated = 0
+    skipped = 0
+    failed = 0
+
+    for row in rows:
+        role, tags = detect_role_lite(
+            total_damage=row.total_damage,
+            total_healing=row.total_healing,
+            total_buff_removal=row.total_buff_removal,
+            profession_int=row.profession,
+            elite_spec_int=row.elite_spec,
+        )
+        row.detected_role = role
+        row.detected_tags = tags
+        updated += 1
+
+    if updated > 0:
+        try:
+            if dry_run:
+                db.rollback()
+            else:
+                db.commit()
+        except SQLAlchemyError:
+            logger.exception("failed committing role detection backfill")
+            db.rollback()
+            failed = updated
+            updated = 0
+
+    return updated, skipped, failed
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _discover_fights(
+    db: Session,
+    *,
+    fight_id: str | None,
+    limit: int | None,
+) -> list[OrmFight]:
+    stmt = select(OrmFight).options(selectinload(OrmFight.agents))
+    if fight_id is not None:
+        stmt = stmt.where(OrmFight.id == fight_id)
+    else:
+        stmt = stmt.where(
+            ~select(OrmFightPlayerSummary.fight_id)
+            .where(OrmFightPlayerSummary.fight_id == OrmFight.id)
+            .exists(),
+        )
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return list(db.execute(stmt).scalars().all())
+
+
+def _backfill_one_fight(
+    db: Session,
+    fight: OrmFight,
+    player_agents: list[OrmFightAgent],
+    *,
+    dry_run: bool,
+) -> None:
+    if fight.events_blob_uri is None:
+        _backfill_pre_phase7(db, fight, player_agents)
+        if dry_run:
+            db.rollback()
+        return
+
+    gz_bytes = storage.get_events(fight.events_blob_uri)
+    events = list(build_event_iterator(gz_bytes=gz_bytes))
+    _persist_player_summaries(db, fight, events)
+    if dry_run:
+        db.rollback()
+
+
+def _backfill_pre_phase7(
+    db: Session,
+    fight: OrmFight,
+    player_agents: list[OrmFightAgent],
+) -> None:
+    db.execute(
+        delete(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight.id),
+    )
+    for agent in player_agents:
+        assert agent.account_name is not None
+        db.add(
+            OrmFightPlayerSummary(
+                fight_id=fight.id,
+                account_name=_sanitize_name(agent.account_name.lstrip(":")),
+                name=_sanitize_name(agent.name),
+                profession=int(agent.profession),
+                elite_spec=int(agent.elite_spec),
+                total_damage=0,
+                total_healing=0,
+                total_buff_removal=0,
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# CLI (argparse wrapper)
+# ---------------------------------------------------------------------------
 
 
 def _positive_int(value: str) -> int:
-    """Argparse type: accept only positive integers (>= 1).
-
-    v0.9.10 plan 035: rejects ``--limit -1`` +
-    ``--progress-every 0`` with a clear error message
-    identifying the bad value + the expected range. The
-    error is printed by argparse in the canonical
-    ``invalid value: '-1' for '--limit'`` format.
-    Postgres rejects a negative ``LIMIT N`` with a
-    cryptic syntax error otherwise; this proactive
-    validation surfaces the operator's typoed intent
-    before the SQL is issued.
-    """
     try:
         n = int(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"expected an integer, got {value!r}",
-        ) from exc
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from exc
     if n < 1:
-        raise argparse.ArgumentTypeError(
-            f"expected a positive integer (>= 1), got {n}",
-        )
+        raise argparse.ArgumentTypeError(f"expected a positive integer (>= 1), got {n}")
     return n
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint. Returns 0 on success, 1 on any failed fight."""
     parser = argparse.ArgumentParser(
         prog="backfill_player_summaries",
-        description=(
-            "Materialise the per-(fight, account) summary rows for pre-v0.8.4 "
-            "fights. The script is idempotent and safe to interrupt + re-run."
-        ),
+        description="Materialise the per-(fight, account) summary rows for pre-v0.8.4 fights.",
     )
-    parser.add_argument(
-        "--limit",
-        type=_positive_int,
-        default=None,
-        help=(
-            "Cap the number of fights processed. Useful for the operational "
-            "'verify on a small batch first' pattern. Defaults to unlimited. "
-            "Must be a positive integer (>= 1)."
-        ),
-    )
-    parser.add_argument(
-        "--progress-every",
-        type=_positive_int,
-        default=100,
-        help=(
-            "Log a progress line every N fights. Useful for large "
-            "backfills (10K+ fights) so the operator can see the "
-            "script is making progress. Must be a positive integer "
-            "(>= 1). Default: 100."
-        ),
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help=(
-            "Log what WOULD be backfilled but skip the commit. The "
-            "(backfilled, skipped, failed) counts are still reported. "
-            "The DELETE+INSERT is rolled back at the end of each fight."
-        ),
-    )
-    parser.add_argument(
-        "--fight-id",
-        type=str,
-        default=None,
-        help=(
-            "Backfill a single fight with this id, regardless of whether it "
-            "already has summary rows. Useful for targeted retries + manual "
-            "verification. The discovery query's NOT EXISTS subquery is "
-            "skipped when this flag is set."
-        ),
-    )
-    parser.add_argument(
-        "--roles-only",
-        action="store_true",
-        help=(
-            "Only backfill detected_role + detected_tags on existing summary "
-            "rows (no blob re-download). Use this for the v0.10.3 role-detection "
-            "backfill on pre-migration rows."
-        ),
-    )
-    parser.add_argument(
-        "--log-level",
-        type=str,
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging level (default: INFO).",
-    )
+    parser.add_argument("--limit", type=_positive_int, default=None)
+    parser.add_argument("--progress-every", type=_positive_int, default=100)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--fight-id", type=str, default=None)
+    parser.add_argument("--roles-only", action="store_true")
+    parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -162,67 +240,27 @@ def main(argv: list[str] | None = None) -> int:
 
     logger = logging.getLogger("backfill")
 
-    def _progress_cb(
-        backfilled: int,
-        skipped: int,
-        failed: int,
-        fight_id: str | None,
-    ) -> None:
-        """v0.9.10 plan 035: progress reporter for large backfills.
-
-        Logs a single line per ``--progress-every`` fights so the
-        operator can see the script is making progress. The line
-        includes the running counts + the most recent fight id so
-        the operator can correlate with the SQL log if needed.
-        """
+    def _progress_cb(backfilled: int, skipped: int, failed: int, fight_id: str | None) -> None:
         total = backfilled + skipped + failed
         if total % args.progress_every == 0:
             logger.info(
                 "backfill progress: total=%d backfilled=%d skipped=%d failed=%d last_fight_id=%s",
-                total,
-                backfilled,
-                skipped,
-                failed,
-                fight_id,
+                total, backfilled, skipped, failed, fight_id,
             )
 
     session = get_sessionmaker()()
     try:
         if args.roles_only:
-            # v0.10.3 plan 119: role-detection backfill on existing
-            # summary rows. No blob re-download — the heuristic runs
-            # on the 3 magnitudes already on each row.
             updated, skipped, failed = backfill_role_detection(
-                session,
-                fight_id=args.fight_id,
-                limit=args.limit,
-                dry_run=args.dry_run,
+                session, fight_id=args.fight_id, limit=args.limit, dry_run=args.dry_run,
             )
-            print(
-                f"role backfill complete: updated={updated} "
-                f"skipped={skipped} failed={failed} "
-                f"{'(dry-run)' if args.dry_run else ''}",
-            )
+            print(f"role backfill complete: updated={updated} skipped={skipped} failed={failed} {'(dry-run)' if args.dry_run else ''}")
         else:
             backfilled, skipped, failed = run_backfill(
-                session,
-                fight_id=args.fight_id,
-                limit=args.limit,
-                dry_run=args.dry_run,
-                progress_callback=_progress_cb,
+                session, fight_id=args.fight_id, limit=args.limit,
+                dry_run=args.dry_run, progress_callback=_progress_cb,
             )
-            # The summary line is the operator's primary signal: the
-            # count of fights whose summary rows are now in the fast-path
-            # table (backfilled), the count of fights that were
-            # correctly skipped (no player agents), and the count of
-            # fights that need a retry (failed -- re-run the script).
-            # The exit code is non-zero if any fight failed so the script
-            # can be wired into CI / cron with a proper failure signal.
-            print(
-                f"backfill complete: backfilled={backfilled} "
-                f"skipped={skipped} failed={failed} "
-                f"{'(dry-run)' if args.dry_run else ''}",
-            )
+            print(f"backfill complete: backfilled={backfilled} skipped={skipped} failed={failed} {'(dry-run)' if args.dry_run else ''}")
     finally:
         session.close()
 

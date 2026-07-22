@@ -179,14 +179,7 @@ class PerFightTimelineOut(BaseModel):
     points: list[PerFightTimelinePointOut] = []
 
 
-class PerPlayerTimelinePointOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    window_start_ms: int
-    window_end_ms: int
-    total_damage: int
-    total_healing: int
-    total_buff_removal: int
+PerPlayerTimelinePointOut = PerFightTimelinePointOut
 
 
 class PerPlayerTimelineSeriesOut(BaseModel):
@@ -206,25 +199,7 @@ class PerPlayerTimelineOut(BaseModel):
     series: list[PerPlayerTimelineSeriesOut] = []
 
 
-class PlayerSkillUsageRowOut(BaseModel):
-    """One row of a per-player per-skill roll-up.
-
-    Tour 4 v0.10.13 plan 044: Skill build analyser. Same shape
-    as :class:`SkillUsageRowOut` (the per-fight roll-up) but
-    source-attributed to a specific player's agent. The frontend
-    uses this when the analyst picks a player on the per-fight
-    drill-down page (``PlayerSkillUsageFilter`` dropdown,
-    mirroring the v0.10.3 ``PerPlayerTimeline`` UX pattern).
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    skill_id: int
-    skill_name: str
-    hit_count: int
-    total_damage: int
-    total_healing: int
-    total_buff_removal: int
+PlayerSkillUsageRowOut = SkillUsageRowOut
 
 
 class PlayerSkillLoadoutOut(BaseModel):

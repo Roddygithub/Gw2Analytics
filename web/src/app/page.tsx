@@ -9,17 +9,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { uploadLog, formatApiError, type UploadCreatedRow } from "@/lib/api";
+import { formatBytes } from "@/lib/format";
 
 import styles from "./page.module.css";
 
 const ACCEPTED_EXT = ".zevtc";
 const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-}
 
 export default function Home() {
   const [dragOver, setDragOver] = useState(false);

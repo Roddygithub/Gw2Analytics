@@ -13,14 +13,10 @@ import anyone else.
 
 from __future__ import annotations
 
-from gw2_core._buff_ids import (
-    BUFF_CATEGORY_MAP,
-    BuffCategory,
-    classify_buff,
-    is_condition,
-)
 from gw2_core.models import (
     _EVENT_MAP,
+    BUFF_CATEGORY_MAP,
+    BuffCategory,
     AccountInfo,
     Agent,
     BarrierEvent,
@@ -50,6 +46,8 @@ from gw2_core.models import (
     StunBreakEvent,
     WorldInfo,
     _dispatch_event,
+    classify_buff,
+    is_condition,
 )
 
 __version__ = "0.6.0"

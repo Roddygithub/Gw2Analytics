@@ -86,7 +86,7 @@ class _NoDispatchReason:
         self.log_message = log_message
 
 
-def _utcnow() -> datetime:
+def utcnow() -> datetime:
     return datetime.now(tz=UTC)
 
 
@@ -189,7 +189,7 @@ def _prepare_deliveries(
                     error=f"ciphertext corrupt: {FernetInvalidToken.__name__}: {exc}",
                 )
                 delivery.payload = body_bytes
-                delivery.next_attempt_at = _utcnow()
+                delivery.next_attempt_at = utcnow()
                 db.add(delivery)
                 logger.error(
                     "webhook subscription %s ciphertext corrupt "
@@ -231,7 +231,7 @@ def _prepare_deliveries(
                 attempt=1,
             )
             delivery.payload = body_bytes
-            delivery.next_attempt_at = _utcnow()
+            delivery.next_attempt_at = utcnow()
             db.add(delivery)
 
             requests.append(
@@ -324,7 +324,7 @@ async def _dispatch_single_async(
             delivery_id=request.delivery_id,
             status_code=resp.status_code,
             error=None,
-            delivered_at=_utcnow(),
+            delivered_at=utcnow(),
         )
 
     error = f"non-2xx response: {resp.status_code}"

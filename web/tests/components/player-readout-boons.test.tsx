@@ -94,6 +94,8 @@ function makeRow(
     defense: {
       barrier_absorbed: 0,
       presence_pct: null,
+      dist_to_commander: null,
+      kill_participation: 0,
       blocks: 0,
       cc_taken: 0,
       damage_taken: 0,
