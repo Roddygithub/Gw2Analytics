@@ -166,16 +166,23 @@ def test_post_webhook_rejects_https_ipv6_loopback_literal() -> None:
     assert "loopback" in detail_blob
 
 
-def test_post_webhook_rejects_https_hostname_resolving_to_private(monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: E501
-    def _fake_getaddrinfo(host: str, port: object, **_kwargs: object) -> list[tuple[Any, Any, Any, Any, tuple[str, int]]]:  # noqa: E501
+def test_post_webhook_rejects_https_hostname_resolving_to_private(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_getaddrinfo(
+        host: str, port: object, **_kwargs: object
+    ) -> list[tuple[Any, Any, Any, Any, tuple[str, int]]]:
         return [(_socket.AF_INET, _socket.SOCK_STREAM, 0, "", ("10.0.0.1", 0))]
+
     monkeypatch.setattr(_socket, "getaddrinfo", _fake_getaddrinfo)
     resp = _post_sub("https://internal.example/")
     assert resp.status_code == 422, resp.text
     assert "private" in str(resp.json()).lower()
 
 
-def test_post_webhook_accepts_https_private_ip_with_env_optin(monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: E501
+def test_post_webhook_accepts_https_private_ip_with_env_optin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("GW2ANALYTICS_ALLOW_PRIVATE_WEBHOOK_URLS", "1")
     get_settings.cache_clear()
     resp = _post_sub("https://10.0.0.2/")
@@ -201,14 +208,37 @@ def _bootstrap_webhook_environment(session_factory: Any) -> tuple[Any, str]:
     try:
         fight = session.get(OrmFight, "fixture-fight-id")
         if fight is None:
-            fight = OrmFight(id="fixture-fight-id", upload_id=_uuid.uuid4(), build_version="20240925", encounter_id=0, agent_count=0, started_at=datetime.now(UTC), game_type=0)  # noqa: E501
+            fight = OrmFight(
+                id="fixture-fight-id",
+                upload_id=_uuid.uuid4(),
+                build_version="20240925",
+                encounter_id=0,
+                agent_count=0,
+                started_at=datetime.now(UTC),
+                game_type=0,
+            )
             session.add(fight)
         upload = session.get(Upload, "fixture-upload-id")
         if upload is None:
-            upload = Upload(id=_uuid.uuid4(), sha256="fixture-sha256", original_filename="fixture.zevtc", size_bytes=100, status=UPLOAD_STATUS_COMPLETED, parser_version="1")  # noqa: E501
+            upload = Upload(
+                id=_uuid.uuid4(),
+                sha256="fixture-sha256",
+                original_filename="fixture.zevtc",
+                size_bytes=100,
+                status=UPLOAD_STATUS_COMPLETED,
+                parser_version="1",
+            )
             session.add(upload)
         session.commit()
-        sub = OrmWebhookSubscription(id="whsub_scheduler", url="https://93.184.216.34/scheduler", filter_payload={"kind": "upload_completed"}, ciphertext=b"dummy", description=None, created_at=datetime.now(UTC), revoked_at=None)  # noqa: E501
+        sub = OrmWebhookSubscription(
+            id="whsub_scheduler",
+            url="https://93.184.216.34/scheduler",
+            filter_payload={"kind": "upload_completed"},
+            ciphertext=b"dummy",
+            description=None,
+            created_at=datetime.now(UTC),
+            revoked_at=None,
+        )
         session.add(sub)
         session.commit()
         return session, sub.id
@@ -219,7 +249,12 @@ def _bootstrap_webhook_environment(session_factory: Any) -> tuple[Any, str]:
 def _seed_failed_delivery(session_factory: Any, sub_id: str, attempt: int = 3) -> str:
     session = session_factory()
     try:
-        dly = OrmWebhookDelivery(id=f"dly_{_uuid.uuid4().hex[:16]}", subscription_id=sub_id, upload_id="fixture-upload-id", attempt=attempt)  # noqa: E501
+        dly = OrmWebhookDelivery(
+            id=f"dly_{_uuid.uuid4().hex[:16]}",
+            subscription_id=sub_id,
+            upload_id="fixture-upload-id",
+            attempt=attempt,
+        )
         session.add(dly)
         session.commit()
         return dly.id
@@ -254,6 +289,7 @@ def test_replayed_delivery_byte_for_byte_hmac_matches_original(session_factory: 
 
 def test_encrypt_decrypt_round_trip_yields_original() -> None:
     from gw2analytics_api.config import get_settings
+
     plaintext = b"whsec_test_secret_value_32_chars_long!"
     kek = get_settings().secrets_kek.get_secret_value().encode("ascii")
     ciphertext = encrypt_webhook_secret(plaintext, kek)

@@ -38,9 +38,6 @@ async def sync_guilds(db: Session, api_key: str) -> list[dict[str, Any]]:  # noq
 def list_guilds_for_account(db: Session, account_name: str) -> list[Guild]:
     """Return all guilds that the given account is a member of."""
     stmt = (
-        select(Guild)
-        .join(GuildMember)
-        .where(GuildMember.account_name == account_name)
-        .distinct()
+        select(Guild).join(GuildMember).where(GuildMember.account_name == account_name).distinct()
     )
     return db.execute(stmt).scalars().all()

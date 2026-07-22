@@ -304,12 +304,15 @@ def setup_logging(*, level: str | int = logging.INFO) -> None:
 
 class _JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        return json.dumps({
-            "t": self.formatTime(record),
-            "level": record.levelname,
-            "name": record.name,
-            "msg": record.getMessage(),
-            "module": record.module,
-            "func": record.funcName,
-            "line": record.lineno,
-        }, default=str)
+        return json.dumps(
+            {
+                "t": self.formatTime(record),
+                "level": record.levelname,
+                "name": record.name,
+                "msg": record.getMessage(),
+                "module": record.module,
+                "func": record.funcName,
+                "line": record.lineno,
+            },
+            default=str,
+        )

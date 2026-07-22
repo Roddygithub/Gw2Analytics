@@ -156,4 +156,3 @@ class TestTargetDpsAggregator:
             name_map={7: "HealBrand"},  # 42 not in the map
         )
         assert rows[0].name is None
-

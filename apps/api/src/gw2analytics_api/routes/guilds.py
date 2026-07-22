@@ -62,9 +62,7 @@ def get_guild(
     if guild is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "guild not found")
     members = (
-        db.execute(select(GuildMember).where(GuildMember.guild_id == guild_id))
-        .scalars()
-        .all()
+        db.execute(select(GuildMember).where(GuildMember.guild_id == guild_id)).scalars().all()
     )
     return GuildDetailOut(
         id=guild.id,

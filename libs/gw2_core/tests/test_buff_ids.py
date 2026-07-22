@@ -44,9 +44,7 @@ class TestClassifyBuff:
     )
     def test_classify_boon(self, buff_id: int, name: str) -> None:
         """Well-known boon IDs classify as BOON."""
-        assert classify_buff(buff_id) == BuffCategory.BOON, (
-            f"{name} ({buff_id}) should be BOON"
-        )
+        assert classify_buff(buff_id) == BuffCategory.BOON, f"{name} ({buff_id}) should be BOON"
 
     # -- Damage conditions --
     @pytest.mark.parametrize(
@@ -134,16 +132,13 @@ class TestBuffCategoryMap:
         """No buff ID appears in more than one category."""
         assert not (_BOON_IDS & _CONDITION_DAMAGE_IDS), "boon ∩ damage condition"
         assert not (_BOON_IDS & _CONDITION_CONTROL_IDS), "boon ∩ control condition"
-        assert not (
-            _CONDITION_DAMAGE_IDS & _CONDITION_CONTROL_IDS
-        ), "damage ∩ control condition"
+        assert not (_CONDITION_DAMAGE_IDS & _CONDITION_CONTROL_IDS), "damage ∩ control condition"
 
     def test_total_count_matches_known_sets(self) -> None:
         """The BUFF_CATEGORY_MAP has exactly |boons|+|damage|+|control| entries."""
         expected = len(_BOON_IDS) + len(_CONDITION_DAMAGE_IDS) + len(_CONDITION_CONTROL_IDS)
         assert len(BUFF_CATEGORY_MAP) == expected, (
-            f"BUFF_CATEGORY_MAP has {len(BUFF_CATEGORY_MAP)} entries, "
-            f"expected {expected}"
+            f"BUFF_CATEGORY_MAP has {len(BUFF_CATEGORY_MAP)} entries, expected {expected}"
         )
 
     def test_total_count_at_least_twenty_eight(self) -> None:

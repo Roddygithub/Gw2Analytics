@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 def _duration_s_from_events(events: list[Event]) -> float:
     return max(e.time_ms for e in events) / 1000.0
 
+
 # v0.10.25 fix: cache the PARSED events list (not just the gzipped
 # bytes) so the 5 endpoints that call _load_fight_events in parallel
 # (events / squads / skills / timeline / timeline-players) share ONE

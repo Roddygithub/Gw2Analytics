@@ -1,5 +1,4 @@
-"""End-to-end tests for the v0.9.0 ``?profession=`` filter on ``GET /api/v1/players``.
-"""
+"""End-to-end tests for the v0.9.0 ``?profession=`` filter on ``GET /api/v1/players``."""
 
 from __future__ import annotations
 

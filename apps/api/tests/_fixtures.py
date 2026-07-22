@@ -134,3 +134,9 @@ def _make_minimal_zevtc(
             body += ev
         zf.writestr("fight.evtc", header + bytes(body))
     return buf.getvalue()
+
+
+# Public alias (no underscore prefix) so the 15+ test files that
+# import ``from _fixtures import make_minimal_zevtc`` (rather than
+# the ``_make_minimal_zevtc`` form) continue to work.
+make_minimal_zevtc = _make_minimal_zevtc

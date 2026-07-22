@@ -176,4 +176,3 @@ class TestPlayerBoonsAggregator:
         )
         with pytest.raises(ValidationError):
             row.agent_id = 999  # type: ignore[misc]
-

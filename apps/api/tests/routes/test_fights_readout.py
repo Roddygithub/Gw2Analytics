@@ -459,16 +459,14 @@ def test_readout_boon_uptimes_and_presence_pct() -> None:
     # All 14 boon uptimes should be 85.0.
     for name in TRACKED_BUFFS:
         assert getattr(a_readout.boons, f"{name}_uptime") == 85.0, (
-            f"expected {name}_uptime=85.0, "
-            f"got {getattr(a_readout.boons, f'{name}_uptime')}"
+            f"expected {name}_uptime=85.0, got {getattr(a_readout.boons, f'{name}_uptime')}"
         )
 
     # All 14 outgoing boons should be 5000.
     for name in TRACKED_BUFFS:
         outgoing_field = f"outgoing_{name}"
         assert getattr(a_readout.boons, outgoing_field) == 5000, (
-            f"expected {outgoing_field}=5000, "
-            f"got {getattr(a_readout.boons, outgoing_field)}"
+            f"expected {outgoing_field}=5000, got {getattr(a_readout.boons, outgoing_field)}"
         )
 
     # Presence: player a has events at t=1000..2300 (boons) + t=5000
@@ -615,30 +613,25 @@ def test_readout_phase6_v2_barrier_and_condi_split_live() -> None:
         f"got {a_readout.heal.barrier_total}"
     )
     assert a_readout.heal.barrier_ps == pytest.approx(500.0 / duration_s, abs=1.0), (
-        f"expected barrier_ps ≈ {500.0 / duration_s:.1f}, "
-        f"got {a_readout.heal.barrier_ps}"
+        f"expected barrier_ps ≈ {500.0 / duration_s:.1f}, got {a_readout.heal.barrier_ps}"
     )
 
     # DPS split: DamageEvent.damage=1000, buff_dmg=300
     # → condi = min(1000, 300) = 300, power = 1000 - 300 = 700
     assert a_readout.damage.dps_power == pytest.approx(700.0 / duration_s, abs=1.0), (
-        f"expected dps_power ≈ {700.0 / duration_s:.1f}, "
-        f"got {a_readout.damage.dps_power}"
+        f"expected dps_power ≈ {700.0 / duration_s:.1f}, got {a_readout.damage.dps_power}"
     )
     assert a_readout.damage.dps_condi == pytest.approx(300.0 / duration_s, abs=1.0), (
-        f"expected dps_condi ≈ {300.0 / duration_s:.1f}, "
-        f"got {a_readout.damage.dps_condi}"
+        f"expected dps_condi ≈ {300.0 / duration_s:.1f}, got {a_readout.damage.dps_condi}"
     )
     # dps_total should be (700 + 300) / 3 = 333.3
     assert a_readout.damage.dps_total == pytest.approx(1000.0 / duration_s, abs=1.0), (
-        f"expected dps_total ≈ {1000.0 / duration_s:.1f}, "
-        f"got {a_readout.damage.dps_total}"
+        f"expected dps_total ≈ {1000.0 / duration_s:.1f}, got {a_readout.damage.dps_total}"
     )
 
     # Player a cast the heal → heal_total=1000 (source-side attribution)
     assert a_readout.heal.heal_total == 1000, (
-        f"expected heal_total=1000 (cast heal on b), "
-        f"got {a_readout.heal.heal_total}"
+        f"expected heal_total=1000 (cast heal on b), got {a_readout.heal.heal_total}"
     )
 
     # Player b received the heal but cast none → heal_total=0
@@ -664,7 +657,7 @@ def test_readout_down_contribution_dps_wired() -> None:
     attributed to the killing player.
     """
     a = 700_001  # damage dealer
-    b = a + 1   # target (goes down)
+    b = a + 1  # target (goes down)
     damage_skill = 7_500_001
 
     # Player b goes down at t=1000, then a damages b at t=2000
@@ -727,13 +720,10 @@ def test_readout_down_contribution_dps_wired() -> None:
     a_readout = next(p for p in out.players if p.agent_id == a)
     # 1000 damage to downed target / 5.0s = 200.0 DPS
     assert a_readout.damage.down_contribution_dps == pytest.approx(200.0, abs=1.0), (
-        f"expected down_contribution_dps ≈ 200.0, "
-        f"got {a_readout.damage.down_contribution_dps}"
+        f"expected down_contribution_dps ≈ 200.0, got {a_readout.damage.down_contribution_dps}"
     )
     # a killed b via DeathEvent.killed_by_agent_id
-    assert a_readout.damage.kills == 1, (
-        f"expected kills=1, got {a_readout.damage.kills}"
-    )
+    assert a_readout.damage.kills == 1, f"expected kills=1, got {a_readout.damage.kills}"
 
     b_readout = next(p for p in out.players if p.agent_id == b)
     # b didn't damage anyone while they were downed
@@ -754,32 +744,53 @@ def test_readout_cleave_targets() -> None:
     DamageEvents targeting different agents.
     """
     a = 800_001  # damage dealer
-    b = a + 1   # target 1
-    c = a + 2   # target 2
+    b = a + 1  # target 1
+    c = a + 2  # target 2
     dmg_skill = 8_500_001
 
     # Player a damages b (twice, same target), c (once), and a dummy.
     events = [
-        DamageEvent(time_ms=1_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=100),  # noqa: E501
-        DamageEvent(time_ms=2_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=200),  # noqa: E501
-        DamageEvent(time_ms=3_000, source_agent_id=a, target_agent_id=c, skill_id=dmg_skill, damage=300),  # noqa: E501
+        DamageEvent(
+            time_ms=1_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=100
+        ),
+        DamageEvent(
+            time_ms=2_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=200
+        ),
+        DamageEvent(
+            time_ms=3_000, source_agent_id=a, target_agent_id=c, skill_id=dmg_skill, damage=300
+        ),
     ]
 
     aid_to_identity = {
         a: AgentIdentity(
-            agent_id=a, name=f"Cleaver {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
-            is_player=True, is_commander=False,
+            agent_id=a,
+            name=f"Cleaver {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(2)",
+            elite_spec="Berserker",
+            is_player=True,
+            is_commander=False,
         ),
         b: AgentIdentity(
-            agent_id=b, name=f"Target1 {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="Dragonhunter",
-            is_player=True, is_commander=False,
+            agent_id=b,
+            name=f"Target1 {b}",
+            subgroup=0,
+            account_name=f"synth.{b}",
+            profession="PROF(1)",
+            elite_spec="Dragonhunter",
+            is_player=True,
+            is_commander=False,
         ),
         c: AgentIdentity(
-            agent_id=c, name=f"Target2 {c}", subgroup=0,
-            account_name=f"synth.{c}", profession="PROF(1)", elite_spec="Dragonhunter",
-            is_player=True, is_commander=False,
+            agent_id=c,
+            name=f"Target2 {c}",
+            subgroup=0,
+            account_name=f"synth.{c}",
+            profession="PROF(1)",
+            elite_spec="Dragonhunter",
+            is_player=True,
+            is_commander=False,
         ),
     }
     out = aggregate_combat_readout(
@@ -809,9 +820,14 @@ def test_readout_dist_to_commander_no_commander() -> None:
     a = 900_001
     aid_to_identity = {
         a: AgentIdentity(
-            agent_id=a, name=f"NoCmd {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
-            is_player=True, is_commander=False,
+            agent_id=a,
+            name=f"NoCmd {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(2)",
+            elite_spec="Berserker",
+            is_player=True,
+            is_commander=False,
         ),
     }
     # Player a has position events.
@@ -842,7 +858,7 @@ def test_readout_dual_role_heal_support() -> None:
     from gw2_core import BoonApplyEvent
 
     a = 950_001  # healer + support
-    b = a + 1   # minor healer (so total > 0)
+    b = a + 1  # minor healer (so total > 0)
     heal_skill = 9_500_001
     boon_skill = 9_500_002
 
@@ -878,14 +894,24 @@ def test_readout_dual_role_heal_support() -> None:
 
     aid_to_identity = {
         a: AgentIdentity(
-            agent_id=a, name=f"HealSup {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(1)", elite_spec="Firebrand",
-            is_player=True, is_commander=False,
+            agent_id=a,
+            name=f"HealSup {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(1)",
+            elite_spec="Firebrand",
+            is_player=True,
+            is_commander=False,
         ),
         b: AgentIdentity(
-            agent_id=b, name=f"Minor {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(2)", elite_spec="Berserker",
-            is_player=True, is_commander=False,
+            agent_id=b,
+            name=f"Minor {b}",
+            subgroup=0,
+            account_name=f"synth.{b}",
+            profession="PROF(2)",
+            elite_spec="Berserker",
+            is_player=True,
+            is_commander=False,
         ),
     }
     out = aggregate_combat_readout(
@@ -903,17 +929,13 @@ def test_readout_dual_role_heal_support() -> None:
     # Player a: 900 heal (90% of squad) → HEAL primary.
     # BOON is NOT an additional role (per-axis threshold was
     # already crossed by HEAL; BOON spec hint is the fallback only).
-    assert "Heal" in a_readout.roles, (
-        f"expected 'Heal' in roles, got {a_readout.roles}"
-    )
+    assert "Heal" in a_readout.roles, f"expected 'Heal' in roles, got {a_readout.roles}"
 
     b_readout = next(p for p in out.players if p.agent_id == b)
     # Player b: 10%% heal share (exactly 10%% — NOT >10%%)
     # Player b: 100 heal (10% of squad) — below the HEAL weighted-effort
     # threshold, and no spec hint (Berserker=DPS). DPS fallback.
-    assert b_readout.roles == ["DPS"], (
-        f"expected ['DPS'], got {b_readout.roles}"
-    )
+    assert b_readout.roles == ["DPS"], f"expected ['DPS'], got {b_readout.roles}"
 
 
 # -----------------------------------------------------------------
@@ -930,7 +952,7 @@ def test_readout_cleanser_role() -> None:
     from gw2_core import BuffRemovalEvent
 
     a = 970_001  # cleanser
-    b = a + 1   # target
+    b = a + 1  # target
     cl_skill = 9_700_001
 
     # 11 cleanse events — all condition buff_ids (Bleeding=736)
@@ -949,14 +971,24 @@ def test_readout_cleanser_role() -> None:
 
     aid_to_identity = {
         a: AgentIdentity(
-            agent_id=a, name=f"Cleanser {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(1)", elite_spec="Firebrand",
-            is_player=True, is_commander=False,
+            agent_id=a,
+            name=f"Cleanser {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(1)",
+            elite_spec="Firebrand",
+            is_player=True,
+            is_commander=False,
         ),
         b: AgentIdentity(
-            agent_id=b, name=f"Target {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(2)", elite_spec="Berserker",
-            is_player=True, is_commander=False,
+            agent_id=b,
+            name=f"Target {b}",
+            subgroup=0,
+            account_name=f"synth.{b}",
+            profession="PROF(2)",
+            elite_spec="Berserker",
+            is_player=True,
+            is_commander=False,
         ),
     }
     out = aggregate_combat_readout(
@@ -998,14 +1030,24 @@ def test_readout_cc_role() -> None:
 
     aid_to_identity = {
         a: AgentIdentity(
-            agent_id=a, name=f"CCer {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
-            is_player=True, is_commander=False,
+            agent_id=a,
+            name=f"CCer {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(2)",
+            elite_spec="Berserker",
+            is_player=True,
+            is_commander=False,
         ),
         b: AgentIdentity(
-            agent_id=b, name=f"Target {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="Dragonhunter",
-            is_player=True, is_commander=False,
+            agent_id=b,
+            name=f"Target {b}",
+            subgroup=0,
+            account_name=f"synth.{b}",
+            profession="PROF(1)",
+            elite_spec="Dragonhunter",
+            is_player=True,
+            is_commander=False,
         ),
     }
     out = aggregate_combat_readout(
@@ -1017,9 +1059,7 @@ def test_readout_cc_role() -> None:
     )
 
     a_readout = next(p for p in out.players if p.agent_id == a)
-    assert "CC" in a_readout.roles, (
-        f"expected 'CC' in roles for 4 CC, got {a_readout.roles}"
-    )
+    assert "CC" in a_readout.roles, f"expected 'CC' in roles for 4 CC, got {a_readout.roles}"
     assert a_readout.damage.cc_applied == 4
 
 
@@ -1032,7 +1072,7 @@ def test_readout_strip_role() -> None:
     from gw2_core import BuffRemovalEvent
 
     a = 960_001  # stripper
-    b = a + 1   # target
+    b = a + 1  # target
     strip_skill = 9_600_001
 
     # 6 strip events — all non-condition buff_ids (Might=740)
@@ -1051,14 +1091,24 @@ def test_readout_strip_role() -> None:
 
     aid_to_identity = {
         a: AgentIdentity(
-            agent_id=a, name=f"Stripper {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
-            is_player=True, is_commander=False,
+            agent_id=a,
+            name=f"Stripper {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(2)",
+            elite_spec="Berserker",
+            is_player=True,
+            is_commander=False,
         ),
         b: AgentIdentity(
-            agent_id=b, name=f"Target {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="Dragonhunter",
-            is_player=True, is_commander=False,
+            agent_id=b,
+            name=f"Target {b}",
+            subgroup=0,
+            account_name=f"synth.{b}",
+            profession="PROF(1)",
+            elite_spec="Dragonhunter",
+            is_player=True,
+            is_commander=False,
         ),
     }
     out = aggregate_combat_readout(
@@ -1104,9 +1154,7 @@ def test_readout_e2e_sample_zevtc_commander(client: TestClient) -> None:
 
     # Commander: is_commander=True, name stripped of [CMDR]
     cmd = next(p for p in payload["players"] if p["is_commander"])
-    assert "[CMDR]" not in cmd["name"], (
-        f"commander name should be stripped: {cmd['name']}"
-    )
+    assert "[CMDR]" not in cmd["name"], f"commander name should be stripped: {cmd['name']}"
     assert cmd["is_commander"] is True
 
     # Regular player: is_commander=False
@@ -1129,14 +1177,24 @@ def test_readout_dist_to_commander_with_commander() -> None:
 
     aid_to_identity = {
         a: AgentIdentity(
-            agent_id=a, name=f"Player {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
-            is_player=True, is_commander=False,
+            agent_id=a,
+            name=f"Player {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(2)",
+            elite_spec="Berserker",
+            is_player=True,
+            is_commander=False,
         ),
         c: AgentIdentity(
-            agent_id=c, name=f"Cmd {c}", subgroup=0,
-            account_name=f"synth.{c}", profession="PROF(1)", elite_spec="Dragonhunter",
-            is_player=True, is_commander=True,
+            agent_id=c,
+            name=f"Cmd {c}",
+            subgroup=0,
+            account_name=f"synth.{c}",
+            profession="PROF(1)",
+            elite_spec="Dragonhunter",
+            is_player=True,
+            is_commander=True,
         ),
     }
     # Commander at (0, 0), player at (300, 400) — distance = 500 units

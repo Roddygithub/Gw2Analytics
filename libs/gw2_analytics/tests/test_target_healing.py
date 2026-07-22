@@ -143,4 +143,3 @@ class TestTargetHealingAggregator:
         by_target = {r.target_agent_id: r for r in rows}
         assert by_target[7].name == "HealBrand"
         assert by_target[9].name is None
-

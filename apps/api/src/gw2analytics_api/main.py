@@ -125,8 +125,7 @@ async def _init_arq_pool(app: FastAPI) -> None:
             if attempt < retry_attempts:
                 delay = retry_base_s * (2 ** (attempt - 1))
                 logger.warning(
-                    "arq pool init attempt %d/%d failed (type=%s); "
-                    "retrying in %.0fs",
+                    "arq pool init attempt %d/%d failed (type=%s); retrying in %.0fs",
                     attempt,
                     retry_attempts,
                     type(exc).__name__,

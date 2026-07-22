@@ -284,7 +284,6 @@ def _build_player_readout(
     )
 
 
-
 class _CombatCounters:
     """Aggregated counters extracted from raw events."""
 
@@ -323,7 +322,8 @@ def _compute_combat_counters(
                 counters.strips[event.source_agent_id] += 1
         elif isinstance(event, DamageEvent):
             counters.cleave_targets.setdefault(
-                event.source_agent_id, set(),
+                event.source_agent_id,
+                set(),
             ).add(event.target_agent_id)
         elif isinstance(event, CCEvent):
             counters.cc[event.source_agent_id] += 1
@@ -495,8 +495,7 @@ def aggregate_combat_readout(
         duration_s,
     )
     down_contrib_by_id: dict[int, tuple[float, int]] = {
-        r.source_agent_id: (r.down_contribution_dps, r.kills)
-        for r in down_contribution_rows
+        r.source_agent_id: (r.down_contribution_dps, r.kills) for r in down_contribution_rows
     }
 
     heal_lookup: dict[int, PlayerHealRow] = {r.source_agent_id: r for r in heal_rows}
@@ -568,10 +567,7 @@ def _downsample_positions(
     if len(selected) > 2000:
         selected = [selected[(len(selected) * i) // 2000] for i in range(2000)]
 
-    samples = [
-        PositionSampleOut(x=e.x, y=e.y, z=0.0)
-        for e in selected
-    ]
+    samples = [PositionSampleOut(x=e.x, y=e.y, z=0.0) for e in selected]
     return samples, [[e.time_ms, e.x, e.y] for e in selected]
 
 
@@ -580,7 +576,7 @@ def _collect_position_samples(
     agent_id_to_identity_map: dict[int, AgentIdentity],
 ) -> tuple[
     dict[int, list[PositionEvent]],  # raw_by_agent
-    dict[str, list[list[float]]],    # player_samples
+    dict[str, list[list[float]]],  # player_samples
     dict[str, list[PositionSampleOut]],  # samples_by_account
 ]:
     """Collect and downsample position events per account."""
@@ -692,14 +688,16 @@ def aggregate_player_positions(
         return []
 
     raw_by_agent, player_samples, samples_by_account = _collect_position_samples(
-        events, agent_id_to_identity_map,
+        events,
+        agent_id_to_identity_map,
     )
     if not player_samples or not samples_by_account or not raw_by_agent:
         return []
 
     metrics = compute_position_metrics(player_samples)
     dist_to_commander_by_account = _compute_commander_distances(
-        player_samples, agent_id_to_identity_map,
+        player_samples,
+        agent_id_to_identity_map,
     )
 
     return _build_position_results(

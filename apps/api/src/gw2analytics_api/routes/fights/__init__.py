@@ -1008,11 +1008,7 @@ def get_fight_readout(
     # and persisted alongside the damage/heal/strip totals. One small
     # SELECT (1-50 rows) avoids an O(N) recomputation from the event stream.
     summary_rows = (
-        db.execute(
-            select(OrmFightPlayerSummary).where(
-                OrmFightPlayerSummary.fight_id == fight_id
-            )
-        )
+        db.execute(select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id))
         .scalars()
         .all()
     )
@@ -1072,6 +1068,3 @@ def get_fight_readout(
         boon_uptimes_by_account=boon_uptimes_by_account or None,
         dist_to_commander_by_account=dist_to_commander_by_account or None,
     )
-
-
-

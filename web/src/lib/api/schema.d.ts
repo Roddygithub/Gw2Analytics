@@ -473,6 +473,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/guilds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Guilds
+         * @description List all guilds that the given account is a member of.
+         */
+        get: operations["list_guilds_api_v1_guilds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/guilds/{guild_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Guild
+         * @description Return guild info + members for a specific guild.
+         */
+        get: operations["get_guild_api_v1_guilds__guild_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health/summary": {
         parameters: {
             query?: never;
@@ -701,14 +741,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List Skills
-         * @description Return the FULL catalog. The frontend caches this once.
-         *
-         *     Empty catalog (lifespan loaded 0 entries) returns ``[]`` per the
-         *     public contract. App-level state missing (lifespan startup
-         *     failure) returns ``503 SKILLS_UNAVAILABLE``.
-         */
+        /** List Skills */
         get: operations["list_skills_api_v1_skills_get"];
         put?: never;
         post?: never;
@@ -725,10 +758,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Skill
-         * @description Return ONE catalog entry by arcdps skill id. 404 on unknown id.
-         */
+        /** Get Skill */
         get: operations["get_skill_api_v1_skills__skill_id__get"];
         put?: never;
         post?: never;
@@ -1173,6 +1203,36 @@ export interface components {
              */
             offset: number;
         };
+        /** GuildDetailOut */
+        GuildDetailOut: {
+            /** Id */
+            id: string;
+            /**
+             * Members
+             * @default []
+             */
+            members: components["schemas"]["GuildMemberOut"][];
+            /** Name */
+            name: string;
+            /** Tag */
+            tag: string;
+        };
+        /** GuildInfoOut */
+        GuildInfoOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Tag */
+            tag: string;
+        };
+        /** GuildMemberOut */
+        GuildMemberOut: {
+            /** Account Name */
+            account_name: string;
+            /** Rank */
+            rank: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1299,19 +1359,6 @@ export interface components {
             /** Window S */
             window_s: number;
         };
-        /** PerPlayerTimelinePointOut */
-        PerPlayerTimelinePointOut: {
-            /** Total Buff Removal */
-            total_buff_removal: number;
-            /** Total Damage */
-            total_damage: number;
-            /** Total Healing */
-            total_healing: number;
-            /** Window End Ms */
-            window_end_ms: number;
-            /** Window Start Ms */
-            window_start_ms: number;
-        };
         /** PerPlayerTimelineSeriesOut */
         PerPlayerTimelineSeriesOut: {
             /** Account Name */
@@ -1322,7 +1369,7 @@ export interface components {
              * Points
              * @default []
              */
-            points: components["schemas"]["PerPlayerTimelinePointOut"][];
+            points: components["schemas"]["PerFightTimelinePointOut"][];
         };
         /** PlayerListRowOut */
         PlayerListRowOut: {
@@ -1363,6 +1410,8 @@ export interface components {
             account_name: string;
             /** Dist To Com */
             dist_to_com: number | null;
+            /** Dist To Commander */
+            dist_to_commander?: number | null;
             /** Elite Spec */
             elite_spec: string;
             /** Name */
@@ -1420,6 +1469,12 @@ export interface components {
          *     ``other_boons_out`` (a free-form name → count mapping;
          *     default empty dict so the frontend renders the empty-state
          *     column without a conditional branch).
+         *
+         *     Plan 173 v0.12.x: 14 boon uptime percentage fields (0-100)
+         *     added alongside the existing raw counts. Uptimes are hydrated
+         *     from ``OrmFightPlayerSummary`` (pre-computed during parse),
+         *     not recalculated from the event stream. ``None`` means
+         *     "unavailable" (pre-migration fight or no boon events).
          */
         PlayerReadoutBoonsOut: {
             /**
@@ -1427,11 +1482,15 @@ export interface components {
              * @default 0
              */
             aegis_out: number;
+            /** Aegis Uptime */
+            aegis_uptime?: number | null;
             /**
              * Alacrity Out
              * @default 0
              */
             alacrity_out: number;
+            /** Alacrity Uptime */
+            alacrity_uptime?: number | null;
             /**
              * Boons In Rate
              * @default 0
@@ -1442,6 +1501,10 @@ export interface components {
              * @default 0
              */
             boons_out_rate: number;
+            /** Fury Uptime */
+            fury_uptime?: number | null;
+            /** Might Uptime */
+            might_uptime?: number | null;
             /**
              * Other Boons Out
              * @default {}
@@ -1449,26 +1512,74 @@ export interface components {
             other_boons_out: {
                 [key: string]: number;
             };
+            /** Outgoing Aegis */
+            outgoing_aegis?: number | null;
+            /** Outgoing Alacrity */
+            outgoing_alacrity?: number | null;
+            /** Outgoing Fury */
+            outgoing_fury?: number | null;
+            /** Outgoing Might */
+            outgoing_might?: number | null;
+            /** Outgoing Protection */
+            outgoing_protection?: number | null;
+            /** Outgoing Quickness */
+            outgoing_quickness?: number | null;
+            /** Outgoing Regeneration */
+            outgoing_regeneration?: number | null;
+            /** Outgoing Resistance */
+            outgoing_resistance?: number | null;
+            /** Outgoing Resolution */
+            outgoing_resolution?: number | null;
+            /** Outgoing Stability */
+            outgoing_stability?: number | null;
+            /** Outgoing Stealth */
+            outgoing_stealth?: number | null;
+            /** Outgoing Superspeed */
+            outgoing_superspeed?: number | null;
+            /** Outgoing Swiftness */
+            outgoing_swiftness?: number | null;
+            /** Outgoing Vigor */
+            outgoing_vigor?: number | null;
+            /** Protection Uptime */
+            protection_uptime?: number | null;
+            /** Quickness Uptime */
+            quickness_uptime?: number | null;
+            /** Regeneration Uptime */
+            regeneration_uptime?: number | null;
             /**
              * Resistance Out
              * @default 0
              */
             resistance_out: number;
+            /** Resistance Uptime */
+            resistance_uptime?: number | null;
+            /** Resolution Uptime */
+            resolution_uptime?: number | null;
             /**
              * Stability Out
              * @default 0
              */
             stability_out: number;
+            /** Stability Uptime */
+            stability_uptime?: number | null;
             /**
              * Stealth Out
              * @default 0
              */
             stealth_out: number;
+            /** Stealth Uptime */
+            stealth_uptime?: number | null;
             /**
              * Superspeed Out
              * @default 0
              */
             superspeed_out: number;
+            /** Superspeed Uptime */
+            superspeed_uptime?: number | null;
+            /** Swiftness Uptime */
+            swiftness_uptime?: number | null;
+            /** Vigor Uptime */
+            vigor_uptime?: number | null;
         };
         /**
          * PlayerReadoutDamageOut
@@ -1491,6 +1602,11 @@ export interface components {
              */
             cc_applied: number;
             /**
+             * Cleave Targets
+             * @default 0
+             */
+            cleave_targets: number;
+            /**
              * Down Contribution Dps
              * @default 0
              */
@@ -1511,6 +1627,11 @@ export interface components {
              */
             dps_total: number;
             /**
+             * Kill Participation
+             * @default 0
+             */
+            kill_participation: number;
+            /**
              * Kills
              * @default 0
              */
@@ -1528,8 +1649,13 @@ export interface components {
          *     Tour 5 v0.10.23 plan 045: Combat readout ``Defense``
          *     table (per §6 of the design doc). The ``time_downed_ms``
          *     column requires the parser to track the ``downed`` state
-         *     per target across events (Phase 6 v2 work); the v0.10.23
-         *     scaffold leaves it at 0 by default.
+         *     per target across events (Phase 6 v2, live since v0.12.2);
+         *     defaults to 0 for legacy streams.
+         *
+         *     Plan 173 Phase E: ``presence_pct`` is the percentage of
+         *     5-second event-window buckets in which the player appeared
+         *     as source or target of at least one event. ``None`` means
+         *     "unavailable" (no events or pre-migration fight).
          */
         PlayerReadoutDefenseOut: {
             /**
@@ -1557,6 +1683,8 @@ export interface components {
              * @default 0
              */
             deaths: number;
+            /** Dist To Commander */
+            dist_to_commander?: number | null;
             /**
              * Dodges
              * @default 0
@@ -1567,6 +1695,13 @@ export interface components {
              * @default 0
              */
             interrupts: number;
+            /**
+             * Kill Participation
+             * @default 0
+             */
+            kill_participation: number;
+            /** Presence Pct */
+            presence_pct?: number | null;
             /**
              * Time Downed Ms
              * @default 0
@@ -1647,7 +1782,7 @@ export interface components {
          *     threshold-calibration is a follow-up cycle).
          *     ``is_commander`` defaults False (the commando-flag is
          *     ONLY rendered when the ORM exposes it; the v0.10.23
-         *     scaffold primes the field for the future Phase C
+         *     primes the field for the future Phase C
          *     feature where the parser writes the flag).
          */
         PlayerReadoutOut: {
@@ -1672,10 +1807,12 @@ export interface components {
             /**
              * @default {
              *       "cc_applied": 0,
+             *       "cleave_targets": 0,
              *       "down_contribution_dps": 0,
              *       "dps_condi": 0,
              *       "dps_power": 0,
              *       "dps_total": 0,
+             *       "kill_participation": 0,
              *       "kills": 0,
              *       "strips": 0
              *     }
@@ -1690,6 +1827,7 @@ export interface components {
              *       "deaths": 0,
              *       "dodges": 0,
              *       "interrupts": 0,
+             *       "kill_participation": 0,
              *       "time_downed_ms": 0
              *     }
              */
@@ -1753,31 +1891,6 @@ export interface components {
             profession: string;
         };
         /**
-         * PlayerSkillUsageRowOut
-         * @description One row of a per-player per-skill roll-up.
-         *
-         *     Tour 4 v0.10.13 plan 044: Skill build analyser. Same shape
-         *     as :class:`SkillUsageRowOut` (the per-fight roll-up) but
-         *     source-attributed to a specific player's agent. The frontend
-         *     uses this when the analyst picks a player on the per-fight
-         *     drill-down page (``PlayerSkillUsageFilter`` dropdown,
-         *     mirroring the v0.10.3 ``PerPlayerTimeline`` UX pattern).
-         */
-        PlayerSkillUsageRowOut: {
-            /** Hit Count */
-            hit_count: number;
-            /** Skill Id */
-            skill_id: number;
-            /** Skill Name */
-            skill_name: string;
-            /** Total Buff Removal */
-            total_buff_removal: number;
-            /** Total Damage */
-            total_damage: number;
-            /** Total Healing */
-            total_healing: number;
-        };
-        /**
          * PlayerSkillsOut
          * @description Per-player skill roll-up + loadout for one fight.
          *
@@ -1806,7 +1919,7 @@ export interface components {
              * Skills
              * @default []
              */
-            skills: components["schemas"]["PlayerSkillUsageRowOut"][];
+            skills: components["schemas"]["SkillUsageRowOut"][];
         };
         /** PlayerTimelineOut */
         PlayerTimelineOut: {
@@ -2117,17 +2230,7 @@ export interface components {
             /** Url */
             url: string;
         };
-        /**
-         * SkillOut
-         * @description API wire shape of one catalog entry.
-         *
-         *     Mirrors :class:`SkillEntry` minus the ``__init__``/``__contains__``
-         *     overhead. The ``profession`` field is typed as ``str | None``; the
-         *     IntEnum-to-string mapping happens in :func:`_to_wire` via
-         *     ``entry.profession.name``. Pydantic v2 ``model_dump`` on a plain
-         *     ``str | None`` field serialises the string as-is (no separate
-         *     field_serializer needed -- removed in v0.10.26-pre review #7).
-         */
+        /** SkillOut */
         gw2analytics_api__routes__skills__SkillOut: {
             /** Description */
             description: string | null;
@@ -2488,6 +2591,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PerPlayerTimelineOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_guilds_api_v1_guilds_get: {
+        parameters: {
+            query: {
+                account_name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuildInfoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_guild_api_v1_guilds__guild_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                guild_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuildDetailOut"];
                 };
             };
             /** @description Validation Error */

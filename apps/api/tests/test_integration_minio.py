@@ -79,9 +79,7 @@ def test_minio_bucket_read_write() -> None:
         response = client.get_object(bucket, key)
         try:
             data = response.read()
-            assert data == payload, (
-                f"Read-back mismatch: expected {payload!r}, got {data!r}"
-            )
+            assert data == payload, f"Read-back mismatch: expected {payload!r}, got {data!r}"
         finally:
             response.close()
             response.release_conn()

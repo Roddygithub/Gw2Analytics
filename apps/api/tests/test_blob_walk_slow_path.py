@@ -59,9 +59,7 @@ def _delete_summaries(fight_id: str) -> None:
     session = get_sessionmaker()()
     try:
         session.execute(
-            delete(OrmFightPlayerSummary).where(
-                OrmFightPlayerSummary.fight_id == fight_id
-            )
+            delete(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
         )
         session.commit()
     finally:
@@ -222,9 +220,7 @@ def test_slow_path_timeline_after_summary_deleted() -> None:
     assert slow_data["points"][1]["fight_id"] == fight_id_1
     assert slow_data["points"][1]["total_damage"] == 1_000
     # Per-point totals match fast-path.
-    for slow_point, fast_point in zip(
-        slow_data["points"], fast_data["points"], strict=True
-    ):
+    for slow_point, fast_point in zip(slow_data["points"], fast_data["points"], strict=True):
         assert slow_point["total_damage"] == fast_point["total_damage"]
         assert slow_point["total_healing"] == fast_point["total_healing"]
         assert slow_point["total_buff_removal"] == fast_point["total_buff_removal"]

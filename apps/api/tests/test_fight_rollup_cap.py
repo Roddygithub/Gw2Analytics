@@ -1,5 +1,4 @@
-"""v0.10.2 hotfix followup #12: per-target roll-up lists are capped at 100 rows.
-"""
+"""v0.10.2 hotfix followup #12: per-target roll-up lists are capped at 100 rows."""
 
 from __future__ import annotations
 
