@@ -203,6 +203,37 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     await expect(page.getByText("Whirlwind")).toBeVisible();
   });
 
+  test("readout tab renders Plan 173 uptime and presence columns", async ({ page }) => {
+    await page.goto("/fights/fixture-fight-001?tab=readout");
+
+    // The 4 per-aspect section headings
+    await expect(
+      page.getByRole("heading", { name: "Damage" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Heal" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Boons" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Defense" }),
+    ).toBeVisible();
+
+    // Plan 173: boon uptime grouped bar columns render with
+    // their French headers.
+    await expect(page.getByText("Offensifs")).toBeVisible();
+    await expect(page.getByText("Défensifs")).toBeVisible();
+    await expect(page.getByText("Mobilité")).toBeVisible();
+    await expect(page.getByText("Furtivité")).toBeVisible();
+
+    // Plan 173 Phase F: outgoing boons column.
+    await expect(page.getByText("Boons générés")).toBeVisible();
+
+    // Plan 173 Phase E: presence percentage column in Defense.
+    await expect(page.getByText("Présence %")).toBeVisible();
+  });
+
   test("direct navigation to a ?account=UNKNOWN_VALUE surfaces the section-level 'Player ... not found in this fight' diagnostic", async ({
     page,
   }) => {
