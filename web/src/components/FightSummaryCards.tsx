@@ -183,6 +183,7 @@ function SummaryPlayerRow({
               DPS: { bg: "rgba(239,68,68,0.15)", fg: "#f87171" },
               Heal: { bg: "rgba(34,197,94,0.15)", fg: "#4ade80" },
               Support: { bg: "rgba(168,85,247,0.15)", fg: "#c084fc" },
+              Strip: { bg: "rgba(251,191,36,0.15)", fg: "#fbbf24" },
             };
             const c = colors[role] ?? { bg: "rgba(255,255,255,0.06)", fg: "var(--foreground)" };
             return (

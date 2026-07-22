@@ -910,6 +910,68 @@ def test_readout_dual_role_heal_support() -> None:
     )
 
 
+# -----------------------------------------------------------------
+# Strip role (v0.14.6)
+# -----------------------------------------------------------------
+
+
+def test_readout_strip_role() -> None:
+    """A player with >5 strips gets the "Strip" role.
+
+    Seeds a player with 6 BuffRemovalEvents (non-condition = strips).
+    Verifies roles includes "Strip" alongside DPS.
+    """
+    from gw2_core import BuffRemovalEvent
+
+    a = 960_001  # stripper
+    b = a + 1   # target
+    strip_skill = 9_600_001
+
+    # 6 strip events — all non-condition buff_ids (Might=740)
+    strip_events = [
+        BuffRemovalEvent(
+            time_ms=i * 500,
+            source_agent_id=a,
+            target_agent_id=b,
+            skill_id=strip_skill,
+            buff_id=740,  # Might (boon, not condition)
+            stacks=1,
+            duration_remaining_ms=0,
+        )
+        for i in range(6)
+    ]
+
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a, name=f"Stripper {a}", subgroup=0,
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            is_player=True, is_commander=False,
+        ),
+        b: AgentIdentity(
+            agent_id=b, name=f"Target {b}", subgroup=0,
+            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="ELITE(27)",
+            is_player=True, is_commander=False,
+        ),
+    }
+    out = aggregate_combat_readout(
+        events=strip_events,
+        skill_id_to_name_map={strip_skill: "Strip"},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=3.0,
+        fight_id="strip-role-test",
+    )
+
+    a_readout = next(p for p in out.players if p.agent_id == a)
+    # 6 strips > 5 → role includes "Strip" (alongside DPS as fallback)
+    assert "Strip" in a_readout.roles, (
+        f"expected 'Strip' in roles for 6 strips, got {a_readout.roles}"
+    )
+    assert "DPS" in a_readout.roles, (
+        f"expected DPS fallback, got {a_readout.roles}"
+    )
+    assert a_readout.damage.strips == 6
+
+
 def test_readout_dist_to_commander_with_commander() -> None:
     """When a commander exists, dist_to_commander is computed for all players.
 

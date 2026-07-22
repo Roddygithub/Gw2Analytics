@@ -736,10 +736,11 @@ def aggregate_combat_readout(
         for r in down_contribution_rows
     }
 
-    # v0.14.4: basic role detection — DPS / Heal / Support based on
+    # v0.14.4: basic role detection — DPS / Heal / Support / Strip based on
     # heal share relative to the squad. If a player contributes >10%
     # of the squad's total healing, they're flagged as "Heal".
     # Boon-focused players (>1 boon/s out) are flagged as "Support".
+    # Strip-focused players (>5 strips) are flagged as "Strip".
     # Everyone else is "DPS". Iterates ALL player agents from the
     # identity map so every player gets a role.
     total_squad_healing = sum(r.total_healing for r in heal_rows)
@@ -754,6 +755,8 @@ def aggregate_combat_readout(
         br = boons_lookup.get(agent_id)
         if br and br.boons_out_rate > 1.0:
             roles.append("Support")
+        if strips_counter.get(agent_id, 0) > 5:
+            roles.append("Strip")
         if not roles:
             roles.append("DPS")
         roles_by_agent[agent_id] = roles
