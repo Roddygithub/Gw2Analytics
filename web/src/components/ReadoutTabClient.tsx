@@ -561,6 +561,7 @@ function StatBadge({ label, value, color }: { label: string; value: string; colo
         fontVariantNumeric: "tabular-nums",
       }}
       title={`${label}: ${value}`}
+      data-testid={`stat-badge-${label.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}
     >
       <span style={{ fontWeight: 700, color }}>{value}</span>
       <span style={{ opacity: 0.6, fontSize: 10 }}>{label}</span>
@@ -791,11 +792,14 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
         </section>
       )}
 
-      {/* Heatmap — self-contained, fetches its own data */}
-      <section>
-        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Carte des positions</h2>
-        <PlayerPositionHeatmap fightId={fightId} />
-      </section>
+      {/* Heatmap — self-contained, fetches own data. Only render the
+          section when we know positions are available (parent fetch succeeded). */}
+      {positions && (
+        <section>
+          <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Carte des positions</h2>
+          <PlayerPositionHeatmap fightId={fightId} />
+        </section>
+      )}
 
       {/* Tableau 1: Dégâts */}
       <section>

@@ -189,19 +189,22 @@ describe("GlobalStatsBar", () => {
       expect(screen.queryByText("Chargement")).toBeNull();
     });
 
-    // Check squad DPS total — "DPS" appears both as role badge and StatBadge label
-    expect(screen.getByText("3000")).toBeInTheDocument();
-    const dpsLabels = screen.getAllByText("DPS");
-    expect(dpsLabels.length).toBeGreaterThanOrEqual(1);
+    // Check squad DPS total via data-testid
+    const dpsBadge = screen.getByTestId("stat-badge-dps");
+    expect(dpsBadge).toBeInTheDocument();
+    expect(dpsBadge).toHaveTextContent("3000");
     // Check Heal/s
-    expect(screen.getByText("400")).toBeInTheDocument(); // 200+200
+    const healBadge = screen.getByTestId("stat-badge-heal-s");
+    expect(healBadge).toHaveTextContent("400");
     // Check strips
-    expect(screen.getByText("13")).toBeInTheDocument(); // 10+3
-    // Check cleanses (may also appear as role badge)
-    const sevens = screen.getAllByText("7");
-    expect(sevens.length).toBeGreaterThanOrEqual(1);
+    const stripBadge = screen.getByTestId("stat-badge-strips");
+    expect(stripBadge).toHaveTextContent("13");
+    // Check cleanses
+    const cleanseBadge = screen.getByTestId("stat-badge-cleanses");
+    expect(cleanseBadge).toHaveTextContent("7");
     // Check CC
-    expect(screen.getByText("9")).toBeInTheDocument(); // 7+2
+    const ccBadge = screen.getByTestId("stat-badge-cc");
+    expect(ccBadge).toHaveTextContent("9");
   });
 
   it("shows healer and support counts when present", async () => {
@@ -218,11 +221,10 @@ describe("GlobalStatsBar", () => {
       expect(screen.queryByText("Chargement")).toBeNull();
     });
 
-    expect(screen.getByText("Healers")).toBeInTheDocument();
-    expect(screen.getByText("Supports")).toBeInTheDocument();
-    // Both healer and support badges should exist with value "1"
-    const ones = screen.getAllByText("1");
-    expect(ones.length).toBeGreaterThanOrEqual(2); // at least DPS squad + healer count
+    expect(screen.getByTestId("stat-badge-healers")).toBeInTheDocument();
+    expect(screen.getByTestId("stat-badge-supports")).toBeInTheDocument();
+    expect(screen.getByTestId("stat-badge-healers")).toHaveTextContent("1");
+    expect(screen.getByTestId("stat-badge-supports")).toHaveTextContent("1");
   });
 
   it("does not show healer badge when no healers", async () => {
@@ -238,8 +240,8 @@ describe("GlobalStatsBar", () => {
       expect(screen.queryByText("Chargement")).toBeNull();
     });
 
-    expect(screen.queryByText("Healers")).not.toBeInTheDocument();
-    expect(screen.queryByText("Supports")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("stat-badge-healers")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("stat-badge-supports")).not.toBeInTheDocument();
   });
 });
 
