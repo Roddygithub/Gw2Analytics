@@ -55,11 +55,10 @@ def main() -> None:
             make_cbtevent(3_000, src=PLAYER_ID, dst=TARGET_ID, value=200, skill_id=DAMAGE_SKILL),
             # Commander heals player at t=4s
             make_cbtevent(4_000, src=COMMANDER_ID, dst=PLAYER_ID, value=800, skill_id=HEAL_SKILL, is_nondamage=1),
-            # Player applies boon (Might) to commander at t=5s, 6s
-            make_cbtevent(5_000, src=PLAYER_ID, dst=COMMANDER_ID, value=740, skill_id=BOON_SKILL, is_nondamage=1),
-            make_cbtevent(6_000, src=PLAYER_ID, dst=COMMANDER_ID, value=740, skill_id=BOON_SKILL, is_nondamage=1),
-            # Commander strips Might from target at t=7s
-            make_cbtevent(7_000, src=COMMANDER_ID, dst=TARGET_ID, value=740, skill_id=STRIP_SKILL, is_nondamage=1),
+            # Player heals commander at t=5s (simulates boon application)
+            make_cbtevent(5_000, src=PLAYER_ID, dst=COMMANDER_ID, value=300, skill_id=BOON_SKILL, is_nondamage=1),
+            # Commander heals player again at t=6s (simulates strip)
+            make_cbtevent(6_000, src=COMMANDER_ID, dst=PLAYER_ID, value=200, skill_id=STRIP_SKILL, is_nondamage=1),
         ],
     )
 

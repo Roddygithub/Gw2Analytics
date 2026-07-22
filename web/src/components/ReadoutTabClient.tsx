@@ -32,6 +32,7 @@ import {
   EliteSpecCellRenderer,
   CommanderCellRenderer,
 } from "./PlayerReadoutCells";
+import { ROLE_COLORS, ROLE_FALLBACK } from "@/lib/roleColors";
 
 /* ------------------------------------------------------------------ *
  *  Shared helpers
@@ -242,15 +243,6 @@ function BoonsBarCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
 /* ------------------------------------------------------------------ *
  *  Role badge cell renderer — coloured pills matching FightSummaryCards
  * ------------------------------------------------------------------ */
-
-const ROLE_COLORS: Record<string, { bg: string; fg: string }> = {
-  DPS: { bg: "rgba(239,68,68,0.15)", fg: "#f87171" },
-  Heal: { bg: "rgba(34,197,94,0.15)", fg: "#4ade80" },
-  Support: { bg: "rgba(168,85,247,0.15)", fg: "#c084fc" },
-  Strip: { bg: "rgba(251,191,36,0.15)", fg: "#fbbf24" },
-  Cleanser: { bg: "rgba(6,182,212,0.15)", fg: "#22d3ee" },
-};
-const ROLE_FALLBACK = { bg: "rgba(255,255,255,0.06)", fg: "var(--foreground)" };
 
 function RoleBadgeCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
   const roles = params.value as string[] | undefined;

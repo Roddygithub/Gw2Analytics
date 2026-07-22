@@ -741,6 +741,8 @@ def aggregate_combat_readout(
     # of the squad's total healing, they're flagged as "Heal".
     # Boon-focused players (>1 boon/s out) are flagged as "Support".
     # Strip-focused players (>5 strips) are flagged as "Strip".
+    # Cleanser-focused players (>10 cleanses) are flagged as "Cleanser".
+    # CC-focused players (>20 CC applied) are flagged as "CC".
     # Everyone else is "DPS". Iterates ALL player agents from the
     # identity map so every player gets a role.
     total_squad_healing = sum(r.total_healing for r in heal_rows)
@@ -759,6 +761,8 @@ def aggregate_combat_readout(
             roles.append("Strip")
         if cleanses_counter.get(agent_id, 0) > 10:
             roles.append("Cleanser")
+        if cc_counter.get(agent_id, 0) > 20:
+            roles.append("CC")
         if not roles:
             roles.append("DPS")
         roles_by_agent[agent_id] = roles

@@ -969,6 +969,54 @@ def test_readout_cleanser_role() -> None:
     assert a_readout.heal.cleanses == 11
 
 
+def test_readout_cc_role() -> None:
+    """A player with >20 CC applied gets the "CC" role.
+
+    Seeds a player with 21 CCEvents. Verifies roles includes "CC".
+    """
+    from gw2_core import CCEvent
+
+    a = 980_001  # CC specialist
+    b = a + 1
+    cc_skill = 9_800_001
+
+    cc_events = [
+        CCEvent(
+            time_ms=i * 100,
+            source_agent_id=a,
+            target_agent_id=b,
+            skill_id=cc_skill,
+        )
+        for i in range(21)
+    ]
+
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a, name=f"CCer {a}", subgroup=0,
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            is_player=True, is_commander=False,
+        ),
+        b: AgentIdentity(
+            agent_id=b, name=f"Target {b}", subgroup=0,
+            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="ELITE(27)",
+            is_player=True, is_commander=False,
+        ),
+    }
+    out = aggregate_combat_readout(
+        events=cc_events,
+        skill_id_to_name_map={cc_skill: "CC"},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=3.0,
+        fight_id="cc-role-test",
+    )
+
+    a_readout = next(p for p in out.players if p.agent_id == a)
+    assert "CC" in a_readout.roles, (
+        f"expected 'CC' in roles for 21 CC, got {a_readout.roles}"
+    )
+    assert a_readout.damage.cc_applied == 21
+
+
 def test_readout_strip_role() -> None:
     """A player with >5 strips gets the "Strip" role.
 
