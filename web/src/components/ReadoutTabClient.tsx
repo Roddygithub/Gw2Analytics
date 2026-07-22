@@ -129,13 +129,23 @@ function HealBar({ hps, bps, total }: { hps: number; bps: number; total: number 
 }
 
 /* ------------------------------------------------------------------ *
- *  Role badge
+ *  Role badge with tooltip
  * ------------------------------------------------------------------ */
+
+const ROLE_TOOLTIPS: Record<string, string> = {
+  DPS: "Dégâts : rôle déterminé par l'effort pondéré (dégâts ×1.0, heal ×2.5, strips ×5000).",
+  Heal: "Heal : spé healer (Druid/Tempest/Scourge/Specter) avec >15% d'effort de soin.",
+  Support: "Support : générateur de boons — spé BOON avec effort non-DPS dominant.",
+  Strip: "Strip : >35% d'effort de retrait de boons ennemis (BuffRemoval).",
+  CC: "CC : >3 compétences de contrôle (stun, daze, knockback…) appliquées.",
+  Cleanser: "Cleanser : >10 altérations (conditions) retirées des alliés.",
+};
 
 function RoleBadge({ role }: { role: string }) {
   const c = ROLE_COLORS[role] ?? ROLE_FALLBACK;
   return (
     <span
+      title={ROLE_TOOLTIPS[role] ?? role}
       style={{
         padding: "0 5px",
         borderRadius: 3,
@@ -145,6 +155,7 @@ function RoleBadge({ role }: { role: string }) {
         background: c.bg,
         color: c.fg,
         letterSpacing: "0.03em",
+        cursor: "help",
       }}
     >
       {role}
@@ -534,55 +545,84 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      {/* Role filter — clickable chips */}
+      {/* Print stylesheet — injected inline so print export works without global CSS changes */}
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          header, nav, .site-nav { display: none !important; }
+          body { background: #fff !important; color: #000 !important; }
+          table { font-size: 10px !important; }
+          [class*="TableWrapper"] { max-height: none !important; overflow: visible !important; border: 1px solid #ccc !important; }
+        }
+      `}</style>
+
+      {/* Print button + role filter row */}
       {allRoles.length > 1 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 11, opacity: 0.6, marginRight: 2 }}>Rôles :</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }} className="no-print">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, opacity: 0.6, marginRight: 2 }}>Rôles :</span>
+            <button
+              onClick={() => setRoleFilter(null)}
+              style={{
+                padding: "2px 10px", borderRadius: 12, border: roleFilter === null ? "1px solid var(--accent)" : "1px solid var(--border)",
+                background: roleFilter === null ? "var(--accent)" : "var(--surface)",
+                color: roleFilter === null ? "#fff" : "var(--foreground)",
+                cursor: "pointer", fontSize: 11, fontWeight: roleFilter === null ? 600 : 400,
+                fontFamily: "var(--font-geist-sans, sans-serif)",
+                transition: "all 0.15s",
+              }}
+            >
+              Tous ({players.length})
+            </button>
+            {allRoles.map((r) => {
+              const count = players.filter((p) => p.roles.includes(r)).length;
+              const active = roleFilter === r;
+              const c = ROLE_COLORS[r] ?? ROLE_FALLBACK;
+              return (
+                <button
+                  key={r}
+                  onClick={() => setRoleFilter(active ? null : r)}
+                  style={{
+                    padding: "2px 10px", borderRadius: 12,
+                    border: active ? `1px solid ${c.fg}` : "1px solid var(--border)",
+                    background: active ? c.bg : "var(--surface)",
+                    color: active ? c.fg : "var(--foreground)",
+                    cursor: "pointer", fontSize: 11, fontWeight: active ? 600 : 400,
+                    fontFamily: "var(--font-geist-sans, sans-serif)",
+                    transition: "all 0.15s",
+                    opacity: active ? 1 : 0.75,
+                  }}
+                  title={`${count} joueur${count > 1 ? "s" : ""}`}
+                >
+                  {r} ({count})
+                </button>
+              );
+            })}
+            {roleFilter && (
+              <span style={{
+                fontSize: 11, opacity: 0.5, fontVariantNumeric: "tabular-nums",
+                padding: "1px 6px", borderRadius: 3,
+              }}>
+                {filteredPlayers.length}/{players.length} joueurs
+              </span>
+            )}
+          </div>
           <button
-            onClick={() => setRoleFilter(null)}
+            onClick={() => window.print()}
             style={{
-              padding: "2px 10px", borderRadius: 12, border: roleFilter === null ? "1px solid var(--accent)" : "1px solid var(--border)",
-              background: roleFilter === null ? "var(--accent)" : "var(--surface)",
-              color: roleFilter === null ? "#fff" : "var(--foreground)",
-              cursor: "pointer", fontSize: 11, fontWeight: roleFilter === null ? 600 : 400,
+              padding: "4px 14px", borderRadius: 6,
+              border: "1px solid var(--border)",
+              background: "var(--surface)",
+              color: "var(--foreground)",
+              cursor: "pointer", fontSize: 12,
               fontFamily: "var(--font-geist-sans, sans-serif)",
-              transition: "all 0.15s",
+              display: "flex", alignItems: "center", gap: 4,
+              opacity: 0.7,
             }}
+            title="Imprimer ou exporter en PDF"
           >
-            Tous ({players.length})
+            🖨️ Imprimer
           </button>
-          {allRoles.map((r) => {
-            const count = players.filter((p) => p.roles.includes(r)).length;
-            const active = roleFilter === r;
-            const c = ROLE_COLORS[r] ?? ROLE_FALLBACK;
-            return (
-              <button
-                key={r}
-                onClick={() => setRoleFilter(active ? null : r)}
-                style={{
-                  padding: "2px 10px", borderRadius: 12,
-                  border: active ? `1px solid ${c.fg}` : "1px solid var(--border)",
-                  background: active ? c.bg : "var(--surface)",
-                  color: active ? c.fg : "var(--foreground)",
-                  cursor: "pointer", fontSize: 11, fontWeight: active ? 600 : 400,
-                  fontFamily: "var(--font-geist-sans, sans-serif)",
-                  transition: "all 0.15s",
-                  opacity: active ? 1 : 0.75,
-                }}
-                title={`${count} joueur${count > 1 ? "s" : ""}`}
-              >
-                {r} ({count})
-              </button>
-            );
-          })}
-          {roleFilter && (
-            <span style={{
-              fontSize: 11, opacity: 0.5, fontVariantNumeric: "tabular-nums",
-              padding: "1px 6px", borderRadius: 3,
-            }}>
-              {filteredPlayers.length}/{players.length} joueurs
-            </span>
-          )}
         </div>
       )}
 
