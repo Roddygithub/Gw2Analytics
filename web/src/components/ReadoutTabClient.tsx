@@ -25,6 +25,7 @@ import {
   CommanderCellRenderer,
 } from "./PlayerReadoutCells";
 import { ROLE_COLORS, ROLE_FALLBACK } from "@/lib/roleColors";
+import { PlayerPositionHeatmap } from "./PlayerPositionHeatmap";
 
 /* ------------------------------------------------------------------ *
  *  Constants & shared styles
@@ -783,12 +784,18 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
         <TimelineMiniChart events={events} />
       </section>
 
-      {positions && (
+      {positions && positions.players.length > 0 && (
         <section>
           <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Positions</h2>
           <PositionsSummary positions={positions} />
         </section>
       )}
+
+      {/* Heatmap — self-contained, fetches its own data */}
+      <section>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Carte des positions</h2>
+        <PlayerPositionHeatmap fightId={fightId} />
+      </section>
 
       {/* Tableau 1: Dégâts */}
       <section>
