@@ -34,7 +34,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.tests.routes._evtc_builder import build_2025_string
-from gw2_core import DamageEvent, DeathEvent, DownEvent, HealingEvent, StunBreakEvent
+from gw2_core import DamageEvent, DeathEvent, DownEvent, HealingEvent, PositionEvent, StunBreakEvent
 from gw2analytics_api.routes.fights.aggregators import (
     aggregate_combat_readout,
     make_barrier_portion_getter,
@@ -739,3 +739,88 @@ def test_readout_down_contribution_dps_wired() -> None:
     # b didn't damage anyone while they were downed
     assert b_readout.damage.down_contribution_dps == 0.0
     assert b_readout.damage.kills == 0
+
+
+# -----------------------------------------------------------------
+# Cleave targets (v0.14.5)
+# -----------------------------------------------------------------
+
+
+def test_readout_cleave_targets() -> None:
+    """Direct aggregator-level test: unique target_agent_id count per source.
+
+    v0.14.5: cleave_targets counts how many different targets a player
+    damaged during the fight. Verifies the count from multiple
+    DamageEvents targeting different agents.
+    """
+    a = 800_001  # damage dealer
+    b = a + 1   # target 1
+    c = a + 2   # target 2
+    dmg_skill = 8_500_001
+
+    # Player a damages b (twice, same target), c (once), and a dummy.
+    events = [
+        DamageEvent(time_ms=1_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=100),
+        DamageEvent(time_ms=2_000, source_agent_id=a, target_agent_id=b, skill_id=dmg_skill, damage=200),
+        DamageEvent(time_ms=3_000, source_agent_id=a, target_agent_id=c, skill_id=dmg_skill, damage=300),
+    ]
+
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a, name=f"Cleaver {a}", subgroup=0,
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            is_player=True, is_commander=False,
+        ),
+        b: AgentIdentity(
+            agent_id=b, name=f"Target1 {b}", subgroup=0,
+            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="ELITE(27)",
+            is_player=True, is_commander=False,
+        ),
+        c: AgentIdentity(
+            agent_id=c, name=f"Target2 {c}", subgroup=0,
+            account_name=f"synth.{c}", profession="PROF(1)", elite_spec="ELITE(27)",
+            is_player=True, is_commander=False,
+        ),
+    }
+    out = aggregate_combat_readout(
+        events=events,
+        skill_id_to_name_map={dmg_skill: "Dmg"},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=3.0,
+        fight_id="cleave-test",
+    )
+
+    a_readout = next(p for p in out.players if p.agent_id == a)
+    # a hit 2 unique targets (b and c) — b was hit twice but counted once.
+    assert a_readout.damage.cleave_targets == 2, (
+        f"expected cleave_targets=2 (b+c), got {a_readout.damage.cleave_targets}"
+    )
+
+
+# -----------------------------------------------------------------
+# dist_to_commander (v0.14.4)
+# -----------------------------------------------------------------
+
+
+def test_readout_dist_to_commander_no_commander() -> None:
+    """When no commander exists, dist_to_commander is None for all players."""
+    from gw2analytics_api.routes.fights.aggregators import aggregate_player_positions
+
+    a = 900_001
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a, name=f"NoCmd {a}", subgroup=0,
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            is_player=True, is_commander=False,
+        ),
+    }
+    # Player a has position events.
+    pe = PositionEvent(time_ms=1_000, source_agent_id=a, x=100.0, y=200.0)
+    result = aggregate_player_positions(
+        events=[pe],
+        agent_id_to_identity_map=aid_to_identity,
+    )
+    assert len(result) == 1
+    assert result[0].dist_to_commander is None, (
+        f"expected None when no commander, got {result[0].dist_to_commander}"
+    )

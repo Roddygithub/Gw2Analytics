@@ -48,6 +48,7 @@ function makeRow(overrides: Partial<PlayerReadoutOut>): PlayerReadoutOut {
       cc_applied: 0,
       down_contribution_dps: 0,
       kills: 0,
+      cleave_targets: 0,
     },
     heal: {
       heal_total: 0,

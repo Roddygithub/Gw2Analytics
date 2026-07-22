@@ -300,6 +300,7 @@ class PlayerReadoutDamageOut(BaseModel):
     cc_applied: int = 0
     down_contribution_dps: float = 0.0
     kills: int = 0
+    cleave_targets: int = 0
 
 
 class PlayerReadoutHealOut(BaseModel):

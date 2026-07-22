@@ -171,6 +171,7 @@ export interface PlayerReadoutDamageOut {
   cc_applied: number;
   down_contribution_dps: number;
   kills: number;
+  cleave_targets: number;
 }
 
 export interface PlayerReadoutHealOut {

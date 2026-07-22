@@ -76,6 +76,7 @@ function makeRow(
       dps_power: 0,
       dps_total: 0,
       kills: 0,
+      cleave_targets: 0,
       strips: 0,
     },
     defense: {

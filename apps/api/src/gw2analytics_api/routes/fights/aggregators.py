@@ -395,6 +395,7 @@ def _build_player_readout(
     cleanses: int = 0,
     strips: int = 0,
     cc_applied: int = 0,
+    cleave_targets: int = 0,
     down_contrib: tuple[float, int] | None = None,
     time_downed_ms: int = 0,
     boon_uptimes: dict[str, float] | None = None,
@@ -442,6 +443,7 @@ def _build_player_readout(
             dps_condi=d_row.dps_condi,
             strips=strips,
             cc_applied=cc_applied,
+            cleave_targets=cleave_targets,
             down_contribution_dps=down_contrib[0] if down_contrib else 0.0,
             kills=down_contrib[1] if down_contrib else 0,
         ),
@@ -642,13 +644,16 @@ def aggregate_combat_readout(
     # generic BuffRemovalEvent and are NOT reclassified here.
     cleanses_counter: Counter[int] = Counter()
     strips_counter: Counter[int] = Counter()
+    # v0.14.5: count unique targets hit (cleave) per source_agent_id.
+    cleave_targets_by_source: dict[int, set[int]] = {}
     for event in events:
         if isinstance(event, BuffRemovalEvent):
             if is_condition(event.buff_id):
                 cleanses_counter[event.source_agent_id] += 1
             else:
-                # Boon strip (boon removal, not condition cleanse).
                 strips_counter[event.source_agent_id] += 1
+        elif isinstance(event, DamageEvent):
+            cleave_targets_by_source.setdefault(event.source_agent_id, set()).add(event.target_agent_id)
 
     # v0.14.4: count CC events per source_agent_id.
     cc_counter: Counter[int] = Counter()
@@ -778,6 +783,7 @@ def aggregate_combat_readout(
             cleanses=cleanses_counter.get(agent_id, 0),
             strips=strips_counter.get(agent_id, 0),
             cc_applied=cc_counter.get(agent_id, 0),
+            cleave_targets=len(cleave_targets_by_source.get(agent_id, set())),
             down_contrib=down_contrib_by_id.get(agent_id),
             time_downed_ms=downtime_counter.get(agent_id, 0),
             roles=roles_by_agent.get(agent_id, []),
