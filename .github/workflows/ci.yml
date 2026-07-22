@@ -165,7 +165,20 @@ jobs:
         run: uv run pytest tests/scripts/ --tb=line -q
 
       - name: Pytest
-        run: uv run pytest --tb=line -q
+        # --cov-report=xml generates coverage.xml for Codecov ingestion.
+        run: uv run pytest --tb=line -q --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        # Only on main (PRs don't have the CODECOV_TOKEN secret).
+        # Uses codecov-action@v5 which gracefully skips upload when
+        # no token is available (e.g. on PRs from forks).
+        if: github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          flags: python
+          fail_ci_if_error: false
 
       - name: Health probe CI gate (regression check)
         run: uv run python -m gw2analytics_api.scripts.health_gate --check-delta /tmp/health_baseline.json
@@ -186,6 +199,7 @@ jobs:
           | Health probe baseline | ✅ |
           | Script tests | ✅ |
           | Pytest | ✅ |
+          | Codecov upload | ✅ |
           | Health probe gate | ✅ |
           EOF
 
