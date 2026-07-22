@@ -337,6 +337,8 @@ function getSortValue(p: PlayerReadoutOut, field: string): number {
  * ------------------------------------------------------------------ */
 
 function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null }) {
+  const [activityOnly, setActivityOnly] = useState(false);
+
   if (!events || events.event_windows.length === 0) {
     return (
       <div style={EMPTY_STYLE}>
@@ -347,23 +349,32 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
 
   const raw = events.event_windows;
   const MAX_POINTS = 200;
-  const W = 800; // viewBox width
-  const H = 100; // viewBox height
+  const W = 800;
+  const H = 100;
   const PAD = 2;
+  const durationMin = (raw[raw.length - 1]?.end_ms ?? 0) / 60000;
 
-  // Downsample to max MAX_POINTS
+  // Count active (non-zero) windows for the toggle label
+  const activeWindows = useMemo(
+    () => raw.filter((w) => w.damage_total > 0 || w.healing_total > 0),
+    [raw],
+  );
+
+  // Downsample, optionally filtering to activity-only
   const points = useMemo(() => {
-    if (raw.length <= MAX_POINTS) {
-      return raw.map((w) => ({
+    const source = activityOnly ? activeWindows : raw;
+    if (source.length === 0) return [];
+    if (source.length <= MAX_POINTS) {
+      return source.map((w) => ({
         x: ((w.start_ms / (raw[raw.length - 1]?.end_ms || 1)) * 100),
         dmg: w.damage_total,
         heal: w.healing_total,
       }));
     }
-    const groupSize = Math.ceil(raw.length / MAX_POINTS);
+    const groupSize = Math.ceil(source.length / MAX_POINTS);
     const result: { x: number; dmg: number; heal: number }[] = [];
-    for (let i = 0; i < raw.length; i += groupSize) {
-      const slice = raw.slice(i, i + groupSize);
+    for (let i = 0; i < source.length; i += groupSize) {
+      const slice = source.slice(i, i + groupSize);
       result.push({
         x: ((slice[0].start_ms / (raw[raw.length - 1]?.end_ms || 1)) * 100),
         dmg: slice.reduce((s, w) => s + w.damage_total, 0),
@@ -371,14 +382,28 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
       });
     }
     return result;
-  }, [raw]);
+  }, [raw, activeWindows, activityOnly]);
+
+  // Detect gaps between consecutive activity windows for gap lines
+  const gapLines = useMemo(() => {
+    if (!activityOnly || activeWindows.length < 2) return [];
+    const gaps: { x: number }[] = [];
+    const gapThresholdMs = 30_000; // 30s gap = visual separator
+    for (let i = 1; i < activeWindows.length; i++) {
+      const gap = activeWindows[i].start_ms - activeWindows[i - 1].end_ms;
+      if (gap > gapThresholdMs) {
+        const midX = ((activeWindows[i - 1].end_ms + activeWindows[i].start_ms) / 2 / (raw[raw.length - 1]?.end_ms || 1)) * 100;
+        gaps.push({ x: midX });
+      }
+    }
+    return gaps;
+  }, [raw, activeWindows, activityOnly]);
 
   const maxDmg = Math.max(...points.map((p) => p.dmg), 1);
   const maxHeal = Math.max(...points.map((p) => p.heal), 1);
-  const durationMin = (raw[raw.length - 1]?.end_ms ?? 0) / 60000;
 
-  // Build SVG path for filled area
   const buildArea = (vals: number[], maxVal: number, height: number) => {
+    if (points.length === 0) return "";
     const pts = points.map((p, i) => {
       const x = PAD + (p.x / 100) * (W - 2 * PAD);
       const y = height - ((vals[i] / maxVal) * (height - PAD));
@@ -390,10 +415,11 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
 
   const dmgPath = buildArea(points.map((p) => p.dmg), maxDmg, H);
   const healPath = buildArea(points.map((p) => p.heal), maxHeal, H);
+  const activityPct = raw.length > 0 ? (activeWindows.length / raw.length) * 100 : 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, flexWrap: "wrap" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <span style={{ width: 10, height: 10, borderRadius: 2, background: "#f59e0b" }} />
           Damage
@@ -402,9 +428,34 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
           <span style={{ width: 10, height: 10, borderRadius: 2, background: "#22c55e" }} />
           Heal
         </span>
-        <span style={{ marginLeft: "auto", opacity: 0.6 }}>
-          {raw.length} buckets · {durationMin.toFixed(1)} min
-          {points.length < raw.length && ` (affiché: ${points.length})`}
+        <button
+          onClick={() => setActivityOnly((v) => !v)}
+          title={
+            activityOnly
+              ? "Afficher toute la durée du combat"
+              : `Zoom sur les ${activeWindows.length} fenêtres avec activité`
+          }
+          style={{
+            padding: "1px 8px",
+            borderRadius: 10,
+            border: activityOnly ? "1px solid #f59e0b" : "1px solid var(--border)",
+            background: activityOnly ? "rgba(245,158,11,0.15)" : "transparent",
+            color: activityOnly ? "#f59e0b" : "var(--foreground)",
+            cursor: "pointer",
+            fontSize: 10,
+            fontWeight: activityOnly ? 600 : 400,
+            fontFamily: "var(--font-geist-sans, sans-serif)",
+            opacity: activityOnly ? 1 : 0.6,
+            transition: "all 0.15s",
+          }}
+        >
+          {activityOnly ? "🔍 Activité seulement" : "Toute la durée"}
+        </button>
+        <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 11 }}>
+          {activityOnly
+            ? `${activeWindows.length} pics · ${activityPct.toFixed(1)}% de la durée`
+            : `${raw.length} buckets · ${durationMin.toFixed(1)} min`}
+          {points.length < (activityOnly ? activeWindows.length : raw.length) && ` (affiché: ${points.length})`}
         </span>
       </div>
       <svg
@@ -417,10 +468,28 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
           overflow: "hidden",
         }}
       >
+        {/* Gap separator lines — only in activity mode */}
+        {gapLines.map((g, i) => {
+          const gx = PAD + (g.x / 100) * (W - 2 * PAD);
+          return (
+            <line
+              key={i}
+              x1={gx}
+              y1={0}
+              x2={gx}
+              y2={H}
+              stroke="rgba(255,255,255,0.18)"
+              strokeWidth="1"
+              strokeDasharray="3 3"
+            />
+          );
+        })}
         {/* Damage area */}
-        <path d={dmgPath} fill="rgba(245,158,11,0.25)" stroke="#f59e0b" strokeWidth="1" strokeLinejoin="round" />
+        {dmgPath && <path d={dmgPath} fill="rgba(245,158,11,0.25)" stroke="#f59e0b" strokeWidth="1" strokeLinejoin="round" />}
         {/* Heal area */}
-        <path d={healPath} fill="rgba(34,197,94,0.2)" stroke="#22c55e" strokeWidth="1" strokeLinejoin="round" />
+        {healPath && <path d={healPath} fill="rgba(34,197,94,0.2)" stroke="#22c55e" strokeWidth="1" strokeLinejoin="round" />}
+        {/* Horizontal zero line */}
+        <line x1={PAD} y1={H} x2={W - PAD} y2={H} stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
       </svg>
     </div>
   );
