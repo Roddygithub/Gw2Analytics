@@ -165,7 +165,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             OSError,
             TimeoutError,
             redis.exceptions.RedisError,
-        ) as exc:                if attempt < retry_attempts:
+        ) as exc:
+            if attempt < retry_attempts:
                 delay = retry_base_s * (2 ** (attempt - 1))
                 logger.warning(
                     "arq pool init attempt %d/%d failed (type=%s); "

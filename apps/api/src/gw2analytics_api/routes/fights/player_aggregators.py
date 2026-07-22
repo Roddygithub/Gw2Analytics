@@ -553,7 +553,7 @@ def aggregate_player_positions(
 
     commander_account: str | None = None
     commander_samples: list[list[float]] = []
-    for agent_id, identity in agent_id_to_identity_map.items():
+    for _agent_id, identity in agent_id_to_identity_map.items():
         if identity.is_commander and identity.account_name:
             commander_account = identity.account_name
             commander_samples = player_samples.get(commander_account, [])

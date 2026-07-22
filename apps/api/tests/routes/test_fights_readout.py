@@ -381,7 +381,7 @@ def test_readout_boon_uptimes_and_presence_pct() -> None:
     # Create one BoonApplyEvent per tracked buff so the uptime dict
     # passed to the aggregator has all 14 boons.
     boon_events: list = []
-    for idx, (name, skill_id) in enumerate(TRACKED_BUFFS.items()):
+    for idx, (_name, skill_id) in enumerate(TRACKED_BUFFS.items()):
         boon_events.append(
             BoonApplyEvent(
                 time_ms=1_000 + idx * 100,
