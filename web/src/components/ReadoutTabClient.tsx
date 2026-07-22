@@ -887,6 +887,22 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
               </option>
             ))}
           </select>
+          {/* X/Y counter — visible when a role filter is active */}
+          {roleFilter && (
+            <span
+              style={{
+                fontSize: 11,
+                opacity: 0.6,
+                fontVariantNumeric: "tabular-nums",
+                padding: "1px 8px",
+                borderRadius: 3,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              {filteredPlayers.length}&nbsp;/&nbsp;{players.length} joueurs
+            </span>
+          )}
         </div>
       )}
 

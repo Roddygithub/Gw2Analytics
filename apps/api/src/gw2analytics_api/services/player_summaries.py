@@ -13,6 +13,7 @@ from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
     BuffRemovalEvent,
+    CCEvent,
     DamageEvent,
     Event,
     HealingEvent,
@@ -44,6 +45,7 @@ class _SummaryBucket:
     condi: int = 0
     boon_strips: int = 0
     condition_cleanses: int = 0
+    cc_applied: int = 0
     name: str = ""
     prof: int = 0
     elite: int = 0
@@ -225,6 +227,46 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
             # cbtevent.buff_dmg strips are offensive boon strips; route
             # their magnitude into the dedicated boon_strips column.
             bucket.boon_strips += event.buff_removal
+        elif isinstance(event, CCEvent):
+            bucket.cc_applied += 1
+
+    # Compute boons_out_rate per account from the buff tracker.
+    # aggregate per-agent outgoing rates into per-account totals.
+    boons_out_by_account: dict[str, float] = {}
+    for account, agent_ids in account_to_agent_ids.items():
+        total_stacks = 0
+        for aid in agent_ids:
+            agent_out = outgoing_by_agent.get(aid, {})
+            total_stacks += sum(agent_out.values())
+        dur = max(duration_s, 1.0)
+        boons_out_by_account[account] = total_stacks / dur
+
+    # Compute total squad healing for Heal role threshold.
+    total_squad_healing = sum(b.healing for b in per_account.values())
+
+    def _compute_account_roles(
+        healing: int,
+        boons_out_rate: float,
+        strips: int,
+        cleanses: int,
+        cc_applied: int,
+    ) -> list[str]:
+        """Determine role badges for a single account using the same
+        thresholds as :func:`aggregate_combat_readout`."""
+        roles_out: list[str] = []
+        if total_squad_healing > 0 and (healing / total_squad_healing) > 0.10:
+            roles_out.append("Heal")
+        if boons_out_rate > 1.0:
+            roles_out.append("Support")
+        if strips > 5:
+            roles_out.append("Strip")
+        if cleanses > 10:
+            roles_out.append("Cleanser")
+        if cc_applied > 3:
+            roles_out.append("CC")
+        if not roles_out:
+            roles_out.append("DPS")
+        return roles_out
 
     if not per_account and source_map:
         logger.warning(
@@ -290,6 +332,13 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
                 condi_damage=bucket.condi,
                 boon_strips=bucket.boon_strips,
                 condition_cleanses=bucket.condition_cleanses,
+                roles=_compute_account_roles(
+                    healing=bucket.healing,
+                    boons_out_rate=boons_out_by_account.get(account_name, 0.0),
+                    strips=bucket.boon_strips,
+                    cleanses=bucket.condition_cleanses,
+                    cc_applied=bucket.cc_applied,
+                ),
                 **boon_kwargs,
             ),
         )
