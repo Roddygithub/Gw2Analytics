@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gw2analytics_api.database import get_session
@@ -57,10 +58,14 @@ def get_guild(
     db: Session = Depends(get_session),  # noqa: B008
 ) -> GuildDetailOut:
     """Return guild info + members for a specific guild."""
-    guild = db.query(Guild).filter(Guild.id == guild_id).first()
+    guild = db.execute(select(Guild).where(Guild.id == guild_id)).scalar_one_or_none()
     if guild is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "guild not found")
-    members = db.query(GuildMember).filter(GuildMember.guild_id == guild_id).all()
+    members = (
+        db.execute(select(GuildMember).where(GuildMember.guild_id == guild_id))
+        .scalars()
+        .all()
+    )
     return GuildDetailOut(
         id=guild.id,
         name=guild.name,
