@@ -267,7 +267,7 @@ jobs:
           - project: visual-regression
     runs-on: ubuntu-latest
     # visual-regression only on PRs; chromium always.
-    if: ${{ matrix.project != 'visual-regression' || github.event_name == 'pull_request' }}
+    if: matrix.project != 'visual-regression' || github.event_name == 'pull_request'
 
     steps:
       - uses: actions/checkout@v7
