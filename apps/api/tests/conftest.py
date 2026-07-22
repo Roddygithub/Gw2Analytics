@@ -131,6 +131,8 @@ from gw2analytics_api.database import get_sessionmaker as _get_sessionmaker_fact
 from gw2analytics_api.limiter import limiter
 from gw2analytics_api.main import app
 from gw2analytics_api.models import (
+    Guild,
+    GuildMember,
     OrmFight,
     OrmFightPlayerSummary,
     OrmWebhookDelivery,
@@ -236,6 +238,10 @@ def _isolate_test_state() -> None:
         db.execute(delete(OrmWebhookDelivery))
         db.execute(delete(OrmWebhookDlq))
         db.execute(delete(OrmWebhookSubscription))
+        # v0.13.6: clean Guild + GuildMember tables so guilds
+        # tests and any future guild-seeding tests are hermetic.
+        db.execute(delete(GuildMember))
+        db.execute(delete(Guild))
         db.execute(delete(OrmFight))
         db.execute(delete(Upload))
         db.commit()
