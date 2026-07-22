@@ -823,6 +823,35 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
     [positionMap],
   );
 
+  // Role filter state — MUST be declared before any early returns
+  // (React hooks must be called unconditionally in the same order).
+  const players = readout?.players ?? [];
+  const [roleFilter, setRoleFilter] = useState<string | null>(null);
+  const allRoles = useMemo(() => {
+    const seen = new Set<string>();
+    for (const p of players) {
+      for (const r of p.roles) seen.add(r);
+    }
+    return [...seen].sort();
+  }, [players]);
+  const filteredPlayers = useMemo(() => {
+    if (!roleFilter) return players;
+    return players.filter((p) => p.roles.includes(roleFilter));
+  }, [players, roleFilter]);
+
+  const exportCsv = useCallback(
+    (gridRef: React.RefObject<AgGridReact<PlayerReadoutOut> | null>, filename: string) => {
+      const api = gridRef.current?.api;
+      if (!api) return;
+      api.exportDataAsCsv({ fileName: filename });
+    },
+    [],
+  );
+
+  // Pass setRoleFilter via AG Grid context so cell renderers can
+  // update the role filter when a badge is clicked.
+  const gridContext = useMemo(() => ({ setRoleFilter }), []);
+
   // Loading state
   if (loading) {
     return (
@@ -857,32 +886,6 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
       </div>
     );
   }
-
-  const players = readout.players;
-
-  // Role filter state
-  const [roleFilter, setRoleFilter] = useState<string | null>(null);
-  const allRoles = useMemo(() => {
-    const seen = new Set<string>();
-    for (const p of players) {
-      for (const r of p.roles) seen.add(r);
-    }
-    return [...seen].sort();
-  }, [players]);
-  const filteredPlayers = useMemo(() => {
-    if (!roleFilter) return players;
-    return players.filter((p) => p.roles.includes(roleFilter));
-  }, [players, roleFilter]);
-
-  const exportCsv = (gridRef: React.RefObject<AgGridReact<PlayerReadoutOut> | null>, filename: string) => {
-    const api = gridRef.current?.api;
-    if (!api) return;
-    api.exportDataAsCsv({ fileName: filename });
-  };
-
-  // Pass setRoleFilter via AG Grid context so cell renderers can
-  // update the role filter when a badge is clicked.
-  const gridContext = useMemo(() => ({ setRoleFilter }), [setRoleFilter]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
