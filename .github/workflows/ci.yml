@@ -31,7 +31,9 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true  # ---------------------------------------------------------------------------
+  cancel-in-progress: true
+
+  # ---------------------------------------------------------------------------
   # Python lint: ruff, mypy, and security audit.
   # Uses the full workspace sync (setup-python composite action) so
   # workspace members are available as editable packages for mypy.
