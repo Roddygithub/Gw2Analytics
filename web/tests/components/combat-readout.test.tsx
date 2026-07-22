@@ -87,6 +87,7 @@ function buildRow(extra: Partial<PlayerReadoutOut> = {}): PlayerReadoutOut {
       down_contribution_dps: 1200,
       kills: 3,
       cleave_targets: 0,
+      kill_participation: 0,
     },
     heal: {
       heal_total: 120000,

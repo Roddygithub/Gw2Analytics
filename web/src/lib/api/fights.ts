@@ -172,6 +172,7 @@ export interface PlayerReadoutDamageOut {
   down_contribution_dps: number;
   kills: number;
   cleave_targets: number;
+  kill_participation: number;
 }
 
 export interface PlayerReadoutHealOut {

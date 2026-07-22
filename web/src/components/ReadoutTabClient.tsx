@@ -296,6 +296,9 @@ const DAMAGE_COLUMNS: ColDef<PlayerReadoutOut>[] = [
   { field: "damage.cc_applied", headerName: "CC", width: 70 },
   { field: "damage.down_contribution_dps", headerName: "Down DPS", width: 110 },
   { field: "damage.cleave_targets", headerName: "Cleave", width: 80 },
+  { field: "damage.kills", headerName: "Kills", width: 60 },
+  { field: "defense.deaths", headerName: "Morts", width: 60 },
+  { field: "damage.kill_participation", headerName: "Kill Part", width: 80 },
 ];
 
 const DAMAGE_SORT: SortModelItem[] = [

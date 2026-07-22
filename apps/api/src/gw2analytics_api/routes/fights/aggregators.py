@@ -396,6 +396,7 @@ def _build_player_readout(
     strips: int = 0,
     cc_applied: int = 0,
     cleave_targets: int = 0,
+    kill_participation: int = 0,
     down_contrib: tuple[float, int] | None = None,
     time_downed_ms: int = 0,
     boon_uptimes: dict[str, float] | None = None,
@@ -444,6 +445,7 @@ def _build_player_readout(
             strips=strips,
             cc_applied=cc_applied,
             cleave_targets=cleave_targets,
+            kill_participation=kill_participation,
             down_contribution_dps=down_contrib[0] if down_contrib else 0.0,
             kills=down_contrib[1] if down_contrib else 0,
         ),
@@ -655,6 +657,20 @@ def aggregate_combat_readout(
         elif isinstance(event, DamageEvent):
             cleave_targets_by_source.setdefault(event.source_agent_id, set()).add(event.target_agent_id)
 
+    # v0.14.5: kill participation — count how many unique kills each
+    # player contributed damage to. Build a reverse index of
+    # target_agent_id → set of source_agent_ids from damage_events,
+    # then for each DeathEvent, increment participation for every
+    # source that damaged the dying player.
+    damage_sources_by_target: dict[int, set[int]] = {}
+    for de in damage_events:
+        damage_sources_by_target.setdefault(de.target_agent_id, set()).add(de.source_agent_id)
+    kill_participation_counter: Counter[int] = Counter()
+    for death in death_events:
+        contributors = damage_sources_by_target.get(death.source_agent_id, set())
+        for src in contributors:
+            kill_participation_counter[src] += 1
+
     # v0.14.4: count CC events per source_agent_id.
     cc_counter: Counter[int] = Counter()
     for event in events:
@@ -784,6 +800,7 @@ def aggregate_combat_readout(
             strips=strips_counter.get(agent_id, 0),
             cc_applied=cc_counter.get(agent_id, 0),
             cleave_targets=len(cleave_targets_by_source.get(agent_id, set())),
+            kill_participation=kill_participation_counter.get(agent_id, 0),
             down_contrib=down_contrib_by_id.get(agent_id),
             time_downed_ms=downtime_counter.get(agent_id, 0),
             roles=roles_by_agent.get(agent_id, []),
