@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from gw2_core import BoonApplyEvent, BuffRemovalEvent, DamageEvent, HealingEvent
+from gw2_core import BoonApplyEvent, BuffRemovalEvent, CCEvent, DamageEvent, HealingEvent
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (
     OrmFight,
@@ -587,3 +587,154 @@ def test_compute_account_roles_zero_squad_healing() -> None:
     )
     assert "Heal" not in result
     assert result == ["DPS"]
+
+
+# ------------------------------------------------------------------ *
+#  DB integration test: roles column populated after _persist_player_summaries
+# ------------------------------------------------------------------ *
+
+
+def test_roles_column_populated_with_heal_and_cc() -> None:
+    """Player with >10% heal + >3 CC → roles includes Heal + CC.
+
+    Seeds a fight with 2 player agents.  Player A has 200 healing (99% of
+    201 total) and 4 CCEvents.  Player B has just 1 healing (baseline).
+    Verifies the resulting OrmFightPlayerSummary.roles column.
+    """
+    fight_id = f"ps-roles-{uuid.uuid4().hex[:8]}"
+    upload_uuid = uuid.uuid4()
+    sha256 = hashlib.sha256(fight_id.encode()).hexdigest()
+    session = get_sessionmaker()()
+    try:
+        session.add(
+            Upload(
+                id=upload_uuid,
+                status="completed",
+                parser_version="0",
+                sha256=sha256,
+                original_filename="t.zevtc",
+                size_bytes=0,
+            )
+        )
+        session.flush()
+        session.add(
+            OrmFight(
+                id=fight_id,
+                upload_id=upload_uuid,
+                agent_count=2,
+                build_version="20250711",
+                encounter_id=0,
+                game_type=1,
+                started_at="2026-07-11T12:00:00+00:00",
+            )
+        )
+        session.add(
+            OrmFightAgent(
+                fight_id=fight_id,
+                agent_id=_D,
+                name="HealCC",
+                account_name="synth.healcc",
+                profession=2,
+                elite_spec=18,
+                is_player=True,
+                subgroup="",
+            )
+        )
+        session.add(
+            OrmFightAgent(
+                fight_id=fight_id,
+                agent_id=101,
+                name="Baseline",
+                account_name="synth.baseline",
+                profession=1,
+                elite_spec=27,
+                is_player=True,
+                subgroup="",
+            )
+        )
+        session.add(
+            OrmFightSkill(
+                fight_id=fight_id,
+                skill_id=200,
+                name="TestSkill",
+            )
+        )
+        session.flush()
+        fight = session.get(OrmFight, fight_id)
+        assert fight is not None
+
+        events = [
+            HealingEvent(
+                time_ms=1_000,
+                source_agent_id=_D,
+                target_agent_id=101,
+                skill_id=200,
+                healing=200,
+            ),
+            HealingEvent(
+                time_ms=2_000,
+                source_agent_id=101,
+                target_agent_id=_D,
+                skill_id=200,
+                healing=1,
+            ),
+            CCEvent(
+                time_ms=3_000,
+                source_agent_id=_D,
+                target_agent_id=101,
+                skill_id=200,
+                amount=0,
+            ),
+            CCEvent(
+                time_ms=4_000,
+                source_agent_id=_D,
+                target_agent_id=101,
+                skill_id=200,
+                amount=0,
+            ),
+            CCEvent(
+                time_ms=5_000,
+                source_agent_id=_D,
+                target_agent_id=101,
+                skill_id=200,
+                amount=0,
+            ),
+            CCEvent(
+                time_ms=6_000,
+                source_agent_id=_D,
+                target_agent_id=101,
+                skill_id=200,
+                amount=0,
+            ),
+            DamageEvent(
+                time_ms=10_000,
+                source_agent_id=_D,
+                target_agent_id=101,
+                skill_id=200,
+                damage=1,
+            ),
+        ]
+        _persist_player_summaries(session, fight, events)
+        session.commit()
+
+        rows = (
+            session.execute(
+                select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        by_account = {row.account_name: row for row in rows}
+
+        healcc = by_account["synth.healcc"]
+        assert healcc.roles is not None
+        assert "Heal" in healcc.roles
+        assert "CC" in healcc.roles
+
+        baseline = by_account["synth.baseline"]
+        assert baseline.roles is not None
+        assert "DPS" in baseline.roles
+        assert "Heal" not in baseline.roles
+    finally:
+        session.close()

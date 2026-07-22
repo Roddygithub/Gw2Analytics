@@ -117,11 +117,13 @@ function SummaryPlayerRow({
   value,
   valueFormatter,
   rank,
+  onRoleFilter,
 }: {
   player: PlayerReadoutOut;
   value: string;
   valueFormatter?: (v: number) => string;
   rank: 0 | 1 | 2;
+  onRoleFilter?: (role: string) => void;
 }) {
   const medal = rank === 0 ? "🥇" : rank === 1 ? "🥈" : "🥉";
   return (
@@ -193,7 +195,15 @@ function SummaryPlayerRow({
                   background: c.bg,
                   color: c.fg,
                   letterSpacing: "0.03em",
+                  cursor: onRoleFilter ? "pointer" : "default",
+                  transition: "opacity 0.15s",
                 }}
+                title={onRoleFilter ? `Filtrer vers ${role}` : undefined}
+                onClick={
+                  onRoleFilter
+                    ? (e) => { e.stopPropagation(); onRoleFilter(role); }
+                    : undefined
+                }
               >
                 {role}
               </span>
@@ -229,11 +239,13 @@ function SummaryCard({
   players,
   getValue,
   valueFormatter,
+  onRoleFilter,
 }: {
   title: string;
   players: PlayerReadoutOut[];
   getValue: (p: PlayerReadoutOut) => number;
   valueFormatter?: (v: number) => string;
+  onRoleFilter?: (role: string) => void;
 }) {
   const sorted = [...players]
     .sort((a, b) => getValue(b) - getValue(a))
@@ -274,6 +286,7 @@ function SummaryCard({
             (valueFormatter ?? DEFAULT_NUMBER_FORMATTER)(getValue(p))
           }
           rank={i as 0 | 1 | 2}
+          onRoleFilter={onRoleFilter}
         />
       ))}
 
@@ -300,8 +313,10 @@ function SummaryCard({
 
 export function FightSummaryCards({
   players,
+  onRoleFilter,
 }: {
   players: PlayerReadoutOut[];
+  onRoleFilter?: (role: string) => void;
 }) {
   if (players.length === 0) return null;
 
@@ -344,33 +359,39 @@ export function FightSummaryCards({
           title="Top DPS"
           players={players}
           getValue={(p) => p.damage.dps_total}
+          onRoleFilter={onRoleFilter}
         />
         <SummaryCard
           title="Top Heal"
           players={players}
           getValue={(p) => p.heal.hps}
           valueFormatter={(v) => v.toFixed(1)}
+          onRoleFilter={onRoleFilter}
         />
         <SummaryCard
           title="Top Strips"
           players={players}
           getValue={(p) => p.damage.strips}
+          onRoleFilter={onRoleFilter}
         />
         <SummaryCard
           title="Top Cleanses"
           players={players}
           getValue={(p) => p.heal.cleanses}
+          onRoleFilter={onRoleFilter}
         />
         <SummaryCard
           title="Top CC"
           players={players}
           getValue={(p) => p.damage.cc_applied}
+          onRoleFilter={onRoleFilter}
         />
         <SummaryCard
           title="Down Contrib"
           players={players}
           getValue={(p) => p.damage.down_contribution_dps}
           valueFormatter={(v) => v.toFixed(1)}
+          onRoleFilter={onRoleFilter}
         />
       </div>
     </section>

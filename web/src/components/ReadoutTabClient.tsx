@@ -943,7 +943,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
       </p>
 
       {/* Summary cards */}
-      <FightSummaryCards players={players} />
+      <FightSummaryCards players={players} onRoleFilter={setRoleFilter} />
 
       {/* Timeline */}
       <section>
