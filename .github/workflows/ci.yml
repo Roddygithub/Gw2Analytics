@@ -71,7 +71,7 @@ jobs:
           ! grep -rn 'db\.query(' apps/api/src/ libs/ --include='*.py'
 
       - name: Mypy
-        run: uv run mypy libs apps --no-incremental --exclude '_evtc_builder\.py'
+        run: uv run mypy libs apps --no-incremental --exclude '_evtc_builder'
 
       - name: pip-audit (Python deps, vulnerability scan)
         run: uv run pip-audit --strict --vulnerability-service osv
