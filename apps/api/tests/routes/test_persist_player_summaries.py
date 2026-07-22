@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from gw2_core import BoonApplyEvent, BuffRemovalEvent, CCEvent, DamageEvent, HealingEvent
+from gw2_core import BoonApplyEvent, BuffRemovalEvent, CCEvent, DamageEvent, Event, HealingEvent
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (
     OrmFight,
@@ -26,7 +26,7 @@ _D = 100_000  # base source agent id
 
 
 def _seed_and_call(
-    events: Sequence[DamageEvent | HealingEvent | BuffRemovalEvent],
+    events: Sequence[Event],
     *,
     account_name_a: str = "synth.100",
     account_name_b: str | None = "synth.101",

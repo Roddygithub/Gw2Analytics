@@ -912,19 +912,39 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
           </select>
           {/* X/Y counter — visible when a role filter is active */}
           {roleFilter && (
-            <span
-              style={{
-                fontSize: 11,
-                opacity: 0.6,
-                fontVariantNumeric: "tabular-nums",
-                padding: "1px 8px",
-                borderRadius: 3,
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-              }}
-            >
-              {filteredPlayers.length}&nbsp;/&nbsp;{players.length} joueurs
-            </span>
+            <>
+              <span
+                style={{
+                  fontSize: 11,
+                  opacity: 0.6,
+                  fontVariantNumeric: "tabular-nums",
+                  padding: "1px 8px",
+                  borderRadius: 3,
+                  background: "var(--surface)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {filteredPlayers.length}&nbsp;/&nbsp;{players.length} joueurs
+              </span>
+              <button
+                onClick={() => setRoleFilter(null)}
+                style={{
+                  padding: "0 6px",
+                  borderRadius: 3,
+                  border: "1px solid var(--border)",
+                  background: "var(--surface)",
+                  color: "var(--foreground)",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  lineHeight: "18px",
+                  fontFamily: "var(--font-geist-sans, sans-serif)",
+                  opacity: 0.7,
+                }}
+                title="Réinitialiser le filtre"
+              >
+                ✕
+              </button>
+            </>
           )}
         </div>
       )}
