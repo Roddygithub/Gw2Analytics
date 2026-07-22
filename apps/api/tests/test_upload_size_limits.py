@@ -50,8 +50,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
-from tests._fixtures import make_minimal_zevtc
 
 # ---------------------------------------------------------------------
 # Layer 3: post-read len check (the canonical 413 defense)

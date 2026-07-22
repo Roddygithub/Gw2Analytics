@@ -21,10 +21,10 @@ import uuid as _uuid
 from datetime import UTC, datetime
 
 import pytest
+from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
 from sqlalchemy import Numeric as SANumeric
 from sqlalchemy import cast
-from tests._fixtures import make_minimal_zevtc
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app

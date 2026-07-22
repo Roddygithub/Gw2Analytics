@@ -37,8 +37,8 @@ from collections.abc import Generator
 from typing import Any
 
 import pytest
+from _fixtures import make_minimal_zevtc
 from fastapi.testclient import TestClient
-from tests._fixtures import make_minimal_zevtc
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app

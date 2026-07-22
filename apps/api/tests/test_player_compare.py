@@ -9,8 +9,8 @@ import time
 import uuid as _uuid
 
 import pytest
+from _fixtures import make_cbtevent, make_minimal_zevtc
 from fastapi.testclient import TestClient
-from tests._fixtures import make_cbtevent, make_minimal_zevtc
 
 # v0.10.8 plan 140 Fix-C: replace the prior ``client = TestClient(app)``
 # (which fired the app lifespan AT IMPORT TIME -- before pytest autouse

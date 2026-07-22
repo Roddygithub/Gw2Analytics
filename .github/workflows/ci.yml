@@ -53,7 +53,7 @@ jobs:
       # Cache pip-audit's OSV vulnerability database so subsequent
       # runs skip the ~15s download on every invocation.
       - name: Cache pip-audit OSV data
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/pip-audit
           key: pip-audit-${{ hashFiles('uv.lock') }}
@@ -72,6 +72,10 @@ jobs:
 
       - name: Mypy
         run: uv run mypy libs apps --no-incremental
+        # Note: pre-existing "Duplicate module named '__main__'" collision
+        # between apps/api/ and libs/ both shipping a __main__.py.
+        # The `--exclude` flag does NOT prevent module resolution,
+        # only type-checking, so it cannot fix this.
 
       - name: pip-audit (Python deps, vulnerability scan)
         run: uv run pip-audit --strict --vulnerability-service osv
@@ -266,7 +270,7 @@ jobs:
       - uses: ./.github/actions/setup-web
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -287,7 +291,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: playwright-report-chromium
           path: web/playwright-report/
@@ -295,7 +299,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: playwright-traces-chromium
           path: web/test-results/
@@ -328,7 +332,7 @@ jobs:
       - uses: ./.github/actions/setup-web
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -349,7 +353,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: playwright-report-visual-regression
           path: web/playwright-report/
@@ -357,7 +361,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: playwright-traces-visual-regression
           path: web/test-results/
@@ -365,7 +369,7 @@ jobs:
 
       - name: Upload visual regression diffs on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: visual-regression-diffs
           path: web/tests/e2e/.visual-regression-output/
