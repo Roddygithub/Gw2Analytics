@@ -246,6 +246,7 @@ function BoonsBarCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
 
 function RoleBadgeCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
   const roles = params.value as string[] | undefined;
+  const setRoleFilter = (params.context as { setRoleFilter?: (r: string) => void } | undefined)?.setRoleFilter;
   if (!Array.isArray(roles) || roles.length === 0) return <span>—</span>;
   return (
     <span style={{ display: "inline-flex", gap: 2, flexWrap: "wrap", alignItems: "center", height: "100%" }}>
@@ -263,7 +264,25 @@ function RoleBadgeCellRenderer(params: ICellRendererParams<PlayerReadoutOut>) {
               background: c.bg,
               color: c.fg,
               letterSpacing: "0.03em",
+              cursor: setRoleFilter ? "pointer" : "default",
+              transition: "opacity 0.15s, transform 0.15s",
             }}
+            title={setRoleFilter ? `Filtrer vers ${role}` : undefined}
+            onClick={
+              setRoleFilter
+                ? (e) => { e.stopPropagation(); setRoleFilter(role); }
+                : undefined
+            }
+            onMouseEnter={
+              setRoleFilter
+                ? (e) => { (e.currentTarget as HTMLSpanElement).style.opacity = "0.75"; }
+                : undefined
+            }
+            onMouseLeave={
+              setRoleFilter
+                ? (e) => { (e.currentTarget as HTMLSpanElement).style.opacity = "1"; }
+                : undefined
+            }
           >
             {role}
           </span>
@@ -861,6 +880,10 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
     api.exportDataAsCsv({ fileName: filename });
   };
 
+  // Pass setRoleFilter via AG Grid context so cell renderers can
+  // update the role filter when a badge is clicked.
+  const gridContext = useMemo(() => ({ setRoleFilter }), [setRoleFilter]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {/* Role filter */}
@@ -972,6 +995,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             animateRows
             getRowId={(p) => String(p.data.agent_id)}
             initialState={{ sort: { sortModel: DAMAGE_SORT } }}
+            context={gridContext}
           />
         </div>
       </section>
@@ -1008,6 +1032,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             animateRows
             getRowId={(p) => String(p.data.agent_id)}
             initialState={{ sort: { sortModel: HEAL_SORT } }}
+            context={gridContext}
           />
         </div>
       </section>
@@ -1044,6 +1069,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             animateRows
             getRowId={(p) => String(p.data.agent_id)}
             initialState={{ sort: { sortModel: BOONS_SORT } }}
+            context={gridContext}
           />
         </div>
       </section>
@@ -1080,6 +1106,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             animateRows
             getRowId={(p) => String(p.data.agent_id)}
             initialState={{ sort: { sortModel: DEFENSE_SORT } }}
+            context={gridContext}
           />
         </div>
       </section>

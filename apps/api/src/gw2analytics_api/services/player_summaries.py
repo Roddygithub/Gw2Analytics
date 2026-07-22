@@ -244,29 +244,35 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
     # Compute total squad healing for Heal role threshold.
     total_squad_healing = sum(b.healing for b in per_account.values())
 
-    def _compute_account_roles(
-        healing: int,
-        boons_out_rate: float,
-        strips: int,
-        cleanses: int,
-        cc_applied: int,
-    ) -> list[str]:
-        """Determine role badges for a single account using the same
-        thresholds as :func:`aggregate_combat_readout`."""
-        roles_out: list[str] = []
-        if total_squad_healing > 0 and (healing / total_squad_healing) > 0.10:
-            roles_out.append("Heal")
-        if boons_out_rate > 1.0:
-            roles_out.append("Support")
-        if strips > 5:
-            roles_out.append("Strip")
-        if cleanses > 10:
-            roles_out.append("Cleanser")
-        if cc_applied > 3:
-            roles_out.append("CC")
-        if not roles_out:
-            roles_out.append("DPS")
-        return roles_out
+def _compute_account_roles(
+    *,
+    healing: int,
+    total_squad_healing: int,
+    boons_out_rate: float,
+    strips: int,
+    cleanses: int,
+    cc_applied: int,
+) -> list[str]:
+    """Determine role badges for a single account using the same
+    thresholds as :func:`aggregate_combat_readout`.
+
+    Extracted as a module-level function so both
+    :func:`_persist_player_summaries` and the unit test suite
+    can import it directly."""
+    roles_out: list[str] = []
+    if total_squad_healing > 0 and (healing / total_squad_healing) > 0.10:
+        roles_out.append("Heal")
+    if boons_out_rate > 1.0:
+        roles_out.append("Support")
+    if strips > 5:
+        roles_out.append("Strip")
+    if cleanses > 10:
+        roles_out.append("Cleanser")
+    if cc_applied > 3:
+        roles_out.append("CC")
+    if not roles_out:
+        roles_out.append("DPS")
+    return roles_out
 
     if not per_account and source_map:
         logger.warning(
@@ -334,6 +340,7 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
                 condition_cleanses=bucket.condition_cleanses,
                 roles=_compute_account_roles(
                     healing=bucket.healing,
+                    total_squad_healing=total_squad_healing,
                     boons_out_rate=boons_out_by_account.get(account_name, 0.0),
                     strips=bucket.boon_strips,
                     cleanses=bucket.condition_cleanses,

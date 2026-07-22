@@ -20,6 +20,7 @@ from gw2analytics_api.models import (
     Upload,
 )
 from gw2analytics_api.services import _persist_player_summaries
+from gw2analytics_api.services.player_summaries import _compute_account_roles
 
 _D = 100_000  # base source agent id
 
@@ -433,3 +434,156 @@ def test_boon_uptime_and_outgoing_persisted() -> None:
         assert target.might_uptime == pytest.approx(0.0)
     finally:
         session.close()
+
+
+# ------------------------------------------------------------------ *
+#  Unit tests for :func:`_compute_account_roles`
+# ------------------------------------------------------------------ *
+
+
+def test_compute_account_roles_defaults_to_dps() -> None:
+    """No thresholds met → single \"DPS\" role."""
+    result = _compute_account_roles(
+        healing=0,
+        total_squad_healing=1000,
+        boons_out_rate=0.0,
+        strips=0,
+        cleanses=0,
+        cc_applied=0,
+    )
+    assert result == ["DPS"]
+
+
+def test_compute_account_roles_heal_threshold() -> None:
+    """>10% of squad healing → Heal role."""
+    result = _compute_account_roles(
+        healing=200,  # 200 / 1000 = 20% > 10%
+        total_squad_healing=1000,
+        boons_out_rate=0.0,
+        strips=0,
+        cleanses=0,
+        cc_applied=0,
+    )
+    assert "Heal" in result
+    assert "DPS" not in result
+
+
+def test_compute_account_roles_heal_below_threshold() -> None:
+    """Exactly 10% of squad healing → NOT Heal (strict >)."""
+    result = _compute_account_roles(
+        healing=100,  # exactly 10%
+        total_squad_healing=1000,
+        boons_out_rate=0.0,
+        strips=0,
+        cleanses=0,
+        cc_applied=0,
+    )
+    assert "Heal" not in result
+    assert result == ["DPS"]
+
+
+def test_compute_account_roles_support_threshold() -> None:
+    """>1 boon/s → Support role."""
+    result = _compute_account_roles(
+        healing=0,
+        total_squad_healing=1000,
+        boons_out_rate=2.5,
+        strips=0,
+        cleanses=0,
+        cc_applied=0,
+    )
+    assert "Support" in result
+    assert "DPS" not in result
+
+
+def test_compute_account_roles_support_exactly_one() -> None:
+    """Exactly 1 boon/s → NOT Support (strict >)."""
+    result = _compute_account_roles(
+        healing=0,
+        total_squad_healing=1000,
+        boons_out_rate=1.0,
+        strips=0,
+        cleanses=0,
+        cc_applied=0,
+    )
+    assert "Support" not in result
+    assert result == ["DPS"]
+
+
+def test_compute_account_roles_strip_threshold() -> None:
+    """>5 strips → Strip role."""
+    result = _compute_account_roles(
+        healing=0,
+        total_squad_healing=1000,
+        boons_out_rate=0.0,
+        strips=6,
+        cleanses=0,
+        cc_applied=0,
+    )
+    assert "Strip" in result
+
+
+def test_compute_account_roles_strip_exactly_five() -> None:
+    """Exactly 5 strips → NOT Strip (strict >)."""
+    result = _compute_account_roles(
+        healing=0,
+        total_squad_healing=1000,
+        boons_out_rate=0.0,
+        strips=5,
+        cleanses=0,
+        cc_applied=0,
+    )
+    assert "Strip" not in result
+
+
+def test_compute_account_roles_cleanser_threshold() -> None:
+    """>10 cleanses → Cleanser role."""
+    result = _compute_account_roles(
+        healing=0,
+        total_squad_healing=1000,
+        boons_out_rate=0.0,
+        strips=0,
+        cleanses=11,
+        cc_applied=0,
+    )
+    assert "Cleanser" in result
+
+
+def test_compute_account_roles_cc_threshold() -> None:
+    """>3 CC → CC role."""
+    result = _compute_account_roles(
+        healing=0,
+        total_squad_healing=1000,
+        boons_out_rate=0.0,
+        strips=0,
+        cleanses=0,
+        cc_applied=4,
+    )
+    assert "CC" in result
+
+
+def test_compute_account_roles_multiple_roles() -> None:
+    """Multiple thresholds met → multiple roles, no DPS fallback."""
+    result = _compute_account_roles(
+        healing=200,  # Heal
+        total_squad_healing=1000,
+        boons_out_rate=2.0,  # Support
+        strips=6,  # Strip
+        cleanses=0,
+        cc_applied=0,
+    )
+    assert result == ["Heal", "Support", "Strip"]
+
+
+def test_compute_account_roles_zero_squad_healing() -> None:
+    """total_squad_healing=0 → Heal role never assigned (avoids div/0)."""
+    result = _compute_account_roles(
+        healing=500,
+        total_squad_healing=0,
+        boons_out_rate=0.0,
+        strips=0,
+        cleanses=0,
+        cc_applied=0,
+    )
+    assert "Heal" not in result
+    assert result == ["DPS"]
