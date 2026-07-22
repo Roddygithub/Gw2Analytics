@@ -269,7 +269,7 @@ jobs:
           - project: visual-regression
     runs-on: ubuntu-latest
     # visual-regression only on PRs; chromium always.
-    if: matrix.project != 'visual-regression' || github.event_name == 'pull_request'
+    if: ${{ matrix.project != 'visual-regression' || github.event_name == 'pull_request' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -313,7 +313,7 @@ jobs:
           retention-days: 7
 
       - name: Upload visual regression diffs on failure
-        if: failure() && matrix.project == 'visual-regression'
+        if: ${{ failure() && matrix.project == 'visual-regression' }}
         uses: actions/upload-artifact@v7
         with:
           name: visual-regression-diffs
