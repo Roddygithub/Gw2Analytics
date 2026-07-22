@@ -74,28 +74,60 @@ export function PerFightTimelineChart({
   points: PerFightTimelinePoint[];
   scale?: TimelineScale;
 }) {
+  // Trim leading + trailing zero-activity buckets so the chart
+  // focuses on the actual combat period. Long WvW fights (e.g. 272
+  // min) spend most of their time repositioning with zero damage/
+  // healing/strip; keeping all buckets flattens the few active ones
+  // into invisibility. We find the first and last bucket with ANY
+  // non-zero activity and render only that slice.
+  // Returns [originalIndex, point] pairs so tooltips report the
+  // correct bucket number from the original fight timeline.
+  const trimmedWithIndex: [number, PerFightTimelinePoint][] = useMemo(() => {
+    if (points.length === 0) return [];
+    const isActive = (p: PerFightTimelinePoint) =>
+      p.total_damage > 0 || p.total_healing > 0 || p.total_buff_removal > 0;
+    const firstActive = points.findIndex(isActive);
+    if (firstActive === -1) {
+      // all zero — show everything with original indices
+      return points.map((p, i) => [i, p] as [number, PerFightTimelinePoint]);
+    }
+    // Search from the end for the last active bucket.
+    let lastActive = points.length - 1;
+    while (lastActive > firstActive && !isActive(points[lastActive])) {
+      lastActive--;
+    }
+    // Include 1 buffer bucket on each side for context.
+    const start = Math.max(0, firstActive - 1);
+    const end = Math.min(points.length - 1, lastActive + 1);
+    const result: [number, PerFightTimelinePoint][] = [];
+    for (let i = start; i <= end; i++) {
+      result.push([i, points[i]]);
+    }
+    return result;
+  }, [points]);
+
   // Map PerFightTimelinePoint[] to the flat
   // TimelineChartPoint[] shape the base component consumes.
   // The wrapper owns the X-axis label format (``M:SS``) +
-  // the tooltip text + the React key (bucket index, since
-  // all points share the same fight id).
+  // the tooltip text + the React key (original bucket index
+  // so the analyst sees the correct temporal reference).
   const chartPoints: TimelineChartPoint[] = useMemo(
     () =>
-      points.map((p, i) => {
+      trimmedWithIndex.map(([origIdx, p]) => {
         const startLabel = formatSecondsLabel(p.window_start_ms);
         const endLabel = formatSecondsLabel(p.window_end_ms);
         return {
           series: [p.total_damage, p.total_healing, p.total_buff_removal],
-          key: `bucket-${i}`,
+          key: `bucket-${origIdx}`,
           xLabel: startLabel,
           tooltip:
-            `${startLabel}–${endLabel} · bucket ${i + 1}/${points.length}\n` +
+            `${startLabel}–${endLabel} · bucket ${origIdx + 1}/${points.length}\n` +
             `Damage: ${p.total_damage.toLocaleString("en-US")}\n` +
             `Healing: ${p.total_healing.toLocaleString("en-US")}\n` +
             `Strip: ${p.total_buff_removal.toLocaleString("en-US")}`,
         };
       }),
-    [points],
+    [trimmedWithIndex, points.length],
   );
 
   return (

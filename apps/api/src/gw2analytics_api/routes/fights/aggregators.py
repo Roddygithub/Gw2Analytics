@@ -101,6 +101,10 @@ from gw2_analytics.player_heal import (
     PlayerHealAggregator,
     PlayerHealRow,
 )
+from gw2_analytics.down_contribution import (
+    DownContributionAggregator,
+    DownContributionRow,
+)
 from gw2_analytics.position_analysis import compute_position_metrics
 from gw2_analytics.skill_usage import SkillUsageAggregator, SkillUsageRow
 from gw2_analytics.squad_rollup import SquadRollupAggregator, SquadRollupRow
@@ -391,6 +395,7 @@ def _build_player_readout(
     cleanses: int = 0,
     strips: int = 0,
     cc_applied: int = 0,
+    down_contrib: tuple[float, int] | None = None,
     time_downed_ms: int = 0,
     boon_uptimes: dict[str, float] | None = None,
     presence_pct: float | None = None,
@@ -437,8 +442,8 @@ def _build_player_readout(
             dps_condi=d_row.dps_condi,
             strips=strips,
             cc_applied=cc_applied,
-            down_contribution_dps=0.0,  # awaits Phase 9 v2 'is target down' attribution.
-            kills=0,  # awaits DeathEvent + DPS stream cross-walk (Phase 9 v2).
+            down_contribution_dps=down_contrib[0] if down_contrib else 0.0,
+            kills=down_contrib[1] if down_contrib else 0,
         ),
         heal=PlayerReadoutHealOut(
             heal_total=h_row.total_healing,
@@ -694,6 +699,22 @@ def aggregate_combat_readout(
         for aid, buckets in active_buckets_by_agent.items()
     }
 
+    # v0.14.4: down-contribution DPS + kill attribution via the
+    # library-side DownContributionAggregator (chronological processing
+    # of DownEvent + DeathEvent + DamageEvent to track damage dealt
+    # to downed targets). Wired since the aggregator already existed
+    # in libs/gw2_analytics but was never called from the API layer.
+    down_contribution_rows: list[DownContributionRow] = DownContributionAggregator().aggregate(
+        damage_events,
+        down_events,
+        death_events,
+        duration_s,
+    )
+    down_contrib_by_id: dict[int, tuple[float, int]] = {
+        r.source_agent_id: (r.down_contribution_dps, r.kills)
+        for r in down_contribution_rows
+    }
+
     # v0.14.4: basic role detection — DPS / Heal / Support based on
     # heal share relative to the squad. If a player contributes >30%
     # of the squad's total healing, they're flagged as "Heal".
@@ -757,6 +778,7 @@ def aggregate_combat_readout(
             cleanses=cleanses_counter.get(agent_id, 0),
             strips=strips_counter.get(agent_id, 0),
             cc_applied=cc_counter.get(agent_id, 0),
+            down_contrib=down_contrib_by_id.get(agent_id),
             time_downed_ms=downtime_counter.get(agent_id, 0),
             roles=roles_by_agent.get(agent_id, []),
             boon_uptimes=(
