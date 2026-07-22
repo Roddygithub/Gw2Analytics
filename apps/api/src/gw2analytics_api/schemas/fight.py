@@ -332,6 +332,12 @@ class PlayerReadoutBoonsOut(BaseModel):
     ``other_boons_out`` (a free-form name → count mapping;
     default empty dict so the frontend renders the empty-state
     column without a conditional branch).
+
+    Plan 173 v0.12.x: 14 boon uptime percentage fields (0-100)
+    added alongside the existing raw counts. Uptimes are hydrated
+    from ``OrmFightPlayerSummary`` (pre-computed during parse),
+    not recalculated from the event stream. ``None`` means
+    "unavailable" (pre-migration fight or no boon events).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -345,6 +351,36 @@ class PlayerReadoutBoonsOut(BaseModel):
     superspeed_out: int = 0
     stealth_out: int = 0
     other_boons_out: dict[str, int] = {}
+    # Plan 173: boon uptime percentages [0.0, 100.0], None when unavailable.
+    might_uptime: float | None = None
+    fury_uptime: float | None = None
+    quickness_uptime: float | None = None
+    alacrity_uptime: float | None = None
+    protection_uptime: float | None = None
+    regeneration_uptime: float | None = None
+    vigor_uptime: float | None = None
+    aegis_uptime: float | None = None
+    stability_uptime: float | None = None
+    swiftness_uptime: float | None = None
+    resistance_uptime: float | None = None
+    resolution_uptime: float | None = None
+    superspeed_uptime: float | None = None
+    stealth_uptime: float | None = None
+    # Plan 173 Phase F: outgoing boon generation totals (stack-ms).
+    outgoing_might: int | None = None
+    outgoing_fury: int | None = None
+    outgoing_quickness: int | None = None
+    outgoing_alacrity: int | None = None
+    outgoing_protection: int | None = None
+    outgoing_regeneration: int | None = None
+    outgoing_vigor: int | None = None
+    outgoing_aegis: int | None = None
+    outgoing_stability: int | None = None
+    outgoing_swiftness: int | None = None
+    outgoing_resistance: int | None = None
+    outgoing_resolution: int | None = None
+    outgoing_superspeed: int | None = None
+    outgoing_stealth: int | None = None
 
 
 class PlayerReadoutDefenseOut(BaseModel):
@@ -355,6 +391,11 @@ class PlayerReadoutDefenseOut(BaseModel):
     column requires the parser to track the ``downed`` state
     per target across events (Phase 6 v2, live since v0.12.2);
     defaults to 0 for legacy streams.
+
+    Plan 173 Phase E: ``presence_pct`` is the percentage of
+    5-second event-window buckets in which the player appeared
+    as source or target of at least one event. ``None`` means
+    "unavailable" (no events or pre-migration fight).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -367,6 +408,8 @@ class PlayerReadoutDefenseOut(BaseModel):
     blocks: int = 0
     interrupts: int = 0
     barrier_absorbed: int = 0
+    # Plan 173 Phase E: presence percentage [0.0, 100.0], None when unavailable.
+    presence_pct: float | None = None
 
 
 class PlayerReadoutOut(BaseModel):

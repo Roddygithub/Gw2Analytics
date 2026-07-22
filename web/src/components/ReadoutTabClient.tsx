@@ -23,6 +23,7 @@ import {
   type FightReadoutOut,
   type FightPositionsOut,
   type FightEventsSummaryRow,
+  type PlayerReadoutBoonsOut,
   type PlayerReadoutOut,
 } from "@/lib/api";
 import { appGridTheme } from "./ag-grid-setup";
@@ -328,6 +329,118 @@ const HEAL_SORT: SortModelItem[] = [
 ];
 
 /* ------------------------------------------------------------------ *
+ *  Boon uptime grouped bar renderer — shows a compact group average
+ *  with a colored bar and individual values in the tooltip.
+ * ------------------------------------------------------------------ */
+
+interface BoonGroupDef {
+  colId: string;
+  headerName: string;
+  fields: (keyof PlayerReadoutBoonsOut)[];
+  gradient: string;
+}
+
+const BOON_GROUPS: BoonGroupDef[] = [
+  {
+    colId: "uptime_offensive",
+    headerName: "Offensifs",
+    fields: ["might_uptime", "fury_uptime", "quickness_uptime", "alacrity_uptime"],
+    gradient: "linear-gradient(135deg, #f59e0b, #d97706)",
+  },
+  {
+    colId: "uptime_defensive",
+    headerName: "Défensifs",
+    fields: [
+      "protection_uptime",
+      "regeneration_uptime",
+      "vigor_uptime",
+      "aegis_uptime",
+      "stability_uptime",
+      "resolution_uptime",
+      "resistance_uptime",
+    ],
+    gradient: "linear-gradient(135deg, #22c55e, #16a34a)",
+  },
+  {
+    colId: "uptime_mobility",
+    headerName: "Mobilité",
+    fields: ["swiftness_uptime", "superspeed_uptime"],
+    gradient: "linear-gradient(135deg, #06b6d4, #0891b2)",
+  },
+  {
+    colId: "uptime_stealth",
+    headerName: "Furtivité",
+    fields: ["stealth_uptime"],
+    gradient: "linear-gradient(135deg, #a855f7, #7c3aed)",
+  },
+];
+
+/**
+ * Build an uptime group column definition for AG Grid.
+ * Renders a horizontal bar showing the group average + individual
+ * percentages on hover.
+ */
+function buildUptimeGroupCol(group: BoonGroupDef): ColDef<PlayerReadoutOut> {
+  const BOON_LABELS: Record<string, string> = {
+    might_uptime: "Might",
+    fury_uptime: "Fury",
+    quickness_uptime: "Quickness",
+    alacrity_uptime: "Alacrity",
+    protection_uptime: "Protection",
+    regeneration_uptime: "Regen",
+    vigor_uptime: "Vigor",
+    aegis_uptime: "Aegis",
+    stability_uptime: "Stability",
+    swiftness_uptime: "Swiftness",
+    resistance_uptime: "Resistance",
+    resolution_uptime: "Resolution",
+    superspeed_uptime: "Superspeed",
+    stealth_uptime: "Stealth",
+  };
+
+  return {
+    colId: group.colId,
+    headerName: group.headerName,
+    width: 160,
+    valueGetter: (params) => {
+      const b = params.data?.boons;
+      if (!b) return null;
+      const vals = group.fields
+        .map((f) => (b as unknown as Record<string, number | null>)[f as string])
+        .filter((v): v is number => v != null);
+      if (vals.length === 0) return null;
+      return vals.reduce((a, c) => a + c, 0) / vals.length;
+    },
+    cellRenderer: (params: ICellRendererParams<PlayerReadoutOut>) => {
+      const pct = params.value as number | null;
+      return (
+        <BarStack
+          segments={
+            pct != null
+              ? [{ pct: Math.min(100, Math.max(0, pct)), gradient: group.gradient, label: `${group.headerName}: ${pct.toFixed(0)}%` }]
+              : []
+          }
+          total={pct != null ? `${pct.toFixed(0)}%` : "—"}
+        />
+      );
+    },
+    tooltipValueGetter: (params) => {
+      const b = params.data?.boons;
+      if (!b) return null;
+      const bRec = b as unknown as Record<string, number | null>;
+      return group.fields
+        .map((f) => {
+          const v = bRec[f as string];
+          return `${BOON_LABELS[f as string] ?? f}: ${v != null ? `${v.toFixed(0)}%` : "—"}`;
+        })
+        .join("\n");
+    },
+    comparator: (a: unknown, b: unknown) =>
+      Number(a ?? -1) - Number(b ?? -1) || 0,
+  };
+}
+
+/* ------------------------------------------------------------------ *
  *  Boons columns
  * ------------------------------------------------------------------ */
 
@@ -343,12 +456,38 @@ const BOONS_COLUMNS: ColDef<PlayerReadoutOut>[] = [
       return bVal - aVal;
     },
   },
-  { field: "boons.stability_out", headerName: "Stabilité", width: 100 },
-  { field: "boons.alacrity_out", headerName: "Célérité", width: 90 },
-  { field: "boons.resistance_out", headerName: "Résistance", width: 110 },
-  { field: "boons.aegis_out", headerName: "Égide", width: 80 },
-  { field: "boons.superspeed_out", headerName: "Superspeed", width: 110 },
-  { field: "boons.stealth_out", headerName: "Stealth", width: 90 },
+  // Plan 173: uptime bars replacing the 6 raw-count columns.
+  // Raw counts (stability_out, etc.) are still available in the
+  // API payload but hidden from the default column set.
+  ...BOON_GROUPS.map(buildUptimeGroupCol),
+  // Plan 173 Phase F: outgoing boons total (sum of all 14 outgoing_*).
+  {
+    colId: "outgoing_boons",
+    headerName: "Boons générés",
+    width: 140,
+    valueGetter: (params) => {
+      const b = params.data?.boons;
+      if (!b) return null;
+      const fields = [
+        "outgoing_might", "outgoing_fury", "outgoing_quickness",
+        "outgoing_alacrity", "outgoing_protection", "outgoing_regeneration",
+        "outgoing_vigor", "outgoing_aegis", "outgoing_stability",
+        "outgoing_swiftness", "outgoing_resistance", "outgoing_resolution",
+        "outgoing_superspeed", "outgoing_stealth",
+      ] as const;
+      const bRec = b as unknown as Record<string, number | null>;
+      let total = 0;
+      let hasAny = false;
+      for (const f of fields) {
+        const v = bRec[f as string];
+        if (v != null) { total += v; hasAny = true; }
+      }
+      return hasAny ? total : null;
+    },
+    valueFormatter: (params) =>
+      params.value != null ? (params.value as number).toLocaleString() : "—",
+    comparator: NUMERIC_COMPARATOR,
+  },
 ];
 
 const BOONS_SORT: SortModelItem[] = [
@@ -373,6 +512,15 @@ function buildDefenseColumns(
     { field: "defense.time_downed_ms", headerName: "Down (ms)", width: 110 },
     { field: "defense.cc_taken", headerName: "CC reçus", width: 100 },
     { field: "defense.barrier_absorbed", headerName: "Barrier abs.", width: 120 },
+    // Plan 173 Phase E: presence percentage from event-window buckets.
+    {
+      field: "defense.presence_pct",
+      headerName: "Présence %",
+      width: 110,
+      valueFormatter: (params) =>
+        params.value != null ? `${(params.value as number).toFixed(0)}%` : "—",
+      comparator: NUMERIC_COMPARATOR,
+    },
     // Position data — merged from the /positions endpoint by account_name
     {
       colId: "stack_dist",

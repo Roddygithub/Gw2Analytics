@@ -40,6 +40,14 @@ const DEFENSE_COLUMNS: ColDef<PlayerReadoutOut>[] = [
   { field: "defense.blocks", headerName: "Blocages", width: 110 },
   { field: "defense.interrupts", headerName: "Interruptions", width: 130 },
   { field: "defense.barrier_absorbed", headerName: "Barrier abs.", width: 130 },
+  // Plan 173 Phase E: presence percentage from event-window buckets.
+  {
+    field: "defense.presence_pct",
+    headerName: "Présence %",
+    width: 110,
+    valueFormatter: (params) =>
+      params.value != null ? `${(params.value as number).toFixed(0)}%` : "—",
+  },
 ];
 
 // Default sort per design doc §13: subgroup ASC + damage_taken DESC

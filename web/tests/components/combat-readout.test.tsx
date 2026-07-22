@@ -104,7 +104,35 @@ function buildRow(extra: Partial<PlayerReadoutOut> = {}): PlayerReadoutOut {
       aegis_out: 35,
       superspeed_out: 15,
       stealth_out: 0,
+      might_uptime: null,
+      fury_uptime: null,
+      quickness_uptime: null,
+      alacrity_uptime: null,
+      protection_uptime: null,
+      regeneration_uptime: null,
+      vigor_uptime: null,
+      aegis_uptime: null,
+      stability_uptime: null,
+      swiftness_uptime: null,
+      resistance_uptime: null,
+      resolution_uptime: null,
+      superspeed_uptime: null,
+      stealth_uptime: null,
       other_boons_out: { might: 4503, fury: 34 },
+      outgoing_might: null,
+      outgoing_fury: null,
+      outgoing_quickness: null,
+      outgoing_alacrity: null,
+      outgoing_protection: null,
+      outgoing_regeneration: null,
+      outgoing_vigor: null,
+      outgoing_aegis: null,
+      outgoing_stability: null,
+      outgoing_swiftness: null,
+      outgoing_resistance: null,
+      outgoing_resolution: null,
+      outgoing_superspeed: null,
+      outgoing_stealth: null,
     },
     defense: {
       damage_taken: 45000,
@@ -115,6 +143,7 @@ function buildRow(extra: Partial<PlayerReadoutOut> = {}): PlayerReadoutOut {
       blocks: 45,
       interrupts: 1,
       barrier_absorbed: 15015,
+      presence_pct: null,
     },
     ...extra,
   };
@@ -237,7 +266,7 @@ describe("PlayerReadoutDefense", () => {
     ).not.toBeNull();
   });
 
-  it("renders AG Grid wrapper with 14 columns + damage_taken-desc sort", () => {
+  it("renders AG Grid wrapper with 15 columns + damage_taken-desc sort", () => {
     const rows = [buildRow()];
     const { container } = render(<PlayerReadoutDefense rows={rows} />);
     const mock = container.querySelector(
@@ -245,8 +274,8 @@ describe("PlayerReadoutDefense", () => {
     );
     expect(mock).not.toBeNull();
     const props = JSON.parse(mock!.getAttribute("data-props") ?? "{}");
-    // 5 SHARED + 8 defense + 1 tiebreaker = 14.
-    expect(props.columnDefs).toBe(14);
+    // 5 SHARED + 9 defense (incl. presence_pct) + 1 tiebreaker = 15.
+    expect(props.columnDefs).toBe(15);
     expect(props.sortModel).toEqual([
       { colId: "subgroup", sort: "asc" },
       { colId: "defense.damage_taken", sort: "desc" },

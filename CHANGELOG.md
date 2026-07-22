@@ -1,3 +1,40 @@
+## [0.14.2] - 2026-07-22
+
+### Added — Plan 173: Boon uptime + Presence % + Outgoing boons in Combat Readout
+- **14 boon uptime percentage fields** in `PlayerReadoutBoonsOut`
+  (`might_uptime` through `stealth_uptime`), hydrated from
+  `OrmFightPlayerSummary` (pre-computed during parse via
+  `BuffStateTracker`). No recomputation from event stream.
+- **`presence_pct` field** in `PlayerReadoutDefenseOut`: percentage
+  of 5-second event-window buckets where the player appeared as
+  source or target. Computed in `aggregate_combat_readout` from the
+  heterogeneous event stream.
+- **14 outgoing boon generation totals** in `PlayerReadoutBoonsOut`
+  (`outgoing_might` through `outgoing_stealth`), total stack-ms
+  applied to other players.
+- **Frontend grouped uptime bars**: 4 column groups (Offensifs /
+  Défensifs / Mobilité / Furtivité) with colored bars + tooltip
+  listing individual boon percentages.
+- **Frontend « Boons générés » column**: sum of all 14 outgoing_*
+  totals in the Boons table.
+- **Frontend « Présence % » column**: in the Defense table.
+- **2 backend hermetic tests** in `test_fights_readout.py`:
+  `test_readout_boon_uptimes_and_presence_pct` (14 uptimes + 14
+  outgoing + presence_pct) and `test_readout_boon_uptimes_none_for_no_account`
+  (None fallback).
+
+### Changed
+- `get_fight_readout` now loads `OrmFightPlayerSummary` rows and
+  builds `boon_uptimes_by_account` dict for the Combat readout.
+- `aggregate_combat_readout` accepts `boon_uptimes_by_account` kwarg.
+- `_build_player_readout` accepts `boon_uptimes` + `presence_pct` kwargs.
+- `PlayerReadoutDefense` now renders 9 defense-aspect columns (was 8).
+
+### Validation
+- TypeScript: 0 errors, Frontend tests: 391 passed, 3 skipped
+- Python: all files compile clean
+- Docker API + web: rebuilt and deployed
+
 ## [0.13.0] - 2026-07-21
 
 ### Changed — Feature-complete milestone

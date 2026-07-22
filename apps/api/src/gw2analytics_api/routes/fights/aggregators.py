@@ -390,6 +390,8 @@ def _build_player_readout(
     *,
     cleanses: int = 0,
     time_downed_ms: int = 0,
+    boon_uptimes: dict[str, float] | None = None,
+    presence_pct: float | None = None,
 ) -> PlayerReadoutOut:
     """Build a single :class:`PlayerReadoutOut` from aspect rows + identity.
 
@@ -399,6 +401,7 @@ def _build_player_readout(
     is always instantiated fresh because its ``other_boons_out`` dict
     is mutable and must not be shared.
     """
+    _uptimes = boon_uptimes or {}
     d_row = damage_row or _ZERO_DAMAGE_ROW
     h_row = heal_row or _ZERO_HEAL_ROW
     b_row = boons_row or PlayerBoonsRow(
@@ -454,6 +457,36 @@ def _build_player_readout(
             superspeed_out=b_row.superspeed_out,
             stealth_out=b_row.stealth_out,
             other_boons_out=dict(b_row.other_boons_out),
+            # Plan 173: boon uptimes from OrmFightPlayerSummary.
+            might_uptime=_uptimes.get("might"),
+            fury_uptime=_uptimes.get("fury"),
+            quickness_uptime=_uptimes.get("quickness"),
+            alacrity_uptime=_uptimes.get("alacrity"),
+            protection_uptime=_uptimes.get("protection"),
+            regeneration_uptime=_uptimes.get("regeneration"),
+            vigor_uptime=_uptimes.get("vigor"),
+            aegis_uptime=_uptimes.get("aegis"),
+            stability_uptime=_uptimes.get("stability"),
+            swiftness_uptime=_uptimes.get("swiftness"),
+            resistance_uptime=_uptimes.get("resistance"),
+            resolution_uptime=_uptimes.get("resolution"),
+            superspeed_uptime=_uptimes.get("superspeed"),
+            stealth_uptime=_uptimes.get("stealth"),
+            # Plan 173 Phase F: outgoing boon generation totals.
+            outgoing_might=_uptimes.get("outgoing_might"),
+            outgoing_fury=_uptimes.get("outgoing_fury"),
+            outgoing_quickness=_uptimes.get("outgoing_quickness"),
+            outgoing_alacrity=_uptimes.get("outgoing_alacrity"),
+            outgoing_protection=_uptimes.get("outgoing_protection"),
+            outgoing_regeneration=_uptimes.get("outgoing_regeneration"),
+            outgoing_vigor=_uptimes.get("outgoing_vigor"),
+            outgoing_aegis=_uptimes.get("outgoing_aegis"),
+            outgoing_stability=_uptimes.get("outgoing_stability"),
+            outgoing_swiftness=_uptimes.get("outgoing_swiftness"),
+            outgoing_resistance=_uptimes.get("outgoing_resistance"),
+            outgoing_resolution=_uptimes.get("outgoing_resolution"),
+            outgoing_superspeed=_uptimes.get("outgoing_superspeed"),
+            outgoing_stealth=_uptimes.get("outgoing_stealth"),
         ),
         defense=PlayerReadoutDefenseOut(
             damage_taken=def_row.damage_taken,
@@ -464,6 +497,8 @@ def _build_player_readout(
             blocks=def_row.blocks,
             interrupts=def_row.interrupts,
             barrier_absorbed=def_row.barrier_absorbed,
+            # Plan 173 Phase E: presence percentage from event-window buckets.
+            presence_pct=presence_pct,
         ),
     )
 
@@ -478,6 +513,7 @@ def aggregate_combat_readout(
     dps_split_getter: DpsSplitGetter | None = None,
     barrier_portion_getter_heal: HealBarrierGetter | None = None,
     buff_removal_events: Iterable[BuffRemovalEvent] | None = None,
+    boon_uptimes_by_account: dict[str, dict[str, float]] | None = None,
 ) -> FightReadoutOut:
     """Aggregate the Combat readout (4-table layout from design doc §3-6) for one fight.
 
@@ -622,6 +658,28 @@ def aggregate_combat_readout(
     boons_by_id: dict[int, PlayerBoonsRow] = {r.agent_id: r for r in boons_rows}
     defense_by_id: dict[int, PlayerDefenseRow] = {r.agent_id: r for r in defense_rows}
 
+    # Plan 173 Phase E: per-player presence percentage via event-window
+    # buckets (5 s). For each player agent, count the number of buckets
+    # in which they appear as source or target of any event, then
+    # compute presence_pct = (active_buckets / total_buckets) * 100.
+    identity_map = agent_id_to_identity_map or {}
+    total_duration_ms = int(duration_s * 1000)
+    bucket_count = max(1, (total_duration_ms // 5000) + (1 if total_duration_ms % 5000 else 0))
+    active_buckets_by_agent: dict[int, set[int]] = {}
+    for event in events:
+        bucket = event.time_ms // 5000
+        # Some event types may not carry target_agent_id (e.g. statechange
+        # events without a target). Use getattr defensively.
+        source_id = event.source_agent_id
+        target_id = getattr(event, "target_agent_id", None)
+        for agent_id in (source_id, target_id):
+            if agent_id is not None and agent_id in identity_map:
+                active_buckets_by_agent.setdefault(agent_id, set()).add(bucket)
+    presence_by_agent: dict[int, float] = {
+        aid: min(100.0, (len(buckets) / bucket_count) * 100.0)
+        for aid, buckets in active_buckets_by_agent.items()
+    }
+
     # Single pass to build the per-agent PlayerReadoutOut envelope.
     # The 5 shared identity columns (per design doc §2) hydrate
     # from the ``AgentIdentity`` map (Tour 6 v0.10.24 close-out of
@@ -662,6 +720,12 @@ def aggregate_combat_readout(
             defense_by_id.get(agent_id),
             cleanses=cleanses_counter.get(agent_id, 0),
             time_downed_ms=downtime_counter.get(agent_id, 0),
+            boon_uptimes=(
+                boon_uptimes_by_account.get(identity_map[agent_id].account_name)
+                if boon_uptimes_by_account and identity_map[agent_id].account_name
+                else None
+            ),
+            presence_pct=presence_by_agent.get(agent_id),
         )
         for agent_id in sorted(valid_agent_ids)
     ]

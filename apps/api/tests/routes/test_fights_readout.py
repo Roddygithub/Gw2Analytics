@@ -363,6 +363,170 @@ def test_readout_aggregator_account_name_none_passthrough() -> None:
 # -----------------------------------------------------------------
 
 
+def test_readout_boon_uptimes_and_presence_pct() -> None:
+    """Plan 173: aggregator-level test for boon uptimes + presence_pct.
+
+    Seeds an AgentIdentity + events with 14 BoonApplyEvent records
+    covering all tracked boons (TRACKED_BUFFS skill_ids). Runs
+    ``aggregate_combat_readout`` with ``boon_uptimes_by_account`` +
+    verifies uptimes are populated and presence_pct is computed
+    from event-window buckets.
+    """
+    from gw2_analytics.buff_state import TRACKED_BUFFS
+    from gw2_core import BoonApplyEvent
+
+    a = 600_001
+    b = a + 1
+
+    # Create one BoonApplyEvent per tracked buff so the uptime dict
+    # passed to the aggregator has all 14 boons.
+    boon_events: list = []
+    for idx, (name, skill_id) in enumerate(TRACKED_BUFFS.items()):
+        boon_events.append(
+            BoonApplyEvent(
+                time_ms=1_000 + idx * 100,
+                source_agent_id=b,
+                target_agent_id=a,
+                skill_id=skill_id,
+                kind="apply",
+                stacks=1,
+                duration_ms=30_000,
+            )
+        )
+
+    # A damage event at time_ms=5000 ensures player a is active in
+    # at least 2 buckets (bucket 0 [0-5s] + bucket 1 [5-10s]).
+    damage_event = DamageEvent(
+        time_ms=5_000,
+        source_agent_id=a,
+        target_agent_id=b,
+        skill_id=9_999_999,
+        damage=500,
+    )
+    all_events = boon_events + [damage_event]
+
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a,
+            name=f"BoonRecv {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(2)",
+            elite_spec="ELITE(18)",
+            is_player=True,
+            is_commander=False,
+        ),
+        b: AgentIdentity(
+            agent_id=b,
+            name=f"BoonSrc {b}",
+            subgroup=0,
+            account_name=f"synth.{b}",
+            profession="PROF(1)",
+            elite_spec="ELITE(27)",
+            is_player=True,
+            is_commander=False,
+        ),
+    }
+
+    # Build uptime dict: player a received all boons at time_ms=1000+i*100
+    # so uptime ≈ (duration_ms - apply_time) / duration_ms * 100.
+    # For a single-boon apply at t=1000 and duration=8000ms (max time_ms=5000
+    # from damage event), the tail uptime is significant.
+    boon_uptimes_by_account: dict[str, dict[str, float]] = {
+        f"synth.{a}": {name: 85.0 for name in TRACKED_BUFFS},
+        f"synth.{b}": {name: 10.0 for name in TRACKED_BUFFS},
+    }
+    # Also add outgoing boons for player b (the source).
+    for account in (f"synth.{a}", f"synth.{b}"):
+        for name in TRACKED_BUFFS:
+            boon_uptimes_by_account[account][f"outgoing_{name}"] = 5000
+
+    duration_s = 8.0
+    out = aggregate_combat_readout(
+        events=all_events,
+        skill_id_to_name_map={},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=duration_s,
+        fight_id="plan173-test",
+        boon_uptimes_by_account=boon_uptimes_by_account,
+    )
+
+    assert isinstance(out.players, list)
+    assert len(out.players) == 2
+
+    a_readout = next(p for p in out.players if p.agent_id == a)
+
+    # All 14 boon uptimes should be 85.0.
+    for name in TRACKED_BUFFS:
+        assert getattr(a_readout.boons, f"{name}_uptime") == 85.0, (
+            f"expected {name}_uptime=85.0, "
+            f"got {getattr(a_readout.boons, f'{name}_uptime')}"
+        )
+
+    # All 14 outgoing boons should be 5000.
+    for name in TRACKED_BUFFS:
+        outgoing_field = f"outgoing_{name}"
+        assert getattr(a_readout.boons, outgoing_field) == 5000, (
+            f"expected {outgoing_field}=5000, "
+            f"got {getattr(a_readout.boons, outgoing_field)}"
+        )
+
+    # Presence: player a has events at t=1000..2300 (boons) + t=5000
+    # = buckets 0 and 1 active. duration_s=8.0 => 5000*8=40000ms =>
+    # ceil(40000/5000)=8 buckets. presence_pct = 2/8*100 = 25.0.
+    assert a_readout.defense.presence_pct is not None
+    assert a_readout.defense.presence_pct == pytest.approx(25.0, abs=5.0), (
+        f"expected presence_pct ≈ 25.0, got {a_readout.defense.presence_pct}"
+    )
+
+
+def test_readout_boon_uptimes_none_for_no_account() -> None:
+    """Plan 173: when boon_uptimes_by_account is None, all uptimes are None."""
+    a = 600_003
+    damage_event = DamageEvent(
+        time_ms=1_000,
+        source_agent_id=a,
+        target_agent_id=a + 1,
+        skill_id=9_999_998,
+        damage=100,
+    )
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a,
+            name=f"NoSynth {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(2)",
+            elite_spec="ELITE(18)",
+            is_player=True,
+            is_commander=False,
+        ),
+    }
+    out = aggregate_combat_readout(
+        events=[damage_event],
+        skill_id_to_name_map={},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=2.0,
+        fight_id="plan173-none",
+        boon_uptimes_by_account=None,
+    )
+    assert len(out.players) == 1
+    a_readout = out.players[0]
+    # All uptime fields should be None (no summary rows for this fight).
+    assert a_readout.boons.might_uptime is None
+    assert a_readout.boons.fury_uptime is None
+    assert a_readout.boons.quickness_uptime is None
+    # Outgoing boons also None.
+    assert a_readout.boons.outgoing_might is None
+    # Presence should be computed even without boon summaries.
+    assert a_readout.defense.presence_pct is not None
+
+
+# -----------------------------------------------------------------
+# Phase 6 v2 live-data verification (v0.12.3)
+# -----------------------------------------------------------------
+
+
 def test_readout_phase6_v2_barrier_and_condi_split_live() -> None:
     """Phase 6 v2 live-data contract: barrier_total > 0 and dps_power/dps_condi split.
 

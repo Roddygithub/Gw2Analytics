@@ -90,6 +90,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from gw2_analytics.buff_state import TRACKED_BUFFS
 from gw2_analytics.event_window import EventWindowAggregator
 from gw2_analytics.per_fight_timeline import PerFightTimelineAggregator
 from gw2_analytics.per_player_timeline import PerPlayerTimelineAggregator
@@ -110,7 +111,7 @@ from gw2_core import (
     StunBreakEvent,
 )
 from gw2analytics_api.database import get_session
-from gw2analytics_api.models import OrmFight, OrmFightAgent
+from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightPlayerSummary
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession
 from gw2analytics_api.routes.fights.aggregators import (
     _split_three_event_streams,
@@ -1012,6 +1013,33 @@ def get_fight_readout(
     # via :func:`format_profession` + :func:`format_elite_spec`.
     agent_id_to_identity_map = agent_id_to_identity(db, fight_id)
 
+    # Plan 173: load pre-computed boon uptimes from OrmFightPlayerSummary.
+    # The uptimes are already calculated during parse by BuffStateTracker
+    # and persisted alongside the damage/heal/strip totals. One small
+    # SELECT (1-50 rows) avoids an O(N) recomputation from the event stream.
+    summary_rows = (
+        db.execute(
+            select(OrmFightPlayerSummary).where(
+                OrmFightPlayerSummary.fight_id == fight_id
+            )
+        )
+        .scalars()
+        .all()
+    )
+    boon_uptimes_by_account: dict[str, dict[str, float]] = {}
+    for s in summary_rows:
+        uptimes: dict[str, float] = {}
+        for name in TRACKED_BUFFS:
+            val = getattr(s, f"{name}_uptime", None)
+            if val is not None:
+                uptimes[name] = float(val)
+            # Plan 173 Phase F: outgoing boon generation totals.
+            outgoing_val = getattr(s, f"outgoing_{name}", None)
+            if outgoing_val is not None:
+                uptimes[f"outgoing_{name}"] = int(outgoing_val)
+        if uptimes:
+            boon_uptimes_by_account[s.account_name] = uptimes
+
     # The per-skill name map for the Boons ``other_boons_out``
     # bucket (the per-player Boons aggregator reads it via the
     # ``name_map`` parameter to resolve skill_id -> string).
@@ -1042,6 +1070,7 @@ def get_fight_readout(
         fight_id=fight_id,
         dps_split_getter=dps_split_getter,
         barrier_portion_getter_heal=barrier_getter,
+        boon_uptimes_by_account=boon_uptimes_by_account or None,
     )
 
 

@@ -192,6 +192,36 @@ export interface PlayerReadoutBoonsOut {
   superspeed_out: number;
   stealth_out: number;
   other_boons_out: Record<string, number>;
+  // Plan 173: boon uptime percentages [0, 100], null when unavailable.
+  might_uptime: number | null;
+  fury_uptime: number | null;
+  quickness_uptime: number | null;
+  alacrity_uptime: number | null;
+  protection_uptime: number | null;
+  regeneration_uptime: number | null;
+  vigor_uptime: number | null;
+  aegis_uptime: number | null;
+  stability_uptime: number | null;
+  swiftness_uptime: number | null;
+  resistance_uptime: number | null;
+  resolution_uptime: number | null;
+  superspeed_uptime: number | null;
+  stealth_uptime: number | null;
+  // Plan 173 Phase F: outgoing boon generation totals.
+  outgoing_might: number | null;
+  outgoing_fury: number | null;
+  outgoing_quickness: number | null;
+  outgoing_alacrity: number | null;
+  outgoing_protection: number | null;
+  outgoing_regeneration: number | null;
+  outgoing_vigor: number | null;
+  outgoing_aegis: number | null;
+  outgoing_stability: number | null;
+  outgoing_swiftness: number | null;
+  outgoing_resistance: number | null;
+  outgoing_resolution: number | null;
+  outgoing_superspeed: number | null;
+  outgoing_stealth: number | null;
 }
 
 export interface PlayerReadoutDefenseOut {
@@ -203,6 +233,8 @@ export interface PlayerReadoutDefenseOut {
   blocks: number;
   interrupts: number;
   barrier_absorbed: number;
+  // Plan 173 Phase E: presence percentage [0, 100], null when unavailable.
+  presence_pct: number | null;
 }
 
 export interface PlayerReadoutOut {
