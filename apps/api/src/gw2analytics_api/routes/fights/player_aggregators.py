@@ -513,7 +513,7 @@ def aggregate_combat_readout(
         for agent_id in identity_map
     }
 
-    identity_map = agent_id_to_identity_map or {}
+    # identity_map reused below — no reassignment needed
     valid_agent_ids = (
         damage_by_id.keys() | heal_by_id.keys() | boons_by_id.keys() | defense_by_id.keys()
     ) & identity_map.keys()
@@ -579,8 +579,9 @@ def _collect_position_samples(
     events: Iterable[Event],
     agent_id_to_identity_map: dict[int, AgentIdentity],
 ) -> tuple[
-    dict[str, list[list[float]]],
-    dict[str, list[PositionSampleOut]],
+    dict[int, list[PositionEvent]],  # raw_by_agent
+    dict[str, list[list[float]]],    # player_samples
+    dict[str, list[PositionSampleOut]],  # samples_by_account
 ]:
     """Collect and downsample position events per account."""
     raw_by_agent: dict[int, list[PositionEvent]] = {}
@@ -605,7 +606,7 @@ def _collect_position_samples(
         samples_by_account[account] = samples
         player_samples[account] = samples_for_analysis
 
-    return player_samples, samples_by_account
+    return raw_by_agent, player_samples, samples_by_account
 
 
 def _compute_commander_distances(
@@ -690,21 +691,16 @@ def aggregate_player_positions(
     if not agent_id_to_identity_map:
         return []
 
-    player_samples, samples_by_account = _collect_position_samples(
+    raw_by_agent, player_samples, samples_by_account = _collect_position_samples(
         events, agent_id_to_identity_map,
     )
-    if not player_samples or not samples_by_account:
+    if not player_samples or not samples_by_account or not raw_by_agent:
         return []
 
     metrics = compute_position_metrics(player_samples)
     dist_to_commander_by_account = _compute_commander_distances(
         player_samples, agent_id_to_identity_map,
     )
-
-    raw_by_agent: dict[int, list[PositionEvent]] = {}
-    for event in events:
-        if isinstance(event, PositionEvent) and event.source_agent_id in agent_id_to_identity_map:
-            raw_by_agent.setdefault(event.source_agent_id, []).append(event)
 
     return _build_position_results(
         raw_by_agent,
