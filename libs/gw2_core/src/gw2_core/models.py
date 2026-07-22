@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import Enum, IntEnum, StrEnum
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Final, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, WrapValidator
 
@@ -917,15 +917,15 @@ def is_condition(buff_id: int) -> bool:
 
 
 __all__ = [
-    "_EVENT_MAP",
     "BUFF_CATEGORY_MAP",
-    "BuffCategory",
+    "_EVENT_MAP",
     "AccountInfo",
     "Agent",
     "BarrierEvent",
     "BaseEvent",
     "BlockEvent",
     "BoonApplyEvent",
+    "BuffCategory",
     "BuffRemovalEvent",
     "CCEvent",
     "ConditionRemoveEvent",

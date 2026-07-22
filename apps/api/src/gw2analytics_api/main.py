@@ -140,9 +140,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # KeyError / ImportError must propagate so a misconfigured
     # deployment surfaces loudly rather than being masked.
     _app.state.arq_pool = None
-    _RETRY_ATTEMPTS = 3
-    _RETRY_BASE_S = 2.0
-    for attempt in range(1, _RETRY_ATTEMPTS + 1):
+    retry_attempts = 3
+    retry_base_s = 2.0
+    for attempt in range(1, retry_attempts + 1):
         try:
             import redis.exceptions  # noqa: PLC0415
             from arq import create_pool  # noqa: PLC0415
@@ -165,14 +165,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             OSError,
             TimeoutError,
             redis.exceptions.RedisError,
-        ) as exc:
-            if attempt < _RETRY_ATTEMPTS:
-                delay = _RETRY_BASE_S * (2 ** (attempt - 1))
+        ) as exc:                if attempt < retry_attempts:
+                delay = retry_base_s * (2 ** (attempt - 1))
                 logger.warning(
                     "arq pool init attempt %d/%d failed (type=%s); "
                     "retrying in %.0fs",
                     attempt,
-                    _RETRY_ATTEMPTS,
+                    retry_attempts,
                     type(exc).__name__,
                     delay,
                 )
@@ -183,7 +182,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     "(type=%s); uploads will use the in-request "
                     "fallback (slower on parallel uploads, but "
                     "functional)",
-                    _RETRY_ATTEMPTS,
+                    retry_attempts,
                     type(exc).__name__,
                 )
 

@@ -403,7 +403,7 @@ def test_readout_boon_uptimes_and_presence_pct() -> None:
         skill_id=9_999_999,
         damage=500,
     )
-    all_events = boon_events + [damage_event]
+    all_events = [*boon_events, damage_event]
 
     aid_to_identity = {
         a: AgentIdentity(
@@ -889,7 +889,7 @@ def test_readout_dual_role_heal_support() -> None:
         ),
     }
     out = aggregate_combat_readout(
-        events=[heal_a, heal_b] + boon_events,
+        events=[heal_a, heal_b, *boon_events],
         skill_id_to_name_map={heal_skill: "Heal", boon_skill: "Might"},
         agent_id_to_identity_map=aid_to_identity,
         duration_s=2.0,
