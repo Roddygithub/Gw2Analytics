@@ -826,6 +826,90 @@ def test_readout_dist_to_commander_no_commander() -> None:
     )
 
 
+# -----------------------------------------------------------------
+# Dual-role Heal+Support (v0.14.5)
+# -----------------------------------------------------------------
+
+
+def test_readout_dual_role_heal_support() -> None:
+    """A player with >10%% heal share AND >1 boon/s gets both ["Heal", "Support"].
+
+    Seeds two players: player a (the healer+support) and player b
+    (a minor healer to ensure total_squad_healing > 0). Player a casts
+    a large heal (900 of 1000 total → 90%%) and 3 BoonApplyEvents
+    over 2s duration (→ 1.5 boons/s). Verifies roles=["Heal", "Support"].
+    """
+    from gw2_core import BoonApplyEvent
+
+    a = 950_001  # healer + support
+    b = a + 1   # minor healer (so total > 0)
+    heal_skill = 9_500_001
+    boon_skill = 9_500_002
+
+    # Player a: large heal (900) + 3 boons applied at t=0, 500, 1000
+    heal_a = HealingEvent(
+        time_ms=500,
+        source_agent_id=a,
+        target_agent_id=b,
+        skill_id=heal_skill,
+        healing=900,
+    )
+    # Player b: small heal (100) so total=1000, a's share=90%%
+    heal_b = HealingEvent(
+        time_ms=600,
+        source_agent_id=b,
+        target_agent_id=a,
+        skill_id=heal_skill,
+        healing=100,
+    )
+    # 3 boons applied by a over 2s → 1.5 boons/s (>1.0)
+    boon_events = [
+        BoonApplyEvent(
+            time_ms=i * 500,
+            source_agent_id=a,
+            target_agent_id=b,
+            skill_id=boon_skill,
+            kind="apply",
+            stacks=1,
+            duration_ms=10_000,
+        )
+        for i in range(3)
+    ]
+
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a, name=f"HealSup {a}", subgroup=0,
+            account_name=f"synth.{a}", profession="PROF(1)", elite_spec="ELITE(62)",
+            is_player=True, is_commander=False,
+        ),
+        b: AgentIdentity(
+            agent_id=b, name=f"Minor {b}", subgroup=0,
+            account_name=f"synth.{b}", profession="PROF(2)", elite_spec="ELITE(18)",
+            is_player=True, is_commander=False,
+        ),
+    }
+    out = aggregate_combat_readout(
+        events=[heal_a, heal_b] + boon_events,
+        skill_id_to_name_map={heal_skill: "Heal", boon_skill: "Might"},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=2.0,
+        fight_id="dual-role-test",
+    )
+
+    assert len(out.players) == 2
+    a_readout = next(p for p in out.players if p.agent_id == a)
+    # Player a: 90%% heal share (>10%%) + 1.5 boons/s (>1.0)
+    assert sorted(a_readout.roles) == ["Heal", "Support"], (
+        f"expected ['Heal', 'Support'], got {a_readout.roles}"
+    )
+
+    b_readout = next(p for p in out.players if p.agent_id == b)
+    # Player b: 10%% heal share (exactly 10%% — NOT >10%%)
+    assert b_readout.roles == ["DPS"], (
+        f"expected ['DPS'] for 10%% share (not >10%%), got {b_readout.roles}"
+    )
+
+
 def test_readout_dist_to_commander_with_commander() -> None:
     """When a commander exists, dist_to_commander is computed for all players.
 
