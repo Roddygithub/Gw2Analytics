@@ -130,6 +130,8 @@ from gw2_core import (
     StunBreakEvent,
     is_condition,
 )
+from gw2_analytics.role_detection import detect_role_lite
+from gw2_core import EliteSpec
 from gw2analytics_api.routes.fights.mappers import AgentIdentity
 from gw2analytics_api.schemas import (
     FightReadoutOut,
@@ -382,6 +384,17 @@ _ZERO_DEFENSE_ROW = PlayerDefenseRow(
     cc_taken=0,
     deaths=0,
 )
+
+#: Role name mapping from detect_role_lite primary roles to the
+#: frontend wire-format labels (Heal / Support / Strip / DPS).
+#: BOON is not a magnitude-driven axis; it only surfaces via the
+#: spec/profession hint fallback inside detect_role_lite.
+_DETECTED_ROLE_LABELS: Final[dict[str, str]] = {
+    "HEAL": "Heal",
+    "BOON": "Support",
+    "STRIP": "Strip",
+    "DPS": "DPS",
+}
 
 
 def _build_player_readout(
@@ -736,29 +749,60 @@ def aggregate_combat_readout(
         for r in down_contribution_rows
     }
 
-    # v0.14.4: basic role detection — DPS / Heal / Support / Strip based on
-    # heal share relative to the squad. If a player contributes >10%
-    # of the squad's total healing, they're flagged as "Heal".
-    # Boon-focused players (>1 boon/s out) are flagged as "Support".
-    # Strip-focused players (>5 strips) are flagged as "Strip".
-    # Cleanser-focused players (>10 cleanses) are flagged as "Cleanser".
-    # CC-focused players (>3 CC applied) are flagged as "CC".
-    # Everyone else is "DPS". Iterates ALL player agents from the
-    # identity map so every player gets a role.
-    total_squad_healing = sum(r.total_healing for r in heal_rows)
-    boons_lookup: dict[int, PlayerBoonsRow] = {r.agent_id: r for r in boons_rows}
+    # v0.15.x: statistical role detection via detect_role_lite
+    # (weighted-effort heuristic with spec/profession hints).
+    # Replaces the v0.14.4 simple-threshold logic (heal share >10%,
+    # boons >1/s, strips >5, cleanses >10, CC >3).
+    #
+    # detect_role_lite classifies DPS / HEAL / STRIP / BOON from the
+    # 3 magnitudes (total_damage, total_healing, total_buff_removal)
+    # weighted against spec/profession role hints. We supplement
+    # with CC + Cleanser badges from the per-player counters since
+    # those axes are not modeled by the 3-magnitude algorithm.
+    #
+    # Parse raw profession/elite_spec ints from the AgentIdentity
+    # formatted strings (PROF(N) / ELITE(N) / BASE / SpecName).
+    # detect_role_lite expects raw ints for the lookup tables.
     heal_lookup: dict[int, PlayerHealRow] = {r.source_agent_id: r for r in heal_rows}
     roles_by_agent: dict[int, list[str]] = {}
     for agent_id in identity_map:
-        roles: list[str] = []
+        ident = identity_map[agent_id]
+        # Parse profession int from formatted string (PROF(N) or UNKNOWN).
+        prof_str = ident.profession
+        if prof_str.startswith("PROF("):
+            try:
+                prof_int = int(prof_str[5:-1])
+            except ValueError:
+                prof_int = 0
+        else:
+            prof_int = 0
+        # Parse elite_spec int from formatted string.
+        elite_str = ident.elite_spec
+        if elite_str == "BASE":
+            elite_int = 0
+        elif elite_str.startswith("ELITE("):
+            try:
+                elite_int = int(elite_str[6:-1])
+            except ValueError:
+                elite_int = 0
+        else:
+            # After v0.15.x format_elite_spec returns names like "Berserker".
+            try:
+                elite_int = EliteSpec[elite_str.upper()].value
+            except KeyError:
+                elite_int = 0
         hr = heal_lookup.get(agent_id)
-        if hr and total_squad_healing > 0 and (hr.total_healing / total_squad_healing) > 0.10:
-            roles.append("Heal")
-        br = boons_lookup.get(agent_id)
-        if br and br.boons_out_rate > 1.0:
-            roles.append("Support")
-        if strips_counter.get(agent_id, 0) > 5:
-            roles.append("Strip")
+        dr = damage_by_id.get(agent_id)
+        primary_role, _tags = detect_role_lite(
+            total_damage=dr.total_damage if dr else 0,
+            total_healing=hr.total_healing if hr else 0,
+            total_buff_removal=strips_counter.get(agent_id, 0),
+            profession_int=prof_int,
+            elite_spec_int=elite_int,
+        )
+        roles: list[str] = []
+        if primary_role in _DETECTED_ROLE_LABELS:
+            roles.append(_DETECTED_ROLE_LABELS[primary_role])
         if cleanses_counter.get(agent_id, 0) > 10:
             roles.append("Cleanser")
         if cc_counter.get(agent_id, 0) > 3:

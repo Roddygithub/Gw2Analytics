@@ -88,9 +88,9 @@ def test_readout_200_happy_path_with_player(client: TestClient) -> None:
     assert a_row["name"] == f"W {suffix}"
     assert a_row["account_name"] == f"synth.{a}"
     assert a_row["profession"] != "UNKNOWN"  # format_profession(Warrior=2) -> "PROF(2)"
-    assert a_row["elite_spec"] != "UNKNOWN"  # format_elite_spec(Berserker=18) -> "ELITE(18)"
+    assert a_row["elite_spec"] != "UNKNOWN"  # format_elite_spec(Berserker=18) -> "Berserker"
     assert a_row["is_commander"] is False
-    assert a_row["roles"] == []
+    assert a_row["roles"] == ["DPS"]
     # DPS: total_damage=1000 / duration_s=2.0 = 500.0
     assert a_row["damage"]["dps_total"] == 500.0
     # v0.12.1: Phase 6 v2 DpsSplitGetter wired — buff_dmg=0 on the
@@ -270,7 +270,7 @@ def test_readout_aggregator_stun_break_events_wired() -> None:
             subgroup=0,
             account_name=f"synth.{a}",
             profession="PROF(2)",
-            elite_spec="ELITE(18)",
+            elite_spec="Berserker",
             is_player=True,
             is_commander=True,
         ),
@@ -331,7 +331,7 @@ def test_readout_aggregator_account_name_none_passthrough() -> None:
             subgroup=0,
             account_name=None,  # the canonical absent-account path
             profession="PROF(2)",
-            elite_spec="ELITE(18)",
+            elite_spec="Berserker",
             is_player=True,
             is_commander=False,
         ),
@@ -351,7 +351,7 @@ def test_readout_aggregator_account_name_none_passthrough() -> None:
     # The OTHER identity columns still hydrate correctly.
     assert a_readout.name == f"W {a}"
     assert a_readout.profession == "PROF(2)"
-    assert a_readout.elite_spec == "ELITE(18)"
+    assert a_readout.elite_spec == "Berserker"
     assert a_readout.is_commander is False
     # The pre-followup coerce of None to "" would have triggered
     # ``assert a_readout.account_name == ""`` (the lossy sentinel);
@@ -412,7 +412,7 @@ def test_readout_boon_uptimes_and_presence_pct() -> None:
             subgroup=0,
             account_name=f"synth.{a}",
             profession="PROF(2)",
-            elite_spec="ELITE(18)",
+            elite_spec="Berserker",
             is_player=True,
             is_commander=False,
         ),
@@ -422,7 +422,7 @@ def test_readout_boon_uptimes_and_presence_pct() -> None:
             subgroup=0,
             account_name=f"synth.{b}",
             profession="PROF(1)",
-            elite_spec="ELITE(27)",
+            elite_spec="Dragonhunter",
             is_player=True,
             is_commander=False,
         ),
@@ -499,7 +499,7 @@ def test_readout_boon_uptimes_none_for_no_account() -> None:
             subgroup=0,
             account_name=f"synth.{a}",
             profession="PROF(2)",
-            elite_spec="ELITE(18)",
+            elite_spec="Berserker",
             is_player=True,
             is_commander=False,
         ),
@@ -576,7 +576,7 @@ def test_readout_phase6_v2_barrier_and_condi_split_live() -> None:
             subgroup=0,
             account_name=f"synth.{a}",
             profession="PROF(2)",
-            elite_spec="ELITE(18)",
+            elite_spec="Berserker",
             is_player=True,
             is_commander=False,
         ),
@@ -586,7 +586,7 @@ def test_readout_phase6_v2_barrier_and_condi_split_live() -> None:
             subgroup=0,
             account_name=f"synth.{b}",
             profession="PROF(1)",
-            elite_spec="ELITE(27)",
+            elite_spec="Dragonhunter",
             is_player=True,
             is_commander=False,
         ),
@@ -698,7 +698,7 @@ def test_readout_down_contribution_dps_wired() -> None:
             subgroup=0,
             account_name=f"synth.{a}",
             profession="PROF(2)",
-            elite_spec="ELITE(18)",
+            elite_spec="Berserker",
             is_player=True,
             is_commander=False,
         ),
@@ -708,7 +708,7 @@ def test_readout_down_contribution_dps_wired() -> None:
             subgroup=0,
             account_name=f"synth.{b}",
             profession="PROF(1)",
-            elite_spec="ELITE(27)",
+            elite_spec="Dragonhunter",
             is_player=True,
             is_commander=False,
         ),
@@ -768,17 +768,17 @@ def test_readout_cleave_targets() -> None:
     aid_to_identity = {
         a: AgentIdentity(
             agent_id=a, name=f"Cleaver {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
             is_player=True, is_commander=False,
         ),
         b: AgentIdentity(
             agent_id=b, name=f"Target1 {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="ELITE(27)",
+            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="Dragonhunter",
             is_player=True, is_commander=False,
         ),
         c: AgentIdentity(
             agent_id=c, name=f"Target2 {c}", subgroup=0,
-            account_name=f"synth.{c}", profession="PROF(1)", elite_spec="ELITE(27)",
+            account_name=f"synth.{c}", profession="PROF(1)", elite_spec="Dragonhunter",
             is_player=True, is_commander=False,
         ),
     }
@@ -810,7 +810,7 @@ def test_readout_dist_to_commander_no_commander() -> None:
     aid_to_identity = {
         a: AgentIdentity(
             agent_id=a, name=f"NoCmd {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
             is_player=True, is_commander=False,
         ),
     }
@@ -879,12 +879,12 @@ def test_readout_dual_role_heal_support() -> None:
     aid_to_identity = {
         a: AgentIdentity(
             agent_id=a, name=f"HealSup {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(1)", elite_spec="ELITE(62)",
+            account_name=f"synth.{a}", profession="PROF(1)", elite_spec="Firebrand",
             is_player=True, is_commander=False,
         ),
         b: AgentIdentity(
             agent_id=b, name=f"Minor {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(2)", elite_spec="ELITE(18)",
+            account_name=f"synth.{b}", profession="PROF(2)", elite_spec="Berserker",
             is_player=True, is_commander=False,
         ),
     }
@@ -899,14 +899,20 @@ def test_readout_dual_role_heal_support() -> None:
     assert len(out.players) == 2
     a_readout = next(p for p in out.players if p.agent_id == a)
     # Player a: 90%% heal share (>10%%) + 1.5 boons/s (>1.0)
-    assert sorted(a_readout.roles) == ["Heal", "Support"], (
-        f"expected ['Heal', 'Support'], got {a_readout.roles}"
+    # detect_role_lite classifies by weighted-effort dominant axis.
+    # Player a: 900 heal (90% of squad) → HEAL primary.
+    # BOON is NOT an additional role (per-axis threshold was
+    # already crossed by HEAL; BOON spec hint is the fallback only).
+    assert "Heal" in a_readout.roles, (
+        f"expected 'Heal' in roles, got {a_readout.roles}"
     )
 
     b_readout = next(p for p in out.players if p.agent_id == b)
     # Player b: 10%% heal share (exactly 10%% — NOT >10%%)
+    # Player b: 100 heal (10% of squad) — below the HEAL weighted-effort
+    # threshold, and no spec hint (Berserker=DPS). DPS fallback.
     assert b_readout.roles == ["DPS"], (
-        f"expected ['DPS'] for 10%% share (not >10%%), got {b_readout.roles}"
+        f"expected ['DPS'], got {b_readout.roles}"
     )
 
 
@@ -944,12 +950,12 @@ def test_readout_cleanser_role() -> None:
     aid_to_identity = {
         a: AgentIdentity(
             agent_id=a, name=f"Cleanser {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(1)", elite_spec="ELITE(62)",
+            account_name=f"synth.{a}", profession="PROF(1)", elite_spec="Firebrand",
             is_player=True, is_commander=False,
         ),
         b: AgentIdentity(
             agent_id=b, name=f"Target {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(2)", elite_spec="ELITE(18)",
+            account_name=f"synth.{b}", profession="PROF(2)", elite_spec="Berserker",
             is_player=True, is_commander=False,
         ),
     }
@@ -993,12 +999,12 @@ def test_readout_cc_role() -> None:
     aid_to_identity = {
         a: AgentIdentity(
             agent_id=a, name=f"CCer {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
             is_player=True, is_commander=False,
         ),
         b: AgentIdentity(
             agent_id=b, name=f"Target {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="ELITE(27)",
+            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="Dragonhunter",
             is_player=True, is_commander=False,
         ),
     }
@@ -1046,12 +1052,12 @@ def test_readout_strip_role() -> None:
     aid_to_identity = {
         a: AgentIdentity(
             agent_id=a, name=f"Stripper {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
             is_player=True, is_commander=False,
         ),
         b: AgentIdentity(
             agent_id=b, name=f"Target {b}", subgroup=0,
-            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="ELITE(27)",
+            account_name=f"synth.{b}", profession="PROF(1)", elite_spec="Dragonhunter",
             is_player=True, is_commander=False,
         ),
     }
@@ -1065,11 +1071,10 @@ def test_readout_strip_role() -> None:
 
     a_readout = next(p for p in out.players if p.agent_id == a)
     # 6 strips > 5 → role includes "Strip" (alongside DPS as fallback)
+    # detect_role_lite: 6 strips → weighted strip score = 6*5000=30000,
+    # no damage/heal → r_strip=1.0 ≥ 0.35 → STRIP primary.
     assert "Strip" in a_readout.roles, (
         f"expected 'Strip' in roles for 6 strips, got {a_readout.roles}"
-    )
-    assert "DPS" in a_readout.roles, (
-        f"expected DPS fallback, got {a_readout.roles}"
     )
     assert a_readout.damage.strips == 6
 
@@ -1125,12 +1130,12 @@ def test_readout_dist_to_commander_with_commander() -> None:
     aid_to_identity = {
         a: AgentIdentity(
             agent_id=a, name=f"Player {a}", subgroup=0,
-            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="ELITE(18)",
+            account_name=f"synth.{a}", profession="PROF(2)", elite_spec="Berserker",
             is_player=True, is_commander=False,
         ),
         c: AgentIdentity(
             agent_id=c, name=f"Cmd {c}", subgroup=0,
-            account_name=f"synth.{c}", profession="PROF(1)", elite_spec="ELITE(27)",
+            account_name=f"synth.{c}", profession="PROF(1)", elite_spec="Dragonhunter",
             is_player=True, is_commander=True,
         ),
     }
