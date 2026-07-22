@@ -9,14 +9,18 @@
 > WvW combat logs (`.zevtc`) are parsed locally and stored in a stable
 > internal model from which all analytics, API, and frontend derive.
 
-## What's new in v0.10.28
+## What's new
 
-- ⚡ **/fights/[id] page renders instantly** — the `/timeline/players` endpoint (10 s SSR blocker) now lazy-loads on the client after hydration via the new `LazyTabbedTimelineSection` component. The Aggregated tab still renders server-side; the Per-player tab streams in 0–10 s later without blocking the initial paint.
-- 🛡️ **Duplicate fight uploads handled gracefully** — when 2 distinct uploads contain the same parsed fight, the duplicate now surfaces as `status='failed'` with the existing fight_id surfaced (`The content is already analyzed as fight <id>`) so operators can pivot to the prior successful parse via `/fights/{existing_id}`. The audit row is preserved (no DELETE).
-- 🎨 **PlayerSearchBar hydration mismatch fixed** — migrated from inline `React.CSSProperties` objects to a CSS module; SSR + CSR now render identically (no more React hydration warnings on the global header search bar).
-- ✅ **CI gate flipped green** — `ruff format` applied to 15 files + 10 `mypy` errors in `routes/fights/` resolved via `Sequence`/`Mapping` covariance swaps. `ruff check` + `mypy` + `tsc` all 0 errors.
+| Release | Highlights |
+| --- | --- |
+| **v0.14.1** | Slow-path blob walk tests (3 hermetic tests for `_contributions_from_blob_walk`). |
+| **v0.14.0** | CI guard against legacy `db.query()` reintroduction. Coverage plan updated. |
+| **v0.13.9** | Zero legacy SQLAlchemy queries — last `db.query()` migrated to `select()`. |
+| **v0.13.8** | `backfill_role_detection` tests (67%→85%). Redundant `limiter.reset()` cleanup. |
+| **v0.13.7** | Rate limiting integration tests. Guilds route tests (0%→70%). |
+| **v0.13.6** | Players route coverage (30%→69%). Guilds router mounted in `main.py`. |
 
-See [CHANGELOG.md](./CHANGELOG.md) for the full per-commit history.
+See [CHANGELOG.md](./CHANGELOG.md) for the full per-release history.
 
 ## Highlights
 
@@ -27,9 +31,10 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full per-commit history.
 - 📊 **Per-player timeline overlay** — one per-bucket series per player agent for multi-line chart overlays.
 - 🎨 **GW2Mists-inspired frontend** — dark palette, sticky glass header, inline SVG logo, favicon, and Next.js `<Link>` navigation.
 - ⚔️ **Combat-readout UI** — per-player Damage / Heal / Boons / Defense 4-table roll-up via `/fights/[id]?tab=readout`.
-- 🧪 **Comprehensive multi-layer test suite** — `pytest` (libs + apps) + `vitest` (web components) + Playwright e2e (web flows), all gated and green on every PR.
+- 🧪 **Comprehensive multi-layer test suite** — `pytest` (libs + apps) + `vitest` (web components) + Playwright e2e (web flows), 117 tests, 84% coverage, all gated and green.
 - 🛡️ **Audit hardening** — Caddyfile HSTS/CSP, CI `pip-audit`/`pnpm-audit`, Next.js error boundaries, headers() defense-in-depth.
 - 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js).
+- 🔧 **Zero legacy SQLAlchemy** — all production queries use `select()` (SQLAlchemy 2.x style). CI guard prevents regression.
 
 ## Architecture
 
