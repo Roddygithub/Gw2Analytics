@@ -160,6 +160,7 @@ function buildTabHref(
   activeTab: "overview" | "replay" | "readout",
 ): string {
   const qs = new URLSearchParams();
+  if (activeTab === "overview") qs.set("tab", "overview");
   if (activeTab === "replay") qs.set("tab", "replay");
   if (activeTab === "readout") qs.set("tab", "readout");
   if (windowS !== 5) qs.set("window_s", String(windowS));
