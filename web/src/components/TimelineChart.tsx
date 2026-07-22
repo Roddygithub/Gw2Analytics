@@ -125,6 +125,19 @@ const HEADER_STYLE: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
+  gap: 8,
+};
+
+const BUTTON_STYLE: React.CSSProperties = {
+  fontSize: 12,
+  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
+  padding: "4px 10px",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  background: "var(--background)",
+  color: "var(--foreground)",
+  cursor: "pointer",
+  fontWeight: 500,
 };
 
 const CAPTION_STYLE: React.CSSProperties = {
@@ -402,6 +415,7 @@ interface TimelineSvgProps {
   pointGeometry: PointGeometry[];
   xLabelIndices: Set<number>;
   points: TimelineChartPoint[];
+  svgRef?: React.RefObject<SVGSVGElement | null>;
 }
 
 /**
@@ -425,9 +439,11 @@ const TimelineSvg = memo(function TimelineSvg({
   pointGeometry,
   xLabelIndices,
   points,
+  svgRef,
 }: TimelineSvgProps) {
   return (
     <svg
+      ref={svgRef}
       viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
       width="100%"
       style={{ display: "block" }}
