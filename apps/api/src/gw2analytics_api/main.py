@@ -36,6 +36,7 @@ from gw2analytics_api.metrics import SKILLS_CATALOG_FRESHNESS_DAYS
 from gw2analytics_api.routes import (
     account,
     fights,
+    guilds,
     health,
     player_compare,
     players,
@@ -305,6 +306,7 @@ def metrics() -> FastAPIResponse:
 
 
 app.include_router(uploads.router)
+app.include_router(guilds.router)
 app.include_router(fights.router)
 # v0.10.0 plan 032: cross-account comparison timeline. MUST
 # be included BEFORE the players router (or the players
