@@ -183,7 +183,7 @@ export const AG_GRID_PROPS = {
   // keeps the grid's colour tokens in sync with the app.
   theme: appGridTheme,
   // Single-row selection (clicking a row selects it for the
-  // future drill-in detail panel; v0.10.23 SCAFFOLD doesn't
+  // future drill-in detail panel; v0.12.x live data renders
   // wire a drill-in yet).
   rowSelection: { mode: "singleRow" } as const,
 } as const;

@@ -1,5 +1,5 @@
 /**
- * Minimal EVTC binary parser — stub-aware for the v0.10.23 SCAFFOLD.
+ * Minimal EVTC binary parser — stub-aware for the v0.10.23 stub fixture.
  *
  * Scope of THIS module (deliberately small + shippable):
  *  - Parse the EVTC 32-byte header (magic + build + day stamp + reserved).
@@ -12,7 +12,7 @@
  *
  * Real ArcDPS EVTC records are a separate concern; the spec lives in
  * the upstream ArcDPS source tree (see ``arcdps.cpp``/``arcdps.h``/``evtc``
- * writer). This module deliberately stops at the SCAFFOLD boundary so it
+ * writer). This module deliberately stops at the stub-fixture boundary so it
  * ships in one turn + stays TS-clean + vitest-passing.
  *
  * Usage

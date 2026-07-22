@@ -86,8 +86,7 @@ import React from "react";
  * - ``kind='elite'`` matches ``"ELITE(N)"`` for any non-negative integer.
  * - ``kind='unknown'`` matches ``"UNKNOWN"`` (profession 0 sentinel)
  *   OR ``"BASE"`` (elite 0 sentinel — represented as elite:int=0).
- * - ``null`` is returned for any string that fails the wire contract
- *   (Phase 6 v2 SCAFFOLD-zero or a future contract widening).
+ * - ``null`` is returned for any string that fails the wire contract   *   (Phase 6 v2 live data or a future contract widening).
  */
 export type ParsedWire =
   | { kind: "profession"; int: number }
