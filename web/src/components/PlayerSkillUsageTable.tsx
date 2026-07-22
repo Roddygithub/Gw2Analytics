@@ -145,7 +145,7 @@ function _downloadCsv(filename: string, skills: PlayerSkills["skills"]): void {
   const rows = skills.map(
     (r) => `${r.skill_id},"${r.skill_name}",${r.hit_count},${r.total_damage},${r.total_healing},${r.total_buff_removal}`,
   );
-  const blob = new Blob([header, ...rows].join("\n"), { type: "text/csv" });
+  const blob = new Blob([header + "\n" + rows.join("\n")], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -196,35 +196,37 @@ export function PlayerSkillUsageTable({
           healing / buff-strip events in this fight).
         </div>
       ) : (
-        <table style={TABLE_STYLE} data-testid="player-skill-table">
-          <thead>
-            <tr>
-              <th style={TH_STYLE}>Skill id</th>
-              <th style={TH_STYLE}>Skill name</th>
-              <th style={TH_RIGHT_STYLE}>Hit count</th>
-              <th style={TH_RIGHT_STYLE}>Total damage</th>
-              <th style={TH_RIGHT_STYLE}>Total healing</th>
-              <th style={TH_RIGHT_STYLE}>Total strip</th>
-            </tr>
-          </thead>
-          <tbody>
-            {skills.map((r) => (
-              <tr key={r.skill_id}>
-                <td style={TD_STYLE}>{r.skill_id}</td>
-                <td style={TD_STYLE}>{r.skill_name || "(unnamed)"}</td>
-                <td style={TD_RIGHT_STYLE}>{r.hit_count.toLocaleString("en-US")}</td>
-                <td style={TD_RIGHT_STYLE}>{r.total_damage.toLocaleString("en-US")}</td>
-                <td style={TD_ACCENT_STYLE}>{r.total_healing.toLocaleString("en-US")}</td>
-                <td style={TD_RIGHT_STYLE}>{r.total_buff_removal.toLocaleString("en-US")}</td>
+        <>
+          <table style={TABLE_STYLE} data-testid="player-skill-table">
+            <thead>
+              <tr>
+                <th style={TH_STYLE}>Skill id</th>
+                <th style={TH_STYLE}>Skill name</th>
+                <th style={TH_RIGHT_STYLE}>Hit count</th>
+                <th style={TH_RIGHT_STYLE}>Total damage</th>
+                <th style={TH_RIGHT_STYLE}>Total healing</th>
+                <th style={TH_RIGHT_STYLE}>Total strip</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {filename && (
-          <button onClick={() => _downloadCsv(filename, skills)}>
-            Download CSV
-          </button>
-        )}
+            </thead>
+            <tbody>
+              {skills.map((r) => (
+                <tr key={r.skill_id}>
+                  <td style={TD_STYLE}>{r.skill_id}</td>
+                  <td style={TD_STYLE}>{r.skill_name || "(unnamed)"}</td>
+                  <td style={TD_RIGHT_STYLE}>{r.hit_count.toLocaleString("en-US")}</td>
+                  <td style={TD_RIGHT_STYLE}>{r.total_damage.toLocaleString("en-US")}</td>
+                  <td style={TD_ACCENT_STYLE}>{r.total_healing.toLocaleString("en-US")}</td>
+                  <td style={TD_RIGHT_STYLE}>{r.total_buff_removal.toLocaleString("en-US")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filename && (
+            <button onClick={() => _downloadCsv(filename, skills)}>
+              Download CSV
+            </button>
+          )}
+        </>
       )}
     </div>
   );
