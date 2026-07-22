@@ -1,0 +1,34 @@
+# Composite action: setup Node 22 + pnpm cache
+#
+# Encapsulates the 3 boilerplate steps used by every web job:
+#   1. Install pnpm (via pnpm/action-setup)
+#   2. Install Node 22 (via actions/setup-node with pnpm cache)
+#   3. Install all web deps (frozen lockfile)
+#
+# This action does NOT include checkout — the caller must run
+# actions/checkout first. This keeps the action composable (a
+# job that needs Python + Web can run checkout once, then call
+# setup-python and setup-web in sequence).
+
+name: Setup Web
+description: Configure Node 22 + pnpm with GHA cache
+
+runs:
+  using: composite
+  steps:
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        version: 11
+
+    - name: Set up Node.js 22
+      uses: actions/setup-node@v7
+      with:
+        node-version: 22
+        cache: pnpm
+        cache-dependency-path: web/pnpm-lock.yaml
+
+    - name: Install web deps (frozen lock)
+      working-directory: web
+      shell: bash
+      run: pnpm install --frozen-lockfile

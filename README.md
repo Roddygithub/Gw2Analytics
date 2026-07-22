@@ -1,6 +1,8 @@
 # GW2Analytics
 
 [![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
+[![Docker build](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/docker-build.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/docker-build.yml)
+[![Cache warmup](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/cache-warmup.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/cache-warmup.yml)
 [![Latest tag](https://img.shields.io/github/v/tag/Roddygithub/Gw2Analytics?sort=semver&label=latest)](https://github.com/Roddygithub/Gw2Analytics/tags)
 
 **Modern combat analytics platform for Guild Wars 2 WvW (World vs World).**

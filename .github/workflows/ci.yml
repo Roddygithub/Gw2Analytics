@@ -1,29 +1,24 @@
 # GitHub Actions: lint + type-check + test the gw2analytics monorepo.
 #
-# Mirrors the local pre-commit + pipeline (uv run ruff check,
-# uv run ruff format --check, uv run mypy libs apps --no-incremental,
-# uv run pytest) so a PR cannot regress any of these gates.
+# Split into parallel jobs for faster feedback:
+#   lint-python  ──>  test-python  (needs postgres)
+#   lint-web     ──>  playwright (chromium + visual-regression)
+#   arq-integration (parallel, needs postgres + redis)
+#
+# Previously a single monolithic ``lint-and-test`` job ran all 16+
+# steps sequentially (~12-15 min wall clock). The parallel split
+# brings the critical path to ~6-7 min by running Python lint, web
+# lint, and ARQ integration simultaneously, with heavier test/e2e
+# jobs starting immediately after their respective lint gates.
+#
+# Uses local composite actions (.github/actions/setup-*) to keep
+# setup blocks DRY.
 #
 # pytest-env injects the docker-compose dev credentials at session
 # startup, so this workflow does not need any GitHub repository
-# secrets. A ``postgres`` service runs alongside the job so the
-# end-to-end ``apps/api/tests/test_uploads_e2e.py::test_uploads_e2e_happy_path``
-# test can hit a real database at ``localhost:5432`` and exercise the
-# full POST /api/v1/uploads -> GET /api/v1/uploads/{id} ->
-# GET /api/v1/fights/{id} chain against a real Postgres schema
-# (instead of silently skipping).
-#
-# The web/ gates (Phase 4) are split into a **drift gate** plus a
-# **typecheck gate**:
-#
-# - Drift gate: re-dump ``app.openapi()`` (no uvicorn -- no port,
-#   no orphan processes, deterministic < 1 s) and feed it through
-#   ``openapi-typescript`` to ``web/src/lib/api/schema.d.ts``. A
-#   ``git diff --exit-code`` fails the build if the regenerated
-#   client differs from the committed baseline (i.e. the developer
-#   touched an endpoint without re-running ``pnpm generate:api``).
-# - Typecheck gate: ``tsc --noEmit`` verifies the frontend types
-#   after the refresh.
+# secrets. A ``postgres`` service runs alongside the test-python job
+# so the end-to-end ``apps/api/tests/test_uploads_e2e.py`` test can
+# hit a real database at ``localhost:5432``.
 
 name: CI
 
@@ -34,15 +29,99 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Cancel in-progress runs on the same branch when a new commit is
-# pushed to the same PR (saves CI minutes on stale branches).
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# ---------------------------------------------------------------------------
+# Python lint: ruff, mypy, and security audit.
+# Uses a lighter ``uv sync --frozen`` (root dev deps only) to avoid
+# installing workspace members as editable packages — the root dev
+# group already pins every third-party dep that mypy needs, and
+# MYPYPATH tells mypy where to find workspace member source trees
+# for cross-package import resolution.
+# ---------------------------------------------------------------------------
 jobs:
-  lint-and-test:
-    name: Lint + test (Python 3.12 + web)
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      # Lightweight sync: root dev deps only (ruff, mypy, pydantic,
+      # fastapi, etc.). Saves ~5s vs --all-packages on warm cache.
+      - name: Sync root dev dependencies (no workspace members)
+        run: uv sync --frozen
+
+      # Cache pip-audit's OSV vulnerability database so subsequent
+      # runs skip the ~15s download on every invocation.
+      - name: Cache pip-audit OSV data
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip-audit
+          key: pip-audit-${{ hashFiles('uv.lock') }}
+
+      - name: Ruff check
+        run: uv run ruff check --output-format=concise
+
+      - name: Ruff format check
+        run: uv run ruff format --check
+
+      # v0.13.9 guard: block reintroduction of legacy db.query()
+      - name: Guard against legacy db.query()
+        run: |
+          echo "Checking for legacy db.query() calls (modern select() required)..."
+          ! grep -rn 'db\.query(' apps/api/src/ libs/ --include='*.py'
+
+      # MYPYPATH tells mypy where to find workspace member packages
+      # for cross-package import resolution without editable installs.
+      # The root dev deps already include all third-party packages
+      # (pydantic, fastapi, sqlalchemy, etc.) in the venv.
+      # NOTE: single-line string required — YAML folded block scalar
+      # would insert spaces after colons, breaking path resolution.
+      - name: Mypy
+        run: uv run mypy libs apps --no-incremental
+        env:
+          MYPYPATH: libs/gw2_core/src:libs/gw2_evtc_parser/src:libs/gw2_analytics/src:libs/gw2_api_client/src:apps/api/src
+
+      - name: pip-audit (Python deps, vulnerability scan)
+        run: uv run pip-audit --strict --vulnerability-service osv
+
+      - name: Lint summary
+        # Only on success to avoid showing ✅ when steps actually failed.
+        if: success()
+        run: |
+          cat <<'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 🔍 Python lint results
+
+          | Check | Status |
+          |-------|--------|
+          | Ruff check | ✅ |
+          | Ruff format | ✅ |
+          | db.query() guard | ✅ |
+          | Mypy | ✅ |
+          | pip-audit | ✅ |
+          EOF
+
+  # ---------------------------------------------------------------------------
+  # Python tests: DB-backed pytest suite.
+  # Depends on lint-python so lint failures abort before running 4 min of tests.
+  # ---------------------------------------------------------------------------
+  test-python:
+    name: Test Python
+    needs: lint-python
     runs-on: ubuntu-latest
 
     env:
@@ -53,13 +132,6 @@ jobs:
       S3_BUCKET: "gw2analytics"
       SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
 
-    # The Postgres service runs the same docker-compose dev image the
-    # local developer brings up via ``docker compose up -d
-    # gw2a-postgres``. Credentials match ``[tool.pytest_env]`` in the
-    # root ``pyproject.toml`` so ``uv run pytest`` finds a reachable
-    # ``DATABASE_URL`` without further wiring. The platform-managed
-    # health check gates the rest of the job until the DB is ready to
-    # accept connections (and auto-cleans the container on job exit).
     services:
       postgres:
         image: postgres:16-alpine
@@ -76,143 +148,73 @@ jobs:
           --health-retries 10
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
-          # Full history for `uv sync --frozen` and exact blame.
           fetch-depth: 0
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.3.2
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+      - uses: ./.github/actions/setup-python
 
-      - name: Set up Python 3.12
-        run: uv python install 3.12
-
-      - name: Sync workspace dependencies (frozen lock)
-        run: uv sync --frozen --all-packages
-
-      - name: Ruff check
-        run: uv run ruff check --output-format=concise
-
-      - name: Ruff format check
-        run: uv run ruff format --check
-
-      # v0.13.9 guard: block any reintroduction of legacy
-      # ``db.query()`` calls in production source code (the modern
-      # ``select()`` pattern is now used everywhere). The grep
-      # checks apps/api/src/ and libs/ (excluding __pycache__).
-      # ``exit 1`` fails the build if any match is found.
-      - name: Guard against legacy db.query()
-        run: |
-          echo "Checking for legacy db.query() calls (modern select() required)..."
-          ! grep -rn 'db\.query(' apps/api/src/ libs/ --include='*.py'
-
-      - name: Mypy
-        run: uv run mypy libs apps --no-incremental
-
-      # ----------------------------------------------------------------
-      # Health probe CI gate (v0.8.7)
-      # ----------------------------------------------------------------
-      # Closes the loop on the v0.8.6 operational health probe.
-      # Step 1 captures the probe response BEFORE the e2e suite runs
-      # (so the baseline reflects the test DB state at the start of
-      # the suite, which is the legitimate "ground truth" against
-      # which the post-e2e drift is measured). Step 3 (after pytest)
-      # hits the probe again and compares to the baseline -- a
-      # ``drift_count`` delta > ``MAX_DRIFT_DELTA = 2`` fails the
-      # build (a real regression in the v0.8.4 materialise would
-      # add ~1 more fight of drift per e2e test that creates a new
-      # fight, so the delta would be ~3-4). The delta approach is
-      # baseline-agnostic -- a strict absolute ``drift_pct`` budget
-      # would be too fragile (1% fails when the test DB has ~10
-      # fights, 10% misses regressions when the test DB has ~100
-      # fights). See ``apps/api/ci_health_gate.py`` for the
-      # detailed design notes.
-      # ----------------------------------------------------------------
       - name: Run database migrations
         working-directory: apps/api
         run: uv run alembic upgrade head
 
-      - name: Health probe baseline (v0.8.7)
+      - name: Health probe baseline
         run: uv run python -m gw2analytics_api.scripts.health_gate --save-baseline /tmp/health_baseline.json
 
-      # Script-level tests do not need Postgres; run them first so the
-      # fast feedback loop is independent of the DB-backed suite.
       - name: Script tests
         run: uv run pytest tests/scripts/ --tb=line -q
 
       - name: Pytest
         run: uv run pytest --tb=line -q
 
-      - name: Health probe CI gate (v0.8.7 regression check)
+      - name: Health probe CI gate (regression check)
         run: uv run python -m gw2analytics_api.scripts.health_gate --check-delta /tmp/health_baseline.json
 
-      # The /tmp/health_baseline.json file is ephemeral -- clean it
-      # up so a later job in the same runner environment doesn't pick
-      # it up.
-      - name: "Health probe: cleanup /tmp/health_baseline.json"
+      - name: Cleanup /tmp/health_baseline.json
         if: always()
         run: rm -f /tmp/health_baseline.json
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+      - name: Test summary
+        if: success()
+        run: |
+          cat <<'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 🧪 Python test results
+
+          | Step | Status |
+          |------|--------|
+          | Database migrations | ✅ |
+          | Health probe baseline | ✅ |
+          | Script tests | ✅ |
+          | Pytest | ✅ |
+          | Health probe gate | ✅ |
+          EOF
+
+  # ---------------------------------------------------------------------------
+  # Web lint: OpenAPI codegen, TypeScript type-check, vitest, and pnpm audit.
+  # Needs Python (for dump_openapi.py) + Node/pnpm.
+  # ---------------------------------------------------------------------------
+  lint-web:
+    name: Lint Web
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
         with:
-          version: 11
+          fetch-depth: 0
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+      # Python setup for the OpenAPI codegen step (dump_openapi.py)
+      - uses: ./.github/actions/setup-python
 
-      - name: Install web deps (frozen lock)
-        working-directory: web
-        run: pnpm install --frozen-lockfile
-
-      # ----------------------------------------------------------------
-      # OpenAPI codegen (Phase 4 tooling)
-      # ----------------------------------------------------------------
-      # 1. Dump the FastAPI OpenAPI spec to /tmp via ``app.openapi()``
-      #    (avoids the uvicorn-boot + curl-loop race of an earlier draft).
-      # 2. Run ``openapi-typescript`` to (re)generate
-      #    ``web/src/lib/api/schema.d.ts``.
-      # The committed ``schema.d.ts`` baseline ships in a followup
-      # commit alongside the ``git diff --exit-code`` drift gate -- once
-      # that lands, this CI pipeline will fail any PR that touches an
-      # endpoint without re-running ``pnpm generate:api``.
-      # The ``env`` block on step 1 supplies the dummy credentials that
-      # :class:`Settings` enforces without defaults.
-      # ----------------------------------------------------------------
-
-      - name: "OpenAPI: dump FastAPI spec (no port, no race)"
+      - name: Dump FastAPI OpenAPI spec
         run: uv run python web/scripts/dump_openapi.py > /tmp/openapi.json
-        env:
-          DATABASE_URL: "postgresql+psycopg://ci@localhost/ci"
-          S3_ENDPOINT: "ci"
-          S3_ACCESS_KEY: "ci"
-          S3_SECRET_KEY: "ci"
-          S3_BUCKET: "ci"
 
-      - name: "OpenAPI: regenerate web TypeScript client"
+      # Node + pnpm for the web toolchain
+      - uses: ./.github/actions/setup-web
+
+      - name: Regenerate web TypeScript client from OpenAPI spec
         working-directory: web
         run: pnpm exec openapi-typescript /tmp/openapi.json -o src/lib/api/schema.d.ts
 
-      # ----------------------------------------------------------------
-      # OpenAPI drift gate (v0.9.1 plan 008)
-      # ----------------------------------------------------------------
-      # Fails the build when the regenerated `schema.d.ts` differs
-      # from the committed baseline -- this catches backend PRs that
-      # touched `apps/api/src/gw2analytics_api/routes/*` without
-      # re-running `pnpm generate:api` and committing the regenerated
-      # `schema.d.ts`. The baseline is committed (un-gitignored) per
-      # plan 008; the gate fires on any pre-merge drift detection
-      # (PR or push to main). `git diff --exit-code` exits non-zero
-      # when there is any diff in the named file.
-      # ----------------------------------------------------------------
       - name: Detect API client drift
         run: git diff --exit-code -- web/src/lib/api/schema.d.ts
 
@@ -220,152 +222,117 @@ jobs:
         working-directory: web
         run: pnpm exec tsc --noEmit
 
-      # ----------------------------------------------------------------
-      # Vitest unit tests (Phase 4 unit-test scaffolding)
-      # ----------------------------------------------------------------
-      # Runs the 3 component tests under tests/app/*.test.tsx with
-      # jsdom + @testing-library/react + jest-dom. Mocks next/link,
-      # next/font/google, and @/lib/env globally via tests/setup.ts
-      # so the suite is hermetic and the CI sandbox does not need
-      # network egress or a running gateway.
-      # ----------------------------------------------------------------
       - name: Web unit tests (vitest)
         working-directory: web
         run: pnpm exec vitest run --coverage --reporter=verbose
 
-      # ----------------------------------------------------------------
-      # Security vulnerability audit (v0.10.x plan 009)
-      # ----------------------------------------------------------------
-      # Two parallel gates (pip-audit for Python + pnpm audit for Node)
-      # detect known CVEs against the LOCKFILE-resolved dependency
-      # surface (uv.lock + pnpm-lock.yaml both committed). Hard-fail on
-      # HIGH+ severity so a known-CVE bump is blocked at PR-time BEFORE
-      # it merges; soft-warn on MEDIUM so operators get notified of
-      # deferred bumps without blocking legitimate work. The soft-warn
-      # step uses `if: always()` so it surfaces in the run summary even
-      # when earlier steps failed. Both audits reuse the existing
-      # `uv run` workspace venv + the `pnpm install` lockfile, so no
-      # new dependency caches are needed.
-      # ----------------------------------------------------------------
-      - name: pip-audit (Python deps, hard-fail on HIGH+)
-        run: |
-          uv run pip-audit --strict --vulnerability-service osv
-
-      - name: pnpm audit (Node deps, hard-fail on HIGH)
+      - name: pnpm audit (Node deps, fail on HIGH)
         working-directory: web
-        run: |
-          pnpm audit --audit-level=high
+        run: pnpm audit --audit-level=high
 
-      - name: pip-audit soft-warn (visibility, non-blocking)
+      - name: Cleanup /tmp/openapi.json
         if: always()
-        continue-on-error: true
-        # Re-runs pip-audit so the operator sees the FULL CVE landscape
-        # in the run summary even when the hard-fail step above blocked
-        # the merge. `continue-on-error: true` ensures the build does NOT
-        # break on MEDIUM-severity findings; HIGH+ already failed via
-        # the gate above. Operator may append real GHSA IDs from
-        # apps/api/.env.example cluster-dep recovery (v0.10.8 pins for
-        # redis, ag-grid, jsdom, @types/node) to `--ignore-vuln GHSA-...`
-        # on a per-bump basis once each CVEs upstream status is verified.
-        run: uv run pip-audit --strict --vulnerability-service osv
+        run: rm -f /tmp/openapi.json
 
-      # ----------------------------------------------------------------
-      # Playwright E2E (v0.7.2 web layer)
-      # ----------------------------------------------------------------
-      # The ``playwright.config.ts`` 2 ``webServer`` blocks (mock
-      # HTTP on 8080 + Next.js on 3000) handle the orchestration;
-      # ``isCI`` flips the Next.js command from ``pnpm dev`` to
-      # ``next build && next start`` for determinism. The
-      # ``--with-deps`` flag installs the system packages the
-      # chromium build needs (``libnss3``, ``libatk1.0``, etc.)
-      # on the bare ``ubuntu-latest`` runner.
-      # ----------------------------------------------------------------
+      - name: Web lint summary
+        if: success()
+        run: |
+          cat <<'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 🌐 Web lint results
+
+          | Check | Status |
+          |-------|--------|
+          | OpenAPI codegen | ✅ |
+          | API client drift | ✅ |
+          | TypeScript type-check | ✅ |
+          | Vitest unit tests | ✅ |
+          | pnpm audit | ✅ |
+          EOF
+
+  # ---------------------------------------------------------------------------
+  # Playwright tests (matrix: chromium + visual-regression).
+  #
+  # Chromium E2E runs on every push/PR; visual-regression is PR-only.
+  # Each matrix entry runs on its own GHA runner so they execute in
+  # parallel (chromium ~4 min, visual-regression ~2 min). The Playwright
+  # browser cache (~/.cache/ms-playwright) and the cache-warmup workflow
+  # mitigate the cost of per-entry setup duplication.
+  # ---------------------------------------------------------------------------
+  playwright:
+    name: Playwright (${{ matrix.project }})
+    needs: lint-web
+    strategy:
+      matrix:
+        project: [chromium]
+        include:
+          - project: visual-regression
+    runs-on: ubuntu-latest
+    # visual-regression only on PRs; chromium always.
+    if: ${{ matrix.project != 'visual-regression' || github.event_name == 'pull_request' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-web
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('web/pnpm-lock.yaml') }}
+
       - name: Install Playwright chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: web
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
-      # ``playwright.config.ts`` flips the Next.js command to
-      # ``pnpm run build && pnpm run start -- -p 3000`` when
-      # ``isCI`` is truthy, so the ``webServer`` block handles
-      # the production build + serve cycle on its own. No
-      # explicit ``next build`` step is needed here. Includes the
-      # /account BFF e2e (account-bff.spec.ts) which runs in the
-      # chromium project via route-intercepted mock responses.
-      - name: Playwright E2E tests
+      - name: Install Playwright system dependencies
         working-directory: web
-        # Run only the chromium project here. The visual-regression
-        # project is executed in a separate PR-only step below so
-        # pushes to main don't pay the screenshot cost, and so the
-        # default E2E step doesn't fail on stale baselines.
-        run: pnpm exec playwright test --project=chromium
+        run: pnpm exec playwright install-deps chromium
 
-      # Upload the Playwright HTML report on failure so the
-      # post-mortem is in the GitHub Actions artifacts tab.
+      - name: Playwright tests
+        working-directory: web
+        run: pnpm exec playwright test --project=${{ matrix.project }}
+
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.project }}
           path: web/playwright-report/
           retention-days: 7
 
-      # Upload the per-test trace + screenshot artifacts on
-      # failure (``playwright.config.ts`` sets
-      # ``trace: "retain-on-failure"`` so the ``test-results/``
-      # directory is populated only when a test fails). The
-      # HTML report and the trace bundles are complementary:
-      # the report gives a high-level summary, the traces
-      # let the post-mortem replay a failing test step-by-step
-      # via ``npx playwright show-trace``.
       - name: Upload Playwright traces on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-traces
+          name: playwright-traces-${{ matrix.project }}
           path: web/test-results/
           retention-days: 7
 
-      # The /tmp/openapi.json file is ephemeral -- clean it up so a
-      # later job in the same runner environment doesn't pick it up.
-      - name: "OpenAPI: cleanup /tmp/openapi.json"
-        if: always()
-        run: rm -f /tmp/openapi.json
-
-      # ----------------------------------------------------------------
-      # Visual regression e2e (v0.8.9 plan/003)
-      # ----------------------------------------------------------------
-      # Pixel-diffs the 8 tracked PNGs at ``docs/screenshots/`` against
-      # fresh full-page captures of the corresponding routes. Gated
-      # on PRs only (``github.event_name == 'pull_request'``) so
-      # pushes to ``main`` don't pay the extra ~2-4 s of browser
-      # time for the 8 full-page screenshots. The
-      # ``--project=visual-regression`` filter on the
-      # ``playwright.config.ts`` ``projects`` block isolates the
-      # spec so the default ``pnpm exec playwright test`` invocation
-      # (the "Playwright E2E tests" step above) doesn't run it. A
-      # diff > 1% of the total pixel count fails the build; the
-      # diff PNG is written to
-      # ``web/tests/e2e/.visual-regression-output/<baseline>`` (on
-      # failure only) and uploaded as a build artifact below.
-      # ----------------------------------------------------------------
-      - name: "Visual regression e2e (PR only)"
-        if: github.event_name == 'pull_request'
-        working-directory: web
-        run: pnpm exec playwright test --project=visual-regression
-
-      # Upload the diff PNGs on failure so the post-mortem is in
-      # the GitHub Actions artifacts tab. The diff PNGs are the
-      # canonical visual diff (a red highlight overlay on the
-      # changed pixels); a developer can open the artifact in any
-      # image viewer to see exactly which pixels regressed.
-      - name: "Upload visual regression diffs on failure"
-        if: failure() && github.event_name == 'pull_request'
+      - name: Upload visual regression diffs on failure
+        if: failure() && matrix.project == 'visual-regression'
         uses: actions/upload-artifact@v7
         with:
           name: visual-regression-diffs
           path: web/tests/e2e/.visual-regression-output/
           retention-days: 7
 
+      - name: Playwright summary
+        if: success()
+        run: |
+          cat <<'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 🎭 Playwright (${{ matrix.project }}) results
+
+          | Check | Status |
+          |-------|--------|
+          | ${{ matrix.project }} tests | ✅ |
+          EOF
+
+  # ---------------------------------------------------------------------------
+  # ARQ worker integration tests (parallel, needs postgres + redis)
+  # ---------------------------------------------------------------------------
   arq-integration:
     name: ARQ worker integration
     runs-on: ubuntu-latest
@@ -403,21 +370,11 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.3.2
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python 3.12
-        run: uv python install 3.12
-
-      - name: Sync workspace dependencies (frozen lock)
-        run: uv sync --frozen --all-packages
+      - uses: ./.github/actions/setup-python
 
       - name: Run database migrations
         working-directory: apps/api
@@ -426,3 +383,15 @@ jobs:
       - name: ARQ worker integration tests
         working-directory: apps/api
         run: uv run pytest tests/test_parser_worker.py tests/test_uploads_arq.py -v
+
+      - name: ARQ summary
+        if: success()
+        run: |
+          cat <<'EOF' >> $GITHUB_STEP_SUMMARY
+          ## ⚡ ARQ worker integration results
+
+          | Check | Status |
+          |-------|--------|
+          | Database migrations | ✅ |
+          | ARQ worker tests | ✅ |
+          EOF

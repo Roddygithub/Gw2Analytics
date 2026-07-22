@@ -1,0 +1,31 @@
+# Composite action: setup Python 3.12 + uv cache
+#
+# Encapsulates the 3 boilerplate steps used by every Python job:
+#   1. Install uv (via astral-sh/setup-uv with GHA cache)
+#   2. Install Python 3.12
+#   3. Sync all workspace deps (frozen lock)
+#
+# This action does NOT include checkout — the caller must run
+# actions/checkout first. This keeps the action composable (a
+# job that needs Python + Web can run checkout once, then call
+# setup-python and setup-web in sequence).
+
+name: Setup Python
+description: Configure Python 3.12 + uv with GHA cache
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v8.3.2
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python 3.12
+      shell: bash
+      run: uv python install 3.12
+
+    - name: Sync workspace dependencies (frozen lock)
+      shell: bash
+      run: uv sync --frozen --all-packages

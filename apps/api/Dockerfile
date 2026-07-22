@@ -11,7 +11,6 @@ COPY libs/gw2_core /app/libs/gw2_core
 COPY libs/gw2_evtc_parser /app/libs/gw2_evtc_parser
 COPY libs/gw2_analytics /app/libs/gw2_analytics
 COPY libs/gw2_api_client /app/libs/gw2_api_client
-COPY libs/gw2_skills /app/libs/gw2_skills
 COPY apps/api /app/apps/api
 
 # Install API + its workspace path deps (libs/) into .venv.
@@ -19,12 +18,18 @@ COPY apps/api /app/apps/api
 # so uv sync at the root needs --package to pick a member.
 # Editable install (default) so __file__-based path resolution
 # in schema_guard.py finds alembic.ini relative to the source tree.
-RUN uv sync --frozen --no-dev --package gw2analytics_api
+# --mount=type=cache caches uv's downloaded wheels across rebuilds.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --package gw2analytics_api
 
 # --- runtime stage ---
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends libpq5 curl && rm -rf /var/lib/apt/lists/*
+# --mount=type=cache caches apt packages across rebuilds to avoid
+# re-downloading on every image build.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 # Create the non-root user FIRST so we can use --chown on COPY
 # (avoids a 119 MB redundant chown layer on the venv).
@@ -38,7 +43,6 @@ COPY --from=builder --chown=appuser:appuser /app/libs/gw2_core /app/libs/gw2_cor
 COPY --from=builder --chown=appuser:appuser /app/libs/gw2_evtc_parser /app/libs/gw2_evtc_parser
 COPY --from=builder --chown=appuser:appuser /app/libs/gw2_analytics /app/libs/gw2_analytics
 COPY --from=builder --chown=appuser:appuser /app/libs/gw2_api_client /app/libs/gw2_api_client
-COPY --from=builder --chown=appuser:appuser /app/libs/gw2_skills /app/libs/gw2_skills
 COPY --from=builder --chown=appuser:appuser /app/apps/api/src /app/apps/api/src
 COPY --from=builder --chown=appuser:appuser /app/apps/api/alembic /app/apps/api/alembic
 COPY --from=builder --chown=appuser:appuser /app/apps/api/alembic.ini /app/apps/api/alembic.ini

@@ -1,0 +1,73 @@
+# Cache warmup (v0.15.0 CI optimisation)
+#
+# Runs on every push to ``main`` to pre-populate the GitHub Actions
+# caches for uv (Python) and pnpm (Node). Subsequent CI runs on PR
+# branches find these caches already warm, so the install steps
+# download fewer packages from the registry.
+#
+# Why a separate workflow?
+# -------------------------
+# The GHA cache is scoped to the branch by default, with a fallback
+# to the default branch (``main``) when the key doesn't match. By
+# running on ``main`` after every merge, we ensure the fallback
+# cache is always fresh for the latest lockfile. Without this, a
+# PR that adds a new dependency would always pay the full download
+# cost because the cache would be stale from the last ``main`` run.
+#
+# This workflow is intentionally minimal — it does NOT run any lint,
+# test, or build steps. It just syncs lockfiles so cache entries
+# are created/refreshed. Total wall-clock time: ~30-60 s.
+
+name: Cache warmup
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cache-warmup-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  uv:
+    name: uv cache (Python deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      # Sync ALL workspace packages so the uv cache contains every
+      # dependency any workspace member might need.
+      - name: Sync workspace dependencies
+        run: uv sync --frozen --all-packages
+
+  pnpm:
+    name: pnpm cache (Node deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web deps
+        working-directory: web
+        run: pnpm install --frozen-lockfile

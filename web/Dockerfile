@@ -11,7 +11,10 @@ ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /app/
-RUN pnpm install --frozen-lockfile
+# --mount=type=cache caches the pnpm store across rebuilds, avoiding
+# re-downloading unchanged packages from the registry.
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 COPY . /app
 RUN pnpm build
