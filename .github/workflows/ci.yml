@@ -71,11 +71,13 @@ jobs:
           ! grep -rn 'db\.query(' apps/api/src/ libs/ --include='*.py'
 
       - name: Mypy
-        run: uv run mypy libs apps --no-incremental
-        # Note: pre-existing "Duplicate module named '__main__'" collision
-        # between apps/api/ and libs/ both shipping a __main__.py.
-        # The `--exclude` flag does NOT prevent module resolution,
-        # only type-checking, so it cannot fix this.
+        # Split into two invocations so libs/__main__.py and
+        # apps/__main__.py don't collide (each invocation only
+        # discovers one __main__.py). The pre-existing
+        # _evtc_builder.py module collision persists in `apps`.
+        run: |
+          uv run mypy libs --no-incremental
+          uv run mypy apps --no-incremental
 
       - name: pip-audit (Python deps, vulnerability scan)
         run: uv run pip-audit --strict --vulnerability-service osv
