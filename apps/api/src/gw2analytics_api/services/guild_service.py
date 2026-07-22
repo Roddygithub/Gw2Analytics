@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gw2analytics_api.models import Guild, GuildMember
@@ -36,10 +37,10 @@ async def sync_guilds(db: Session, api_key: str) -> list[dict[str, Any]]:  # noq
 
 def list_guilds_for_account(db: Session, account_name: str) -> list[Guild]:
     """Return all guilds that the given account is a member of."""
-    return (
-        db.query(Guild)
+    stmt = (
+        select(Guild)
         .join(GuildMember)
-        .filter(GuildMember.account_name == account_name)
+        .where(GuildMember.account_name == account_name)
         .distinct()
-        .all()
     )
+    return db.execute(stmt).scalars().all()
