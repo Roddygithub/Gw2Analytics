@@ -234,6 +234,43 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     await expect(page.getByText("Présence %")).toBeVisible();
   });
 
+  test("renders position heatmap canvas, controls, and legend on Overview tab", async ({
+    page,
+  }) => {
+    await page.goto("/fights/fixture-fight-001");
+
+    // Scroll down to the Positions section.
+    const positionsHeading = page.getByRole("heading", {
+      name: "Positions",
+    });
+    await positionsHeading.scrollIntoViewIfNeeded();
+    await expect(positionsHeading).toBeVisible();
+
+    // The heatmap canvas should have role="img".
+    const canvas = page.locator(
+      'section[data-testid="player-position-heatmap"] canvas',
+    );
+    await expect(canvas).toBeVisible();
+    await expect(canvas).toHaveAttribute("role", "img");
+
+    // Play/pause button.
+    const playButton = page.getByRole("button", { name: /Lecture/ });
+    await expect(playButton).toBeVisible();
+
+    // Time slider.
+    const slider = page.getByRole("slider", {
+      name: "Curseur temporel",
+    });
+    await expect(slider).toBeVisible();
+
+    // Time display shows M:SS / M:SS format.
+    await expect(page.getByText(/\d:\d\d\s*\/\s*\d:\d\d/)).toBeVisible();
+
+    // Profession legend shows abbreviations.
+    await expect(page.getByText("Guar")).toBeVisible();
+    await expect(page.getByText("COM")).toBeVisible();
+  });
+
   test("direct navigation to a ?account=UNKNOWN_VALUE surfaces the section-level 'Player ... not found in this fight' diagnostic", async ({
     page,
   }) => {

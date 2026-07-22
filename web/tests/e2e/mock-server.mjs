@@ -336,6 +336,59 @@ const server = createServer(async (req, res) => {
       );
     }
 
+    // /api/v1/fights/:id/positions (v0.11.0 Phase C + v0.14.3 heatmap).
+    // Returns per-player position metrics + downsampled samples.
+    // MUST be matched BEFORE the bare /:id catch-all.
+    const positionsMatch = path.match(
+      /^\/api\/v1\/fights\/([^/]+)\/positions$/,
+    );
+    if (positionsMatch) {
+      const fightId = decodeURIComponent(positionsMatch[1]);
+      if (!KNOWN_FIGHTS.has(fightId)) {
+        return jsonResponse(
+          res,
+          404,
+          JSON.stringify({ error: "fight not found" }),
+        );
+      }
+      return jsonResponse(
+        res,
+        200,
+        JSON.stringify({
+          fight_id: fightId,
+          players: [
+            {
+              account_name: "TestAccount.1234",
+              name: "Fighty McFight",
+              profession: "Warrior",
+              elite_spec: "Berserker",
+              stack_dist: 150.0,
+              dist_to_com: 80.0,
+              samples: [
+                { x: 1000, y: 2000, z: 0 },
+                { x: 1100, y: 2100, z: 0 },
+                { x: 1200, y: 2050, z: 0 },
+                { x: 1150, y: 1950, z: 0 },
+              ],
+            },
+            {
+              account_name: "TestAccount.5678",
+              name: "Heal Bot",
+              profession: "Guardian",
+              elite_spec: "Firebrand",
+              stack_dist: 200.0,
+              dist_to_com: 120.0,
+              samples: [
+                { x: 3000, y: 4000, z: 0 },
+                { x: 3100, y: 4100, z: 0 },
+                { x: 3200, y: 4050, z: 0 },
+              ],
+            },
+          ],
+        }),
+      );
+    }
+
     // Combat readout (F17, per docs/v0.9.0-combat-readout-design.md
     // §5.1) -- the unified endpoint returns the bound payload for
     // all 4 per-player tables (Damage / Heal / Boons / Defense).
