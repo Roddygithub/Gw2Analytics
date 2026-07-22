@@ -31,16 +31,19 @@ import {
   resolveAccount,
   resolveAccountViaProxy,
 } from "@/lib/api";
+import { __resetCacheForTests } from "@/lib/fetchCached";
 
 const mockFetch = vi.fn();
 
 beforeEach(() => {
   mockFetch.mockReset();
   vi.stubGlobal("fetch", mockFetch);
+  __resetCacheForTests();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  __resetCacheForTests();
 });
 
 const okResponse = (body: unknown) =>
