@@ -241,12 +241,23 @@ async def create_upload(
     except (S3Error, OSError) as exc:
         logger.exception("MinIO put_zevtc failed; upload %s rejected", upload.id)
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
+        # v0.10.26-pre: distinguish credential errors from availability
+        # errors so the operator sees an actionable message.
+        s3_code = getattr(exc, "code", None)
+        if s3_code in ("SignatureDoesNotMatch", "InvalidAccessKeyId", "AccessDenied"):
+            detail = (
+                "S3 credential mismatch: the configured MinIO access key or "
+                "secret key does not match the server. Check S3_ACCESS_KEY "
+                "and S3_SECRET_KEY in the environment."
+            )
+        else:
+            detail = (
                 "Object storage unavailable; the upload could not be "
                 "persisted. Retry once storage is healthy."
-            ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
         ) from exc
 
     db.commit()

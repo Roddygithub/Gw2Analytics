@@ -12,7 +12,7 @@
  * caused "No Rows To Show" despite data being loaded.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef, ICellRendererParams, SortModelItem } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 
@@ -357,19 +357,53 @@ const BOONS_SORT: SortModelItem[] = [
 ];
 
 /* ------------------------------------------------------------------ *
- *  Defense columns
+ *  Defense columns — built as a function so we can inject
+ *  the positionMap (from the positions fetch) at render time.
  * ------------------------------------------------------------------ */
 
-const DEFENSE_COLUMNS: ColDef<PlayerReadoutOut>[] = [
-  { field: "defense.damage_taken", headerName: "Dmg reçu", width: 110 },
-  { field: "defense.cc_taken", headerName: "CC reçus", width: 100 },
-  { field: "defense.deaths", headerName: "Morts", width: 80 },
-  { field: "defense.time_downed_ms", headerName: "Down (ms)", width: 110 },
-  { field: "defense.dodges", headerName: "Esquives", width: 100 },
-  { field: "defense.blocks", headerName: "Blocages", width: 100 },
-  { field: "defense.interrupts", headerName: "Interrupt.", width: 110 },
-  { field: "defense.barrier_absorbed", headerName: "Barrier abs.", width: 120 },
-];
+function buildDefenseColumns(
+  positionMap: Map<string, { stack_dist: number | null; dist_to_com: number | null }>,
+): ColDef<PlayerReadoutOut>[] {
+  return [
+    { field: "defense.damage_taken", headerName: "Dmg reçu", width: 110 },
+    { field: "defense.dodges", headerName: "Esquives", width: 90 },
+    { field: "defense.blocks", headerName: "Blocages", width: 100 },
+    { field: "defense.interrupts", headerName: "Interrupt", width: 100 },
+    { field: "defense.deaths", headerName: "Morts", width: 70 },
+    { field: "defense.time_downed_ms", headerName: "Down (ms)", width: 110 },
+    { field: "defense.cc_taken", headerName: "CC reçus", width: 100 },
+    { field: "defense.barrier_absorbed", headerName: "Barrier abs.", width: 120 },
+    // Position data — merged from the /positions endpoint by account_name
+    {
+      colId: "stack_dist",
+      headerName: "Stack dist",
+      width: 100,
+      valueGetter: (params) => {
+        const account = params.data?.account_name;
+        if (!account) return null;
+        const pos = positionMap.get(account);
+        return pos?.stack_dist;
+      },
+      valueFormatter: (params) =>
+        params.value != null ? `${(params.value as number).toFixed(1)}u` : "—",
+      comparator: NUMERIC_COMPARATOR,
+    },
+    {
+      colId: "dist_to_com",
+      headerName: "Dist COM",
+      width: 100,
+      valueGetter: (params) => {
+        const account = params.data?.account_name;
+        if (!account) return null;
+        const pos = positionMap.get(account);
+        return pos?.dist_to_com;
+      },
+      valueFormatter: (params) =>
+        params.value != null ? `${(params.value as number).toFixed(1)}u` : "—",
+      comparator: NUMERIC_COMPARATOR,
+    },
+  ];
+}
 
 const DEFENSE_SORT: SortModelItem[] = [
   { colId: "subgroup", sort: "asc" },
@@ -575,6 +609,28 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
   const players = readout.players;
 
+  // Build a lookup map from positions data for the defense table
+  const positionMap = useMemo(() => {
+    const map = new Map<
+      string,
+      { stack_dist: number | null; dist_to_com: number | null }
+    >();
+    for (const p of positions?.players ?? []) {
+      if (p.account_name) {
+        map.set(p.account_name, {
+          stack_dist: p.stack_dist,
+          dist_to_com: p.dist_to_com,
+        });
+      }
+    }
+    return map;
+  }, [positions]);
+
+  const defenseColumns = useMemo(
+    () => buildDefenseColumns(positionMap),
+    [positionMap],
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {/* Status banner */}
@@ -677,13 +733,13 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
       {/* Tableau 4: Defense */}
       <section>
       <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
-      Défense
+      Défense &amp; Positionnement
     </h2>
         <div style={GRID_CONTAINER_STYLE}>
           <AgGridReact<PlayerReadoutOut>
             theme={appGridTheme}
             rowData={players}
-            columnDefs={[...SHARED_COLUMNS, ...DEFENSE_COLUMNS]}
+            columnDefs={[...SHARED_COLUMNS, ...defenseColumns]}
             defaultColDef={{
               comparator: NUMERIC_COMPARATOR,
               resizable: true,

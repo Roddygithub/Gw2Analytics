@@ -44,6 +44,9 @@ from gw2analytics_api.routes import (
     uploads,
     webhooks,
 )
+from minio.error import S3Error
+
+from gw2analytics_api.storage import get_minio
 from gw2analytics_api.workers.stuck_upload_sweeper import lifespan_stuck_upload_sweeper
 from gw2analytics_api.workers.webhook_scheduler import lifespan_scheduler
 
@@ -83,6 +86,48 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # naming both heads). Set ``SKIP_SCHEMA_GUARD=1`` to
     # bypass in emergencies.
     schema_guard.check_schema_drift()
+
+    # Step 1b: MinIO connectivity check (v0.10.26-pre). Attempt
+    # to list buckets; a SignatureDoesNotMatch / InvalidAccessKey
+    # indicates misconfigured S3 credentials, while a connection
+    # timeout indicates the MinIO server is unreachable. The
+    # check is non-fatal (the API starts anyway) but logs a
+    # loud WARNING so the operator catches misconfiguration
+    # at deploy time rather than on the first real upload.
+    s = get_settings()
+    try:
+        minio_client = get_minio()
+        minio_client.list_buckets()
+        logger.info(
+            "MinIO connectivity OK (endpoint=%s, bucket=%s)",
+            s.minio_endpoint,
+            s.minio_bucket,
+        )
+    except S3Error as exc:
+        s3_code = exc.code or ""
+        if s3_code in ("SignatureDoesNotMatch", "InvalidAccessKeyId", "AccessDenied"):
+            logger.error(
+                "MinIO CREDENTIAL MISMATCH (endpoint=%s, code=%s): "
+                "the configured S3_ACCESS_KEY / S3_SECRET_KEY do not "
+                "match the server. Uploads will fail with 503. "
+                "Fix the credentials and restart the API.",
+                s.minio_endpoint,
+                s3_code,
+            )
+        else:
+            logger.error(
+                "MinIO UNREACHABLE (endpoint=%s, code=%s): "
+                "uploads will fail until the storage server is restored.",
+                s.minio_endpoint,
+                s3_code,
+            )
+    except (ConnectionError, OSError, TimeoutError) as exc:
+        logger.error(
+            "MinIO connection failed (endpoint=%s, type=%s): "
+            "uploads will fail until the storage server is reachable.",
+            s.minio_endpoint,
+            type(exc).__name__,
+        )
 
     # Step 2: Arq pool init with graceful fallback. The
     # lazy imports keep the cold-start path lightweight
