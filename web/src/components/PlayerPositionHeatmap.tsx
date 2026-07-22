@@ -19,24 +19,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import React from "react";
 
 import { fetchFightPositions, type PlayerPositionOut } from "@/lib/api";
+import {
+  FALLBACK_COLOR,
+  PROFESSION_COLORS,
+  professionColor,
+} from "@/lib/professionColors";
 
 // ---------------------------------------------------------------------------
-// Profession colour palette — matches the rest of the app.
+// Canvas constants
 // ---------------------------------------------------------------------------
 
-const PROFESSION_COLORS: Record<string, string> = {
-  Guardian: "#72C1D9",
-  Warrior: "#FFD166",
-  Engineer: "#D09B2C",
-  Ranger: "#8CD13C",
-  Thief: "#C08F95",
-  Elementalist: "#F68A87",
-  Mesmer: "#B679D2",
-  Necromancer: "#52A76F",
-  Revenant: "#D16E5A",
-};
-
-const FALLBACK_COLOR = "#888888";
 const COM_COLOR = "#FFFFFF";
 const TRAIL_FADE_MS = 4000;
 const SAMPLE_INTERVAL_MS = 500;
@@ -44,10 +36,6 @@ const DOT_RADIUS = 6;
 const COM_RADIUS = 8;
 const LABEL_OFFSET = 10;
 const CANVAS_PADDING = 40;
-
-function professionColor(profession: string): string {
-  return PROFESSION_COLORS[profession] ?? FALLBACK_COLOR;
-}
 
 // ---------------------------------------------------------------------------
 // Types
