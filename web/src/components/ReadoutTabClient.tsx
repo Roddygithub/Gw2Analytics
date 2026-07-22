@@ -797,7 +797,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
       {positions && (
         <section>
           <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Carte des positions</h2>
-          <PlayerPositionHeatmap fightId={fightId} />
+          <PlayerPositionHeatmap fightId={fightId} positionsData={positions} />
         </section>
       )}
 

@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import React from "react";
 
-import { fetchFightPositions, type PlayerPositionOut } from "@/lib/api";
+import { fetchFightPositions, type PlayerPositionOut, type FightPositionsOut } from "@/lib/api";
 import {
   FALLBACK_COLOR,
   PROFESSION_COLORS,
@@ -53,13 +53,18 @@ interface HeatmapPlayer {
 
 interface PlayerPositionHeatmapProps {
   fightId: string;
+  /** Pre-fetched positions data from the parent. When provided, the
+   *  internal ``fetchFightPositions`` call is skipped — avoids a
+   *  redundant network request when the parent already fetched the
+   *  same endpoint (e.g. ReadoutTabClient). */
+  positionsData?: FightPositionsOut | null;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function PlayerPositionHeatmap({ fightId }: PlayerPositionHeatmapProps) {
+export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPositionHeatmapProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animRef = useRef<number | null>(null);
 
@@ -76,7 +81,11 @@ export function PlayerPositionHeatmap({ fightId }: PlayerPositionHeatmapProps) {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchFightPositions(fightId);
+      // Use pre-fetched data when provided (avoids double-fetch).
+      const data: FightPositionsOut =
+        positionsData && positionsData.players.length > 0
+          ? positionsData
+          : await fetchFightPositions(fightId);
       const built: HeatmapPlayer[] = data.players.map((p: PlayerPositionOut) => {
         const samples: [number, number, number][] = (p.samples ?? []).map(
           (s, i) => [i * SAMPLE_INTERVAL_MS, s.x, s.y] as [number, number, number],
@@ -98,6 +107,9 @@ export function PlayerPositionHeatmap({ fightId }: PlayerPositionHeatmapProps) {
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- positionsData
+    // is stable once provided (parent guards with {positions && ...}),
+    // so it never changes after mount.
   }, [fightId]);
 
   useEffect(() => {

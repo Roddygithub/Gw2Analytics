@@ -1,3 +1,58 @@
+## [0.15.0] - 2026-07-22
+
+### Added — GlobalStatsBar, Timeline activity toggle, Heatmap in Analyse
+- **GlobalStatsBar**: new squad-level aggregate bar in the Analyse tab
+  showing total squad DPS, Heal/s, Strips, Cleanses, CC, Healer count,
+  and Support count as color-coded `StatBadge` chips. Uses `useMemo`
+  for efficient recomputation.
+- **Timeline activity toggle**: new "Toute la durée" / "🔍 Activité
+  seulement" button on the timeline chart. Activity-only mode filters
+  to windows with `damage_total > 0` or `healing_total > 0`, draws
+  dashed gap separator lines between activity peaks >30s apart, and
+  shows activity stats (N pics · X% de la durée).
+- **PlayerPositionHeatmap in Analyse tab**: the canvas-based 2D position
+  heatmap (v0.14.3) is now rendered in the Analyse tab under "Carte des
+  positions", self-contained with its own data fetching.
+- **`positionsData` prop**: `PlayerPositionHeatmap` now accepts an
+  optional `positionsData?: FightPositionsOut` prop. When provided by
+  the parent (e.g. `ReadoutTabClient`), the internal `fetchFightPositions`
+  call is skipped — avoids redundant double-fetch.
+- **Unit tests**: new `ReadoutTabClient.test.tsx` with 6 tests covering
+  `GlobalStatsBar` (squad aggregates, healer/support counts, empty state)
+  and `TimelineMiniChart` activity toggle (default mode, toggle switch,
+  activity stats display). Uses `data-testid` for precise assertions.
+- **`data-testid` on StatBadge**: each badge carries a
+  `stat-badge-{label}` testid for precise per-badge assertions.
+
+### Fixed
+- **Tab navigation**: `buildTabHref` in `/fights/[id]/page.tsx` now
+  correctly sets `?tab=overview` for the Overview link (was missing,
+  causing both Overview and Analyse links to navigate to the readout
+  default view).
+- **Heatmap conditional rendering**: the heatmap section is now wrapped
+  in `{positions && (...)}` so it doesn't render when position data is
+  unavailable (parent fetch failed).
+
+### Removed
+- **CSV export**: deleted `CsvDownloadButton.tsx`, `web/src/lib/csv.ts`,
+  and their test files. Removed `filename` props and CSV download
+  buttons from `TargetRollupsGrid`, `SquadRollupsGrid`,
+  `SkillUsageTable`, `PlayerSkillUsageTable`, and `PlayersGrid`.
+  Removed `filename` props from `fights/[id]/page.tsx` and
+  `players/page.tsx`.
+
+### Changed
+- **FightSummaryCards compaction**: reduced padding (10→6px), font
+  sizes (13→11px), gaps (6→4px) — cards are ~30% more compact.
+- **API rebuild**: API Docker container rebuilt and verified; readout
+  endpoint returns 200.
+
+### Validation
+- TypeScript: 0 errors, vitest: 6/6 new tests pass
+- Browser E2E: all 4 tables, heatmap, GlobalStatsBar, timeline toggle
+  verified rendering correctly
+- Full stack rebuild: API + Web containers healthy
+
 ## [0.14.3] - 2026-07-22
 
 ### Added — Phase H: Position heatmap visualization

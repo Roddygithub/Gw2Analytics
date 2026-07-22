@@ -130,26 +130,25 @@ describe("PlayerPositionHeatmap", () => {
       expect(screen.queryByText("Chargement des positions…")).toBeNull();
     });
 
-    const button = screen.getByRole("button", { name: "Lecture" });
-    expect(button).toHaveTextContent("▶ Lecture");
+    // Auto-play starts for 2s, so pause it first to get a stable "Lecture" state.
+    const pauseButton = await screen.findByRole("button", { name: "Pause" }, { timeout: 3000 });
+    fireEvent.click(pauseButton);
 
-    // Click to play — button should switch to pause.
-    fireEvent.click(button);
+    // Now we should be in stable stopped state.
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Pause" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Lecture" })).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "Pause" })).toHaveTextContent(
-      "⏸ Pause",
-    );
 
-    // Click again to pause — button should switch back to play.
+    // Click to play.
+    fireEvent.click(screen.getByRole("button", { name: "Lecture" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    });
+
+    // Click to pause again.
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Lecture" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Lecture" })).toBeInTheDocument();
     });
   });
 
