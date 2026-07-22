@@ -129,57 +129,63 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             type(exc).__name__,
         )
 
-    # Step 2: Arq pool init with graceful fallback. The
-    # lazy imports keep the cold-start path lightweight
-    # (the upload route's asyncio.to_thread fallback does
-    # not need arq + redis to be importable for the API
-    # to start; only the enqueue_job path needs them).
-    # ``noqa: PLC0415`` suppresses ruff's "import should be
-    # at the top of the file" because the lazy import is
-    # intentional: a misconfigured env without arq installed
-    # should NOT prevent the API from starting (the route
-    # handler's BackgroundTasks fallback handles uploads
-    # without arq).
+    # Step 2: Arq pool init with retry + graceful fallback.
+    # v0.15.1: added retry loop (3 attempts, 2s→4s→8s backoff)
+    # because Redis is often not ready when the API starts
+    # (healthcheck passes but Redis hasn't loaded its dataset
+    # or is briefly unresponsive post-restart). The retry
+    # catches transient failures; 3 attempts with 8s max
+    # backoff keeps startup under 30s.
+    #
+    # The except tuple is intentionally narrow: AttributeError /
+    # KeyError / ImportError must propagate so a misconfigured
+    # deployment surfaces loudly rather than being masked.
     _app.state.arq_pool = None
-    try:
-        import redis.exceptions  # noqa: PLC0415
-        from arq import create_pool  # noqa: PLC0415
+    _RETRY_ATTEMPTS = 3
+    _RETRY_BASE_S = 2.0
+    for attempt in range(1, _RETRY_ATTEMPTS + 1):
+        try:
+            import redis.exceptions  # noqa: PLC0415
+            from arq import create_pool  # noqa: PLC0415
+            from gw2analytics_api.workers.parser_settings import (  # noqa: PLC0415
+                WorkerSettings,
+            )
 
-        from gw2analytics_api.workers.parser_settings import WorkerSettings  # noqa: PLC0415
-
-        _app.state.arq_pool = await create_pool(WorkerSettings.redis_settings)
-        logger.info("arq pool initialised (host=%s)", WorkerSettings.redis_settings.host)
-    except (
-        ConnectionError,
-        OSError,
-        TimeoutError,
-        redis.exceptions.RedisError,
-    ) as exc:
-        # The try/except is intentionally narrow: arq is documented
-        # to raise ``ConnectionError`` (Redis unreachable), ``OSError``
-        # (DNS), and ``TimeoutError`` (slow broker) on init failure.
-        # In practice the underlying ``redis-py`` library's exceptions
-        # (``redis.exceptions.ConnectionError``,
-        # ``redis.exceptions.TimeoutError``) are SUBCLASSES of
-        # ``redis.exceptions.RedisError`` (NOT the builtin
-        # ``ConnectionError`` / ``TimeoutError``), so the bare
-        # builtins do NOT catch them. We add ``RedisError`` to the
-        # tuple to catch the unwrapped redis exceptions that reach
-        # ``arq.create_pool`` in some arq versions. Other exception
-        # classes (e.g. ``AttributeError`` from a typo'd
-        # ``redis_settings``) propagate so a misconfigured deployment
-        # surfaces the underlying misconfiguration rather than masking
-        # it with a misleading "arq pool init failed" warning.
-        # v0.10.15 plan 032: narrowed from ``except Exception`` to the
-        # 4 specific exception classes documented in this comment;
-        # an ``AttributeError`` / ``KeyError`` / ``ImportError`` now
-        # propagates.
-        logger.exception(
-            "arq pool init failed (type=%s); uploads will use the "
-            "BackgroundTasks fallback (slower on parallel "
-            "uploads, but functional)",
-            type(exc).__name__,
-        )
+            _app.state.arq_pool = await create_pool(
+                WorkerSettings.redis_settings,
+            )
+            logger.info(
+                "arq pool initialised (host=%s, attempt=%d)",
+                WorkerSettings.redis_settings.host,
+                attempt,
+            )
+            break
+        except (
+            ConnectionError,
+            OSError,
+            TimeoutError,
+            redis.exceptions.RedisError,
+        ) as exc:
+            if attempt < _RETRY_ATTEMPTS:
+                delay = _RETRY_BASE_S * (2 ** (attempt - 1))
+                logger.warning(
+                    "arq pool init attempt %d/%d failed (type=%s); "
+                    "retrying in %.0fs",
+                    attempt,
+                    _RETRY_ATTEMPTS,
+                    type(exc).__name__,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.exception(
+                    "arq pool init failed after %d attempts "
+                    "(type=%s); uploads will use the in-request "
+                    "fallback (slower on parallel uploads, but "
+                    "functional)",
+                    _RETRY_ATTEMPTS,
+                    type(exc).__name__,
+                )
 
     # Step 3: webhook retry+DLQ scheduler (v0.9.1, unchanged).
     scheduler_task = asyncio.create_task(lifespan_scheduler(get_sessionmaker()))
