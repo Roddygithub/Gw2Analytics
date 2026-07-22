@@ -1062,6 +1062,15 @@ def get_fight_readout(
     dps_split_getter = make_dps_split_getter(build_date, skill_id_to_name_map.get)
     barrier_getter = make_barrier_portion_getter()
 
+    # v0.15.x: compute per-player distance to commander from position
+    # events and pass it through to the readout aggregator so the
+    # Defense table can display the column directly.
+    position_players = aggregate_player_positions(events, agent_id_to_identity_map)
+    dist_to_commander_by_account: dict[str, float] = {}
+    for pp in position_players:
+        if pp.dist_to_commander is not None:
+            dist_to_commander_by_account[pp.account_name] = pp.dist_to_commander
+
     return aggregate_combat_readout(
         events,
         skill_id_to_name_map=skill_id_to_name_map,
@@ -1071,6 +1080,7 @@ def get_fight_readout(
         dps_split_getter=dps_split_getter,
         barrier_portion_getter_heal=barrier_getter,
         boon_uptimes_by_account=boon_uptimes_by_account or None,
+        dist_to_commander_by_account=dist_to_commander_by_account or None,
     )
 
 

@@ -306,6 +306,8 @@ function getSortValue(p: PlayerReadoutOut, field: string): number {
   if (field === "time_downed") return p.defense.time_downed_ms;
   if (field === "barrier_absorbed") return p.defense.barrier_absorbed;
   if (field === "presence_pct") return p.defense.presence_pct ?? 0;
+  if (field === "dist_to_commander") return p.defense.dist_to_commander ?? -1;
+  if (field === "kill_part") return p.defense.kill_participation;
   if (field === "subgroup") return p.subgroup;
   if (field.startsWith("boon_in_")) {
     const boonKey = field.replace("boon_in_", "");
@@ -750,6 +752,8 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
                 <Th field="cc_taken" currentSort={defenseSort.sort} onSort={defenseSort.onSort}>CC reçus</Th>
                 <Th field="barrier_absorbed" currentSort={defenseSort.sort} onSort={defenseSort.onSort}>Barrier abs.</Th>
                 <Th field="presence_pct" currentSort={defenseSort.sort} onSort={defenseSort.onSort}>Présence %</Th>
+                <Th field="dist_to_commander" currentSort={defenseSort.sort} onSort={defenseSort.onSort}>Dist. Cmd</Th>
+                <Th field="kill_part" currentSort={defenseSort.sort} onSort={defenseSort.onSort}>Kill Part</Th>
               </tr>
             </thead>
             <tbody>
@@ -767,6 +771,10 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
                   <td style={{ ...TD_STYLE, fontVariantNumeric: "tabular-nums" }}>
                     {p.defense.presence_pct != null ? `${p.defense.presence_pct.toFixed(0)}%` : "—"}
                   </td>
+                  <td style={{ ...TD_STYLE, fontVariantNumeric: "tabular-nums" }}>
+                    {p.defense.dist_to_commander != null ? p.defense.dist_to_commander.toFixed(0) : "—"}
+                  </td>
+                  <td style={TD_STYLE}>{p.defense.kill_participation}</td>
                 </tr>
               ))}
             </tbody>

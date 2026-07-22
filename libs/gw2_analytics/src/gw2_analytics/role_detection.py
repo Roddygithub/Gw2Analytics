@@ -228,6 +228,18 @@ _R_STRIP_HIGH: Final[float] = 0.60
 # axis must also be at least this fraction of the total.
 _HINT_MIN_FRACTION: Final[float] = 0.30
 
+# Healer-spec override threshold. A player on a healer spec
+# (Druid, Tempest, Scourge, Specter — specs whose
+# SPEC_ROLE_HINTS hint is HEAL) who crosses this lower
+# healing threshold gets HEAL promoted ahead of DPS even
+# when the DPS axis would otherwise dominate. This fixes the
+# common case of a Druid doing moderate damage but also
+# substantial healing: without the override, r_dmg >= 0.65
+# forces DPS as primary; with the override, HEAL takes
+# priority when the player is on a healer spec and has
+# meaningful healing output.
+_R_HEAL_OVERRIDE: Final[float] = 0.15
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers (extracted from ``detect_role_lite`` to keep the
@@ -482,6 +494,20 @@ def detect_role_lite(
 
     # 4. Pick badges by per-axis pure threshold.
     badges = _pick_role_from_ratios(r_dmg, r_heal, r_strip)
+    # 4a. Healer-spec override: when a healer spec (Druid, Tempest,
+    # Scourge, Specter) crosses the lower _R_HEAL_OVERRIDE threshold
+    # with meaningful healing, promote HEAL to primary role even
+    # when DPS also crossed its threshold. This prevents a Druid
+    # doing moderate DPS + substantial healing from being tagged
+    # purely as DPS.
+    if (
+        expected_hint == "HEAL"
+        and r_heal >= _R_HEAL_OVERRIDE
+        and badges
+        and badges[0] == "DPS"
+        and "HEAL" not in badges
+    ):
+        badges.insert(0, "HEAL")
     # 5. Fallback to spec / profession hint (only when no axis crossed;
     # the helper returns the input unchanged when ``badges`` is non-empty,
     # so the call is a no-op when the per-axis check already populated

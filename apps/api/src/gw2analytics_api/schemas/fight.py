@@ -412,6 +412,11 @@ class PlayerReadoutDefenseOut(BaseModel):
     barrier_absorbed: int = 0
     # Plan 173 Phase E: presence percentage [0.0, 100.0], None when unavailable.
     presence_pct: float | None = None
+    # v0.15.x: average distance to commander in game units, None when
+    # no commander or no position data available.
+    dist_to_commander: float | None = None
+    # v0.15.x: number of unique kills the player contributed damage to.
+    kill_participation: int = 0
 
 
 class PlayerReadoutOut(BaseModel):

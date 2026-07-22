@@ -414,6 +414,7 @@ def _build_player_readout(
     time_downed_ms: int = 0,
     boon_uptimes: dict[str, float] | None = None,
     presence_pct: float | None = None,
+    dist_to_commander: float | None = None,
     roles: list[str] | None = None,
 ) -> PlayerReadoutOut:
     """Build a single :class:`PlayerReadoutOut` from aspect rows + identity.
@@ -524,6 +525,9 @@ def _build_player_readout(
             barrier_absorbed=def_row.barrier_absorbed,
             # Plan 173 Phase E: presence percentage from event-window buckets.
             presence_pct=presence_pct,
+            # v0.15.x: distance to commander + kill participation.
+            dist_to_commander=dist_to_commander,
+            kill_participation=kill_participation,
         ),
     )
 
@@ -539,6 +543,7 @@ def aggregate_combat_readout(
     barrier_portion_getter_heal: HealBarrierGetter | None = None,
     buff_removal_events: Iterable[BuffRemovalEvent] | None = None,
     boon_uptimes_by_account: dict[str, dict[str, float]] | None = None,
+    dist_to_commander_by_account: dict[str, float] | None = None,
 ) -> FightReadoutOut:
     """Aggregate the Combat readout (4-table layout from design doc §3-6) for one fight.
 
@@ -863,6 +868,11 @@ def aggregate_combat_readout(
                 else None
             ),
             presence_pct=presence_by_agent.get(agent_id),
+            dist_to_commander=(
+                dist_to_commander_by_account.get(identity_map[agent_id].account_name)
+                if dist_to_commander_by_account and identity_map[agent_id].account_name
+                else None
+            ),
         )
         for agent_id in sorted(valid_agent_ids)
     ]
