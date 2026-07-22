@@ -41,7 +41,7 @@ export default defineConfig({
     globals: true,
     coverage: {
       provider: "v8",
-      reporter: ["text", "text-summary"],
+      reporter: ["text", "text-summary", "lcov"],
       // Exclude generated OpenAPI client code and test harness files
       // from coverage thresholds. The schema file is auto-generated
       // from the FastAPI spec; the API wrapper modules are thin

@@ -31,16 +31,11 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
-# ---------------------------------------------------------------------------
-# Python lint: ruff, mypy, and security audit.
-# Uses a lighter ``uv sync --frozen`` (root dev deps only) to avoid
-# installing workspace members as editable packages — the root dev
-# group already pins every third-party dep that mypy needs, and
-# MYPYPATH tells mypy where to find workspace member source trees
-# for cross-package import resolution.
-# ---------------------------------------------------------------------------
+  cancel-in-progress: true  # ---------------------------------------------------------------------------
+  # Python lint: ruff, mypy, and security audit.
+  # Uses the full workspace sync (setup-python composite action) so
+  # workspace members are available as editable packages for mypy.
+  # ---------------------------------------------------------------------------
 jobs:
   lint-python:
     name: Lint Python
@@ -51,19 +46,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.3.2
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python 3.12
-        run: uv python install 3.12
-
-      # Lightweight sync: root dev deps only (ruff, mypy, pydantic,
-      # fastapi, etc.). Saves ~5s vs --all-packages on warm cache.
-      - name: Sync root dev dependencies (no workspace members)
-        run: uv sync --frozen
+      - uses: ./.github/actions/setup-python
 
       # Cache pip-audit's OSV vulnerability database so subsequent
       # runs skip the ~15s download on every invocation.
@@ -85,16 +68,8 @@ jobs:
           echo "Checking for legacy db.query() calls (modern select() required)..."
           ! grep -rn 'db\.query(' apps/api/src/ libs/ --include='*.py'
 
-      # MYPYPATH tells mypy where to find workspace member packages
-      # for cross-package import resolution without editable installs.
-      # The root dev deps already include all third-party packages
-      # (pydantic, fastapi, sqlalchemy, etc.) in the venv.
-      # NOTE: single-line string required — YAML folded block scalar
-      # would insert spaces after colons, breaking path resolution.
       - name: Mypy
         run: uv run mypy libs apps --no-incremental
-        env:
-          MYPYPATH: libs/gw2_core/src:libs/gw2_evtc_parser/src:libs/gw2_analytics/src:libs/gw2_api_client/src:apps/api/src
 
       - name: pip-audit (Python deps, vulnerability scan)
         run: uv run pip-audit --strict --vulnerability-service osv
@@ -240,6 +215,15 @@ jobs:
         working-directory: web
         run: pnpm exec vitest run --coverage --reporter=verbose
 
+      - name: Upload vitest coverage to Codecov
+        if: github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: web/coverage/lcov.info
+          flags: javascript
+          fail_ci_if_error: false
+
       - name: pnpm audit (Node deps, fail on HIGH)
         working-directory: web
         run: pnpm audit --audit-level=high
@@ -260,6 +244,7 @@ jobs:
           | API client drift | ✅ |
           | TypeScript type-check | ✅ |
           | Vitest unit tests | ✅ |
+          | Vitest coverage upload | ✅ |
           | pnpm audit | ✅ |
           EOF
 
