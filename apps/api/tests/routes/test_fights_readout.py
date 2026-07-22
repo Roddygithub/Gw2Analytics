@@ -34,7 +34,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.tests.routes._evtc_builder import build_2025_string
-from gw2_core import DamageEvent, HealingEvent, StunBreakEvent
+from gw2_core import DamageEvent, DeathEvent, DownEvent, HealingEvent, StunBreakEvent
 from gw2analytics_api.routes.fights.aggregators import (
     aggregate_combat_readout,
     make_barrier_portion_getter,
@@ -647,3 +647,95 @@ def test_readout_phase6_v2_barrier_and_condi_split_live() -> None:
         f"expected heal_total=0 (received heal from a, no outgoing heals), "
         f"got {b_readout.heal.heal_total}"
     )
+
+
+# -----------------------------------------------------------------
+# Down-contribution DPS + kill attribution (v0.14.4)
+# -----------------------------------------------------------------
+
+
+def test_readout_down_contribution_dps_wired() -> None:
+    """Direct aggregator-level test: DownEvent + DamageEvent populate down_contribution_dps.
+
+    v0.14.4: the library-side DownContributionAggregator was already
+    shipped but never called from the API layer. This test verifies
+    that damage dealt to a downed target correctly populates
+    ``down_contribution_dps`` and that kills from DeathEvent are
+    attributed to the killing player.
+    """
+    a = 700_001  # damage dealer
+    b = a + 1   # target (goes down)
+    damage_skill = 7_500_001
+
+    # Player b goes down at t=1000, then a damages b at t=2000
+    # while b is downed. b dies at t=3000 (killed by a).
+    down_event = DownEvent(
+        time_ms=1_000,
+        source_agent_id=b,
+        target_agent_id=0,
+        downtime_ms=0,
+    )
+    damage_event = DamageEvent(
+        time_ms=2_000,
+        source_agent_id=a,
+        target_agent_id=b,
+        skill_id=damage_skill,
+        damage=1000,
+    )
+    death_event = DeathEvent(
+        time_ms=3_000,
+        source_agent_id=b,
+        target_agent_id=0,
+        skill_id=0,
+        killed_by_agent_id=a,
+        killing_skill_id=damage_skill,
+    )
+
+    aid_to_identity = {
+        a: AgentIdentity(
+            agent_id=a,
+            name=f"Killer {a}",
+            subgroup=0,
+            account_name=f"synth.{a}",
+            profession="PROF(2)",
+            elite_spec="ELITE(18)",
+            is_player=True,
+            is_commander=False,
+        ),
+        b: AgentIdentity(
+            agent_id=b,
+            name=f"Downed {b}",
+            subgroup=0,
+            account_name=f"synth.{b}",
+            profession="PROF(1)",
+            elite_spec="ELITE(27)",
+            is_player=True,
+            is_commander=False,
+        ),
+    }
+    duration_s = 5.0
+    out = aggregate_combat_readout(
+        events=[down_event, damage_event, death_event],
+        skill_id_to_name_map={damage_skill: "Dmg"},
+        agent_id_to_identity_map=aid_to_identity,
+        duration_s=duration_s,
+        fight_id="down-contrib-test",
+    )
+
+    assert len(out.players) == 2
+
+    a_readout = next(p for p in out.players if p.agent_id == a)
+    # 1000 damage to downed target / 5.0s = 200.0 DPS
+    assert a_readout.damage.down_contribution_dps == pytest.approx(200.0, abs=1.0), (
+        f"expected down_contribution_dps ≈ 200.0, "
+        f"got {a_readout.damage.down_contribution_dps}"
+    )
+    # a killed b via DeathEvent.killed_by_agent_id
+    assert a_readout.damage.kills == 1, (
+        f"expected kills=1, got {a_readout.damage.kills}"
+    )
+
+    b_readout = next(p for p in out.players if p.agent_id == b)
+    # b didn't damage anyone while they were downed
+    assert b_readout.damage.down_contribution_dps == 0.0
+    assert b_readout.damage.kills == 0

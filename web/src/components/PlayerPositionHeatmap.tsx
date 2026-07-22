@@ -215,6 +215,24 @@ export function PlayerPositionHeatmap({ fightId }: PlayerPositionHeatmapProps) {
       return [last[1], last[2]];
     };
 
+    // ---- draw grid (light reference lines for spatial orientation) ---------
+
+    ctx.strokeStyle = "rgba(255,255,255,0.04)";
+    ctx.lineWidth = 0.5;
+    const gridStep = Math.max(1, Math.floor(Math.min(drawW, drawH) / 8));
+    for (let gx = CANVAS_PADDING; gx <= CANVAS_PADDING + drawW; gx += gridStep) {
+      ctx.beginPath();
+      ctx.moveTo(gx, CANVAS_PADDING);
+      ctx.lineTo(gx, CANVAS_PADDING + drawH);
+      ctx.stroke();
+    }
+    for (let gy = CANVAS_PADDING; gy <= CANVAS_PADDING + drawH; gy += gridStep) {
+      ctx.beginPath();
+      ctx.moveTo(CANVAS_PADDING, gy);
+      ctx.lineTo(CANVAS_PADDING + drawW, gy);
+      ctx.stroke();
+    }
+
     // ---- draw trails --------------------------------------------------------
 
     ctx.lineWidth = 2;
@@ -260,6 +278,14 @@ export function PlayerPositionHeatmap({ fightId }: PlayerPositionHeatmapProps) {
     }
 
     for (const [, sx, sy, color] of activePositions) {
+      // Glow ring for visibility on dark background.
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.15;
+      ctx.beginPath();
+      ctx.arc(sx, sy, DOT_RADIUS + 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(sx, sy, DOT_RADIUS, 0, Math.PI * 2);

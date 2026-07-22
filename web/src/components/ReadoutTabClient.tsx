@@ -501,7 +501,7 @@ const BOONS_SORT: SortModelItem[] = [
  * ------------------------------------------------------------------ */
 
 function buildDefenseColumns(
-  positionMap: Map<string, { stack_dist: number | null; dist_to_com: number | null }>,
+  positionMap: Map<string, { stack_dist: number | null; dist_to_com: number | null; dist_to_commander: number | null }>,
 ): ColDef<PlayerReadoutOut>[] {
   return [
     { field: "defense.damage_taken", headerName: "Dmg reçu", width: 110 },
@@ -549,6 +549,21 @@ function buildDefenseColumns(
       valueFormatter: (params) =>
         params.value != null ? `${(params.value as number).toFixed(1)}u` : "—",
       comparator: NUMERIC_COMPARATOR,
+    },
+    {
+      colId: "dist_to_commander",
+      headerName: "Dist Cmd",
+      width: 100,
+      valueGetter: (params) => {
+        const account = params.data?.account_name;
+        if (!account) return null;
+        const pos = positionMap.get(account);
+        return pos?.dist_to_commander;
+      },
+      valueFormatter: (params) =>
+        params.value != null ? `${(params.value as number).toFixed(1)}u` : "—",
+      comparator: NUMERIC_COMPARATOR,
+      tooltipValueGetter: () => "Distance moyenne au commandant de l'escouade",
     },
   ];
 }
@@ -725,13 +740,14 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
   const positionMap = useMemo(() => {
     const map = new Map<
       string,
-      { stack_dist: number | null; dist_to_com: number | null }
+      { stack_dist: number | null; dist_to_com: number | null; dist_to_commander: number | null }
     >();
     for (const p of positions?.players ?? []) {
       if (p.account_name) {
         map.set(p.account_name, {
           stack_dist: p.stack_dist,
           dist_to_com: p.dist_to_com,
+          dist_to_commander: p.dist_to_commander,
         });
       }
     }

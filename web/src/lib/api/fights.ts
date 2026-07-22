@@ -265,6 +265,7 @@ export interface PlayerPositionOut {
   elite_spec: string;
   stack_dist: number | null;
   dist_to_com: number | null;
+  dist_to_commander: number | null;
   samples: { x: number; y: number; z: number }[];
 }
 

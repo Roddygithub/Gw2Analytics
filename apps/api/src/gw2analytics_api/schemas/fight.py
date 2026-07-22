@@ -506,6 +506,7 @@ class PlayerPositionOut(BaseModel):
     elite_spec: str
     stack_dist: float | None
     dist_to_com: float | None
+    dist_to_commander: float | None = None
     samples: list[PositionSampleOut] = []
 
 

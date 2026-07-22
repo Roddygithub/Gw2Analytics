@@ -880,6 +880,42 @@ def aggregate_player_positions(
 
     metrics = compute_position_metrics(player_samples)
 
+    # v0.14.4: find the commander player and compute per-player
+    # average distance to the commander's position at matching
+    # timestamps. The commander is the player agent with
+    # is_commander=True in the identity map.
+    commander_account: str | None = None
+    commander_samples: list[list[float]] = []
+    for agent_id, identity in agent_id_to_identity_map.items():
+        if identity.is_commander and identity.account_name:
+            commander_account = identity.account_name
+            commander_samples = player_samples.get(commander_account, [])
+            break
+
+    dist_to_commander_by_account: dict[str, float] = {}
+    if commander_account and commander_samples:
+        # Build a time_ms -> position lookup for the commander.
+        cmd_pos_by_time: dict[int, tuple[float, float]] = {}
+        for sample in commander_samples:
+            t_ms = int(sample[0])
+            cmd_pos_by_time[t_ms] = (sample[1], sample[2])
+        for account, samples in player_samples.items():
+            if account == commander_account:
+                dist_to_commander_by_account[account] = 0.0
+                continue
+            total_dist = 0.0
+            matched = 0
+            for sample in samples:
+                t_ms = int(sample[0])
+                cmd_pos = cmd_pos_by_time.get(t_ms)
+                if cmd_pos is not None:
+                    dx = sample[1] - cmd_pos[0]
+                    dy = sample[2] - cmd_pos[1]
+                    total_dist += (dx * dx + dy * dy) ** 0.5
+                    matched += 1
+            if matched > 0:
+                dist_to_commander_by_account[account] = total_dist / matched
+
     result: list[PlayerPositionOut] = []
     # Sort by account_name for deterministic, user-friendly ordering.
     for agent_id in sorted(
@@ -899,6 +935,7 @@ def aggregate_player_positions(
                 elite_spec=identity.elite_spec,
                 stack_dist=row_metrics.get("stack_dist"),
                 dist_to_com=row_metrics.get("dist_to_com"),
+                dist_to_commander=dist_to_commander_by_account.get(account),
                 samples=samples_by_account.get(account, []),
             ),
         )
