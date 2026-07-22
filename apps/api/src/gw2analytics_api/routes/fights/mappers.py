@@ -193,17 +193,31 @@ class AgentIdentity(BaseModel):
 def _parse_subgroup_label(subgroup: str | None) -> int:
     """Parse an arcdps subgroup string to its integer label.
 
-    arcdps writes the subgroup as ``"Subgroup N"`` (the canonical
-    2024+ format) or ``"Sub N"`` (the legacy 2018-2023 format).
+    arcdps writes the subgroup in one of three formats:
+
+    * ``"Subgroup N"`` (canonical 2024+ format)
+    * ``"Sub N"`` (legacy 2018-2023 format)
+    * ``"N"`` (plain integer string — the format written by the
+      EVTC parser into the database ``OrmFightAgent.subgroup``
+      column when the source EVTC carries a bare integer subgroup
+      field).
+
     An empty / ``None`` subgroup OR a non-numeric string collapses
     to ``0`` (the canonical wire-shape "no subgroup assigned"
-    sentinel). The parse is whitespace-token-bounded so a
-    malformed subgroup like ``"Subgroup A"`` falls through to ``0``
-    rather than raising -- a misconfigured parser would otherwise
-    crash the readout envelope.
+    sentinel). The parse tries the plain-integer fast-path first,
+    then falls back to whitespace-token extraction so a malformed
+    subgroup like ``"Subgroup A"`` returns ``0`` rather than
+    raising -- a misconfigured parser would otherwise crash the
+    readout envelope.
     """
     if not subgroup:
         return 0
+    # Fast path: plain integer string ("7", "12", etc.)
+    try:
+        return int(subgroup)
+    except ValueError:
+        pass
+    # Fallback: "Sub N" or "Subgroup N" format
     tokens = subgroup.split()
     if len(tokens) < 2:
         return 0
