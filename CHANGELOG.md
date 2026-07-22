@@ -1,3 +1,28 @@
+## [0.14.3] - 2026-07-22
+
+### Added — Phase H: Position heatmap visualization
+- **`PlayerPositionHeatmap.tsx`**: new canvas-based 2D position heatmap
+  component rendering squad positions over time with:
+  - Profession-colored dots with name labels
+  - Movement trails (4-second fading tail)
+  - Center-of-mass crosshair marker
+  - Time slider with play/pause animation
+  - Linear interpolation between 500 ms samples for smooth scrubbing
+  - Responsive canvas sizing with `devicePixelRatio` for crisp rendering
+  - Profession color legend + COM marker legend
+- **Page integration**: heatmap rendered above `PlayerPositionGrid` in
+  the Overview tab's Positions section.
+
+### Fixed
+- **`test_readout_boon_uptimes_and_presence_pct`**: corrected presence_pct
+  expectation from 25.0% to 100.0% (the test had a math bug multiplying
+  `duration_s` by 5000 instead of 1000; actual bucket count for 8s
+  duration is 2, both players active in both buckets → 100%).
+
+### Validation
+- TypeScript: 0 errors, vitest: 391 passed, 3 skipped
+- Plan 173 pytest: 2/2 passed (presence_pct + None fallback)
+
 ## [0.14.2] - 2026-07-22
 
 ### Added — Plan 173: Boon uptime + Presence % + Outgoing boons in Combat Readout

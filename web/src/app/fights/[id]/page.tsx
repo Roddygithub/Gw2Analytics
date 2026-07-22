@@ -99,6 +99,7 @@ import { ReplayPlayer } from "@/components/ReplayPlayer";
 import { SectionErrorChip } from "@/components/SectionErrorChip";
 import { ReadoutTabClient } from "@/components/ReadoutTabClient";
 import { PlayerPositionGrid } from "@/components/PlayerPositionGrid";
+import { PlayerPositionHeatmap } from "@/components/PlayerPositionHeatmap";
 import { fetchReplayTimeline } from "@/lib/replayFetcher";
 import { WindowSizeSelector } from "@/components/WindowSizeSelector";
 import { TargetFilter } from "@/components/TargetFilter";
@@ -972,6 +973,7 @@ export default async function FightEventsPage({
           windows so the existing overview flow is not interrupted. */}
       <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 600 }}>Positions</h2>
+        <PlayerPositionHeatmap fightId={id} />
         <PlayerPositionGrid fightId={id} />
       </section>
 

@@ -472,11 +472,13 @@ def test_readout_boon_uptimes_and_presence_pct() -> None:
         )
 
     # Presence: player a has events at t=1000..2300 (boons) + t=5000
-    # = buckets 0 and 1 active. duration_s=8.0 => 5000*8=40000ms =>
-    # ceil(40000/5000)=8 buckets. presence_pct = 2/8*100 = 25.0.
+    # = buckets 0 and 1 active. duration_s=8.0 => 1000*8=8000ms =>
+    # ceil(8000/5000)=2 buckets. presence_pct = 2/2*100 = 100.0.
+    # Both players (a as target/source, b as source/target) are active
+    # in both buckets.
     assert a_readout.defense.presence_pct is not None
-    assert a_readout.defense.presence_pct == pytest.approx(25.0, abs=5.0), (
-        f"expected presence_pct ≈ 25.0, got {a_readout.defense.presence_pct}"
+    assert a_readout.defense.presence_pct == pytest.approx(100.0, abs=5.0), (
+        f"expected presence_pct ≈ 100.0, got {a_readout.defense.presence_pct}"
     )
 
 
