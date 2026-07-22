@@ -572,6 +572,29 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
     load();
   }, [load]);
 
+  // Build lookup map from positions data (BEFORE early returns — hooks
+  // must always be called in the same order regardless of state)
+  const positionMap = useMemo(() => {
+    const map = new Map<
+      string,
+      { stack_dist: number | null; dist_to_com: number | null }
+    >();
+    for (const p of positions?.players ?? []) {
+      if (p.account_name) {
+        map.set(p.account_name, {
+          stack_dist: p.stack_dist,
+          dist_to_com: p.dist_to_com,
+        });
+      }
+    }
+    return map;
+  }, [positions]);
+
+  const defenseColumns = useMemo(
+    () => buildDefenseColumns(positionMap),
+    [positionMap],
+  );
+
   // Loading state
   if (loading) {
     return (
@@ -608,28 +631,6 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
   }
 
   const players = readout.players;
-
-  // Build a lookup map from positions data for the defense table
-  const positionMap = useMemo(() => {
-    const map = new Map<
-      string,
-      { stack_dist: number | null; dist_to_com: number | null }
-    >();
-    for (const p of positions?.players ?? []) {
-      if (p.account_name) {
-        map.set(p.account_name, {
-          stack_dist: p.stack_dist,
-          dist_to_com: p.dist_to_com,
-        });
-      }
-    }
-    return map;
-  }, [positions]);
-
-  const defenseColumns = useMemo(
-    () => buildDefenseColumns(positionMap),
-    [positionMap],
-  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
@@ -669,18 +670,13 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
       {/* Tableau 1: Damage */}
       <section>
-      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
-      Dégâts
-    </h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Dégâts</h2>
         <div style={GRID_CONTAINER_STYLE}>
           <AgGridReact<PlayerReadoutOut>
             theme={appGridTheme}
             rowData={players}
             columnDefs={[...SHARED_COLUMNS, ...DAMAGE_COLUMNS]}
-            defaultColDef={{
-              comparator: NUMERIC_COMPARATOR,
-              resizable: true,
-            }}
+            defaultColDef={{ comparator: NUMERIC_COMPARATOR, resizable: true }}
             animateRows
             getRowId={(p) => String(p.data.agent_id)}
             initialState={{ sort: { sortModel: DAMAGE_SORT } }}
@@ -690,18 +686,13 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
       {/* Tableau 2: Heal */}
       <section>
-      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
-      Soins
-    </h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Soins</h2>
         <div style={GRID_CONTAINER_STYLE}>
           <AgGridReact<PlayerReadoutOut>
             theme={appGridTheme}
             rowData={players}
             columnDefs={[...SHARED_COLUMNS, ...HEAL_COLUMNS]}
-            defaultColDef={{
-              comparator: NUMERIC_COMPARATOR,
-              resizable: true,
-            }}
+            defaultColDef={{ comparator: NUMERIC_COMPARATOR, resizable: true }}
             animateRows
             getRowId={(p) => String(p.data.agent_id)}
             initialState={{ sort: { sortModel: HEAL_SORT } }}
@@ -711,18 +702,13 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
       {/* Tableau 3: Boons */}
       <section>
-      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
-      Boons
-    </h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Boons</h2>
         <div style={GRID_CONTAINER_STYLE}>
           <AgGridReact<PlayerReadoutOut>
             theme={appGridTheme}
             rowData={players}
             columnDefs={[...SHARED_COLUMNS, ...BOONS_COLUMNS]}
-            defaultColDef={{
-              comparator: NUMERIC_COMPARATOR,
-              resizable: true,
-            }}
+            defaultColDef={{ comparator: NUMERIC_COMPARATOR, resizable: true }}
             animateRows
             getRowId={(p) => String(p.data.agent_id)}
             initialState={{ sort: { sortModel: BOONS_SORT } }}
@@ -732,18 +718,13 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
 
       {/* Tableau 4: Defense */}
       <section>
-      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>
-      Défense &amp; Positionnement
-    </h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px 0" }}>Défense &amp; Positionnement</h2>
         <div style={GRID_CONTAINER_STYLE}>
           <AgGridReact<PlayerReadoutOut>
             theme={appGridTheme}
             rowData={players}
             columnDefs={[...SHARED_COLUMNS, ...defenseColumns]}
-            defaultColDef={{
-              comparator: NUMERIC_COMPARATOR,
-              resizable: true,
-            }}
+            defaultColDef={{ comparator: NUMERIC_COMPARATOR, resizable: true }}
             animateRows
             getRowId={(p) => String(p.data.agent_id)}
             initialState={{ sort: { sortModel: DEFENSE_SORT } }}
