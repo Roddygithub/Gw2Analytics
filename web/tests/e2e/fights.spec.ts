@@ -274,16 +274,22 @@ test.describe("/fights/[id] (v0.7.1)", () => {
 
     // Profession legend is rendered (``PlayerPositionGrid``
     // uses an integer-based mapping via the
-    // ``web/src/components/icons/Professions.tsx`` table; we
-    // assert the grid <section> + <table> are present as a
-    // structural smoke check, instead of hardcoded
-    // abbreviations like ``Guar``/``COM`` which were removed
-    // when the icon-based legend landed).
+    // ``web/src/components/icons/Professions.tsx`` table).
+    // Durable coverage assertions (don't hardcode the next
+    // abbr / icon's title):
+    //   1. <section data-testid="player-position-grid"> visible
+    //   2. <table> present inside the section
+    //   3. <tbody> rows = #player agents in fixture (2 for
+    //      ``TestAccount.1234`` + ``TestAccount.5678``)
+    //   4. at least one <img> icon rendered for the legend
     const gridSection = page.locator(
       'section[data-testid="player-position-grid"]',
     );
     await expect(gridSection).toBeVisible();
-    await expect(gridSection.locator("table")).toBeVisible();
+    const table = gridSection.locator("table");
+    await expect(table).toBeVisible();
+    await expect(table.locator("tbody tr")).toHaveCount(2);
+    await expect(gridSection.locator("img").first()).toBeVisible();
   });
 
   test("direct navigation to a ?account=UNKNOWN_VALUE surfaces the section-level 'Player ... not found in this fight' diagnostic", async ({

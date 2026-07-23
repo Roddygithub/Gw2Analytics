@@ -13,12 +13,15 @@
  * The mock server returns a deterministic stub regardless of content,
  * so this tests the client-side UI pipeline, not the server parse.
  */
-import { existsSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 import { join } from "node:path";
 
 const PUBLIC_DIR = join(process.cwd(), "public");
-const WVW_DIR = "/home/roddy/Projects/WvW/WvW (1)";
+// Repo-resident fixtures shipped under web/tests/e2e/fixtures/
+// (the 3 WvW .zevtc files were moved out of the developer's
+// local directory so the spec ships REAL coverage on CI,
+// not a no-op skip).
+const FIXTURES_DIR = join(process.cwd(), "tests", "e2e", "fixtures");
 
 interface FileSpec {
   path: string;
@@ -33,18 +36,18 @@ const FILES: FileSpec[] = [
     description: "143 B tiny synthetic",
   },
   {
-    path: join(WVW_DIR, "Ess Kape/20251116-224830.zevtc"),
-    expectedLabel: "20251116-224830.zevtc",
+    path: join(FIXTURES_DIR, "wvw-tiny-2agents.zevtc"),
+    expectedLabel: "wvw-tiny-2agents.zevtc",
     description: "5 KB real tiny (2 agents)",
   },
   {
-    path: join(WVW_DIR, "Ess Kitable/20250928-230925.zevtc"),
-    expectedLabel: "20250928-230925.zevtc",
+    path: join(FIXTURES_DIR, "wvw-small-fight.zevtc"),
+    expectedLabel: "wvw-small-fight.zevtc",
     description: "28 KB real small fight",
   },
   {
-    path: join(WVW_DIR, "Ber Zerk Er/20251206-003232.zevtc"),
-    expectedLabel: "20251206-003232.zevtc",
+    path: join(FIXTURES_DIR, "wvw-large-fight.zevtc"),
+    expectedLabel: "wvw-large-fight.zevtc",
     description: "657 KB real large fight",
   },
 ];
@@ -54,19 +57,7 @@ test.describe("upload multi-size", () => {
     const pageErrors: string[] = [];
     page.on("pageerror", (e) => pageErrors.push(e.message));
 
-    // CI / clean laptops do NOT have the developer's local
-    // ``/home/roddy/Projects/WvW/WvW (1)`` directory mounted.
-    // The test is gated on at least one of the LOCAL_VWV_DIR
-    // files being present; otherwise every step is skipped
-    // (so the spec stays green on CI without losing local
-    // coverage when the dev has the real .zevtc files).
-    const presentFiles = FILES.filter((f) => existsSync(f.path));
-    test.skip(
-      presentFiles.length === 0,
-      "no local .zevtc files available at ${WVW_DIR} -- skipping multi-size upload smoke test (see web/e2e/README.md)",
-    );
-
-    for (const fileSpec of presentFiles) {
+    for (const fileSpec of FILES) {
       await test.step(`upload ${fileSpec.description}`, async () => {
         await page.goto("/upload");
         await expect(
