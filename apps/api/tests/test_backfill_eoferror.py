@@ -11,8 +11,9 @@ from __future__ import annotations
 import gzip
 import uuid as _uuid
 
-from _fixtures import make_cbtevent, post_minimal_fight
+from _fixtures import make_cbtevent
 from sqlalchemy import delete
+from test_uploads_helpers import _post_minimal_fight as post_minimal_fight
 
 from gw2analytics_api import storage
 from gw2analytics_api.database import get_sessionmaker

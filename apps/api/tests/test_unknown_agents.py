@@ -29,8 +29,8 @@ import uuid as _uuid
 import pytest
 from _fixtures import make_cbtevent as _make_cbtevent
 from _fixtures import make_minimal_zevtc as _make_minimal_zevtc
-from _fixtures import wait_for_upload_completion as _wait_for_upload_completion
 from fastapi.testclient import TestClient
+from test_uploads_helpers import _wait_for_upload_completion
 
 from gw2analytics_api.main import app
 

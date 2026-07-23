@@ -71,3 +71,37 @@ def _wait_for_upload_completion(upload_id: str) -> str:
         time.sleep(0.1)
     msg = f"upload {upload_id} did not reach 'completed' within 5s"
     raise AssertionError(msg)
+
+
+def _post_npc_only_fight(suffix: str | None = None) -> str:
+    """POST a fight with only NPC agents (no player agents).
+
+    NPC-only fights cannot contribute to a player profile, so
+    the backfill skips them. This helper centralises the NPC
+    agent fixture so the backfill tests don't need to inline
+    the ``_make_minimal_zevtc`` boilerplate.
+    """
+    suffix = suffix or _uuid.uuid4().hex[:8]
+    base_id_a = 100_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_id_b = base_id_a + 1
+    base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
+    base_skill_b = base_skill_a + 1
+    blob = _make_minimal_zevtc(
+        [
+            (base_id_a, 0, 0, f"NPC One {suffix}", False),
+            (base_id_b, 1, 27, f"NPC Two {suffix}", False),
+        ],
+        build="20240925",
+        skills=[
+            (base_skill_a, f"Whirlwind {suffix}"),
+            (base_skill_b, f"Burning {suffix}"),
+        ],
+    )
+    resp = client.post(
+        "/api/v1/uploads",
+        files={"file": ("sample.zevtc", blob, "application/octet-stream")},
+    )
+    assert resp.status_code == 201, resp.text
+    upload_id = resp.json()["id"]
+    return _wait_for_upload_completion(upload_id)
+

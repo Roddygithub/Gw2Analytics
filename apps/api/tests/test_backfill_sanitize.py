@@ -49,9 +49,10 @@ from __future__ import annotations
 
 import uuid as _uuid
 
-from _fixtures import make_cbtevent, post_minimal_fight
+from _fixtures import make_cbtevent
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import selectinload
+from test_uploads_helpers import _post_minimal_fight as post_minimal_fight
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (

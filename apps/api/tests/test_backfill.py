@@ -34,12 +34,10 @@ from __future__ import annotations
 
 import uuid as _uuid
 
-from _fixtures import (
-    make_cbtevent,
-    post_minimal_fight,
-    post_npc_only_fight,
-)
+from _fixtures import make_cbtevent
 from sqlalchemy import delete, select, update
+from test_uploads_helpers import _post_minimal_fight as post_minimal_fight
+from test_uploads_helpers import _post_npc_only_fight as post_npc_only_fight
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary

@@ -33,15 +33,11 @@ from __future__ import annotations
 import uuid as _uuid
 from urllib.parse import quote
 
-from _fixtures import (
-    build_2025_string,
-    make_cbtevent,
-    make_minimal_zevtc,
-    post_minimal_fight,
-    wait_for_upload_completion,
-)
+from _fixtures import build_2025_string, make_cbtevent, make_minimal_zevtc
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
+from test_uploads_helpers import _post_minimal_fight as post_minimal_fight
+from test_uploads_helpers import _wait_for_upload_completion as wait_for_upload_completion
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app
