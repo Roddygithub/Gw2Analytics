@@ -187,7 +187,7 @@ Rulesets → New branch ruleset):
 | Target branches                                  | `main` only                          |
 | Restrict creations                               | Enable (only via PR)                 |
 | Restrict updates                                 | Enable (PR or admin bypass only)     |
-| Required status checks                           | `lint-and-test` (CI workflow)        |
+| Required status checks                           | 6 checks: Lint Python, Test Python, Lint Web, Playwright (chromium), ARQ worker integration, DCO check |
 | Require linear history                           | Yes (no merge commits)               |
 | Require deployments before merging               | No (no deploys from `main` directly) |
 | Block force pushes                               | **Yes** (admin included)             |
@@ -513,11 +513,28 @@ git config user.email "jane@example.com"
 git commit -s -m "feat(parsers): handle new buff ID range"
 ```
 
-DCO ``Signed-off-by:`` trailers are checked by GitHub's native
-``Require contributors to sign off on web-based commits`` branch
-protection (recommended in the ruleset below). They are also
-verifiable by any interested party from the git history itself
-without a separate CLA database.
+DCO ``Signed-off-by:`` trailers are enforced by two complementary
+mechanisms:
+
+1. **GitHub's native ``Require contributors to sign off on web-based
+   commits``** (repo setting) — covers commits authored via the
+   github.com web editor.
+
+2. **Inline bash DCO check** (``.github/workflows/ci.yml``, job
+   ``dco-check``) — covers CLI / IDE commits (``git commit -s``
+   from outside the web editor). Runs on every PR and validates
+   each commit in the PR range for a ``Signed-off-by:`` trailer.
+   Promoted to ``required_status_checks`` in the ``main`` ruleset
+   (6 required checks total).
+
+Both mechanisms must pass for a PR to merge. The inline bash
+check uses ``git log`` + ``grep`` with zero external action
+dependencies — the previous ``crazy-max/ghaction-dco@v1`` action
+was removed upstream, which motivated the migration.
+
+The ``Signed-off-by:`` trailers are also verifiable by any
+interested party from the git history itself without a separate
+CLA database.
 
 ## Historical: private-mode unblock appendix
 
@@ -604,19 +621,24 @@ git push origin main
 #      - Require status checks: pick the CI workflow's 6 jobs
 #      - **Require contributors to sign off on web-based commits**  ← the
 #        GitHub-native DCO check for web-editor commits; pairs with
-#        the dco-action step below to make DCO enforceable for ALL
-#        commits (web + CLI / IDE), not just web-editor ones
+#        the inline bash DCO check (see ``.github/workflows/ci.yml``,
+#        job ``dco-check``) to make DCO enforceable for ALL commits
+#        (web + CLI / IDE), not just web-editor ones
 #
 #    **⚠ Caveat — the GitHub web-DCO toggle only covers commits
 #    authored via github.com's web editor.** For CLI / IDE commits
-#    (``git commit -s`` from outside the github.com editor), also
-#    wire a dedicated DCO check into ``.github/workflows/ci.yml``
-#    as a required status check. The maintained actions are
-#    ``crazy-max/ghaction-dco@v1`` or the older
-#    ``suzuki-shunsuke/dco-action@v1``; either approach makes the
-#    DCO model enforceable for ALL commits, not just web-editor
-#    ones. Without this extra check, CLI-signed PRs slip through
-#    the web-DCO gate and ``-s`` sign-off becomes decorative again.
+#    (``git commit -s`` from outside the github.com editor), an
+#    inline bash DCO check is wired into ``.github/workflows/ci.yml``
+#    (job ``dco-check``, runs only on PRs). It iterates every commit
+#    in the range ``base.sha..head.sha`` and validates that a
+#    ``Signed-off-by:`` trailer is present. If absent, the job
+#    fails and the ruleset blocks the merge.
+#
+#    The check is implemented as plain bash (``git log`` + ``grep``)
+#    rather than a third-party action. The previous action
+#    (``crazy-max/ghaction-dco@v1``) was removed upstream leaving
+#    the check broken silently; the inline approach has zero
+#    external dependencies and cannot disappear.
 #
 #    (The ``gh ruleset`` CLI to apply rulesets programmatically is a
 #    GitHub-Enterprise feature; on the free plan the UI is the only

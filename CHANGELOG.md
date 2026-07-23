@@ -1,3 +1,22 @@
+## [0.15.2] - 2026-07-24
+
+### Fixed — DCO check inline bash migration
+- **Replaced dead `crazy-max/ghaction-dco@v1` action**: the action
+  was removed upstream, causing the `dco-check` job to fail silently
+  (`repository not found`) even on correctly signed commits.
+- **Inline bash DCO check**: the job now iterates each commit in the
+  PR range via `git log` + `grep` to validate `Signed-off-by:` trailers
+  with zero external action dependencies.
+- **Promoted to required_status_checks**: `DCO check` is now a required
+  gate in the `main` ruleset (6 required checks total).
+- **CONTRIBUTING.md updated**: DCO setup section and historical
+  private-flip appendix now reference the inline bash check.
+
+### Validation
+- Signed commit: DCO check = SUCCESS (inline bash correctly accepts `-s` trailers)
+- Unsigned commit: DCO check = FAILURE (inline bash correctly rejects missing trailers)
+- CI on `main` (commit `816e815`): completed/success
+
 ## [0.15.1] - 2026-07-22
 
 ### Added — Timeline SVG / PNG export
