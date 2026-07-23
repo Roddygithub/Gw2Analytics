@@ -129,17 +129,22 @@ jobs:
       S3_ACCESS_KEY: "gw2analytics"
       S3_SECRET_KEY: "gw2analytics-secret"
       S3_BUCKET: "gw2analytics"
-      # NOTE: ``SECRETS_KEK`` is intentionally NOT set here. The
-      # deterministic test-fixture value lives in pyproject.toml's
-      # ``[tool.pytest_env]`` block (visible in the public source
-      # anyway -- ``cryptography.fernet.Fernet`` only needs *a* valid
-      # 32-byte key for round-trip encryption, and the test suite
-      # never uses the production KEK for anything). pytest-env
-      # injects it at session startup. Setting it to
-      # ``${{ secrets.SECRETS_KEK }}`` would BREAK fork PRs (GitHub
-      # strips secrets from forks → empty string → Fernet crashes
-      # with ``ValueError: Fernet key must be 32 url-safe base64-encoded
-      # bytes.``).
+      # NOTE: SECRETS_KEK is hardcoded to the deterministic
+      # test-fixture value (matches pyproject.toml
+      # ``[tool.pytest_env]``). Rationale:
+      #   (a) pytest-env injects this DURING pytest runtime, but
+      #       the alembic ``env.py`` instantiates Settings()
+      #       which requires SECRETS_KEK -- and alembic runs
+      #       BEFORE pytest, so the env block MUST provide it
+      #       explicitly. pytest-env alone is insufficient.
+      #   (b) ``${{ secrets.SECRETS_KEK }}`` would BREAK fork
+      #       PRs (GitHub strips secrets from forks -> empty
+      #       string -> Fernet crashes with ``ValueError: Fernet
+      #       key must be 32 url-safe base64-encoded bytes.``).
+      #   (c) The dummy value is already public in
+      #       pyproject.toml (# ``base64.urlsafe_b64encode(b"a"*32)``),
+      #       so hardcoding here leaks no additional information.
+      SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
 
     services:
       postgres:
@@ -449,10 +454,11 @@ jobs:
       S3_ACCESS_KEY: "gw2analytics"
       S3_SECRET_KEY: "gw2analytics-secret"
       S3_BUCKET: "gw2analytics"
-      # See test-python env block above for why ``SECRETS_KEK`` is
-      # intentionally not set here -- pytest_env injects the test
-      # fixture value, which works on fork PRs where secrets are
-      # stripped to empty strings.
+      # See test-python env block above for the full rationale.
+      # pytest-env alone cannot satisfy the alembic-pre-pytest
+      # injection window, so the test-fixture value is hardcoded
+      # here too.
+      SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
       ARQ_REDIS_HOST: localhost
       ARQ_REDIS_PORT: 6379
 

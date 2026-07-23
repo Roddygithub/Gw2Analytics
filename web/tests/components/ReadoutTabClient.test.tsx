@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import type { MockInstance } from "vitest";
 import * as React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
@@ -308,9 +309,9 @@ describe("TimelineMiniChart activity toggle", () => {
  * ------------------------------------------------------------------ */
 
 describe("TimelineMiniChart export", () => {
-  let createObjectURLSpy: ReturnType<typeof vi.spyOn>;
-  let revokeObjectURLSpy: ReturnType<typeof vi.spyOn>;
-  let anchorClickSpy: ReturnType<typeof vi.spyOn>;
+  let createObjectURLSpy: MockInstance<typeof URL.createObjectURL>;
+  let revokeObjectURLSpy: MockInstance<typeof URL.revokeObjectURL>;
+  let anchorClickSpy: MockInstance<(this: HTMLAnchorElement) => void>;
   // Captured href + download from each ``<a>.click()`` call. The capture
   // happens before the spy returns so the click array reflects the order
   // in which the production code invoked the download.
