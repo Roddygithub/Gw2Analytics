@@ -336,9 +336,9 @@ def _compute_combat_counters(
         for src in contributors:
             counters.kill_participation[src] += 1
 
-    for de in down_events:
-        if de.downtime_ms > 0:
-            counters.downtime[de.source_agent_id] += de.downtime_ms
+    for down_evt in down_events:
+        if down_evt.downtime_ms > 0:
+            counters.downtime[down_evt.source_agent_id] += down_evt.downtime_ms
 
     return counters
 
@@ -534,13 +534,13 @@ def aggregate_combat_readout(
             time_downed_ms=counters.downtime.get(agent_id, 0),
             roles=roles_by_agent.get(agent_id, []),
             boon_uptimes=(
-                boon_uptimes_by_account.get(identity_map[agent_id].account_name)
+                boon_uptimes_by_account.get(cast(str, identity_map[agent_id].account_name))
                 if boon_uptimes_by_account and identity_map[agent_id].account_name
                 else None
             ),
             presence_pct=presence_by_agent.get(agent_id),
             dist_to_commander=(
-                dist_to_commander_by_account.get(identity_map[agent_id].account_name)
+                dist_to_commander_by_account.get(cast(str, identity_map[agent_id].account_name))
                 if dist_to_commander_by_account and identity_map[agent_id].account_name
                 else None
             ),
@@ -650,7 +650,7 @@ def _compute_commander_distances(
 def _build_position_results(
     raw_by_agent: dict[int, list[PositionEvent]],
     agent_id_to_identity_map: dict[int, AgentIdentity],
-    metrics: dict[str, dict[str, float]],
+    metrics: dict[str, dict[str, float | None]],
     samples_by_account: dict[str, list[PositionSampleOut]],
     dist_to_commander_by_account: dict[str, float],
 ) -> list[PlayerPositionOut]:

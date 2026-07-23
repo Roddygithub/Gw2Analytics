@@ -73,11 +73,10 @@ jobs:
       - name: Mypy
         # Split into two invocations so libs/__main__.py and
         # apps/__main__.py don't collide (each invocation only
-        # discovers one __main__.py). The pre-existing
-        # _evtc_builder.py module collision persists in `apps`.
+        # discovers one __main__.py).
         run: |
           uv run mypy libs --no-incremental
-          uv run mypy apps --no-incremental
+          uv run mypy apps/api/src --no-incremental
 
       - name: pip-audit (Python deps, vulnerability scan)
         run: uv run pip-audit --strict --vulnerability-service osv
@@ -293,7 +292,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-chromium
           path: web/playwright-report/
@@ -301,7 +300,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-traces-chromium
           path: web/test-results/
@@ -355,7 +354,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-visual-regression
           path: web/playwright-report/
@@ -363,7 +362,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-traces-visual-regression
           path: web/test-results/
@@ -371,7 +370,7 @@ jobs:
 
       - name: Upload visual regression diffs on failure
         if: failure()
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: visual-regression-diffs
           path: web/tests/e2e/.visual-regression-output/

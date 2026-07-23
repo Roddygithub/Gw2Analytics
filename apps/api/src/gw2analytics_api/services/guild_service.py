@@ -40,4 +40,4 @@ def list_guilds_for_account(db: Session, account_name: str) -> list[Guild]:
     stmt = (
         select(Guild).join(GuildMember).where(GuildMember.account_name == account_name).distinct()
     )
-    return db.execute(stmt).scalars().all()
+    return list(db.execute(stmt).scalars().all())

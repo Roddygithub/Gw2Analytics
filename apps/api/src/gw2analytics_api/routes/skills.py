@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
@@ -31,8 +31,8 @@ class SkillOut(BaseModel):
     description: str | None
 
 
-def load_skills() -> dict[int, dict]:
-    skills: dict[int, dict] = {}
+def load_skills() -> dict[int, dict[str, Any]]:
+    skills: dict[int, dict[str, Any]] = {}
     path = _SKILLS_DATA_PATH
     if not path.exists():
         return skills
@@ -49,7 +49,7 @@ def load_skills() -> dict[int, dict]:
     return skills
 
 
-def _to_wire(entry: dict) -> SkillOut:
+def _to_wire(entry: dict[str, Any]) -> SkillOut:
     return SkillOut(
         id=entry["id"],
         name=entry["name"],
@@ -63,7 +63,7 @@ def _to_wire(entry: dict) -> SkillOut:
 
 @router.get("", response_model=list[SkillOut])
 async def list_skills(request: Request) -> list[SkillOut]:
-    catalog: dict[int, dict] | None = getattr(request.app.state, "skill_catalog", None)
+    catalog: dict[int, dict[str, Any]] | None = getattr(request.app.state, "skill_catalog", None)
     if catalog is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -77,7 +77,7 @@ async def list_skills(request: Request) -> list[SkillOut]:
 
 @router.get("/{skill_id}", response_model=SkillOut)
 async def get_skill(skill_id: int, request: Request) -> SkillOut:
-    catalog: dict[int, dict] | None = getattr(request.app.state, "skill_catalog", None)
+    catalog: dict[int, dict[str, Any]] | None = getattr(request.app.state, "skill_catalog", None)
     if catalog is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
