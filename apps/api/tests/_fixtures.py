@@ -140,3 +140,11 @@ def _make_minimal_zevtc(
 # import ``from _fixtures import make_minimal_zevtc`` (rather than
 # the ``_make_minimal_zevtc`` form) continue to work.
 make_minimal_zevtc = _make_minimal_zevtc
+
+# Same treatment for ``_make_cbtevent``: tests expect the public name.
+make_cbtevent = _make_cbtevent
+
+# Re-export the EVTC2025+ build-string helper from the route-level builder
+# module so tests importing ``from _fixtures import build_2025_string``
+# (rather than from ``routes._evtc_builder``) continue to work.
+from routes._evtc_builder import build_2025_string  # noqa: F401

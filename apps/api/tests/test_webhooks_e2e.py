@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from tests.test_webhooks_helpers import _bounds, _post_sub
+from test_webhooks_helpers import _bounds, _post_sub
 
 from gw2analytics_api import schemas
 from gw2analytics_api.config import Settings, get_settings

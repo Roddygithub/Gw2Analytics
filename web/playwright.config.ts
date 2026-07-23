@@ -104,8 +104,14 @@ export default defineConfig({
       // suppressions). In local dev, fall back to
       // ``pnpm run dev`` for the fast-iteration loop
       // (HMR + source maps + TS error overlay).
+      //
+      #v0.16.x: Next.js standalone mode does NOT always copy
+      // .next/static/ and public/ into the standalone directory
+      // when the build uses Turbopack. Without these, the
+      // standalone server returns 404 / wrong MIME types for
+      // CSS and JS chunks.  Explicitly copy them after build.
       command: isCI
-        ? "pnpm run build && PORT=3000 node .next/standalone/server.js"
+        ? "pnpm run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && PORT=3000 node .next/standalone/server.js"
         : "pnpm run dev",
       port: 3000,
       // Always spawn fresh: a stale Next.js dev server on port

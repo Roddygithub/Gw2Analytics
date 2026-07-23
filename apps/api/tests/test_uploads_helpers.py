@@ -12,7 +12,7 @@ import time
 import uuid as _uuid
 
 from fastapi.testclient import TestClient
-from tests._fixtures import _make_minimal_zevtc
+from _fixtures import _make_minimal_zevtc
 
 from gw2analytics_api.main import app
 

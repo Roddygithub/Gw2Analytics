@@ -21,8 +21,8 @@ from urllib.parse import quote
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from tests._fixtures import _make_cbtevent, _make_minimal_zevtc
-from tests.test_uploads_helpers import _post_minimal_fight, _wait_for_upload_completion
+from _fixtures import _make_cbtevent, _make_minimal_zevtc
+from test_uploads_helpers import _post_minimal_fight, _wait_for_upload_completion
 
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.main import app
