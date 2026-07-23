@@ -117,8 +117,15 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     // Each numeric value lives in a different sub-tab table
     // (only one sub-tab is mounted at a time), so click the
     // matching sub-tab right before its assertion.
+    //
+    // Number formatting is locale-aware: ReadoutTabClient uses
+    // ``.toLocaleString()`` on outgoing boon counts and large
+    // boons/barrier totals, which inserts a thousands separator
+    // (``en_US`` CI locale: comma -> "1,800" / "45,000"; ``fr_FR``
+    // local: NBSP -> "1 800" / "45 000"; bare int -> "1800" /
+    // "45000"). The regex below accepts all three forms.
     await page.getByRole("button", { name: /Boons/i }).click();
-    await expect(page.getByText("1800", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/^(?:1,|1 )?800$/).first()).toBeVisible();
 
     // DPS condi also renders non-zero
     await page.getByRole("button", { name: /Dégâts/i }).click();
@@ -126,7 +133,7 @@ test.describe("/fights/[id] (v0.7.1)", () => {
 
     // Barrier total: Heal Bot has barrier_total=45000
     await page.getByRole("button", { name: /Soins/i }).click();
-    await expect(page.getByText("45000", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/^(?:45,|45 )?000$/).first()).toBeVisible();
 
     // Defense: Heal Bot blocks=12 is unique across the fixture
     // (dodges=[3,7,2,1], blocks=[2,0,5,12], interrupts=[1,3,0,4]).
@@ -244,17 +251,34 @@ test.describe("/fights/[id] (v0.7.1)", () => {
       page.getByRole("heading", { name: /Défense/i }),
     ).toBeVisible();
 
-    // Plan 173: boon uptime grouped bar columns render with
-    // their French headers.
-    await expect(page.getByText("Offensifs")).toBeVisible();
-    await expect(page.getByText("Défensifs")).toBeVisible();
-    await expect(page.getByText("Mobilité")).toBeVisible();
-    await expect(page.getByText("Furtivité")).toBeVisible();
-
-    // Plan 173 Phase F: outgoing boons column.
-    await expect(page.getByText("Boons générés")).toBeVisible();
+    // Plan 173 (v0.12.3 refactor): the boon-uptime column
+    // grouping headings ("Offensifs" / "Défensifs" / "Mobilite"
+    // / "Furtivite") and the "Boons genere"s out-column header
+    // were removed when the v0.12.3 ReadoutTabClient rebuild
+    // flattened the boons table to a single per-boon column
+    // pair (In / Out). The structural check below asserts that
+    // the Boons table still renders with its 14 boon key column
+    // headers + the In/Out sub-column grouping (power in +
+    // outgoing per boon).
+    await page.getByRole("button", { name: /Boons/i }).click();
+    await expect(
+      page.getByRole("columnheader", { name: "Might" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Alac" }),
+    ).toBeVisible();
+    // The "In" / "Out" sub-column headers (rendered on the
+    // Boons table's second <thead> row) confirm the
+    // incoming/uptime vs outgoing-count splitting.
+    await expect(
+      page.getByRole("columnheader", { name: "In" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Out" }),
+    ).toBeVisible();
 
     // Plan 173 Phase E: presence percentage column in Defense.
+    await page.getByRole("button", { name: /Défense/i }).click();
     await expect(page.getByText("Présence %")).toBeVisible();
   });
 

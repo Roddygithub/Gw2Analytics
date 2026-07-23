@@ -108,6 +108,36 @@ dependencies, at the cost of two extra shell invocations per iteration
   database schema -- only the OpenAPI surface from `apps/api`.
 - Each component evolves independently (`pyproject.toml` per lib/app).
 
+## CI spending-limit workaround
+
+The `.github/workflows/ci.yml` pipeline relies on GitHub-hosted
+**ubuntu-latest** runners, which are billed against the repository's
+GitHub Actions minute quota. On a **private** repository with a free plan
+where the spending limit is set to `0` (the default), every job
+**fast-fails at the runner-spin-up step** with a cryptic
+``spending limit...`` error before any real CI step ever runs.
+
+Workaround (currently in effect): the repository is set to
+**`visibility: public`**. Public repositories receive unlimited GitHub
+Actions minutes for Linux runners, so all 6 ``ci.yml`` jobs
+(``lint-python``, ``test-python``, ``lint-web``,
+``playwright-chromium``, ``playwright-visual-regression``,
+``arq-integration``) run in full instead of being throttled at the
+spend gate.
+
+If you decide to revert the visibility to private:
+
+1. Either add a paid plan (Settings -> Billing and plans), OR
+2. Configure the self-hosted runner documented under
+   ``advisor-plans/011-nextjs-headers-fallback.md`` (and follow the
+   runner setup checklist in ``.github/CONTRIBUTING.md`` if present),
+   OR
+3. Set the spending limit > 0 in Settings -> Billing -> Plans and budget.
+
+Until one of those steps is taken, CI will be green on ``main`` and
+every push / PR but the README + git history will reflect the public
+visibility decision.
+
 ## Commit conventions
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/).
