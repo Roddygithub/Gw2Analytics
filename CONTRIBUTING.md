@@ -467,5 +467,56 @@ download path that does not require a postinstall script).
 
 ## License
 
-By contributing you agree to MIT-license your contributions under the
-terms of the LICENSE file.
+This project is **proprietary software, all rights reserved** --
+see [`LICENSE`](./LICENSE) and [`NOTICE.md`](./NOTICE.md) at the
+repo root for the full legal text + a plain-language summary of
+what is and isn't permitted.
+
+### What "contributing" means under an All Rights Reserved license
+
+Unlike MIT/Apache/GPL projects, this codebase does **not** accept
+outside contributions under a pre-existing open-source contribution
+agreement. Instead, the project operates on a **Developer Certificate
+of Origin (DCO) model** that mirrors the Linux kernel's:
+
+1. **You retain copyright** in any contribution you submit. Submitting
+   a Pull Request does not transfer your rights to the copyright
+   holder.
+2. **You certify** that the contribution is your original work (or
+   you have authority to submit it under these terms) by appending a
+   ``Signed-off-by:`` line to every commit message. The line must use
+   your real name + a reachable email address. Example:
+
+   ```text
+   feat(parsers): handle new buff ID range
+
+   Signed-off-by: Jane Contributor <jane@example.com>
+   ```
+
+3. **You grant a non-exclusive license** to the project to use,
+   modify, and redistribute the contribution under the project's
+   proprietary ``LICENSE``. This lets the copyright holder
+   incorporate your work without asking for further paperwork.
+
+4. **CI / branch protection may enforce the DCO sign-off** before a
+   PR can merge. Maintainers may also reject a contribution for any
+   other reason (style mismatch, doesn't fit the project direction,
+   etc.) without obligation to incorporate it.
+
+### How to set up DCO sign-off locally
+
+```bash
+# Tell git your real name + reachable email (used for Sign-off-by):
+git config user.name "Jane Contributor"
+git config user.email "jane@example.com"
+
+# Always use ``git commit -s`` (or ``--signoff``) so the
+# ``Signed-off-by:`` trailer is appended automatically.
+git commit -s -m "feat(parsers): handle new buff ID range"
+```
+
+DCO ``Signed-off-by:`` trailers are checked by GitHub's native
+``Require contributors to sign off on web-based commits`` branch
+protection (recommended in the ruleset below). They are also
+verifiable by any interested party from the git history itself
+without a separate CLA database.

@@ -4,7 +4,11 @@ version = "0.12.3"
 description = "GW2 WvW combat analytics platform (monorepo root)"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+# v0.15.2: flipped from MIT to proprietary All Rights Reserved to
+# match the root ``LICENSE`` file. This field surfaces to PyPI
+# metadata if the workspace is ever published, so keeping it in sync
+# with LICENSE avoids an implicit-license mismatch.
+license = { text = "Proprietary -- All rights reserved" }
 
 # Pure virtual project: declares dev-tool groups only.
 # Each workspace member keeps its own production deps in its own [project].

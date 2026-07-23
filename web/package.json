@@ -2,6 +2,8 @@
   "name": "web",
   "version": "0.10.28",
   "private": true,
+  "// license": "v0.15.2: marks the package as proprietary / unlicensed to match LICENSE + NOTICE.md. The package is also private (line above) which prevents npm publish by default; this field is the explicit publisher-facing posture for parity with PEP 639 / SPDX markers.",
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "pnpm generate:api && next dev",
     "build": "next build",

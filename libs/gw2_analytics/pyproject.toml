@@ -3,7 +3,9 @@ name = "gw2_analytics"
 version = "0.10.25"
 description = "Multi-level Guild Wars 2 combat analytics (single / multi-fight / per-player profiles)."
 requires-python = ">=3.12"
-license = { text = "MIT" }
+# v0.15.2: flipped from MIT to proprietary All Rights Reserved to
+# match the root ``LICENSE`` file.
+license = { text = "Proprietary -- All rights reserved" }
 authors = [{ name = "GW2Analytics team" }]
 dependencies = [
     "pydantic>=2.9",
