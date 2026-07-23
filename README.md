@@ -169,7 +169,12 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for branch protection, pre-commit, code
 
 ## License
 
-[MIT](LICENSE) — Copyright (c) 2024-2026 Roddy. See [`LICENSE`](./LICENSE) for the
-full text. The project is independent third-party software — no affiliation
-with ArenaNet or any Guild Wars 2 trademark holder. All Guild Wars 2 game
+**Proprietary software — all rights reserved.** Copyright (c) 2024-2026
+Roddy. See [`LICENSE`](./LICENSE) for the full legal text and
+[`NOTICE.md`](./NOTICE.md) for a plain-language summary of what is
+and isn't permitted without explicit written permission from the
+copyright holder.
+
+The project is independent third-party software — no affiliation with
+ArenaNet or any Guild Wars 2 trademark holder. All Guild Wars 2 game
 content references are nominative fair use under the GW2 content policy.

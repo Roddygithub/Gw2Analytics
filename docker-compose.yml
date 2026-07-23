@@ -1,3 +1,12 @@
+  # ---------------------------------------------------------------------------
+  # NOTE for public-repo viewers: the ``gw2analytics`` / ``gw2analytics`` /
+  # ``gw2analytics-secret`` credentials below are DEV-ONLY PLACEHOLDERS --
+  # they ship with the repo so ``docker compose up -d`` works out of the box
+  # for a fresh checkout. None of these values are used in production. The
+  # real Postgres / MinIO credentials live in a secrets manager (see
+  # apps/api/.env.example for the variable names; production overrides
+  # those via env, NEVER by editing this file).
+  # ---------------------------------------------------------------------------
 services:
   postgres:
     image: postgres:16-alpine
@@ -27,6 +36,7 @@ services:
     container_name: gw2a-minio
     command: server /data --console-address ":9001"
     environment:
+      # DEV-ONLY PLACEHOLDER -- see top-of-file note above.
       MINIO_ROOT_USER: gw2analytics
       MINIO_ROOT_PASSWORD: gw2analytics-secret
     ports:
