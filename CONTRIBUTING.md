@@ -193,9 +193,18 @@ Rulesets → New branch ruleset):
 | Block force pushes                               | **Yes** (admin included)             |
 | Block branch deletion                            | **Yes**                              |
 
-The `lint-and-test` job from `.github/workflows/ci.yml` is the single
-gate; it runs `ruff check`, `ruff format --check`, `mypy`
-(`--no-incremental`), and `pytest` (full suite).
+Until the spending-limit unblock lands (tracked as an open item
+in `docs/ROADMAP.md` §3 "Strategic items (v1.0+)"), the CI
+workflow at `.github/workflows/ci.yml` is **not** triggered by
+``push`` or ``pull_request`` events -- its only trigger is
+``workflow_dispatch``, which means CI must be invoked manually via
+the Actions tab or ``gh workflow run ci.yml --ref main`` for the
+6 jobs (``lint-python``, ``test-python``, ``lint-web``,
+``playwright-chromium``, ``playwright-visual-regression``,
+``arq-integration``) to execute. The "Required status checks" row
+below should be filled in once the auto-trigger is restored; until
+then, leave it empty (or pick ``None`` in the ruleset UI) so PRs
+aren't blocked by an absent gate.
 
 ## Pre-commit / CI mirror
 
@@ -208,7 +217,7 @@ and PR via GitHub Actions:
 | ruff check             | ✅         | ✅            |
 | ruff format            | ✅         | ✅            |
 | mypy (`--strict`)      | ✅         | ✅            |
-| pytest                 | (manual)   | ✅            |
+| pytest                 | (manual)   | (n/a -- CI is dispatch-only) |
 
 Run them yourself before pushing:
 
@@ -471,7 +480,20 @@ of Origin (DCO) model** that mirrors the Linux kernel's:
    credit + the right to use the same code in other projects of your
    own.
 
-4. **CI / branch protection may enforce the DCO sign-off** before a
+4. **You waive moral rights to the maximum extent permitted by
+   applicable law.** Many jurisdictions (France under CPI Article
+   L121-1, the rest of the EU, and several non-EU copyright regimes)
+   recognize *moral rights* (*droit moral*) that are distinct from
+   economic copyright: the right of attribution (to be credited as
+   author), the right of integrity (to object to modifications that
+   harm the author's reputation), and the right of withdrawal (to
+   stop distribution under certain conditions). These rights are
+   inalienable but waivable. By signing off on a contribution, you
+   waive them **to the maximum extent permitted by applicable law**
+   so the copyright holder can ship derivative works without
+   renegotiating attribution waivers per change.
+
+5. **CI / branch protection may enforce the DCO sign-off** before a
    PR can merge. Maintainers may also reject a contribution for any
    other reason (style mismatch, doesn't fit the project direction,
    etc.) without obligation to incorporate it.
@@ -493,3 +515,26 @@ DCO ``Signed-off-by:`` trailers are checked by GitHub's native
 protection (recommended in the ruleset below). They are also
 verifiable by any interested party from the git history itself
 without a separate CLA database.
+
+## Historical: private-mode unblock appendix
+
+This section is kept for the case where the repo is ever
+re-flipped from **public** back to **private** on a free GitHub
+plan and the spending-limit block returns. As of v0.15.2 the
+repo is public; the canonical reference for the 3 historical
+private-mode workarounds is commit ``8a1bfe4``.
+
+1. Add a paid plan (Settings → Billing and plans).
+2. Set the spending limit > 0 (Settings → Billing → Plans and budget).
+3. Configure a self-hosted runner on a free cloud VM (e.g. Oracle
+   Cloud Always Free tier) -- the advisor plan stub
+   ``advisor-plans/011-nextjs-headers-fallback.md`` carries the
+   legacy reasoning in case it is useful when picking the
+   runner host.
+
+The right "go-forward" answer is to keep the repo **public**
+(unlimited free GitHub Actions minutes) and only re-flip to
+private if there's a confidentiality reason strong enough to
+justify the billing work. The license stance in ``LICENSE``
+(All Rights Reserved) does **not** require private visibility
+to remain effective against idea theft.

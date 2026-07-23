@@ -9,6 +9,10 @@ requires-python = ">=3.12"
 # text is at the root ``LICENSE`` file; this metadata field is only
 # read by PyPI / uv / pip at package-publish time.
 license = "LicenseRef-Proprietary"
+# PEP 639 compliance: declare which file holds the full license
+# text so uv / pip / PyPI know where to find it. Required for any
+# non-SPDX-list ``LicenseRef-*`` expression.
+license-files = ["LICENSE"]PlaceholderEnd1
 
 # Pure virtual project: declares dev-tool groups only.
 # Each workspace member keeps its own production deps in its own [project].

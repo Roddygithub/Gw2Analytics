@@ -6,6 +6,9 @@ requires-python = ">=3.12"
 # v0.15.2: SPDX LicenseRef form (PEP 639 bare-string) replaces the
 # deprecated ``{ text = ... }`` dict form. See ../../LICENSE.
 license = "LicenseRef-Proprietary"
+# PEP 639 compliance: declare which file holds the full license
+# text. See ../../LICENSE for the full legal text.
+license-files = ["../../LICENSE"]PlaceholderEnd3
 authors = [{ name = "GW2Analytics team" }]
 dependencies = [
     "pydantic>=2.9",
