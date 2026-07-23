@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -53,7 +53,7 @@ jobs:
       # Cache pip-audit's OSV vulnerability database so subsequent
       # runs skip the ~15s download on every invocation.
       - name: Cache pip-audit OSV data
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip-audit
           key: pip-audit-${{ hashFiles('uv.lock') }}
@@ -130,7 +130,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -170,8 +170,7 @@ jobs:
         # Only on main (PRs don't have the CODECOV_TOKEN secret).
         # Uses codecov-action@v5 which gracefully skips upload when
         # no token is available (e.g. on PRs from forks).
-        if: github.ref == 'refs/heads/main'
-        uses: codecov/codecov-action@v5
+        if: github.ref == 'refs/heads/main'          uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
@@ -210,7 +209,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -239,8 +238,7 @@ jobs:
         run: pnpm exec vitest run --coverage --reporter=verbose
 
       - name: Upload vitest coverage to Codecov
-        if: github.ref == 'refs/heads/main'
-        uses: codecov/codecov-action@v5
+        if: github.ref == 'refs/heads/main'          uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: web/coverage/lcov.info
@@ -282,12 +280,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup-web
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -308,7 +306,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-report-chromium
           path: web/playwright-report/
@@ -316,7 +314,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-traces-chromium
           path: web/test-results/
@@ -344,12 +342,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup-web
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -370,7 +368,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-report-visual-regression
           path: web/playwright-report/
@@ -378,7 +376,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-traces-visual-regression
           path: web/test-results/
@@ -386,7 +384,7 @@ jobs:
 
       - name: Upload visual regression diffs on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: visual-regression-diffs
           path: web/tests/e2e/.visual-regression-output/
@@ -444,7 +442,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup-python
 
