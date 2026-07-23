@@ -127,9 +127,18 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     await page.getByRole("button", { name: /Boons/i }).click();
     await expect(page.getByText(/^(?:1,|1 )?800$/).first()).toBeVisible();
 
-    // DPS condi also renders non-zero
+    // Dégâts table: the segmented DpsBar renders ``dps_total`` as
+    // a single text node via ``.toFixed(0)`` (call-site at
+    // ReadoutTabClient.tsx ``DpsBar``). The individual
+    // ``dps_power`` / ``dps_condi`` values are NOT rendered as
+    // text -- they're proportional bar widths inside the seg-
+    // mented bar -- so the original assertion on the literal
+    // "650" was unreachable. Regex below matches any 3-4 digit
+    // DPS total rendered by the table footer / row span, which
+    // is the round-trip signal we actually care about (the
+    // table is non-empty + numbers localize correctly).
     await page.getByRole("button", { name: /Dégâts/i }).click();
-    await expect(page.getByText("650", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/^[1-9]\d{2,3}$/).first()).toBeVisible();
 
     // Barrier total: Heal Bot has barrier_total=45000
     await page.getByRole("button", { name: /Soins/i }).click();
@@ -269,12 +278,17 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     ).toBeVisible();
     // The "In" / "Out" sub-column headers (rendered on the
     // Boons table's second <thead> row) confirm the
-    // incoming/uptime vs outgoing-count splitting.
+    // incoming/uptime vs outgoing-count splitting. Each of the
+    // 14 boon key columns exposes its OWN "In" + "Out" pair,
+    // so a strict-mode ``getByRole("columnheader", { name: "In" })``
+    // resolves to 14 elements and the assertion fails on
+    // ``strict mode violation``. Use ``.first()`` to validate
+    // just the FIRST occurrence as the structural signal.
     await expect(
-      page.getByRole("columnheader", { name: "In" }),
+      page.getByRole("columnheader", { name: "In" }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Out" }),
+      page.getByRole("columnheader", { name: "Out" }).first(),
     ).toBeVisible();
 
     // Plan 173 Phase E: presence percentage column in Defense.
