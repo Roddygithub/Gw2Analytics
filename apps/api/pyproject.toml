@@ -3,13 +3,17 @@ name = "gw2analytics_api"
 version = "0.10.25"
 description = "FastAPI app for GW2Analytics."
 requires-python = ">=3.12"
-# v0.15.2: SPDX LicenseRef form (PEP 639 bare-string) replaces the
-# deprecated ``{ text = ... }`` dict form. See ../../LICENSE +
-# ../../NOTICE.md for the full legal text.
-license = "LicenseRef-Proprietary"
-# PEP 639 compliance: declare which file holds the full license
-# text. See ../../LICENSE for the full legal text.
-license-files = ["../../LICENSE"]PlaceholderEnd2
+# v0.15.2: this nested workspace member has NO PEP 639 ``license`` /
+# ``license-files`` block -- the root ``../../pyproject.toml``
+# carries the workspace-level ``LicenseRef-Proprietary``
+# declaration. PEP 639 requires ``license-files`` paths to live
+# INSIDE the project directory, but the canonical LICENSE is at
+# the workspace root. Setting it on every nested project would
+# either require copying LICENSE into each subdir (license drift
+# risk) or force-include via hatch config (build-time plumbing).
+# Both are over-engineered for an internal-only workspace that
+# will never be published to PyPI; the root declaration is the
+# single source of truth.
 authors = [{ name = "GW2Analytics team" }]
 dependencies = [
     "fastapi-mcp>=0.4",

@@ -484,10 +484,13 @@ of Origin (DCO) model** that mirrors the Linux kernel's:
    applicable law.** Many jurisdictions (France under CPI Article
    L121-1, the rest of the EU, and several non-EU copyright regimes)
    recognize *moral rights* (*droit moral*) that are distinct from
-   economic copyright: the right of attribution (to be credited as
-   author), the right of integrity (to object to modifications that
-   harm the author's reputation), and the right of withdrawal (to
-   stop distribution under certain conditions). These rights are
+   economic copyright: the right of attribution (paternité -- to be
+   credited as author), the right of integrity (to object to
+   modifications that harm the author's reputation), the right of
+   withdrawal / modification (to stop or modify distribution under
+   certain conditions), **and** the right of respect of name,
+   quality, and the work itself (L121-1: *"droit au respect de son
+   nom, de sa qualité et de son œuvre"*). These rights are
    inalienable but waivable. By signing off on a contribution, you
    waive them **to the maximum extent permitted by applicable law**
    so the copyright holder can ship derivative works without
@@ -523,6 +526,34 @@ re-flipped from **public** back to **private** on a free GitHub
 plan and the spending-limit block returns. As of v0.15.2 the
 repo is public; the canonical reference for the 3 historical
 private-mode workarounds is commit ``8a1bfe4``.
+
+### Public-flip cheatsheet (what is about to happen)
+
+If you're flipping this repo to public, run:
+
+```bash
+# 1. Confirm license / package metadata / CONTRIBUTING / NOTICE
+#    / README / docker-compose are all consistent (this commit +
+#    3 prior commits). Spot-check:
+git log --oneline origin/main -10
+gh api repos/:owner/:repo/contents/LICENSE -q '.content' | base64 -d | head -3
+gh api repos/:owner/:repo/license  # = "Other (Proprietary -- All rights reserved)" expected
+
+# 2. Flip the visibility:
+gh repo edit --visibility public --accept-visibility-change-consequences
+
+# 3. After the flip completes, set up the secrets + re-enable CI:
+gh secret set SECRETS_KEK --body "$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+# Then in .github/workflows/ci.yml, replace the 4 hardcoded
+# ``SECRETS_KEK: "YWFhYWFh..."`` env entries with
+# ``SECRETS_KEK: ${{ secrets.SECRETS_KEK }}`` and re-add the
+# ``push:`` + ``pull_request:`` triggers under ``on:``.
+
+# 4. Configure the branch-protection ruleset per the table at the
+#    top of this file (Settings → Rules → Rulesets → New ruleset).
+```
+
+### If the repo flips back to private + the billing block returns
 
 1. Add a paid plan (Settings → Billing and plans).
 2. Set the spending limit > 0 (Settings → Billing → Plans and budget).
