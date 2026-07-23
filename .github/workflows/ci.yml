@@ -23,43 +23,31 @@
 name: CI
 
 on:
-  # NOTE: ``push`` / ``pull_request`` triggers were removed because
-  # GitHub Actions on this private repo is blocked by the
-  # ``spending_limit`` ("recent account payments have failed or your
-  # spending limit needs to be increased"). With those auto-triggers
-  # gone, the repo stops accumulating wasted run-attempts on every
-  # push. Migration to a free CI provider (CircleCI free tier,
-  # GitLab.com free tier, or a self-hosted runner on a free cloud
-  # VM) is tracked as the open item for ROADMAP §3.
-  #
-  # Be aware: even manual ``workflow_dispatch`` runs hit the same
-  # block today -- the short-circuit fires on EVERY workflow
-  # invocation regardless of trigger, so the workflow above only
-  # parse-loads successfully; jobs will not execute until the
-  # billing gate is lifted or the workflow is migrated.
-  #
-  # Until then, run the suite LOCALLY before pushing so regressions
-  # surface without burning GitHub minutes:
-  #
-  #   make ci-status                                    # list the 5 most recent gh runs (read-only)
-  #   make ci-open                                      # open the GitHub Actions page in a browser
-  #
-  #   # ``act`` runs the same steps locally in Docker (requires the
-  #   # ``act`` CLI + a running Docker daemon). The 2 Playwright
-  #   # jobs are omitted here on purpose: ``playwright-chromium``
-  #   # pulls + installs the chromium binary (~200 MB), and
-  #   # ``playwright-visual-regression`` is PR-event-only. Run them
-  #   # on demand after the lint + unit + integration jobs are green:
-  #
-  #   act -C . -W .github/workflows/ci.yml -j lint-python
-  #   act -C . -W .github/workflows/ci.yml -j lint-web
-  #   act -C . -W .github/workflows/ci.yml -j test-python
-  #   act -C . -W .github/workflows/ci.yml -j arq-integration
+  # v0.15.2: repo flipped from private → public (LICENSE-cleanup
+  # series), so the ``spending_limit`` block no longer applies and
+  # auto-triggers are restored. ``push`` / ``pull_request`` cover
+  # normal development; ``workflow_dispatch`` stays for ad-hoc
+  # manual runs (e.g. cache-warmup, debugging a single job).
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
+
+# Minimum-privilege token default for the public-repo era. Without
+# this, the GITHUB_TOKEN inherits the repo's default permissions
+# (potentially ``write-all`` on legacy settings), which is a pivot
+# risk if a malicious PR ever exfiltrates it. See GitHub docs:
+# https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel PR runs on rapid-fire pushes to save contributor minutes,
+  # but let ``main`` runs complete to preserve CI history for each
+  # landed commit (so a flaky rerun doesn't lose visibility).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # ---------------------------------------------------------------------------
 # Python lint: ruff, mypy, and security audit.
@@ -75,6 +63,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-python
 
@@ -140,7 +129,17 @@ jobs:
       S3_ACCESS_KEY: "gw2analytics"
       S3_SECRET_KEY: "gw2analytics-secret"
       S3_BUCKET: "gw2analytics"
-      SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+      # NOTE: ``SECRETS_KEK`` is intentionally NOT set here. The
+      # deterministic test-fixture value lives in pyproject.toml's
+      # ``[tool.pytest_env]`` block (visible in the public source
+      # anyway -- ``cryptography.fernet.Fernet`` only needs *a* valid
+      # 32-byte key for round-trip encryption, and the test suite
+      # never uses the production KEK for anything). pytest-env
+      # injects it at session startup. Setting it to
+      # ``${{ secrets.SECRETS_KEK }}`` would BREAK fork PRs (GitHub
+      # strips secrets from forks → empty string → Fernet crashes
+      # with ``ValueError: Fernet key must be 32 url-safe base64-encoded
+      # bytes.``).
 
     services:
       postgres:
@@ -161,6 +160,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-python
 
@@ -241,6 +241,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Python setup for the OpenAPI codegen step (dump_openapi.py)
       - uses: ./.github/actions/setup-python
@@ -311,6 +312,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-web
 
@@ -373,6 +376,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-web
 
@@ -444,7 +449,10 @@ jobs:
       S3_ACCESS_KEY: "gw2analytics"
       S3_SECRET_KEY: "gw2analytics-secret"
       S3_BUCKET: "gw2analytics"
-      SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+      # See test-python env block above for why ``SECRETS_KEK`` is
+      # intentionally not set here -- pytest_env injects the test
+      # fixture value, which works on fork PRs where secrets are
+      # stripped to empty strings.
       ARQ_REDIS_HOST: localhost
       ARQ_REDIS_PORT: 6379
 
@@ -473,6 +481,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-python
 
@@ -511,4 +521,3 @@ jobs:
           | Database migrations | ✅ |
           | ARQ worker tests | ✅ |
           EOF
-

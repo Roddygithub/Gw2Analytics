@@ -50,6 +50,21 @@ dependencies = [
 [dependency-groups]
 dev = []
 
+# Mirror of the root ``[tool.pytest_env]`` block. The
+# ``arq-integration`` CI job ``cd``s into this directory before
+# running pytest; pytest's rootdir discovery normally finds the
+# root ``pyproject.toml`` via the ``[tool.pytest.ini_options]``
+# marker, BUT if anyone ever adds that block here, rootdir flips
+# to ``apps/api/`` and the SECRETS_KEK line stops being injected,
+# causing Fernet to crash mid-suite with
+# ``ValueError: Fernet key must be 32 url-safe base64-encoded bytes.``
+# Mirroring the test-fixture value here closes that future risk
+# without depending on cross-directory config discovery.
+# The value matches ``pyproject.toml`` exactly:
+#   base64.urlsafe_b64encode(b"a"*32) = "YWFh...YWE="
+[tool.pytest_env]
+SECRETS_KEK = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
