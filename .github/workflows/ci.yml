@@ -41,8 +41,15 @@ on:
   # Until then, run the suite LOCALLY before pushing so regressions
   # surface without burning GitHub minutes:
   #
-  #   make ci-status                                    # tail of latest gh run (read-only)
+  #   make ci-status                                    # list the 5 most recent gh runs (read-only)
   #   make ci-open                                      # open the GitHub Actions page in a browser
+  #
+  #   # ``act`` runs the same steps locally in Docker (requires the
+  #   # ``act`` CLI + a running Docker daemon). The 2 Playwright
+  #   # jobs are omitted here on purpose: ``playwright-chromium``
+  #   # pulls + installs the chromium binary (~200 MB), and
+  #   # ``playwright-visual-regression`` is PR-event-only. Run them
+  #   # on demand after the lint + unit + integration jobs are green:
   #
   #   act -C . -W .github/workflows/ci.yml -j lint-python
   #   act -C . -W .github/workflows/ci.yml -j lint-web
