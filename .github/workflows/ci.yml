@@ -23,10 +23,18 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # NOTE: ``push`` and ``pull_request`` triggers were removed because
+  # GitHub Actions on this private repo is blocked by the
+  # ``spending_limit`` ("recent account payments have failed or your
+  # spending limit needs to be increased"). Re-introducing a free
+  # automatic CI is tracked in Plan 038. Until then, CI runs only on
+  # a manual button-press via the GitHub UI or the GitHub CLI:
+  #
+  #   gh workflow run ci.yml --ref main
+  #
+  # Likewise, contributors can validate the suite locally either with
+  # ``make ci`` (runs the same checks behind the scenes) or with
+  # ``act`` --bind /home/roddy/Projects/Gw2Analytics/<branch>``.
   workflow_dispatch:
 
 concurrency:
