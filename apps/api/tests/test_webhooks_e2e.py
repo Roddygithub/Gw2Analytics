@@ -34,6 +34,8 @@ from gw2analytics_api.workers.webhook_scheduler import process_scheduled_retries
 
 client = TestClient(app)
 
+FIXTURE_UPLOAD_ID = "00000000-0000-0000-0000-000000000001"
+
 
 # ---------------------------------------------------------------------------
 # Basic CRUD
@@ -210,7 +212,7 @@ def _bootstrap_webhook_environment(session_factory: Any) -> tuple[Any, str]:
         if fight is None:
             fight = OrmFight(
                 id="fixture-fight-id",
-                upload_id=_uuid.uuid4(),
+                upload_id=_uuid.UUID(FIXTURE_UPLOAD_ID),
                 build_version="20240925",
                 encounter_id=0,
                 agent_count=0,
@@ -218,10 +220,10 @@ def _bootstrap_webhook_environment(session_factory: Any) -> tuple[Any, str]:
                 game_type=0,
             )
             session.add(fight)
-        upload = session.get(Upload, "fixture-upload-id")
+        upload = session.get(Upload, _uuid.UUID(FIXTURE_UPLOAD_ID))
         if upload is None:
             upload = Upload(
-                id=_uuid.uuid4(),
+                id=_uuid.UUID(FIXTURE_UPLOAD_ID),
                 sha256="fixture-sha256",
                 original_filename="fixture.zevtc",
                 size_bytes=100,
@@ -252,7 +254,7 @@ def _seed_failed_delivery(session_factory: Any, sub_id: str, attempt: int = 3) -
         dly = OrmWebhookDelivery(
             id=f"dly_{_uuid.uuid4().hex[:16]}",
             subscription_id=sub_id,
-            upload_id="fixture-upload-id",
+            upload_id=FIXTURE_UPLOAD_ID,
             attempt=attempt,
         )
         session.add(dly)
@@ -266,7 +268,7 @@ def test_retry_scheduler_first_attempt_success(session_factory: Any) -> None:
     session, sub_id = _bootstrap_webhook_environment(session_factory)
     try:
         delivery_id = _seed_failed_delivery(session_factory, sub_id, attempt=0)
-        process_scheduled_retries(session_factory, batch_size=10)
+        process_scheduled_retries(session_factory)
         session = session_factory()
         dly = session.get(OrmWebhookDelivery, delivery_id)
         assert dly is not None
@@ -290,11 +292,11 @@ def test_replayed_delivery_byte_for_byte_hmac_matches_original(session_factory: 
 def test_encrypt_decrypt_round_trip_yields_original() -> None:
     from gw2analytics_api.config import get_settings
 
-    plaintext = b"whsec_test_secret_value_32_chars_long!"
-    kek = get_settings().secrets_kek.get_secret_value().encode("ascii")
-    ciphertext = encrypt_webhook_secret(plaintext, kek)
+    plaintext = "whsec_test_secret_value_32_chars_long!"
+    kek = get_settings().secrets_kek.get_secret_value()
+    ciphertext = encrypt_webhook_secret(plaintext, kek=kek)
     assert ciphertext != plaintext
-    decrypted = decrypt_webhook_secret(ciphertext, kek)
+    decrypted = decrypt_webhook_secret(ciphertext, kek=kek)
     assert decrypted == plaintext
 
 

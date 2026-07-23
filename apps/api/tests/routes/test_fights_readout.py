@@ -666,6 +666,7 @@ def test_readout_down_contribution_dps_wired() -> None:
         time_ms=1_000,
         source_agent_id=b,
         target_agent_id=0,
+        skill_id=0,
         downtime_ms=0,
     )
     damage_event = DamageEvent(
@@ -831,7 +832,9 @@ def test_readout_dist_to_commander_no_commander() -> None:
         ),
     }
     # Player a has position events.
-    pe = PositionEvent(time_ms=1_000, source_agent_id=a, x=100.0, y=200.0)
+    pe = PositionEvent(
+        time_ms=1_000, source_agent_id=a, target_agent_id=0, skill_id=0, x=100.0, y=200.0
+    )
     result = aggregate_player_positions(
         events=[pe],
         agent_id_to_identity_map=aid_to_identity,
@@ -932,10 +935,10 @@ def test_readout_dual_role_heal_support() -> None:
     assert "Heal" in a_readout.roles, f"expected 'Heal' in roles, got {a_readout.roles}"
 
     b_readout = next(p for p in out.players if p.agent_id == b)
-    # Player b: 10%% heal share (exactly 10%% — NOT >10%%)
-    # Player b: 100 heal (10% of squad) — below the HEAL weighted-effort
-    # threshold, and no spec hint (Berserker=DPS). DPS fallback.
-    assert b_readout.roles == ["DPS"], f"expected ['DPS'], got {b_readout.roles}"
+    # Player b: 100 heal with 0 damage → weighted-effort is 100%% healing.
+    # detect_role_lite classifies pure-healing effort (r_heal >= 0.50)
+    # as HEAL primary, overriding the Berserker DPS spec hint.
+    assert "Heal" in b_readout.roles, f"expected 'Heal' in roles, got {b_readout.roles}"
 
 
 # -----------------------------------------------------------------
@@ -962,9 +965,8 @@ def test_readout_cleanser_role() -> None:
             source_agent_id=a,
             target_agent_id=b,
             skill_id=cl_skill,
+            buff_removal=1,
             buff_id=736,  # Bleeding (condition, not boon)
-            stacks=1,
-            duration_remaining_ms=0,
         )
         for i in range(11)
     ]
@@ -1024,6 +1026,7 @@ def test_readout_cc_role() -> None:
             source_agent_id=a,
             target_agent_id=b,
             skill_id=cc_skill,
+            cc_value=1,
         )
         for i in range(4)
     ]
@@ -1082,9 +1085,8 @@ def test_readout_strip_role() -> None:
             source_agent_id=a,
             target_agent_id=b,
             skill_id=strip_skill,
+            buff_removal=1,
             buff_id=740,  # Might (boon, not condition)
-            stacks=1,
-            duration_remaining_ms=0,
         )
         for i in range(6)
     ]
@@ -1200,10 +1202,18 @@ def test_readout_dist_to_commander_with_commander() -> None:
     # Commander at (0, 0), player at (300, 400) — distance = 500 units
     # at the same timestamps so matching is exact.
     events = [
-        PositionEvent(time_ms=1_000, source_agent_id=a, x=300.0, y=400.0),
-        PositionEvent(time_ms=1_000, source_agent_id=c, x=0.0, y=0.0),
-        PositionEvent(time_ms=2_000, source_agent_id=a, x=600.0, y=800.0),
-        PositionEvent(time_ms=2_000, source_agent_id=c, x=0.0, y=0.0),
+        PositionEvent(
+            time_ms=1_000, source_agent_id=a, target_agent_id=0, skill_id=0, x=300.0, y=400.0
+        ),
+        PositionEvent(
+            time_ms=1_000, source_agent_id=c, target_agent_id=0, skill_id=0, x=0.0, y=0.0
+        ),
+        PositionEvent(
+            time_ms=2_000, source_agent_id=a, target_agent_id=0, skill_id=0, x=600.0, y=800.0
+        ),
+        PositionEvent(
+            time_ms=2_000, source_agent_id=c, target_agent_id=0, skill_id=0, x=0.0, y=0.0
+        ),
     ]
     result = aggregate_player_positions(
         events=events,

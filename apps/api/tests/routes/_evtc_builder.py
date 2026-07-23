@@ -192,7 +192,7 @@ def make_minimal_zevtc(
             0,
             0,
             len(agents),
-            0,
+            len(skills),
         )
         assert len(header) == _HEADER_SIZE
         body = bytearray()

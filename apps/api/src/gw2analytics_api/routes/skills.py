@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Final
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
+
+from gw2_core import Profession
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +53,18 @@ def load_skills() -> dict[int, dict[str, Any]]:
 
 
 def _to_wire(entry: dict[str, Any]) -> SkillOut:
+    raw_profession = entry.get("profession")
+    profession: str | None = None
+    if raw_profession is not None:
+        if isinstance(raw_profession, int):
+            with suppress(ValueError):
+                profession = Profession(raw_profession).name
+        else:
+            profession = str(raw_profession)
     return SkillOut(
         id=entry["id"],
         name=entry["name"],
-        profession=entry.get("profession"),
+        profession=profession,
         is_elite=entry.get("is_elite", False),
         skill_type=entry.get("skill_type", "utility"),
         icon_url=entry.get("icon_url"),

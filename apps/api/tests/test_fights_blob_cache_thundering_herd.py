@@ -37,7 +37,7 @@ def test_cache_dedupes_concurrent_calls(monkeypatch: pytest.MonkeyPatch) -> None
         barrier.wait(timeout=2.0)
         return _cached_get_events("s3://bucket/events/SAME.jsonl.gz")
 
-    with threading.ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda _: call(), range(4)))
 
     assert call_count["n"] == 1

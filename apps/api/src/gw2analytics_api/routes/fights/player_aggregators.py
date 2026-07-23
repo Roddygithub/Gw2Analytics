@@ -516,6 +516,16 @@ def aggregate_combat_readout(
     valid_agent_ids = (
         damage_by_id.keys() | heal_by_id.keys() | boons_by_id.keys() | defense_by_id.keys()
     ) & identity_map.keys()
+    # Also include agents that appear in counters (strips, cleanses, cc)
+    # even if they don't have damage/heal/boons/defense rows. This covers
+    # players whose only contribution is buff removal or CC (Strip,
+    # Cleanser, or CC role badges).
+    _counter_agent_ids: set[int] = set()
+    for _counter in (counters.strips, counters.cleanses, counters.cc):
+        for _aid in _counter:
+            if _aid in identity_map:
+                _counter_agent_ids.add(_aid)
+    valid_agent_ids = valid_agent_ids | _counter_agent_ids
 
     players: list[PlayerReadoutOut] = [
         _build_player_readout(

@@ -1,31 +1,24 @@
 """Shared EVTC test fixtures: synthetic .zevtc builder helpers.
 
-Extracted from ``test_uploads_e2e.py`` so ``test_players.py`` and
-``test_fight_rollup_cap.py`` can import ``_make_cbtevent`` and
-``_make_minimal_zevtc`` without duplicating the struct definitions.
+Delegates to ``routes._evtc_builder`` which supports both legacy
+(pre-2025) and EVTC2025+ wire formats. Tests that import from
+``_fixtures`` and from ``routes._evtc_builder`` now produce the
+same binary output for the same build string.
+
+The ``_make_cbtevent`` wrapper defaults ``is_evtc2025=False`` for
+backward compatibility: legacy callers (``build="20240925"``)
+should NOT emit 2025+ event records. Tests that want EVTC2025+
+events should import ``make_cbtevent`` directly from
+``routes._evtc_builder``.
 """
 
 from __future__ import annotations
 
-import struct
-import zipfile
-from io import BytesIO
-
-# Re-export the EVTC2025+ build-string helper from the route-level builder
-# module so tests importing ``from _fixtures import build_2025_string``
-# (rather than from ``routes._evtc_builder``) continue to work.
-from routes._evtc_builder import build_2025_string  # noqa: F401
-
-# V1.3 EVTC layout (matches libs/gw2_evtc_parser parser.py).
-_HEADER_FMT = "<4s8sBHBII"
-_HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 24
-_AGENT_RECORD_FMT = "<QIIhhhh"
-_AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)  # 24
-_AGENT_NAME_SIZE = 72
-_AGENT_SIZE = _AGENT_PREFIX_SIZE + _AGENT_NAME_SIZE  # 96
-_SKILL_RECORD_SIZE = 68  # skill_id(u32) + name(64s)
-_EVENT_FMT = "<QQQiiIIHHHbbbbbbbbIIbb"
-_EVENT_SIZE = struct.calcsize(_EVENT_FMT)  # 64
+from routes._evtc_builder import (
+    build_2025_string,  # noqa: F401
+    make_minimal_zevtc,
+)
+from routes._evtc_builder import make_cbtevent as _evtc_make_cbtevent
 
 
 def _make_cbtevent(
@@ -39,110 +32,28 @@ def _make_cbtevent(
     is_nondamage: int = 0,
     buff_dmg: int = 0,
 ) -> bytes:
-    """Pack one 64-byte cbtevent record matching the parser's struct layout.
+    """Pack a legacy-format cbtevent (``is_evtc2025=False``).
 
-    ``value > 0`` + ``is_statechange == 0`` + ``is_nondamage == 0``
-    produces a yielded ``DamageEvent``. ``buff_dmg`` exercises the
-    same-record dual-emit (heal + strip) or the pure-strip case.
+    Backward-compatible wrapper around :func:`routes._evtc_builder.make_cbtevent`.
+    Tests that need EVTC2025+ event records should import ``make_cbtevent``
+    directly from ``routes._evtc_builder``.
     """
-    return struct.pack(
-        _EVENT_FMT,
+    return _evtc_make_cbtevent(
         time_ms,
         src,
         dst,
         value,
-        buff_dmg,
-        0,  # overstack_value
         skill_id,
-        0,  # src_instid
-        0,  # dst_instid
-        0,  # translocated
-        is_nondamage,  # byte 47 = is_nondamage
-        is_statechange,  # byte 48 = is_statechange
-        0,  # ev_buff
-        0,  # result
-        0,  # is_offcycle
-        0,  # is_buffremove
-        0,  # is_ninety
-        0,  # pad63 (u32, offsets 54-57)
-        0,  # pad64 (u32, offsets 58-61)
-        0,  # pad65 (byte 62)
-        0,  # pad66 (byte 63)
-    )[:_EVENT_SIZE]
+        is_statechange=is_statechange,
+        is_nondamage=is_nondamage,
+        buff_dmg=buff_dmg,
+        is_evtc2025=False,
+    )
 
 
-def _make_minimal_zevtc(
-    agents: list[tuple[int, int, int, str, bool]],
-    build: str,
-    skills: list[tuple[int, str]] | None = None,
-    events: list[bytes] | None = None,
-) -> bytes:
-    """Build a synthetic .zevtc blob (zip wrapper around EVTC).
+# Underscore-prefixed aliases for callers (e.g. test_uploads_helpers)
+# that import ``_make_minimal_zevtc`` directly.
+_make_minimal_zevtc = make_minimal_zevtc
 
-    Uses the V1.3 24-byte header + 96-byte agent records + variable
-    skill records. For player agents the combo string
-    ``name\\0:synth.<id>\\0`` is null-padded to 72 bytes; NPCs get a
-    single null-terminated name null-padded to 72 bytes. Skill records
-    are ``<II`` (skill_id + name_len) + UTF-8 name + 1 byte null.
-
-    ``events`` is an optional list of pre-packed 64-byte cbtevent
-    records appended verbatim after the skill block.
-    """
-    if skills is None:
-        skills = []
-    if events is None:
-        events = []
-    buf = BytesIO()
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
-        header = struct.pack(
-            _HEADER_FMT,
-            b"EVTC",
-            build.encode("ascii"),
-            0,
-            0,
-            0,
-            len(agents),
-            len(skills),
-        )
-        assert len(header) == _HEADER_SIZE
-        body = bytearray()
-        for aid, prof, elite, name, is_player in agents:
-            prefix = struct.pack(
-                _AGENT_RECORD_FMT,
-                aid,
-                prof,
-                elite,
-                0,
-                0,
-                0,
-                0,
-            )
-            assert len(prefix) == _AGENT_PREFIX_SIZE
-            if is_player:
-                raw = name.encode() + b"\x00" + f":synth.{aid}".encode() + b"\x00\x00"
-            else:
-                raw = name.encode() + b"\x00"
-            if len(raw) > _AGENT_NAME_SIZE:
-                msg = f"agent name region {len(raw)} > {_AGENT_NAME_SIZE}"
-                raise ValueError(msg)
-            name_buf = raw + b"\x00" * (_AGENT_NAME_SIZE - len(raw))
-            assert len(name_buf) == _AGENT_NAME_SIZE
-            body += prefix + name_buf
-        body += struct.pack("<I", len(skills))
-        for skill_id, skill_name in skills:
-            name_bytes = skill_name.encode("utf-8")[:64]
-            name_buf = name_bytes + b"\x00" * (_SKILL_RECORD_SIZE - 4 - len(name_bytes))
-            body += struct.pack("<I64s", skill_id, name_buf)
-        for ev in events:
-            body += ev
-        zf.writestr("fight.evtc", header + bytes(body))
-    return buf.getvalue()
-
-
-# Public alias (no underscore prefix) so the 15+ test files that
-# import ``from _fixtures import make_minimal_zevtc`` (rather than
-# the ``_make_minimal_zevtc`` form) continue to work.
-make_minimal_zevtc = _make_minimal_zevtc
-
-# Same treatment for ``_make_cbtevent``: tests expect the public name.
+# Public alias for callers that import ``make_cbtevent`` from ``_fixtures``.
 make_cbtevent = _make_cbtevent

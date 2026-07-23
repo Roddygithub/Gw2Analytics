@@ -247,7 +247,7 @@ def test_player_timeline_404_when_account_unknown() -> None:
 
 
 def test_player_timeline_422_when_limit_out_of_range() -> None:
-    assert client.get("/api/v1/players/dummy.1234/timeline?limit=0").status_code == 404
+    assert client.get("/api/v1/players/dummy.1234/timeline?limit=0").status_code == 422
 
 
 def test_player_timeline_422_when_limit_zero() -> None:

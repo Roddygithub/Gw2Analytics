@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 import uuid as _uuid
 
-from _fixtures import _make_minimal_zevtc
+from _fixtures import _make_cbtevent, _make_minimal_zevtc
 from fastapi.testclient import TestClient
 
 from gw2analytics_api.main import app
@@ -40,6 +40,29 @@ def _post_minimal_fight(
             (base_id_a, 2, 18, f"V07 Warrior {suffix}", True),
             (base_id_b, 1, 27, f"V07 Guard {suffix}", True),
         ]
+    if events is None:
+        # Use the first two agent IDs (whether default or caller-provided)
+        # so default events always reference existing agents.
+        _aid_a = agents[0][0]
+        _aid_b = agents[1][0]
+        events = [
+            _make_cbtevent(
+                time_ms=1_000,
+                src=_aid_a,
+                dst=_aid_b,
+                value=100,
+                skill_id=base_skill_a,
+            ),
+            # Second event so both agents have at least one
+            # source-side event and appear in the /players list.
+            _make_cbtevent(
+                time_ms=1_500,
+                src=_aid_b,
+                dst=_aid_a,
+                value=50,
+                skill_id=base_skill_b,
+            ),
+        ]
     blob = _make_minimal_zevtc(
         agents,
         build=build,
@@ -47,7 +70,7 @@ def _post_minimal_fight(
             (base_skill_a, f"Whirlwind {suffix}"),
             (base_skill_b, f"Burning {suffix}"),
         ],
-        events=events or [],
+        events=events,
     )
     resp = client.post(
         "/api/v1/uploads",

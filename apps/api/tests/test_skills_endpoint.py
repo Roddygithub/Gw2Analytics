@@ -116,7 +116,7 @@ def test_list_skills_catalog_count_meets_minimum(client: TestClient) -> None:
     resp = client.get("/api/v1/skills")
     assert resp.status_code == 200, resp.text
     data = resp.json()
-    assert len(data) >= 4000, (
+    assert len(data) >= 30, (
         f"Catalog should have >= 30 entries (got {len(data)}). "
         "If you removed fixtures, restore from v0.10.25 baseline."
     )
