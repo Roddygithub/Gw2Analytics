@@ -11,6 +11,11 @@ import struct
 import zipfile
 from io import BytesIO
 
+# Re-export the EVTC2025+ build-string helper from the route-level builder
+# module so tests importing ``from _fixtures import build_2025_string``
+# (rather than from ``routes._evtc_builder``) continue to work.
+from routes._evtc_builder import build_2025_string  # noqa: F401
+
 # V1.3 EVTC layout (matches libs/gw2_evtc_parser parser.py).
 _HEADER_FMT = "<4s8sBHBII"
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 24
@@ -143,8 +148,3 @@ make_minimal_zevtc = _make_minimal_zevtc
 
 # Same treatment for ``_make_cbtevent``: tests expect the public name.
 make_cbtevent = _make_cbtevent
-
-# Re-export the EVTC2025+ build-string helper from the route-level builder
-# module so tests importing ``from _fixtures import build_2025_string``
-# (rather than from ``routes._evtc_builder``) continue to work.
-from routes._evtc_builder import build_2025_string  # noqa: F401

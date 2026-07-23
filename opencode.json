@@ -1,8 +1,32 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": ["@dietrichgebert/ponytail"],
+  "model": "omniroute/auto/best-coding",
   "instructions": [],
   "references": {},
+  "provider": {
+    "omniroute": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "OmniRoute",
+      "options": {
+        "baseURL": "http://localhost:20128/v1",
+        "apiKey": "sk-omniroute-local"
+      },
+      "models": {
+        "auto/best-coding": { "name": "Best Coding (auto)" },
+        "auto/best-reasoning": { "name": "Best Reasoning (auto)" },
+        "auto/best-fast": { "name": "Best Fast (auto)" },
+        "auto/best-vision": { "name": "Best Vision (auto)" },
+        "auto/best-chat": { "name": "Best Chat (auto)" },
+        "auto/best-coding-fast": { "name": "Best Coding Fast (auto)" },
+        "auto/best-free": { "name": "Best Free (auto)" },
+        "auto/coding:free": { "name": "Coding Free (auto)" },
+        "auto/cheap": { "name": "Cheap (auto)" },
+        "auto/coding:cheap": { "name": "Coding Cheap (auto)" },
+        "auto/offline": { "name": "Offline (auto)" }
+      }
+    }
+  },
   "mcp": {
     "postgres": {
       "type": "local",

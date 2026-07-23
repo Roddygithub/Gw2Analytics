@@ -11,8 +11,8 @@ from __future__ import annotations
 import time
 import uuid as _uuid
 
-from fastapi.testclient import TestClient
 from _fixtures import _make_minimal_zevtc
+from fastapi.testclient import TestClient
 
 from gw2analytics_api.main import app
 

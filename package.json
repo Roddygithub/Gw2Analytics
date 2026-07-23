@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.14"
+  }
+}
