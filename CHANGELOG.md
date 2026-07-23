@@ -12,10 +12,16 @@
 - **CONTRIBUTING.md updated**: DCO setup section and historical
   private-flip appendix now reference the inline bash check.
 
+### Changed
+- **CONTRIBUTING.md Pre-commit / CI mirror table**: added DCO check row
+  (`(manual)` pre-commit, `✅ (PR-only)` CI). Updated pytest row from
+  outdated `(n/a -- CI is dispatch-only)` to `✅` (repo is now public with
+  CI auto-trigger).
+
 ### Validation
 - Signed commit: DCO check = SUCCESS (inline bash correctly accepts `-s` trailers)
 - Unsigned commit: DCO check = FAILURE (inline bash correctly rejects missing trailers)
-- CI on `main` (commit `816e815`): completed/success
+- CI on `main` (commits `816e815`, `f742a23`, `97f96a7`): all completed/success
 
 ## [0.15.1] - 2026-07-22
 
