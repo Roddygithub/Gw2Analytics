@@ -18,6 +18,8 @@ gh pr create --base main --head test/dco-validation \
   --title 'WIP: DCO check test (unsigned)' \
   --body 'Test PR — will be closed without merging'
 # Wait for CI, then:
+# CI takes ~5 min; poll with watch -n 30 or re-run manually:
+# watch -n 30 'gh pr view --json statusCheckRollup --jq ...'
 gh pr view --json statusCheckRollup --jq \
   '.statusCheckRollup[] | select(.name == "DCO check") | .conclusion'
 # Expected: FAILURE
@@ -29,6 +31,7 @@ gh pr view --json statusCheckRollup --jq \
 git commit --amend --allow-empty -s -m "test(dco): signed commit"
 git push --force-with-lease origin test/dco-validation
 # Wait for CI, then:
+# Same polling approach — CI takes ~5 min:
 gh pr view --json statusCheckRollup --jq \
   '.statusCheckRollup[] | select(.name == "DCO check") | .conclusion'
 # Expected: SUCCESS
@@ -37,7 +40,8 @@ gh pr view --json statusCheckRollup --jq \
 ### Cleanup
 
 ```bash
-gh pr close --delete-branch
+PR_NUM=$(gh pr list --head test/dco-validation --json number --jq '.[0].number')
+gh pr close "$PR_NUM" --delete-branch
 git checkout main
 git branch -D test/dco-validation
 ```
