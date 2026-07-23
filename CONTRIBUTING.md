@@ -108,37 +108,6 @@ dependencies, at the cost of two extra shell invocations per iteration
   database schema -- only the OpenAPI surface from `apps/api`.
 - Each component evolves independently (`pyproject.toml` per lib/app).
 
-## CI spending-limit
-
-The `.github/workflows/ci.yml` pipeline relies on GitHub-hosted
-**ubuntu-latest** runners, which are billed against the repository's
-GitHub Actions minute quota. On a **private** repository with a free plan
-where the spending limit is set to `0` (the default), every job
-**fast-fails at the runner-spin-up step** with a cryptic
-``spending limit...`` error before any real CI step ever runs.
-
-History note (2026-07-22): the repository was temporarily switched to
-``visibility: public`` (which receives unlimited Linux runner minutes)
-to unblock CI while a billing change was in flight. It has since been
-reverted to ``visibility: private``; the unblock mechanism from now on
-is expected to come from one of the operator-side options below, not
-from visibility. If CI starts failing again with
-``spending limit...`` on a push to ``main`` or a PR, apply one of the
-three options in the next subsection, do not re-flip visibility.
-
-If you decide to revert the visibility to private:
-
-1. Either add a paid plan (Settings -> Billing and plans), OR
-2. Configure the self-hosted runner documented under
-   ``advisor-plans/011-nextjs-headers-fallback.md`` (and follow the
-   runner setup checklist in ``.github/CONTRIBUTING.md`` if present),
-   OR
-3. Set the spending limit > 0 in Settings -> Billing -> Plans and budget.
-
-Until one of those steps is taken, CI will be green on ``main`` and
-every push / PR but the README + git history will reflect the public
-visibility decision.
-
 ## Commit conventions
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/).
@@ -493,10 +462,14 @@ of Origin (DCO) model** that mirrors the Linux kernel's:
    Signed-off-by: Jane Contributor <jane@example.com>
    ```
 
-3. **You grant a non-exclusive license** to the project to use,
-   modify, and redistribute the contribution under the project's
-   proprietary ``LICENSE``. This lets the copyright holder
-   incorporate your work without asking for further paperwork.
+3. **You grant an irrevocable, perpetual, worldwide, sublicensable
+   license** to the copyright holder to use, modify, sublicense,
+   and redistribute the contribution under the project's proprietary
+   ``LICENSE``, including the right to incorporate it into derivative
+   works. This lets the copyright holder ship your contribution
+   without asking for further paperwork, while you retain authorship
+   credit + the right to use the same code in other projects of your
+   own.
 
 4. **CI / branch protection may enforce the DCO sign-off** before a
    PR can merge. Maintainers may also reject a contribution for any
