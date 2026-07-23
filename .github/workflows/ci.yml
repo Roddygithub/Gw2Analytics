@@ -23,18 +23,31 @@
 name: CI
 
 on:
-  # NOTE: ``push`` and ``pull_request`` triggers were removed because
+  # NOTE: ``push`` / ``pull_request`` triggers were removed because
   # GitHub Actions on this private repo is blocked by the
   # ``spending_limit`` ("recent account payments have failed or your
-  # spending limit needs to be increased"). Re-introducing a free
-  # automatic CI is tracked in Plan 038. Until then, CI runs only on
-  # a manual button-press via the GitHub UI or the GitHub CLI:
+  # spending limit needs to be increased"). With those auto-triggers
+  # gone, the repo stops accumulating wasted run-attempts on every
+  # push. Migration to a free CI provider (CircleCI free tier,
+  # GitLab.com free tier, or a self-hosted runner on a free cloud
+  # VM) is tracked as the open item for ROADMAP §3.
   #
-  #   gh workflow run ci.yml --ref main
+  # Be aware: even manual ``workflow_dispatch`` runs hit the same
+  # block today -- the short-circuit fires on EVERY workflow
+  # invocation regardless of trigger, so the workflow above only
+  # parse-loads successfully; jobs will not execute until the
+  # billing gate is lifted or the workflow is migrated.
   #
-  # Likewise, contributors can validate the suite locally either with
-  # ``make ci`` (runs the same checks behind the scenes) or with
-  # ``act`` --bind /home/roddy/Projects/Gw2Analytics/<branch>``.
+  # Until then, run the suite LOCALLY before pushing so regressions
+  # surface without burning GitHub minutes:
+  #
+  #   make ci-status                                    # tail of latest gh run (read-only)
+  #   make ci-open                                      # open the GitHub Actions page in a browser
+  #
+  #   act -C . -W .github/workflows/ci.yml -j lint-python
+  #   act -C . -W .github/workflows/ci.yml -j lint-web
+  #   act -C . -W .github/workflows/ci.yml -j test-python
+  #   act -C . -W .github/workflows/ci.yml -j arq-integration
   workflow_dispatch:
 
 concurrency:
