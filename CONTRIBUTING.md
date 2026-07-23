@@ -7,22 +7,95 @@ contributing to the GW2Analytics monorepo (``libs/gw2_core``,
 
 ## Local development setup
 
+The fastest path is the one-shot developer-onboarding target, which
+checks your tools, bootstraps `.env`, brings up the infrastructure
+with a per-service health-wait, syncs all monorepo deps (Python +
+Node), applies Alembic migrations, and regenerates the OpenAPI
+TypeScript client -- all in one command:
+
+```bash
+make dev-onboard
+```
+
+Equivalent manual steps (only use these if you don't have GNU Make or
+prefer fine-grained control):
+
 ```bash
 # 1. Install uv (Python package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Sync all monorepo deps (libs + apps + dev)
-uv sync
+# 2. Configure local app env (operator-side .env file)
+cp .env.example .env
 
-# 3. Install git hooks (pre-commit + pre-push)
-uv run pre-commit install --hook-type pre-commit --hook-type pre-push
-
-# 4. Bring up the infrastructure for end-to-end tests
+# 3. Bring up the infrastructure for end-to-end tests
 docker compose up -d
 
-# 5. Configure local app env (operator-side .env file)
-cp .env.example .env
+# 4. Sync all monorepo deps (libs + apps + dev) and apply migrations
+uv sync
+uv run --directory apps/api alembic upgrade head
+
+# 5. Install web deps (frozen lockfile) and regenerate the OpenAPI client
+(cd web && pnpm install --frozen-lockfile && pnpm generate:api)
+
+# 6. Install git hooks (pre-commit + pre-push)
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
+
+The ordering differs from the historical manual list because
+`alembic upgrade head` needs the running Postgres **plus** the
+`uv`-synced Python env (alembic is installed via `uv sync`), and
+`pnpm generate:api` needs the `web/` deps present. `make dev-onboard`
+sequences these explicitly; the manual list above mirrors that order.
+
+### Rolling back
+
+If `make dev-onboard` turns out to be too aggressive for your local
+workflow (e.g. you only need the Postgres driver, not MinIO), revert
+**all** of the dev-onboard commits — not just the most recent one.
+The SHA list is self-locating and the loop handles 1+ commits
+transparently:
+
+```bash
+# Revert every commit whose subject line contains `dev-onboard` and
+# that touched `Makefile`, newest first. Capped at 5 to prevent runaway
+# loops on a corrupted history:
+for _ in 1 2 3 4 5; do
+  sha=$(git log --oneline --grep='dev-onboard' Makefile | head -1 | cut -d' ' -f1)
+  [ -z "$sha" ] && break
+  git revert --no-edit "$sha" \
+    || { echo >&2 "conflict on $sha — resolve manually, then continue the loop"; break; }
+done
+```
+
+After the cascade-squash followup lands, every dev-onboard touch
+collapses into ONE combined commit whose subject line typically does
+**not** contain `\u2018dev-onboard\u2019` (the new subject is whatever you
+chose for the merged commit, e.g. `\u2018ci: green-up cumulative suite\u2019`).
+In that state, the loop above returns without reverting anything —
+fall back to reverting the most-recent Makefile commit:
+
+```bash
+# Post-cascade-squash fallback: pick the most-recent commit touching Makefile
+# (which contains the merged dev-onboard changes among everything else):
+git revert --no-edit $(git log --oneline -1 Makefile | cut -d' ' -f1)
+```
+
+If neither variant reverts what you expected, run `git log --oneline
+Makefile` manually to see the history directly. The revert is safe to
+discard later (`git revert --abort` or drop the follow-up commit
+before pushing); the underlying behaviour (the manual 5-step setup
+above) is unchanged.
+
+### Why a portable POSIX-loop instead of `timeout`
+
+The 60s health-wait per Docker service is implemented as a pure
+POSIX `date +%s`-arithmetic loop (`start=$$(date +%s); until <probe>;
+do [ $$(($$(date +%s) - start)) -ge 60 ] && exit 1; sleep 2; done`).
+It does **not** call GNU `timeout` — GNU `timeout` is not on stock
+macOS (requires `brew install coreutils` + a `gtimeout` alias). This
+keeps the target usable on a fresh macOS checkout with zero extra
+dependencies, at the cost of two extra shell invocations per iteration
+(`date +%s` once per loop).
 
 ## Architecture reminders
 

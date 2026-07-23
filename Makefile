@@ -99,6 +99,61 @@ dev-stack-status: ## Show API + web status
 	@./scripts/dev-web-bg.sh --status
 
 # ----------------------------------------------------------------------------
+# First-time onboarding (idempotent: re-runnable on partial failures)
+# ----------------------------------------------------------------------------
+
+.PHONY: dev-onboard
+dev-onboard: ## One-shot first-time setup: tools, .env, docker services + health, deps, migrations, OpenAPI client, git hooks
+	@echo "==> [1/7] Pre-flight: required dev tools (uv, pnpm, docker compose)"
+	@command -v uv    >/dev/null 2>&1 || { echo >&2 "ERROR: uv not installed. See https://docs.astral.sh/uv/getting-started/installation/"; exit 1; }
+	@command -v pnpm  >/dev/null 2>&1 || { echo >&2 "ERROR: pnpm not installed. Run: corepack enable && corepack prepare pnpm@latest --activate"; exit 1; }
+	@command -v docker >/dev/null 2>&1 || { echo >&2 "ERROR: docker not installed."; exit 1; }
+	@docker compose version >/dev/null 2>&1 || { echo >&2 "ERROR: docker compose plugin missing."; exit 1; }
+	@echo "      ok — uv $$(uv --version | awk '{print $$2}'), pnpm $$(pnpm --version), docker $$(docker --version | awk '{print $$3}' | tr -d ,)"
+	@echo
+	@echo "==> [2/7] Operator .env (idempotent: created only if missing)"
+	@if [ ! -f .env ]; then \
+	  cp .env.example .env && \
+	  echo "      created .env from .env.example (edit SECRET_KEY before any deployment)"; \
+	else \
+	  echo "      .env already present — leaving untouched"; \
+	fi
+	@echo
+	@echo "==> [3/7] Docker services (postgres + minio + redis) with portable 60s health-wait per service (Pure POSIX date/sleep loop — no GNU timeout dependency, works on macOS without `brew install coreutils`)"
+	@docker compose up -d postgres minio redis
+	@start=$$(date +%s); \
+	  until docker compose exec -T postgres pg_isready -U gw2analytics >/dev/null 2>&1; do \
+	    [ $$(($$(date +%s) - start)) -ge 60 ] && { echo >&2 "ERROR: postgres did not become ready in 60s (docker compose logs postgres)"; exit 1; }; \
+	    sleep 2; \
+	  done
+	@start=$$(date +%s); \
+	  until curl -fsS http://localhost:9000/minio/health/live >/dev/null 2>&1; do \
+	    [ $$(($$(date +%s) - start)) -ge 60 ] && { echo >&2 "ERROR: minio did not become ready in 60s (docker compose logs minio)"; exit 1; }; \
+	    sleep 2; \
+	  done
+	@start=$$(date +%s); \
+	  until docker compose exec -T redis redis-cli ping 2>/dev/null | grep -q PONG; do \
+	    [ $$(($$(date +%s) - start)) -ge 60 ] && { echo >&2 "ERROR: redis did not become ready in 60s"; exit 1; }; \
+	    sleep 2; \
+	  done
+	@echo "      postgres, minio, redis — all healthy"
+	@echo
+	@echo "==> [4/7] Python deps (uv sync --frozen --all-packages)"
+	@uv sync --frozen --all-packages
+	@echo
+	@echo "==> [5/7] DB migrations (alembic upgrade head)"
+	@cd apps/api && uv run alembic upgrade head
+	@echo
+	@echo "==> [6/7] Web deps + OpenAPI client regeneration"
+	@cd web && pnpm install --frozen-lockfile && pnpm generate:api
+	@echo
+	@echo "==> [7/7] Git hooks (pre-commit + pre-push)"
+	@uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+	@echo
+	@echo "☑ dev-onboard complete."
+	@echo "      Next step: \`make dev-stack-up\` to start API + Arq worker + Next.js (in tmux)."
+
+# ----------------------------------------------------------------------------
 # CI helpers
 # ----------------------------------------------------------------------------
 
