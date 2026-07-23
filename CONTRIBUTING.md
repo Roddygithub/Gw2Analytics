@@ -217,7 +217,8 @@ and PR via GitHub Actions:
 | ruff check             | ✅         | ✅            |
 | ruff format            | ✅         | ✅            |
 | mypy (`--strict`)      | ✅         | ✅            |
-| pytest                 | (manual)   | (n/a -- CI is dispatch-only) |
+| pytest                 | (manual)   | ✅            |
+| DCO check              | (manual)   | ✅ (PR-only)  |
 
 Run them yourself before pushing:
 
