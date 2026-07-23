@@ -52,24 +52,22 @@ def _make_cbtevent(
         dst,
         value,
         buff_dmg,
-        0,
+        0,  # overstack_value
         skill_id,
-        0,
-        0,
-        0,
-        0,
-        is_nondamage,
-        is_statechange,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
+        0,  # src_instid
+        0,  # dst_instid
+        0,  # translocated
+        is_nondamage,  # byte 47 = is_nondamage
+        is_statechange,  # byte 48 = is_statechange
+        0,  # ev_buff
+        0,  # result
+        0,  # is_offcycle
+        0,  # is_buffremove
+        0,  # is_ninety
+        0,  # pad63 (u32, offsets 54-57)
+        0,  # pad64 (u32, offsets 58-61)
+        0,  # pad65 (byte 62)
+        0,  # pad66 (byte 63)
     )[:_EVENT_SIZE]
 
 

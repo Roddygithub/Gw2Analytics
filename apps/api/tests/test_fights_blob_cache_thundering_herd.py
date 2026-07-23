@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from minio.error import S3Error
@@ -60,7 +61,7 @@ def test_concurrent_calls_to_distinct_uris(monkeypatch: pytest.MonkeyPatch) -> N
         return _cached_get_events(uri)
 
     start = time.monotonic()
-    with threading.ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         list(pool.map(call, uris))
     elapsed = time.monotonic() - start
 
