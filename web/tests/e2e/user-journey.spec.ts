@@ -141,7 +141,7 @@ test.describe("full analyst user journey", () => {
     // banner was deprecated by the readiness-banner refactor).
     // The duration-strip assertion below stays (renders under
     // whichever sub-tab is active).
-    await expect(page.getByText(/duration \d+(?:\.\d+)?\s+s/)).toBeVisible();
+    await expect(page.getByText(/durée\s+\d+(?:[.,]\d+)?\s*s/i)).toBeVisible();
     // The 4 per-aspect section headings render under their
     // own localisable sub-tab buttons (Dégâts / Soins / Boons
     // / Défense & Positionnement); default is Dégâts.

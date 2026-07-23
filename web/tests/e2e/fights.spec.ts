@@ -114,15 +114,23 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     // favour of the per-table numeric columns + the inline
     // stat-badge summary row. The Phase 6 v2 contract is
     // proven by the unique non-zero values rendered below.
+    // Each numeric value lives in a different sub-tab table
+    // (only one sub-tab is mounted at a time), so click the
+    // matching sub-tab right before its assertion.
+    await page.getByRole("button", { name: /Boons/i }).click();
     await expect(page.getByText("1800", { exact: true }).first()).toBeVisible();
+
     // DPS condi also renders non-zero
+    await page.getByRole("button", { name: /Dégâts/i }).click();
     await expect(page.getByText("650", { exact: true }).first()).toBeVisible();
 
     // Barrier total: Heal Bot has barrier_total=45000
+    await page.getByRole("button", { name: /Soins/i }).click();
     await expect(page.getByText("45000", { exact: true }).first()).toBeVisible();
 
     // Defense: Heal Bot blocks=12 is unique across the fixture
     // (dodges=[3,7,2,1], blocks=[2,0,5,12], interrupts=[1,3,0,4]).
+    await page.getByRole("button", { name: /Défense/i }).click();
     await expect(page.getByText("12", { exact: true }).first()).toBeVisible();
   });
 
@@ -299,7 +307,13 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     const table = gridSection.locator("table");
     await expect(table).toBeVisible();
     await expect(table.locator("tbody tr")).toHaveCount(2);
-    await expect(gridSection.locator("svg").first()).toBeVisible();
+
+    const heatmap = page.locator('section[data-testid="player-position-heatmap"]');
+    await expect(heatmap).toBeVisible();
+    // Profession legend is rendered as plain text inside the
+    // heatmap section (the coordinate pedagogy uses an
+    // integer-based mapping via the icons table, not <svg>).
+    await expect(heatmap).toContainText(/Guar|Warr|Engi|Rang|Thie|Elem|Mesm|Necr|Reve/);
   });
 
   test("direct navigation to a ?account=UNKNOWN_VALUE surfaces the section-level 'Player ... not found in this fight' diagnostic", async ({
