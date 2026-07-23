@@ -527,3 +527,40 @@ jobs:
           | Database migrations | ✅ |
           | ARQ worker tests | ✅ |
           EOF
+
+  # ---------------------------------------------------------------------------
+  # DCO sign-off check.
+  # PR-only. GitHub's web-DCO toggle (separate repo setting) covers
+  # github.com web-editor commits natively; this action-based check
+  # covers CLI/IDE commits via ``git commit -s`` per the DCO model
+  # documented in CONTRIBUTING.md.
+  #
+  # NOT currently added to the branch-protection ``required_status_checks``
+  # rule -- we ship it informational-only first. Bump to hard-required
+  # after one real Contributor-signed PR has demonstrated the workflow
+  # end-to-end. The job will FAIL (not error) on unsigned commits, so the
+  # first failing PR will surface clearly in the Actions UI without
+  # blocking the merge until we wire it into required_status_checks.
+  #
+  # Action: crazy-max/ghaction-dco@v1 (maintained fork of suzuki-shunsuke's
+  # action, used per CONTRIBUTING.md cheatsheet step 8).
+  # ---------------------------------------------------------------------------
+  dco-check:
+    name: DCO check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run DCO check
+        uses: crazy-max/ghaction-dco@v1
+        with:
+          # Override the default ``HEAD~1..HEAD`` range so
+          # first-commit-on-branch PRs don't trip on a non-existent
+          # ``HEAD~1``, and so all commits in the PR (not just the
+          # latest) are validated.
+          args: --range ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
