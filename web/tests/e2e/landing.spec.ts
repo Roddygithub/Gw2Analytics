@@ -33,19 +33,16 @@ test.describe("/ (v0.4.0-web landing)", () => {
       page.getByRole("heading", { name: "GW2Analytics", level: 1 }),
     ).toBeVisible();
 
-    // 4 navigation cards
-    await expect(
-      page.getByRole("link", { name: /Browse fights/ }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /Upload replay/ }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /Resolve API key/ }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: /Browse players/ }),
-    ).toBeVisible();
+    // 4 navigation cards. Use the ``home-nav-*`` data-testids
+    // declared on each card in ``src/app/page.tsx`` so the
+    // assertions stay stable across copy / i18n changes
+    // (the previous regex selectors assumed an English-language
+    // nav ("Browse fights", "Upload replay", ...); the page
+    // has since been localised to French).
+    await expect(page.getByTestId("home-nav-fights")).toBeVisible();
+    await expect(page.getByTestId("home-nav-players")).toBeVisible();
+    await expect(page.getByTestId("home-nav-compare")).toBeVisible();
+    await expect(page.getByTestId("home-nav-upload")).toBeVisible();
 
     // No uncaught exceptions during page load. (We use
     // ``pageerror`` rather than ``console.error`` because the

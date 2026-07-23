@@ -66,10 +66,14 @@ test.describe("full analyst user journey", () => {
     await expect(
       page.getByRole("heading", { name: "GW2Analytics", level: 1 }),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: /Upload replay/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Browse fights/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Browse players/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Resolve API key/i })).toBeVisible();
+    // The 4 feature cards on the home page expose stable
+    // ``home-nav-*`` data-testids (``src/app/page.tsx``) instead
+    // of relying on the French card title. This keeps the
+    // assertions independent of any future copy / i18n change.
+    await expect(page.getByTestId("home-nav-fights")).toBeVisible();
+    await expect(page.getByTestId("home-nav-players")).toBeVisible();
+    await expect(page.getByTestId("home-nav-compare")).toBeVisible();
+    await expect(page.getByTestId("home-nav-upload")).toBeVisible();
     await screenshot(page, "01-landing");
 
     // -----------------------------------------------------------------

@@ -198,8 +198,17 @@ export default function Home() {
       </section>
 
       {/* Quick links */}
+      {/*
+       * ``data-testid="home-nav-*"`` attrs are stable selectors for the
+       * Playwright e2e suite. They intentionally bypass the visible
+       * French card title so the user-journey / landing specs do not
+       * regress on a future copy rename or i18n pass. The same ``nav-*``
+       * prefix on the global sticky header (see ``web/src/components/AppShell*``)
+       * refers to the always-present header navigation, not these
+       * feature cards, so the ``home-nav-*`` distinction matters.
+       */}
       <nav className={styles.cards}>
-        <Link className={styles.card} href="/fights">
+        <Link className={styles.card} href="/fights" data-testid="home-nav-fights">
           <span className={styles.cardIcon}>⚔️</span>
           <span className={styles.cardTitle}>Combats</span>
           <span className={styles.cardBody}>
@@ -208,7 +217,7 @@ export default function Home() {
           </span>
           <span className={styles.cardArrow}>Explorer &rarr;</span>
         </Link>
-        <Link className={styles.card} href="/players">
+        <Link className={styles.card} href="/players" data-testid="home-nav-players">
           <span className={styles.cardIcon}>👥</span>
           <span className={styles.cardTitle}>Joueurs</span>
           <span className={styles.cardBody}>
@@ -217,7 +226,7 @@ export default function Home() {
           </span>
           <span className={styles.cardArrow}>Voir &rarr;</span>
         </Link>
-        <Link className={styles.card} href="/players/compare">
+        <Link className={styles.card} href="/players/compare" data-testid="home-nav-compare">
           <span className={styles.cardIcon}>📊</span>
           <span className={styles.cardTitle}>Comparer</span>
           <span className={styles.cardBody}>
@@ -226,7 +235,7 @@ export default function Home() {
           </span>
           <span className={styles.cardArrow}>Comparer &rarr;</span>
         </Link>
-        <Link className={styles.card} href="/upload">
+        <Link className={styles.card} href="/upload" data-testid="home-nav-upload">
           <span className={styles.cardIcon}>📤</span>
           <span className={styles.cardTitle}>Upload avancé</span>
           <span className={styles.cardBody}>
