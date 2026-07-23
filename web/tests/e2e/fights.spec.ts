@@ -27,7 +27,11 @@ import { test, expect } from "@playwright/test";
 
 test.describe("/fights/[id] (v0.7.1)", () => {
   test("renders the 5 roll-up sections + event windows for a known fight", async ({ page }) => {
-    await page.goto("/fights/fixture-fight-001");
+    // v0.10.17+ default tab is "readout" (Analyse); this test
+    // exercises the Overview tab content (per-target roll-ups +
+    // per-bucket event windows + the Duration header), so we
+    // explicitly request the Overview tab.
+    await page.goto("/fights/fixture-fight-001?tab=overview");
 
     // Header strip
     await expect(
@@ -79,15 +83,6 @@ test.describe("/fights/[id] (v0.7.1)", () => {
   test("readout tab renders Phase 6 v2 columns with non-zero data", async ({ page }) => {
     await page.goto("/fights/fixture-fight-001?tab=readout");
 
-    // The readout tab status banner is visible (v0.12.3: no
-    // longer says "SCAFFOLD-zero").
-    const banner = page.locator('[data-testid="readout-tab-status"]');
-    await expect(banner).toBeVisible();
-    // The old SCAFFOLD-zero disclaimer is GONE (v0.12.3).
-    await expect(banner.getByText(/stay at 0/i)).toHaveCount(0);
-    // The banner now says "All columns" (v0.12.3 live-data text).
-    await expect(banner.getByText(/All columns/i)).toBeVisible();
-
     // The 4 per-aspect section headings
     await expect(
       page.getByRole("heading", { name: "Damage" }),
@@ -102,9 +97,12 @@ test.describe("/fights/[id] (v0.7.1)", () => {
       page.getByRole("heading", { name: "Defense" }),
     ).toBeVisible();
 
-    // AG Grid renders the DPS power column with the mock
-    // fixture value ("1800" for Fighty McFight). All chosen
-    // values are unique across the 4-player fixture.
+    // v0.12.3+ readout-tab refactor: the page-level
+    // ``data-testid="readout-tab-status"`` banner with the
+    // ``All columns`` / ``stay at 0`` messaging was removed in
+    // favour of the per-table numeric columns + the inline
+    // stat-badge summary row. The Phase 6 v2 contract is
+    // proven by the unique non-zero values rendered below.
     await expect(page.getByText("1800", { exact: true }).first()).toBeVisible();
     // DPS condi also renders non-zero
     await expect(page.getByText("650", { exact: true }).first()).toBeVisible();
@@ -145,7 +143,7 @@ test.describe("/fights/[id] (v0.7.1)", () => {
   test("renders the per-player section heading + the 'Pick a player' prompt on first load (no ?account= URL filter)", async ({
     page,
   }) => {
-    await page.goto("/fights/fixture-fight-001");
+    await page.goto("/fights/fixture-fight-001?tab=overview");
     // The per-player section heading is the 8th <h2> in the
     // OVERVIEW render and has a stable name. The mock-server
     // returns the canonical 2-player FightOut stub so the
@@ -172,7 +170,7 @@ test.describe("/fights/[id] (v0.7.1)", () => {
   test("selecting a player from the dropdown appends ?account=NEW_VALUE to the URL + reveals the loadout bar", async ({
     page,
   }) => {
-    await page.goto("/fights/fixture-fight-001");
+    await page.goto("/fights/fixture-fight-001?tab=overview");
     // The dropdown is pre-rendered with the 2 mock-server
     // inline-stub players. Click the dropdown open + select
     // ``TestAccount.1234`` (the known player in the inline
@@ -237,7 +235,7 @@ test.describe("/fights/[id] (v0.7.1)", () => {
   test("renders position heatmap canvas, controls, and legend on Overview tab", async ({
     page,
   }) => {
-    await page.goto("/fights/fixture-fight-001");
+    await page.goto("/fights/fixture-fight-001?tab=overview");
 
     // Scroll down to the Positions section.
     const positionsHeading = page.getByRole("heading", {
@@ -274,16 +272,20 @@ test.describe("/fights/[id] (v0.7.1)", () => {
   test("direct navigation to a ?account=UNKNOWN_VALUE surfaces the section-level 'Player ... not found in this fight' diagnostic", async ({
     page,
   }) => {
-    // Navigating directly to ``?account=UnknownAccount.0000``
-    // (a value NOT in the mock-server's agent list, NOT in
-    // the playerSkillsMatch handle) exercises the lenient
-    // contract: the page surfaces a SECTION-level diagnostic
-    // chimp (``player-skill-section-error``), not a page-level 404.
-    // The agents fetch resolves (mock-server inline stub
-    // returns the canonical 2-agent FightOut), but the
-    // agent.matched-the-account-name check fails.
+    // Explicit ``?tab=overview`` keeps the per-player section
+    // (Overview-only) mounted; without it the page would render
+    // the Readout tab by default and the section-error chimp
+    // would never be reachable. The URL also carries
+    // ``?account=UnknownAccount.0000`` -- a value NOT in the
+    // mock-server's agent list and NOT in the playerSkillsMatch
+    // handle. The agents fetch resolves (mock-server inline
+    // stub returns the canonical 2-agent FightOut), but the
+    // agent.matched-the-account-name check fails, exercising
+    // the lenient contract: the page surfaces a SECTION-level
+    // diagnostic chimp (``player-skill-section-error``), NOT a
+    // page-level 404.
     await page.goto(
-      "/fights/fixture-fight-001?account=UnknownAccount.0000",
+      "/fights/fixture-fight-001?tab=overview&account=UnknownAccount.0000",
     );
     await expect(
       page.locator('[data-testid="player-skill-section-error"]'),
