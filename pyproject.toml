@@ -65,7 +65,8 @@ dev = [
     "alembic>=1.13,<2",
     "minio>=7.2,<8",
     "python-multipart>=0.0.20,<1",
-    "cryptography>=43.0.1,<45",
+    "cryptography>=43.0.1,<49",  # v0.10.26 CI: pip-audit → crypt>=48
+
     "arq>=0.25,<1",
     "redis>=5.0,<8",
     "prometheus_client>=0.20,<1",
