@@ -577,8 +577,14 @@ gh repo edit --visibility public --accept-visibility-change-consequences
 # Step 7 — verify CI runs end-to-end with the secret resolved
 #    BEFORE applying the ruleset in step 6, so any CI failures
 #    surface without the ruleset in the way (iteration is cheaper):
-git commit --allow-empty -m "ci: smoke-test public CI pipeline
-Signed-off-by: Your Name <your-real-email@example.com>"
+# Use ``git commit -s`` (the **-s** flag) so git itself appends the
+# ``Signed-off-by:`` trailer from the ``user.name`` + ``user.email``
+# configured in step 6. This is the canonical DCO-compatible commit
+# pattern: avoids hand-typed trailers (which bash word-splits on
+# the embedded newline, producing a separate paragraph instead
+# of a true git trailer) and matches the ``-s`` pattern documented
+# at the top of this file.
+git commit --allow-empty -s -m "ci: smoke-test public CI pipeline"
 git push origin main
 #   All 6 jobs should now run on every push + PR, with SECRETS_KEK
 #   resolved from the repo secret (no ``YWFh...`` literal in the log).
