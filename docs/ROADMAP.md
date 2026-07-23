@@ -179,8 +179,12 @@ notes).
   (v0.9.1) covers push notifications via HMAC-signed HTTP callbacks.
   Any future GraphQL proposal must demonstrate a concrete user
   requirement that webhooks cannot satisfy. See `docs/adr/001-graphql-subscription-channel.md`.
-- **PNG / SVG export of the timeline** (CSV is already covered
-  by `CsvDownloadButton`).
+- ~~**PNG / SVG export of the timeline**~~ **SHIPPED v0.15.1** (CSV
+  is already covered by `CsvDownloadButton`). The v0.15.1 cycle added
+  `📐 SVG` + `📸 PNG` buttons inside `TimelineMiniChart`; SVG is a
+  direct ``XMLSerializer`` capture, PNG rasterises the same SVG onto a
+  hidden ``<canvas>`` at 2x scale. No new dependency. See CHANGELOG
+  ``[0.15.1]`` for the full diff + 3 vitest tests.
 
 ---
 

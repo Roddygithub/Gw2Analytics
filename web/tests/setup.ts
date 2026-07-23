@@ -43,6 +43,38 @@ beforeEach(() => {
 });
 
 /**
+ * jsdom does NOT implement ``URL.createObjectURL`` / ``URL.revokeObjectURL``
+ * (the Blob object-URL machinery is a browser-level feature the polyfill
+ * omits). Components that build transient download anchors
+ * (e.g. ``web/src/components/ReadoutTabClient.tsx``'s timeline SVG / PNG
+ * export) call ``URL.createObjectURL(blob)`` at click time, and the
+ * companion test in :file:`web/tests/components/ReadoutTabClient.test.tsx`
+ * needs to spy on the function.
+ *
+ * Without this stub, the production call throws ``TypeError: URL.createObjectURL
+ * is not a function`` on first render, and the test's ``vi.spyOn(URL, ...)
+ * call fails with ``createObjectURL does not exist``. We register minimal
+ * no-op shims so production code can call them and test code can spy on them.
+ * The shims return deterministic ``blob:`` URLs so the test can assert the
+ * href matches.
+ */
+if (typeof URL.createObjectURL !== "function") {
+  URL.createObjectURL = (() => {
+    let counter = 0;
+    return (obj: Blob | MediaSource): string => {
+      counter += 1;
+      return `blob:mock-${counter.toString(36)}`;
+    };
+  })();
+}
+if (typeof URL.revokeObjectURL !== "function") {
+  URL.revokeObjectURL = (): void => {
+    // no-op: the shim counter never needs cleanup because the URLs are
+    // generated lazily and discarded after the test.
+  };
+}
+
+/**
  * Simulate a cross-tab ``storage`` event. Use this in tests when
  * code under test listens to ``window.addEventListener("storage", ...)".
  * Same-document writes do not fire this event in real browsers.

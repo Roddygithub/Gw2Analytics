@@ -10,7 +10,7 @@
  *  4. TimelineMiniChart shows activity stats in activity mode
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
@@ -296,5 +296,98 @@ describe("TimelineMiniChart activity toggle", () => {
 
     // Default mode shows bucket count + duration
     expect(screen.getByText(/200 buckets/)).toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ *  Timeline SVG / PNG export tests
+ *
+ *  JSDOM does NOT implement ``HTMLCanvasElement.toBlob`` / ``Image``
+ *  (the PNG rasterisation path is browser-only), so the PNG test is
+ *  scoped to render-only assertions; the SVG path is fully exercised.
+ * ------------------------------------------------------------------ */
+
+describe("TimelineMiniChart export", () => {
+  let createObjectURLSpy: ReturnType<typeof vi.spyOn>;
+  let revokeObjectURLSpy: ReturnType<typeof vi.spyOn>;
+  let anchorClickSpy: ReturnType<typeof vi.spyOn>;
+  // Captured href + download from each ``<a>.click()`` call. The capture
+  // happens before the spy returns so the click array reflects the order
+  // in which the production code invoked the download.
+  let clicked: { href: string; download: string }[] = [];
+
+  beforeEach(() => {
+    clicked = [];
+    createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockImplementation(() => "blob:mock-timeline-export");
+    revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined);
+    // ``HTMLAnchorElement.prototype.click`` is the prototype method the
+    // transient download anchor invokes. ``vi.spyOn(obj, prop)`` on a
+    // prototype method returns a ``MockInstance`` that vitest
+    // auto-restores on ``vi.restoreAllMocks`` -- the prototype-level
+    // mutation is tracked in vitest's mock lifecycle, no global stashes
+    // needed.
+    anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clicked.push({ href: this.href, download: this.download });
+      });
+  });
+
+  afterEach(() => {
+    createObjectURLSpy.mockRestore();
+    revokeObjectURLSpy.mockRestore();
+    anchorClickSpy.mockRestore();
+  });
+
+  it("renders both PNG and SVG export buttons when events are present", async () => {
+    mockFetchReadout.mockResolvedValueOnce(makeReadout([makePlayer()]));
+    mockFetchEvents.mockResolvedValueOnce(makeEvents(5));
+
+    render(<ReadoutTabClient fightId="test-fight" />);
+    await waitFor(() => {
+      expect(screen.queryByText("Chargement")).toBeNull();
+    });
+
+    expect(screen.getByTestId("timeline-export-svg")).toBeInTheDocument();
+    expect(screen.getByTestId("timeline-export-png")).toBeInTheDocument();
+  });
+
+  it("does not render export buttons when there are no events", async () => {
+    mockFetchReadout.mockResolvedValueOnce(makeReadout([makePlayer()]));
+    // No events-> empty-state branch -> buttons should not appear.
+    mockFetchEvents.mockResolvedValueOnce({ event_windows: [] });
+
+    render(<ReadoutTabClient fightId="test-fight" />);
+    await waitFor(() => {
+      expect(screen.queryByText("Chargement")).toBeNull();
+    });
+
+    expect(screen.queryByTestId("timeline-export-svg")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("timeline-export-png")).not.toBeInTheDocument();
+  });
+
+  it("clicking the SVG button creates an object URL + triggers a download with correct mime", async () => {
+    mockFetchReadout.mockResolvedValueOnce(makeReadout([makePlayer()]));
+    mockFetchEvents.mockResolvedValueOnce(makeEvents(5));
+
+    render(<ReadoutTabClient fightId="test-fight" />);
+    await waitFor(() => {
+      expect(screen.queryByText("Chargement")).toBeNull();
+    });
+
+    fireEvent.click(screen.getByTestId("timeline-export-svg"));
+
+    expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
+    const blobArg = createObjectURLSpy.mock.calls[0]?.[0] as Blob | undefined;
+    expect(blobArg).toBeDefined();
+    expect(blobArg?.type).toBe("image/svg+xml;charset=utf-8");
+
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0]?.download).toBe("timeline.svg");
+    expect(clicked[0]?.href).toContain("blob:mock-timeline-export");
   });
 });

@@ -8,7 +8,7 @@
  *   - 4 native HTML tables (Damage, Heal, Boons, Defense)
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   fetchFightReadout,
@@ -79,6 +79,83 @@ const EMPTY_STYLE: React.CSSProperties = {
 
 const BAR_BG = "rgba(255,255,255,0.05)";
 const BAR_HEIGHT = 14;
+
+/* ------------------------------------------------------------------ *
+ *  Timeline SVG / PNG export helpers (pure, no React state)
+ *
+ *  No external dependencies: the SVG serialises to a string via the DOM
+ *  ``XMLSerializer``, the PNG path rasterises that string onto a hidden
+ *  ``<canvas>`` at 2x scale. The download is triggered by a transient
+ *  ``<a download>`` element appended to + removed from ``document.body``.
+ *
+ *  Trade-offs:
+ *    - ``var(--foreground)`` etc. are NOT used inside the timeline
+ *      ``<svg>`` -- all colors are inline ``fill`` / ``stroke`` attrs --
+ *      so the export preserves colors without needing a CSS-variable
+ *      resolver.
+ *    - The PNG background matches the chart's CSS background (light
+ *      off-white at 2% opacity) so the file isn't transparent when
+ *      opened in viewers that don't honour alpha.
+ *    - ``URL.revokeObjectURL`` runs on the next tick so the browser's
+ *      download manager has time to start the transfer before we tear
+ *      the URL down -- revoking synchronously can stall downloads on
+ *      Chromium.
+ * ------------------------------------------------------------------ */
+
+function serializeSvg(svg: SVGSVGElement): string {
+  // ``xmlns`` is needed when the SVG is opened standalone; the in-DOM
+  // tree doesn't strictly require it, but the rasteriser does.
+  if (!svg.getAttribute("xmlns")) {
+    svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  }
+  return new XMLSerializer().serializeToString(svg);
+}
+
+function renderSvgToPng(
+  svgString: string,
+  vbW: number,
+  vbH: number,
+  scale = 2,
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = vbW * scale;
+        canvas.height = vbH * scale;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("2d context unavailable"));
+        // Match ``<svg style="background: rgba(255,255,255,0.02)">``
+        ctx.fillStyle = "rgba(255,255,255,0.02)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("canvas.toBlob returned null"));
+        }, "image/png");
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = () => reject(new Error("SVG image load failed"));
+    img.src =
+      "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString);
+  });
+}
+
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revoke on the next tick so the browser's download manager starts the
+  // transfer before we tear the URL down. Otherwise the download may stall.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 /* ------------------------------------------------------------------ *
  *  Bar chart helpers
@@ -339,6 +416,27 @@ function getSortValue(p: PlayerReadoutOut, field: string): number {
 
 function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null }) {
   const [activityOnly, setActivityOnly] = useState(false);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  const handleExportSvg = useCallback(() => {
+    if (!svgRef.current) return;
+    const str = serializeSvg(svgRef.current);
+    triggerDownload(
+      new Blob([str], { type: "image/svg+xml;charset=utf-8" }),
+      "timeline.svg",
+    );
+  }, []);
+
+  const handleExportPng = useCallback(async () => {
+    if (!svgRef.current) return;
+    try {
+      const str = serializeSvg(svgRef.current);
+      const blob = await renderSvgToPng(str, W, H, 2);
+      triggerDownload(blob, "timeline.png");
+    } catch (e) {
+      console.error("Timeline PNG export failed", e);
+    }
+  }, []);
 
   if (!events || events.event_windows.length === 0) {
     return (
@@ -452,6 +550,44 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
         >
           {activityOnly ? "🔍 Activité seulement" : "Toute la durée"}
         </button>
+        <button
+          onClick={handleExportSvg}
+          title="Exporter la timeline en SVG (vectoriel)"
+          data-testid="timeline-export-svg"
+          style={{
+            padding: "1px 8px",
+            borderRadius: 10,
+            border: "1px solid var(--border)",
+            background: "transparent",
+            color: "var(--foreground)",
+            cursor: "pointer",
+            fontSize: 10,
+            fontFamily: "var(--font-geist-sans, sans-serif)",
+            opacity: 0.6,
+            transition: "all 0.15s",
+          }}
+        >
+          📐 SVG
+        </button>
+        <button
+          onClick={handleExportPng}
+          title="Exporter la timeline en PNG (image bitmap, ~2\u00d7 r\u00e9solution)"
+          data-testid="timeline-export-png"
+          style={{
+            padding: "1px 8px",
+            borderRadius: 10,
+            border: "1px solid var(--border)",
+            background: "transparent",
+            color: "var(--foreground)",
+            cursor: "pointer",
+            fontSize: 10,
+            fontFamily: "var(--font-geist-sans, sans-serif)",
+            opacity: 0.6,
+            transition: "all 0.15s",
+          }}
+        >
+          📸 PNG
+        </button>
         <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 11 }}>
           {activityOnly
             ? `${activeWindows.length} pics · ${activityPct.toFixed(1)}% de la durée`
@@ -460,6 +596,7 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
         </span>
       </div>
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         style={{
           width: "100%",

@@ -1,3 +1,37 @@
+## [0.15.1] - 2026-07-22
+
+### Added — Timeline SVG / PNG export
+- **PNG/SVG export buttons** on the timeline mini-chart (Analyse tab).
+  - 2 new buttons (`📐 SVG` + `📸 PNG`) sit next to the existing
+    activity-mode toggle inside `TimelineMiniChart`.
+  - **SVG export** serialises the live `<svg>` DOM tree via `XMLSerializer`
+    and downloads as `<fight>.svg` (vector, embeds in academic reports
+    + forum posts).
+  - **PNG export** rasterises the same SVG onto a hidden `<canvas>` at
+    `2x` scale and downloads as `<fight>.png` (~1600x200 px output for
+    high-DPI screens).
+  - Pure-browser-API: no new dependency, no server round-trip. The
+    download uses an in-DOM `<a download>` element appended / removed
+    inside the same click handler; ``URL.revokeObjectURL`` runs on the
+    next tick so the browser's download manager picks up the URL before
+    we tear it down (the Chromium pattern).
+- **Vitest unit coverage** (`ReadoutTabClient.test.tsx`): 3 export
+  tests verifying button presence on populated state, button absence on
+  empty state, and the SVG click triggering a Blob anchor download
+  with `image/svg+xml;charset=utf-8` mime + `"timeline.svg"` filename.
+- **jsdom URL polyfill** (`tests/setup.ts`): jsdom does NOT implement
+  ``URL.createObjectURL`` / ``URL.revokeObjectURL`` by default. The
+  polyfill provides minimal no-op shims so ``vi.spyOn(URL, ...)`` works
+  on the export test and so any future test that exercises blob URLs
+  doesn't have to re-install the polyfill. The shims return
+  deterministic ``blob:mock-<id>`` URLs so href assertions are stable.
+
+### Fixed
+- **Empty-timeline early return guards the export path**: when
+  ``events`` is null or the windows list is empty, the
+  ``EMPTY_STYLE`` div renders and the export buttons are absent — so
+  users cannot trigger a download from an empty chart.
+
 ## [0.15.0] - 2026-07-22
 
 ### Added — GlobalStatsBar, Timeline activity toggle, Heatmap in Analyse
