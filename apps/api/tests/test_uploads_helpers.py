@@ -104,4 +104,3 @@ def _post_npc_only_fight(suffix: str | None = None) -> str:
     assert resp.status_code == 201, resp.text
     upload_id = resp.json()["id"]
     return _wait_for_upload_completion(upload_id)
-

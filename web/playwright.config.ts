@@ -111,7 +111,7 @@ export default defineConfig({
       // standalone server returns 404 / wrong MIME types for
       // CSS and JS chunks.  Explicitly copy them after build.
       command: isCI
-        ? "pnpm run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && PORT=3000 node .next/standalone/server.js"
+        ? "pnpm run build && mkdir -p .next/standalone/.next && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && PORT=3000 node .next/standalone/server.js"
         : "pnpm run dev",
       port: 3000,
       // Always spawn fresh: a stale Next.js dev server on port
