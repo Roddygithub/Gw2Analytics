@@ -574,22 +574,28 @@ gh secret set SECRETS_KEK \
 #    cap). The flip is the moment CI is unblocked:
 gh repo edit --visibility public --accept-visibility-change-consequences
 
-# Step 7 — verify CI runs end-to-end with the secret resolved
-#    BEFORE applying the ruleset in step 6, so any CI failures
-#    surface without the ruleset in the way (iteration is cheaper):
-# Use ``git commit -s`` (the **-s** flag) so git itself appends the
-# ``Signed-off-by:`` trailer from the ``user.name`` + ``user.email``
-# configured in step 6. This is the canonical DCO-compatible commit
-# pattern: avoids hand-typed trailers (which bash word-splits on
-# the embedded newline, producing a separate paragraph instead
-# of a true git trailer) and matches the ``-s`` pattern documented
-# at the top of this file.
-git commit --allow-empty -s -m "ci: smoke-test public CI pipeline"
+# Step 6 — configure git sign-off locally (LOCAL repo config matches
+#    the DCO setup section at the top of this file). MUST run before
+#    step 7, otherwise ``git commit -s`` fails with "Please tell me
+#    who you are" on a fresh clone / CI runner.
+git config user.name "Your Name"
+git config user.email "your-real-email@example.com"
+
+# Step 7 — verify CI runs end-to-end with the secret resolved, BEFORE
+#    applying the ruleset in step 8, so any CI failures surface without
+#    the ruleset in the way (iteration is cheaper). Uses ``git commit -s``
+#    (the **-s** flag) so git itself appends the ``Signed-off-by:``
+#    trailer from the ``user.name`` + ``user.email`` configured in
+#    step 6 — the canonical DCO-compatible commit pattern (avoids
+#    hand-typed trailers that bash word-splits on the embedded
+#    newline) and matches the ``-s`` pattern documented at the top
+#    of this file.
+git commit --allow-empty -s -m "ci: smoke-test SECRETS_KEK secret resolution + 6-job public pipeline"
 git push origin main
 #   All 6 jobs should now run on every push + PR, with SECRETS_KEK
 #   resolved from the repo secret (no ``YWFh...`` literal in the log).
 
-# Step 6 — apply the branch-protection ruleset via the GitHub web UI:
+# Step 8 — apply the branch-protection ruleset via the GitHub web UI:
 #    Settings → Rules → Rulesets → New branch ruleset, target = main.
 #    Enable these rules:
 #      - Require linear history (no merge commits)
@@ -597,24 +603,20 @@ git push origin main
 #      - Block branch deletion
 #      - Require status checks: pick the CI workflow's 6 jobs
 #      - **Require contributors to sign off on web-based commits**  ← the
-#        GitHub-native DCO check; pairs with step 6b to turn the DCO
-#        model in this file into a hard requirement, not decorative
+#        GitHub-native DCO check for web-editor commits; pairs with
+#        the dco-action step below to make DCO enforceable for ALL
+#        commits (web + CLI / IDE), not just web-editor ones
 #
 #    **⚠ Caveat — the GitHub web-DCO toggle only covers commits
 #    authored via github.com's web editor.** For CLI / IDE commits
 #    (``git commit -s`` from outside the github.com editor), also
 #    wire a dedicated DCO check into ``.github/workflows/ci.yml``
-#    as a required status check:
-#
-#        - uses: suzuki-shunsuke/dco-action@v1
-#          with:
-#            require-latest-commit: true
-#
-#    Or install the ``probot/dco`` GitHub App on the repo. Either
-#    approach makes the DCO model enforceable for ALL commits,
-#    not just web-editor ones. Without this extra check, CLI-signed
-#    PRs slip through the web-DCO gate and ``-s`` sign-off becomes
-#    decorative again.
+#    as a required status check. The maintained actions are
+#    ``crazy-max/ghaction-dco@v1`` or the older
+#    ``suzuki-shunsuke/dco-action@v1``; either approach makes the
+#    DCO model enforceable for ALL commits, not just web-editor
+#    ones. Without this extra check, CLI-signed PRs slip through
+#    the web-DCO gate and ``-s`` sign-off becomes decorative again.
 #
 #    (The ``gh ruleset`` CLI to apply rulesets programmatically is a
 #    GitHub-Enterprise feature; on the free plan the UI is the only
@@ -624,10 +626,11 @@ git push origin main
 #    ``required_pull_request_reviews`` / ``required_signatures`` /
 #    ``linear_history`` — but not for the new Rulesets UI.)
 
-# Step 6b — every developer (including the owner) configures git sign-off
-#    locally so ``git commit -s`` auto-appends ``Signed-off-by:``:
-git config --global user.name "Your Name"
-git config --global user.email "your-real-email@example.com"
+# (Step 6b git-config block was moved up + renamed Step 6 to
+#  document the right execution order: git config MUST precede
+#  step 7's smoke-test commit; the ``--global`` flag was dropped
+#  in favour of LOCAL repo config to match the DCO setup section
+#  earlier in this file.)
 ```
 
 ### If the repo flips back to private + the billing block returns
