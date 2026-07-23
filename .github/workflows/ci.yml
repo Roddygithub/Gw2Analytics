@@ -136,6 +136,22 @@ jobs:
 
       - uses: ./.github/actions/setup-python
 
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=gw2analytics \
+            -e MINIO_ROOT_PASSWORD=gw2analytics-secret \
+            minio/minio:latest server /data --console-address :9001
+          echo "Waiting for MinIO to be ready..."
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1; then
+              echo "MinIO is ready!"
+              break
+            fi
+            sleep 2
+          done
+
       - name: Run database migrations
         working-directory: apps/api
         run: uv run alembic upgrade head
