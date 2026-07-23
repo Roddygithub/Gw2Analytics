@@ -529,28 +529,76 @@ private-mode workarounds is commit ``8a1bfe4``.
 
 ### Public-flip cheatsheet (what is about to happen)
 
-If you're flipping this repo to public, run:
+**⚠ Critical: do steps 1-4 BEFORE the visibility flip in step 5.**
+The 4 hardcoded ``SECRETS_KEK: "YWFhYWFh..."`` env entries in
+``.github/workflows/ci.yml`` must be swapped for ``${{ secrets.SECRETS_KEK }}``
++ a real repo secret **before** re-enabling the ``push:`` trigger
+— otherwise the deterministic ``aaaa...`` test fixture lands in
+the public CI log on the first push, which is ugly first-impression
+hygiene.
 
 ```bash
-# 1. Confirm license / package metadata / CONTRIBUTING / NOTICE
-#    / README / docker-compose are all consistent (this commit +
-#    3 prior commits). Spot-check:
+# Step 1 — sanity-check license / metadata / file consistency.
+#    (no phantom-suffix text should be in tracked files)
 git log --oneline origin/main -10
-gh api repos/:owner/:repo/contents/LICENSE -q '.content' | base64 -d | head -3
-gh api repos/:owner/:repo/license  # = "Other (Proprietary -- All rights reserved)" expected
+gh api repos/:owner/:repo/license   # expect "Other (Proprietary -- All rights reserved)"
+grep -nE 'PlaceholderEnd|Old1End|Old2End|DeferredInTextComment|DepartureComment' \
+    apps/api/pyproject.toml libs/gw2_analytics/pyproject.toml \
+    pyproject.toml CONTRIBUTING.md      # expect NO output
 
-# 2. Flip the visibility:
+# Step 2 — locate the hardcoded test KEK literals that step 4 will replace.
+grep -nE 'SECRETS_KEK.*YWFh' .github/workflows/ci.yml
+#   Expect 4 matches (one per job env: dict in lint-python, test-python,
+#   lint-web, arq-integration).
+
+# Step 3 — set the SECRETS_KEK repo secret FIRST so step 4 env refs
+#    resolve on the first push. Generate a fresh Fernet key + store it.
+gh secret set SECRETS_KEK \
+    --body "$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+#   PASTE THE OUTPUT into your local .env file too. This is the SOLE
+#   key for ALL webhook-subscription ciphertexts — if lost, all rows
+#   become unreadable per the v0.10.0 plan 031 KEK flow.
+
+# Step 4 — edit .github/workflows/ci.yml:
+#    a) replace the 4 hardcoded ``SECRETS_KEK: "YWFhYWFhYWFh..."`` entries
+#       with ``SECRETS_KEK: ${{ secrets.SECRETS_KEK }}``
+#    b) under the ``on:`` block, replace ``workflow_dispatch:`` with:
+#         push:
+#           branches: [main]
+#         pull_request:
+#           branches: [main]
+#         workflow_dispatch:
+
+# Step 5 — flip the visibility NOW (push triggers are back, secret is set,
+#    but they cannot fire while the repo is private on the spending-limit
+#    cap). The flip is the moment CI is unblocked:
 gh repo edit --visibility public --accept-visibility-change-consequences
 
-# 3. After the flip completes, set up the secrets + re-enable CI:
-gh secret set SECRETS_KEK --body "$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
-# Then in .github/workflows/ci.yml, replace the 4 hardcoded
-# ``SECRETS_KEK: "YWFhYWFh..."`` env entries with
-# ``SECRETS_KEK: ${{ secrets.SECRETS_KEK }}`` and re-add the
-# ``push:`` + ``pull_request:`` triggers under ``on:``.
+# Step 6 — apply the branch-protection ruleset via the GitHub web UI:
+#    Settings → Rules → Rulesets → New branch ruleset, target = main.
+#    Enable these rules:
+#      - Require linear history (no merge commits)
+#      - Block force pushes (admin included)
+#      - Block branch deletion
+#      - Require status checks: pick the CI workflow's 6 jobs
+#      - **Require contributors to sign off on web-based commits**  ← the
+#        GitHub-native DCO check; pairs with step 6b to turn the DCO
+#        model in this file into a hard requirement, not decorative
+#
+#    (The ``gh ruleset`` CLI to apply rulesets programmatically is a
+#    GitHub-Enterprise feature; on the free plan the UI is the only path.)
 
-# 4. Configure the branch-protection ruleset per the table at the
-#    top of this file (Settings → Rules → Rulesets → New ruleset).
+# Step 6b — every developer (including the owner) configures git sign-off
+#    locally so ``git commit -s`` auto-appends ``Signed-off-by:``:
+git config --global user.name "Your Name"
+git config --global user.email "your-real-email@example.com"
+
+# Step 7 — verify CI runs end-to-end with the secret resolved.
+git commit --allow-empty -m "ci: smoke-test public CI pipeline
+Signed-off-by: Your Name <your-real-email@example.com>"
+git push origin main
+#   All 6 jobs should now run on every push + PR, with SECRETS_KEK
+#   resolved from the repo secret (no ``YWFh...`` literal in the log).
 ```
 
 ### If the repo flips back to private + the billing block returns
