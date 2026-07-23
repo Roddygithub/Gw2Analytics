@@ -83,22 +83,27 @@ test.describe("/fights/[id] (v0.7.1)", () => {
   test("readout tab renders Phase 6 v2 columns with non-zero data", async ({ page }) => {
     await page.goto("/fights/fixture-fight-001?tab=readout");
 
-    // The 4 per-aspect section headings (these match the
-    // French headings actually rendered by ``ReadoutTabClient``:
-    // the readout tab was localised alongside the rest of the
-    // app, so the English regexes that were here previously
-    // silently stopped matching once the headings switched
-    // to ``Dégâts`` / ``Soins`` / ``Boons`` /
-    // ``Défense & Positionnement``).
+    // v0.12.3+ readout-tab rebuild: the 4 per-aspect French
+    // headings are mounted under their own sub-tab buttons
+    // (Dégâts / Soins / Boons / Défense). Click each sub-tab
+    // before asserting its heading so the panel mounts and
+    // the corresponding column data (dps_power, barrier_total,
+    // blocks, etc.) becomes visible. The default sub-tab is
+    // Dégâts so the first click is redundant but explicit for
+    // spec-isolation.
+    await page.getByRole("button", { name: /Dégâts/i }).click();
     await expect(
       page.getByRole("heading", { name: /Dégâts/i }),
     ).toBeVisible();
+    await page.getByRole("button", { name: /Soins/i }).click();
     await expect(
       page.getByRole("heading", { name: /Soins/i }),
     ).toBeVisible();
+    await page.getByRole("button", { name: /Boons/i }).click();
     await expect(
       page.getByRole("heading", { name: /Boons/i }),
     ).toBeVisible();
+    await page.getByRole("button", { name: /Défense/i }).click();
     await expect(
       page.getByRole("heading", { name: /Défense/i }),
     ).toBeVisible();
@@ -185,11 +190,12 @@ test.describe("/fights/[id] (v0.7.1)", () => {
       .locator('[data-testid="player-skill-filter"]')
       .selectOption("TestAccount.1234");
     // The URL gains the ``?account=`` query param with the
-    // selected value. The fight-id is appended for
-    // shareability (analyst can bookmark the per-player view
-    // for a specific account).
+    // selected value. Subsequent query params may already be
+    // present from the URL we navigated to
+    // (``?tab=overview&``); assert the account param is
+    // present anywhere in the querystring.
     await expect(page).toHaveURL(
-      /\/fights\/fixture-fight-001[?&]account=TestAccount\.1234/,
+      /\/fights\/fixture-fight-001.*[?&]account=TestAccount\.1234/,
     );
     // The loadout bar testid ``player-skill-loadout`` becomes
     // visible once the per-player skill fetch resolves.
@@ -210,18 +216,22 @@ test.describe("/fights/[id] (v0.7.1)", () => {
   test("readout tab renders Plan 173 uptime and presence columns", async ({ page }) => {
     await page.goto("/fights/fixture-fight-001?tab=readout");
 
-    // The 4 per-aspect section headings (localised in
-    // ``ReadoutTabClient``; see the same note in the
-    // ``readout tab renders Phase 6 v2`` test for context).
+    // v0.12.3+ readout-tab rebuild: same sub-tab button
+    // navigation pattern as the Phase 6 v2 test (see comment
+    // in that test for the full rationale).
+    await page.getByRole("button", { name: /Dégâts/i }).click();
     await expect(
       page.getByRole("heading", { name: /Dégâts/i }),
     ).toBeVisible();
+    await page.getByRole("button", { name: /Soins/i }).click();
     await expect(
       page.getByRole("heading", { name: /Soins/i }),
     ).toBeVisible();
+    await page.getByRole("button", { name: /Boons/i }).click();
     await expect(
       page.getByRole("heading", { name: /Boons/i }),
     ).toBeVisible();
+    await page.getByRole("button", { name: /Défense/i }).click();
     await expect(
       page.getByRole("heading", { name: /Défense/i }),
     ).toBeVisible();
@@ -289,7 +299,7 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     const table = gridSection.locator("table");
     await expect(table).toBeVisible();
     await expect(table.locator("tbody tr")).toHaveCount(2);
-    await expect(gridSection.locator("img").first()).toBeVisible();
+    await expect(gridSection.locator("svg").first()).toBeVisible();
   });
 
   test("direct navigation to a ?account=UNKNOWN_VALUE surfaces the section-level 'Player ... not found in this fight' diagnostic", async ({

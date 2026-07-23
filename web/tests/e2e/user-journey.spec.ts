@@ -135,12 +135,26 @@ test.describe("full analyst user journey", () => {
 
     // Switch to the Readout tab to exercise the per-player roll-up.
     await page.getByTestId("page-tab-readout").click();
-    await expect(page.getByText("Combat readout loaded")).toBeVisible();
+    // v0.12.3+ removed the standalone "Combat readout loaded"
+    // status banner (the page-tab readout now starts rendering
+    // straight from the per-aspect sub-tabs; the page-level
+    // banner was deprecated by the readiness-banner refactor).
+    // The duration-strip assertion below stays (renders under
+    // whichever sub-tab is active).
     await expect(page.getByText(/duration \d+(?:\.\d+)?\s+s/)).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Damage" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Heal" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Boons" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Defense" })).toBeVisible();
+    // The 4 per-aspect section headings render under their
+    // own localisable sub-tab buttons (Dégâts / Soins / Boons
+    // / Défense & Positionnement); default is Dégâts.
+    // Click each sub-tab before asserting its heading so the
+    // panel mounts and the heading appears.
+    await page.getByRole("button", { name: /Dégâts/i }).click();
+    await expect(page.getByRole("heading", { name: /Dégâts/i })).toBeVisible();
+    await page.getByRole("button", { name: /Soins/i }).click();
+    await expect(page.getByRole("heading", { name: /Soins/i })).toBeVisible();
+    await page.getByRole("button", { name: /Boons/i }).click();
+    await expect(page.getByRole("heading", { name: /Boons/i })).toBeVisible();
+    await page.getByRole("button", { name: /Défense/i }).click();
+    await expect(page.getByRole("heading", { name: /Défense/i })).toBeVisible();
     await screenshot(page, "05b-fight-detail-readout");
 
     // -----------------------------------------------------------------
