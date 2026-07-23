@@ -531,19 +531,20 @@ jobs:
   # ---------------------------------------------------------------------------
   # DCO sign-off check.
   # PR-only. GitHub's web-DCO toggle (separate repo setting) covers
-  # github.com web-editor commits natively; this action-based check
-  # covers CLI/IDE commits via ``git commit -s`` per the DCO model
+  # github.com web-editor commits natively; this inline check covers
+  # CLI/IDE commits via ``git commit -s`` per the DCO model
   # documented in CONTRIBUTING.md.
   #
+  # Implemented as plain bash (``git log`` + ``grep``) so there is no
+  # external action dependency — the previous ``crazy-max/ghaction-dco@v1``
+  # was removed upstream, breaking the check silently.
+  #
   # NOT currently added to the branch-protection ``required_status_checks``
-  # rule -- we ship it informational-only first. Bump to hard-required
+  # rule — we ship it informational-only first. Bump to hard-required
   # after one real Contributor-signed PR has demonstrated the workflow
   # end-to-end. The job will FAIL (not error) on unsigned commits, so the
   # first failing PR will surface clearly in the Actions UI without
   # blocking the merge until we wire it into required_status_checks.
-  #
-  # Action: crazy-max/ghaction-dco@v1 (maintained fork of suzuki-shunsuke's
-  # action, used per CONTRIBUTING.md cheatsheet step 8).
   # ---------------------------------------------------------------------------
   dco-check:
     name: DCO check
@@ -553,14 +554,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Full history needed so ``git log <base>..<head>`` resolves.
           fetch-depth: 0
           persist-credentials: false
 
+      # Inline DCO check: iterates every commit in the PR range and
+      # verifies a ``Signed-off-by:`` trailer exists in its body.
+      # Avoids any third-party action dependency.
       - name: Run DCO check
-        uses: crazy-max/ghaction-dco@v1
-        with:
-          # Override the default ``HEAD~1..HEAD`` range so
-          # first-commit-on-branch PRs don't trip on a non-existent
-          # ``HEAD~1``, and so all commits in the PR (not just the
-          # latest) are validated.
-          args: --range ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set +e
+          bad=0
+          for commit in $(git log --format='%H' "${BASE_SHA}..${HEAD_SHA}"); do
+            if ! git log --format='%B' -1 "$commit" | grep -qi 'Signed-off-by:'; then
+              echo "::error::Missing Signed-off-by: trailer in commit ${commit}"
+              bad=$((bad+1))
+            fi
+          done
+          if [ $bad -gt 0 ]; then
+            echo "::warning::${bad} commit(s) missing Signed-off-by: trailer — DCO check FAILED"
+            exit 1
+          fi
+          echo "All commits have a Signed-off-by: trailer — DCO check PASSED"
