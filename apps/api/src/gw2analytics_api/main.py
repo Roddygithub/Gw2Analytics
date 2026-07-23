@@ -269,7 +269,7 @@ app.state.limiter = limiter
 # slowapi's _rate_limit_exceeded_handler accepts RateLimitExceeded
 # (a subclass of Exception) but Starlette's type signature expects
 # the wider Exception type — this is a safe narrowing in practice.
-app.add_exception_handler(429, _rate_limit_exceeded_handler)
+app.add_exception_handler(429, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 app.add_middleware(SlowAPIMiddleware)
 
 
