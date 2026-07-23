@@ -108,7 +108,7 @@ dependencies, at the cost of two extra shell invocations per iteration
   database schema -- only the OpenAPI surface from `apps/api`.
 - Each component evolves independently (`pyproject.toml` per lib/app).
 
-## CI spending-limit workaround
+## CI spending-limit
 
 The `.github/workflows/ci.yml` pipeline relies on GitHub-hosted
 **ubuntu-latest** runners, which are billed against the repository's
@@ -117,13 +117,14 @@ where the spending limit is set to `0` (the default), every job
 **fast-fails at the runner-spin-up step** with a cryptic
 ``spending limit...`` error before any real CI step ever runs.
 
-Workaround (currently in effect): the repository is set to
-**`visibility: public`**. Public repositories receive unlimited GitHub
-Actions minutes for Linux runners, so all 6 ``ci.yml`` jobs
-(``lint-python``, ``test-python``, ``lint-web``,
-``playwright-chromium``, ``playwright-visual-regression``,
-``arq-integration``) run in full instead of being throttled at the
-spend gate.
+History note (2026-07-22): the repository was temporarily switched to
+``visibility: public`` (which receives unlimited Linux runner minutes)
+to unblock CI while a billing change was in flight. It has since been
+reverted to ``visibility: private``; the unblock mechanism from now on
+is expected to come from one of the operator-side options below, not
+from visibility. If CI starts failing again with
+``spending limit...`` on a push to ``main`` or a PR, apply one of the
+three options in the next subsection, do not re-flip visibility.
 
 If you decide to revert the visibility to private:
 
