@@ -109,6 +109,11 @@ test.describe("full analyst user journey", () => {
     await expect(fightLink).toBeVisible();
     await fightLink.click();
     await expect(page).toHaveURL(/\/fights\/fixture-fight-001/);
+    // v0.10.17+ default tab is "readout" (Analyse); the
+    // ``Per-target damage`` heading below is rendered only in
+    // the Overview tab content, so explicitly navigate to it
+    // after the link click.
+    await page.goto("/fights/fixture-fight-001?tab=overview");
 
     // -----------------------------------------------------------------
     // 3. Fight detail page

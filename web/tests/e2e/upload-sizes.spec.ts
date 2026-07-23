@@ -13,6 +13,7 @@
  * The mock server returns a deterministic stub regardless of content,
  * so this tests the client-side UI pipeline, not the server parse.
  */
+import { existsSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 import { join } from "node:path";
 
@@ -53,7 +54,19 @@ test.describe("upload multi-size", () => {
     const pageErrors: string[] = [];
     page.on("pageerror", (e) => pageErrors.push(e.message));
 
-    for (const fileSpec of FILES) {
+    // CI / clean laptops do NOT have the developer's local
+    // ``/home/roddy/Projects/WvW/WvW (1)`` directory mounted.
+    // The test is gated on at least one of the LOCAL_VWV_DIR
+    // files being present; otherwise every step is skipped
+    // (so the spec stays green on CI without losing local
+    // coverage when the dev has the real .zevtc files).
+    const presentFiles = FILES.filter((f) => existsSync(f.path));
+    test.skip(
+      presentFiles.length === 0,
+      "no local .zevtc files available at ${WVW_DIR} -- skipping multi-size upload smoke test (see web/e2e/README.md)",
+    );
+
+    for (const fileSpec of presentFiles) {
       await test.step(`upload ${fileSpec.description}`, async () => {
         await page.goto("/upload");
         await expect(

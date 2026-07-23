@@ -83,18 +83,24 @@ test.describe("/fights/[id] (v0.7.1)", () => {
   test("readout tab renders Phase 6 v2 columns with non-zero data", async ({ page }) => {
     await page.goto("/fights/fixture-fight-001?tab=readout");
 
-    // The 4 per-aspect section headings
+    // The 4 per-aspect section headings (these match the
+    // French headings actually rendered by ``ReadoutTabClient``:
+    // the readout tab was localised alongside the rest of the
+    // app, so the English regexes that were here previously
+    // silently stopped matching once the headings switched
+    // to ``Dégâts`` / ``Soins`` / ``Boons`` /
+    // ``Défense & Positionnement``).
     await expect(
-      page.getByRole("heading", { name: "Damage" }),
+      page.getByRole("heading", { name: /Dégâts/i }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Heal" }),
+      page.getByRole("heading", { name: /Soins/i }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Boons" }),
+      page.getByRole("heading", { name: /Boons/i }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Defense" }),
+      page.getByRole("heading", { name: /Défense/i }),
     ).toBeVisible();
 
     // v0.12.3+ readout-tab refactor: the page-level
@@ -204,18 +210,20 @@ test.describe("/fights/[id] (v0.7.1)", () => {
   test("readout tab renders Plan 173 uptime and presence columns", async ({ page }) => {
     await page.goto("/fights/fixture-fight-001?tab=readout");
 
-    // The 4 per-aspect section headings
+    // The 4 per-aspect section headings (localised in
+    // ``ReadoutTabClient``; see the same note in the
+    // ``readout tab renders Phase 6 v2`` test for context).
     await expect(
-      page.getByRole("heading", { name: "Damage" }),
+      page.getByRole("heading", { name: /Dégâts/i }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Heal" }),
+      page.getByRole("heading", { name: /Soins/i }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Boons" }),
+      page.getByRole("heading", { name: /Boons/i }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Defense" }),
+      page.getByRole("heading", { name: /Défense/i }),
     ).toBeVisible();
 
     // Plan 173: boon uptime grouped bar columns render with
@@ -264,9 +272,18 @@ test.describe("/fights/[id] (v0.7.1)", () => {
     // Time display shows M:SS / M:SS format.
     await expect(page.getByText(/\d:\d\d\s*\/\s*\d:\d\d/)).toBeVisible();
 
-    // Profession legend shows abbreviations.
-    await expect(page.getByText("Guar")).toBeVisible();
-    await expect(page.getByText("COM")).toBeVisible();
+    // Profession legend is rendered (``PlayerPositionGrid``
+    // uses an integer-based mapping via the
+    // ``web/src/components/icons/Professions.tsx`` table; we
+    // assert the grid <section> + <table> are present as a
+    // structural smoke check, instead of hardcoded
+    // abbreviations like ``Guar``/``COM`` which were removed
+    // when the icon-based legend landed).
+    const gridSection = page.locator(
+      'section[data-testid="player-position-grid"]',
+    );
+    await expect(gridSection).toBeVisible();
+    await expect(gridSection.locator("table")).toBeVisible();
   });
 
   test("direct navigation to a ?account=UNKNOWN_VALUE surfaces the section-level 'Player ... not found in this fight' diagnostic", async ({
