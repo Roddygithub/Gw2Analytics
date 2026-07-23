@@ -169,8 +169,8 @@ jobs:
       - name: Upload coverage to Codecov
         # Only on main (PRs don't have the CODECOV_TOKEN secret).
         # Uses codecov-action@v5 which gracefully skips upload when
-        # no token is available (e.g. on PRs from forks).
-        if: github.ref == 'refs/heads/main'          uses: codecov/codecov-action@v4
+        # no token is available (e.g. on PRs from forks).          if: github.ref == 'refs/heads/main'
+          uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
@@ -237,8 +237,8 @@ jobs:
         working-directory: web
         run: pnpm exec vitest run --coverage --reporter=verbose
 
-      - name: Upload vitest coverage to Codecov
-        if: github.ref == 'refs/heads/main'          uses: codecov/codecov-action@v4
+      - name: Upload vitest coverage to Codecov          if: github.ref == 'refs/heads/main'
+          uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: web/coverage/lcov.info
