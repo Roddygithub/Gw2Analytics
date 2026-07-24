@@ -309,6 +309,16 @@ test.describe("visual regression (v0.8.9 plan/003)", () => {
       );
       await page.screenshot({ path: tempPath, fullPage: true });
 
+      // Update-mode: copy the fresh capture to the baseline
+      // dir when UPDATE_BASELINES=1 is set (regenerate baselines
+      // from the same rendering pipeline that the test uses).
+      if (process.env.UPDATE_BASELINES === "1") {
+        const baselinePath = join(BASELINE_DIR, baseline);
+        await fs.copyFile(tempPath, baselinePath);
+        // eslint-disable-next-line no-console
+        console.log(`updated baseline: ${baselinePath}`);
+      }
+
       // Read the checked-in baseline + the fresh capture.
       const baselinePath = join(BASELINE_DIR, baseline);
       const [baselineBytes, freshBytes] = await Promise.all([
