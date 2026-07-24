@@ -55,20 +55,41 @@ jobs:
       - name: Sync workspace
         run: uv sync --frozen
 
+      - name: Sync workspace
+        run: uv sync --frozen
+
       - name: Upgrade to head
         run: uv run alembic upgrade head
         working-directory: apps/api
         env:
           DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics
+          DATABASE_URL: postgresql+psycopg://gw2:gw2@localhost:5432/gw2analytics
+          S3_ENDPOINT: localhost:9000
+          S3_ACCESS_KEY: gw2analytics
+          S3_SECRET_KEY: gw2analytics-secret
+          S3_BUCKET: gw2analytics
+          SECRETS_KEK: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
 
       - name: Downgrade one step
         run: uv run alembic downgrade -1
         working-directory: apps/api
         env:
           DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics
+          DATABASE_URL: postgresql+psycopg://gw2:gw2@localhost:5432/gw2analytics
+          S3_ENDPOINT: localhost:9000
+          S3_ACCESS_KEY: gw2analytics
+          S3_SECRET_KEY: gw2analytics-secret
+          S3_BUCKET: gw2analytics
+          SECRETS_KEK: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
 
       - name: Re-upgrade to head (round-trip complete)
         run: uv run alembic upgrade head
         working-directory: apps/api
         env:
           DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics
+          DATABASE_URL: postgresql+psycopg://gw2:gw2@localhost:5432/gw2analytics
+          S3_ENDPOINT: localhost:9000
+          S3_ACCESS_KEY: gw2analytics
+          S3_SECRET_KEY: gw2analytics-secret
+          S3_BUCKET: gw2analytics
+          SECRETS_KEK: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
