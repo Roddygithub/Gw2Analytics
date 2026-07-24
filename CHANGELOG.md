@@ -1,3 +1,69 @@
+## [Unreleased]
+
+### Added -- Webhook subscriptions CRUD UI (PR #69) + API hardening (PR #68)
+- **New ``/webhooks`` management page** (``web/src/app/webhooks/page.tsx``)
+  renders a full subscription lifecycle alongside the existing DLQ surface:
+  the ``WebhookSubscriptionsGrid`` (AG Grid, id/url/description/filter/created_at
+  columns + per-row ``Revoke`` action) and a ``CreateWebhookPanel``
+  (3-phase state machine: closed → form → one-shot secret reveal with
+  a mandatory acknowledge-before-Done guard, modelled on Stripe / GitHub).
+- **New ``CreateWebhookPanel`` 3-phase state machine**: closed →
+  form → reveal. The reveal phase surfaces the one-shot plaintext
+  ``secret`` returned by ``POST /api/v1/webhooks`` (Fernet envelope
+  encryption-at-rest for every later fetch), with copy-to-clipboard +
+  a ``I have securely stored this secret.`` acknowledgement gate before
+  ``Done`` (which calls ``router.refresh()`` so the new row appears in
+  the grid).
+- **New ``DEFAULT_WEBHOOK_FILTER`` shared constant** exporting
+  ``{ kind: "upload_completed" }`` from ``web/src/lib/api/webhooks.ts``
+  -- mirrors the Pydantic closed-set on the backend so callers (form
+  + third-party integrations) automatically produce a backend-acceptable
+  payload, closing the prod-bug "leave-empty-filter → 422" gap.
+- **New network-boundary tests** (``web/tests/api/webhooks.test.ts``):
+  6 ``vi.stubGlobal('fetch', ...)`` cases asserting the parsed JSON
+  body of ``POST /api/v1/webhooks`` carries ``filter: { kind:
+  upload_completed }`` when the caller omits or passes an empty filter,
+  that the inverse pattern (caller-supplied filter) is honoured, that
+  ``fetchWebhookSubscriptions`` forwards ``limit`` + ``offset`` as query
+  params, that ``revokeWebhook`` sends ``DELETE`` to the canonicalised
+  URL, and that 4xx upstream bodies propagate via ``ApiError``.
+- **Global header nav expansion** (``web/src/app/layout.tsx``): the
+  pre-PR-69 nav exposed only ``Players`` + ``Compare``. PR-69 adds
+  ``/webhooks`` + ``/account`` + ``/upload`` so every primary
+  analyst surface is reachable from any other page.
+
+### Changed -- API hardening (PR #68)
+- **DB session lifecycle**: ``get_session`` (``apps/api/src/gw2analytics_api/database.py``)
+  now commits on successful yield and rolls back on exception. Route
+  handlers no longer need to call ``db.commit()`` for their writes;
+  the canonical 5xx path rolls back automatically.
+- **N+1 on ``GET /fights``**: ``selectinload(OrmFight.agents, OrmFight.skills)``
+  eagerly fetches the per-fight agents + skills alongside the trimmed
+  page, so a 50-fight list with 5 agents/fight stops issuing 51
+  round-trips.
+- **Pagination on ``GET /webhooks``**: ``limit`` (1-1000) +
+  ``offset`` (>= 0) query parameters, mirroring the existing
+  ``GET /fights`` pattern.
+
+### Fixed
+- **a11y warning on CreateWebhookPanel**: each of the 3 form inputs
+  (URL, description, filter) carries a ``name="..."`` attribute so
+  Chrome devtools no longer surfaces "A form field element should
+  have an id or name attribute". ``aria-describedby`` continues to
+  anchor the URL field's help text; the form's tab order remains
+  unchanged.
+
+### Changed (docs + repo hygiene)
+- **CONTRIBUTING.md**: added a §"Branch cleanup after merge"
+  subsection documenting the GitHub UI delete button, the
+  ``git push origin --delete <branch>`` CLI path, and the
+  one-sweep cleanup snippet for accumulating dep-bumps + feature
+  branches.
+- **.github/dependabot.yml**: header comment now references
+  the GitHub repo setting "Automatically delete head branches"
+  (Settings → General → Pull Requests) which is the canonical
+  way to stop dependabot branches from accumulating per PR.
+
 ## [0.16.0] - 2026-07-24
 
 ### Added — Full-stack refactoring: Phases 1-7 complete

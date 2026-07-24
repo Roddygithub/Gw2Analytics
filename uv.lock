@@ -927,7 +927,7 @@ dev = []
 
 [[package]]
 name = "gw2analytics-api"
-version = "0.10.25"
+version = "0.10.26"
 source = { editable = "apps/api" }
 dependencies = [
     { name = "alembic" },

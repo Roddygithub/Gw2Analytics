@@ -493,6 +493,36 @@ the formatter for any file in the index. If it auto-fixes something,
 add the fix to the **same commit** (not a follow-up) to keep each commit
 self-contained.
 
+### Branch cleanup after merge
+
+Once a PR is squash-merged into `main`, **delete the feature branch**
+to keep the branch list scannable. Two paths:
+
+1. **GitHub UI** (one click): PR page → scroll to the bottom →
+   "Delete branch" button (appears immediately after the merge).
+2. **CLI**: `git push origin --delete <branch-name>` from any local repo.
+
+Dependabot-created branches (the ``dependabot/npm_and_yarn/...`` and
+``dependabot/uv/...`` ones) are auto-deleted after merge **only** if
+the repository setting **Settings → General → Pull Requests →
+"Automatically delete head branches"** is enabled. The setting lives at
+the repo level, not in ``.github/dependabot.yml`` -- verify it is on
+after opening the repo (otherwise dependabot branches accumulate one
+per dep-update PR). Stale feature branches from past merges can be
+pruned in a single sweep with:
+
+```bash
+# Lists + deletes every merged-into-main remote branch (read-only first):
+git branch -r --merged main | grep -vE '^\s*origin/(main|HEAD)' | tee /tmp/merged-branches.txt
+# Sanity-check the list, then delete (uncomment to actually run):
+git push origin --delete $(awk '{$1=$1;print}' /tmp/merged-branches.txt | sed 's|^origin/||')
+```
+
+The ``grep -vE`` excludes ``main`` + ``HEAD`` so a typo doesn't nuke
+the canonical branch. The same script works for cleaning up
+``refactor/*`` / ``fix/*`` / ``feat/*`` branches whose PRs were
+merged in past sprints.
+
 ## Tagging
 
 We use **semver with a scope suffix**:

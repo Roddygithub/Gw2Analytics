@@ -7,6 +7,7 @@ import { AgGridReact } from "ag-grid-react";
 import { type ColDef, type ICellRendererParams } from "ag-grid-community";
 import type { WebhookDlqRow } from "@/lib/api";
 import { replayDlq } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 
 import { appGridTheme } from "./ag-grid-setup";
 import styles from "./WebhookDlqGrid.module.css";
@@ -15,14 +16,6 @@ const GRID_CONTAINER_STYLE: React.CSSProperties = {
   height: 600,
   width: "100%",
 };
-
-function formatDate(iso: string | null): string {
-  if (!iso) {
-    return "—";
-  }
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
-}
 
 export function WebhookDlqGrid({ rows }: { rows: WebhookDlqRow[] }) {
   const router = useRouter();
@@ -65,7 +58,7 @@ export function WebhookDlqGrid({ rows }: { rows: WebhookDlqRow[] }) {
         sortable: true,
         filter: true,
         minWidth: 180,
-        valueFormatter: (p) => formatDate(p.value),
+        valueFormatter: (p) => formatDateTime(p.value),
       },
       {
         headerName: "Actions",

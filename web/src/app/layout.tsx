@@ -163,18 +163,22 @@ export default function RootLayout({
               GW2<span style={{ color: "var(--accent)" }}>Analytics</span>
             </span>
           </Link>
-          {/* v0.10.0 plan 032: secondary nav links between
-              the brand and the search bar. ``/players`` and
-              ``/players/compare`` are the 2 most common
-              cross-fight destinations; the analyst can pivot
-              from any page to either view without typing a
-              URL. The link styles mirror the brand link so
-              the nav reads as one consistent strip. */}
+          {/* v0.10.0 plan 032 + PR2 hardening: secondary nav
+              links between the brand and the search bar. The 5
+              links cover the analyst's primary surfaces:
+              - /players : cross-fight roll-up of every account.
+              - /players/compare : side-by-side comparison.
+              - /account : GW2 API key resolver (BFF proxy).
+              - /webhooks : webhook subscription CRUD + DLQ.
+              - /upload : full 3-step upload wizard.
+              The link styles mirror the brand link so the nav
+              reads as one consistent strip. */}
           <nav
             style={{
               display: "flex",
               alignItems: "center",
               gap: 16,
+              flexWrap: "wrap",
             }}
             aria-label="Primary"
           >
@@ -199,6 +203,39 @@ export default function RootLayout({
               }}
             >
               Compare
+            </Link>
+            <Link
+              href="/webhooks"
+              data-testid="nav-webhooks"
+              style={{
+                fontSize: 13,
+                color: "var(--link)",
+                textDecoration: "none",
+              }}
+            >
+              Webhooks
+            </Link>
+            <Link
+              href="/account"
+              data-testid="nav-account"
+              style={{
+                fontSize: 13,
+                color: "var(--link)",
+                textDecoration: "none",
+              }}
+            >
+              Account
+            </Link>
+            <Link
+              href="/upload"
+              data-testid="nav-upload"
+              style={{
+                fontSize: 13,
+                color: "var(--link)",
+                textDecoration: "none",
+              }}
+            >
+              Upload
             </Link>
           </nav>
           <PlayerSearchBar />
