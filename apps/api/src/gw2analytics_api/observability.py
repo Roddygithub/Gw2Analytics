@@ -32,6 +32,7 @@ explicit-import approach gives. The explicit-import approach also
 keeps the ``init_otel`` function unit-testable (the distro swallowed
 all startup events).
 """
+
 from __future__ import annotations
 
 import logging
@@ -187,6 +188,3 @@ def shutdown_otel(*, timeout_s: float = 5.0) -> None:
 
 
 __all__ = ["init_otel", "shutdown_otel"]
-
-
-

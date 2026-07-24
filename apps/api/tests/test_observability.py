@@ -19,6 +19,7 @@ collector in a follow-up cycle; here we just assert that the
 SDK BOOTSTRAP runs without crashing AND the middleware bridge
 returns the same hex shape downstream either way.
 """
+
 from __future__ import annotations
 
 import logging

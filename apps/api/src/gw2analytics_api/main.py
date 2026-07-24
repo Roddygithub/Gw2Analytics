@@ -196,6 +196,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # current span's trace_id. Lazy import keeps the cold-startup
     # footprint minimal (the OTel SDK is ~2 MB of code).
     from gw2analytics_api.observability import init_otel  # noqa: PLC0415
+
     init_otel(_app, get_settings())
 
     # Step 2: Arq pool init with retry + graceful fallback.
@@ -249,6 +250,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # critical-path time). ``asyncio`` is already imported at
         # the top of this module.
         from gw2analytics_api.observability import shutdown_otel  # noqa: PLC0415
+
         await asyncio.to_thread(shutdown_otel, timeout_s=5.0)
 
 

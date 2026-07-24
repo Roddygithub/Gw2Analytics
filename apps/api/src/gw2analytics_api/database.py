@@ -75,8 +75,7 @@ def _maybe_instrument_sqlalchemy(engine: Engine) -> None:
         # + carry on un-instrumented; the API serves traffic
         # identically either way.
         logger.warning(
-            "SQLAlchemy OTel instrumentation failed; "
-            "engine runs un-instrumented",
+            "SQLAlchemy OTel instrumentation failed; engine runs un-instrumented",
             exc_info=True,
         )
 
