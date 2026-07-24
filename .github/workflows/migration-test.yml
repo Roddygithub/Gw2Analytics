@@ -55,9 +55,6 @@ jobs:
       - name: Sync workspace
         run: uv sync --frozen
 
-      - name: Sync workspace
-        run: uv sync --frozen
-
       - name: Upgrade to head
         run: uv run alembic upgrade head
         working-directory: apps/api
