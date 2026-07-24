@@ -34,9 +34,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from gw2analytics_api import schema_guard
 from gw2analytics_api.config import get_settings, setup_logging
 from gw2analytics_api.database import get_sessionmaker
-
-# Phase 6.2: structured JSON logging for the API process.
-setup_logging()
 from gw2analytics_api.limiter import limiter
 from gw2analytics_api.metrics import SKILLS_CATALOG_FRESHNESS_DAYS
 from gw2analytics_api.middleware import RequestIDMiddleware
@@ -54,6 +51,9 @@ from gw2analytics_api.routes import (
 from gw2analytics_api.storage import get_minio
 from gw2analytics_api.workers.stuck_upload_sweeper import lifespan_stuck_upload_sweeper
 from gw2analytics_api.workers.webhook_scheduler import lifespan_scheduler
+
+# Phase 6.2: structured JSON logging for the API process.
+setup_logging()
 
 logger = logging.getLogger(__name__)
 
