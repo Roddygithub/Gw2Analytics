@@ -1,6 +1,8 @@
 # GW2Analytics
 
 [![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
+[![Migration test](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/migration-test.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/migration-test.yml)
+[![Security scan](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/security.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/security.yml)
 [![Docker build](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/docker-build.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/docker-build.yml)
 [![Cache warmup](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/cache-warmup.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/cache-warmup.yml)
 [![codecov](https://codecov.io/gh/Roddygithub/Gw2Analytics/branch/main/graph/badge.svg)](https://codecov.io/gh/Roddygithub/Gw2Analytics)
@@ -38,7 +40,8 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full per-release history.
 - 🎨 **GW2Mists-inspired frontend** — dark palette, sticky glass header, inline SVG logo, favicon, and Next.js `<Link>` navigation.
 - ⚔️ **Combat-readout UI** — per-player Damage / Heal / Boons / Defense 4-table roll-up via `/fights/[id]?tab=readout` (default tab), with native HTML sortable tables, boon In/Out columns (14 boons), GlobalStatsBar (squad DPS/Heal/Strips/Cleanses/CC/Healers/Supports), compact FightSummaryCards (Top 3 per category), timeline activity toggle ("Toute la durée" / "Activité seulement"), and 2D position heatmap with play/pause animation.
 - 🧪 **Comprehensive multi-layer test suite** — `pytest` (libs + apps) + `vitest` (web components) + Playwright e2e (web flows), 117 tests, 84% coverage, all gated and green.
-- 🛡️ **Audit hardening** — Caddyfile HSTS/CSP, CI `pip-audit`/`pnpm-audit`, Next.js error boundaries, headers() defense-in-depth.
+- 🛡️ **Audit hardening** — Caddyfile HSTS/CSP, CI `pip-audit`/`pnpm-audit`, Next.js error boundaries, headers() defense-in-depth, Trivy filesystem scan + detect-secrets pre-commit hook.
+- 📊 **Observability** — OpenTelemetry tracing (FastAPI + SQLAlchemy + Redis) with OTLP HTTP export, structured JSON logging, Prometheus metrics endpoint, Grafana dashboard.
 - 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js).
 - 🔧 **Zero legacy SQLAlchemy** — all production queries use `select()` (SQLAlchemy 2.x style). CI guard prevents regression.
 - ⚡ **Arq worker** — dedicated background worker process for .zevtc parsing, eliminating in-request GIL contention on parallel uploads.
@@ -154,6 +157,7 @@ pnpm typecheck && pnpm lint && pnpm test:unit
 | [CHANGELOG.md](./CHANGELOG.md) | Canonical per-commit history. |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Workflow conventions, branch protection rules, CI gates. |
 | [docs/ROADMAP.md](./docs/ROADMAP.md) | Forward-looking candidates and technical-debt ledger. |
+| [monitoring/grafana-dashboard.json](./monitoring/grafana-dashboard.json) | Pre-built Grafana dashboard (upload rate, parse duration, errors, queue, drift). |
 | [plans/README.md](./plans/README.md) | Senior-advisor audit trails and scoped cycle implementation plans. |
 
 ## Contributing

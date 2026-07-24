@@ -1,5 +1,17 @@
 """v0.10.1 plan 010: Arq worker that runs the EVTC parser + webhook dispatch.
 
+Phase 6.2: calls ``setup_logging()`` at module level so the Arq
+worker process (separate from the API process) uses the same
+structured JSON logging format as the API.
+
+The call is a module-level side effect — safe because the Arq CLI
+starts a fresh Python process per worker, so there is no risk of
+double-call or interference with the API process's root logger.
+"""
+from gw2analytics_api.config import setup_logging
+
+setup_logging()
+
 Why this exists
 ===============
 

@@ -193,6 +193,29 @@ class Settings(BaseSettings):
         ge=1.0,
         le=120.0,
     )
+    # Phase 6.1: OpenTelemetry tracing outbound endpoint. When set,
+    # the apps/api process auto-instruments FastAPI + Redis +
+    # (via ``database.py``) SQLAlchemy and exports traces over
+    # HTTP/protobuf to the configured URL. Leave unset for tests
+    # + local dev (zero overhead -- ``init_otel`` no-ops when the
+    # env var is missing). Operators should follow the OTel env
+    # var convention for the rest of the OTel SDK config
+    # (``OTEL_TRACES_SAMPLER``, ``OTEL_RESOURCE_ATTRIBUTES``,
+    # ``OTEL_EXPORTER_OTLP_HEADERS`` for auth) -- those vars are
+    # honoured by the SDK directly WITHOUT being re-exposed here.
+    otel_exporter_otlp_endpoint: str | None = Field(
+        default=None,
+        validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT",
+    )
+    # Phase 6.1: OTel ``service.name`` resource attribute. Set to
+    # the SERVICE_NAME env var (the OTel default) and shows up as
+    # the W3C Trace Context service identifier in collector UIs
+    # (Tempo / Honeycomb / etc). Default ``gw2analytics-api``
+    # matches the existing Prometheus job label.
+    otel_service_name: str = Field(
+        default="gw2analytics-api",
+        validation_alias="OTEL_SERVICE_NAME",
+    )
     # Real WvW logs are ~5-40 MB compressed; the cap gives headroom
     # for the largest known files while preventing OOM from malicious
     # or broken clients. The parser's decompressed cap (500 MB) is

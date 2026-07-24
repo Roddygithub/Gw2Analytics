@@ -900,14 +900,14 @@ jobs:
 
 | Phase | Description | Fichiers | Dépendances | Statut |
 |-------|-------------|----------|-------------|--------|
-| 0 | Préparation / Baseline | CI config | Aucune | ⬜ |
-| 1 | Quick Wins DB + Sécurité | 16 | Phase 0 | ⬜ |
-| 2 | Repository + Service Layer | 18 | Phase 1 | ⬜ |
-| 3 | Normalisation Schéma | 10 | Phase 2 | ⬜ |
-| 4 | Performance | 12 | Phase 2 | ⬜ |
-| 5 | Qualité + Dette | 25+ | Phase 2,3,4 | ⬜ |
-| 6 | Monitoring (Bonus) | 5 | Phase 2 | ⬜ |
-| 7 | Documentation (Bonus) | 5 | Phase 5 | ⬜ |
+| 0 | Préparation / Baseline | CI config | Aucune | ✅ |
+| 1 | Quick Wins DB + Sécurité | 16 | Phase 0 | ✅ |
+| 2 | Repository + Service Layer | 18 | Phase 1 | ✅ |
+| 3 | Normalisation Schéma | 10 | Phase 2 | ✅ |
+| 4 | Performance | 12 | Phase 2 | ✅ |
+| 5 | Qualité + Dette | 25+ | Phase 2,3,4 | ✅ |
+| 6 | Monitoring (Bonus) | 5 | Phase 2 | ✅ |
+| 7 | Documentation (Bonus) | 5 | Phase 5 | ✅ |
 
 ### Ordre conseillé
 

@@ -32,8 +32,11 @@ from sqlalchemy.exc import SQLAlchemyError
 # ``schema_guard.check_schema_drift()`` resolves the monkeypatch path
 # mismatch (test_main_mount_order.py:1 Fix-D residual failure).
 from gw2analytics_api import schema_guard
-from gw2analytics_api.config import get_settings
+from gw2analytics_api.config import get_settings, setup_logging
 from gw2analytics_api.database import get_sessionmaker
+
+# Phase 6.2: structured JSON logging for the API process.
+setup_logging()
 from gw2analytics_api.limiter import limiter
 from gw2analytics_api.metrics import SKILLS_CATALOG_FRESHNESS_DAYS
 from gw2analytics_api.middleware import RequestIDMiddleware
@@ -183,6 +186,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Step 1b: MinIO connectivity check (v0.10.26-pre).
     _check_minio_connectivity()
 
+    # Phase 6.1: OpenTelemetry bootstrap. Conditional on
+    # ``OTEL_EXPORTER_OTLP_ENDPOINT`` -- no-op (zero overhead) when
+    # the endpoint is unset (tests, local dev without an OTLP
+    # collector). When set, init_otel wires FastAPI + Redis +
+    # SQLAlchemy (the latter via ``database._maybe_instrument_sqlalchemy``
+    # which fires when ``get_engine()`` is first called) AND sets
+    # the global TracerProvider so RequestIDMiddleware can read the
+    # current span's trace_id. Lazy import keeps the cold-startup
+    # footprint minimal (the OTel SDK is ~2 MB of code).
+    from gw2analytics_api.observability import init_otel  # noqa: PLC0415
+    init_otel(_app, get_settings())
+
     # Step 2: Arq pool init with retry + graceful fallback.
     # v0.15.1: added retry loop (3 attempts, 2s→4s→8s backoff).
     _app.state.arq_pool = None
@@ -220,6 +235,21 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await scheduler_task
         if _app.state.arq_pool is not None:
             await _app.state.arq_pool.aclose()
+        # Phase 6.1: OTel shutdown AFTER arq_pool so any final
+        # worker spans captured during arq teardown are exported
+        # before the TracerProvider flushes + closes. The 5s timeout
+        # bounds the synchronous provider.shutdown() flush against
+        # a black-holed OTLP collector (OTel's shutdown() doesn't
+        # accept a timeout arg itself; observability.shutdown_otel
+        # wraps it in a future with ThreadPoolExecutor).
+        # ``asyncio.to_thread`` keeps the event loop responsive
+        # during the bounded 5s wait -- a synchronous call here
+        # would block the entire uvicorn process for up to 5s on a
+        # hung collector (FastAPI lifespan shutdown is
+        # critical-path time). ``asyncio`` is already imported at
+        # the top of this module.
+        from gw2analytics_api.observability import shutdown_otel  # noqa: PLC0415
+        await asyncio.to_thread(shutdown_otel, timeout_s=5.0)
 
 
 app = FastAPI(
