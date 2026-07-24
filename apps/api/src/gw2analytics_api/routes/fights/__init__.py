@@ -200,7 +200,11 @@ def list_fights(
     """
     rows = (
         db.execute(
-            select(OrmFight).order_by(OrmFight.started_at.desc()).limit(limit).offset(offset),
+            select(OrmFight)
+            .options(selectinload(OrmFight.agents), selectinload(OrmFight.skills))
+            .order_by(OrmFight.started_at.desc())
+            .limit(limit)
+            .offset(offset),
         )
         .scalars()
         .all()
