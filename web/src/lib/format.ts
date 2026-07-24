@@ -25,3 +25,23 @@ export function formatSecondsLabel(ms: number): string {
   const rem = s % 60;
   return `${m}:${rem.toString().padStart(2, "0")}`;
 }
+
+/**
+ * Format an ISO-8601 datetime string for table rows. Returns
+ * ``"-"`` for null/undefined values so AG Grid columns render
+ * a stable empty marker. Falls back to the raw string when
+ * ``new Date()`` returns ``NaN`` (the wire layer sometimes
+ * emits truncated strings during schema migration windows) so
+ * a corrupt value never blanks an entire column.
+ *
+ * Shared by :class:\`WebhookDlqGrid\` + :class:\`WebhookSubscriptionsGrid\`
+ * (PR2 wire-shape mirror) so the table-time formatting stays
+ * in lockstep across the two grids.
+ */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) {
+    return "—";
+  }
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
