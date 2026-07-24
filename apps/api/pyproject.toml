@@ -1,6 +1,6 @@
 [project]
 name = "gw2analytics_api"
-version = "0.10.25"
+version = "0.10.26"
 description = "FastAPI app for GW2Analytics."
 requires-python = ">=3.12"
 # v0.15.2: this nested workspace member has NO PEP 639 ``license`` /
