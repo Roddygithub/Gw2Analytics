@@ -37,7 +37,7 @@ dev = [
     # + ruff resolution. The mypy override below mirrors the fastapi_mcp
     # one for the /tests/load/locust/locustfile.py HttpUser subclass.
     # TODO: bump <3.0 -> <4.0 when locust 3.0 ships GA (Q1 2026 estimate).
-    "locust>=2.40,<3.0",
+    "locust>=2.46.1,<3.0",
     # v0.10.26-pre followup-6: mypy.ini declares
     # ``plugins = pydantic.mypy`` but uv only resolves the ROOT
     # [dependency-groups].dev for ``uv run mypy`` invocations --
