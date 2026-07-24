@@ -42,7 +42,13 @@ export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
   forbidOnly: isCI,
-  retries: isCI ? 2 : 0,
+  // v0.16.x: bump retry budget from 2 -> 3 to absorb the
+  // remaining AG Grid hydration race on the visual-regression
+  // suite (the spec now also carries a stable-scroll hydration
+  // sentinel inside ``web/tests/e2e/visual-regression.spec.ts``
+  // which addresses the root cause; the 3 retries are defense
+  // in depth against transient Chromium / Node-version flakes).
+  retries: isCI ? 3 : 0,
   workers: isCI ? 2 : undefined,
   // Use the HTML reporter in CI so the post-mortem is
   // available as a downloadable artifact (see
