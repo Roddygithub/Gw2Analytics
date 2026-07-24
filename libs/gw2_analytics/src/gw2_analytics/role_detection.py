@@ -238,7 +238,14 @@ _HINT_MIN_FRACTION: Final[float] = 0.30
 # forces DPS as primary; with the override, HEAL takes
 # priority when the player is on a healer spec and has
 # meaningful healing output.
-_R_HEAL_OVERRIDE: Final[float] = 0.15
+#
+# Raised from 0.15 to 0.30 in v0.16.1-api follow-up: the
+# previous threshold was too permissive, tagging low-healing
+# player (e.g. a Scourge whose weighted effort was only ~15 %
+# healing) as HEAL despite minimal actual heal output. The
+# new threshold requires at least 30 % of the weighted effort
+# to come from healing before the override kicks in.
+_R_HEAL_OVERRIDE: Final[float] = 0.30
 
 
 # ---------------------------------------------------------------------------
