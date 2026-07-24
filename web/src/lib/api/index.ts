@@ -69,5 +69,16 @@ export {
   fetchPlayerCompareTimeline,
 } from "./players";
 
-export type { WebhookDlqRow } from "./webhooks";
-export { fetchWebhookDeliveries, replayDlq } from "./webhooks";
+export type {
+  WebhookDlqRow,
+  WebhookSubscriptionRow,
+  WebhookSubscriptionCreatedRow,
+  CreateWebhookPayload,
+} from "./webhooks";
+export {
+  fetchWebhookDeliveries,
+  fetchWebhookSubscriptions,
+  createWebhook,
+  revokeWebhook,
+  replayDlq,
+} from "./webhooks";
