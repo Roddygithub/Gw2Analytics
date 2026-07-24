@@ -341,6 +341,7 @@ export function CreateWebhookPanel() {
               }
               className={styles.input}
               aria-describedby="create-webhook-url-help"
+              name="url"
               data-testid="create-webhook-url"
             />
             <span id="create-webhook-url-help" className={styles.helpText}>
@@ -364,6 +365,7 @@ export function CreateWebhookPanel() {
                 })
               }
               className={styles.input}
+              name="description"
               data-testid="create-webhook-description"
             />
           </label>
@@ -384,6 +386,7 @@ export function CreateWebhookPanel() {
                 })
               }
               className={styles.textarea}
+              name="filter"
               data-testid="create-webhook-filter"
             />
             <span className={styles.helpText}>
