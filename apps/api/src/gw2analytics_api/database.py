@@ -80,6 +80,50 @@ def _maybe_instrument_sqlalchemy(engine: Engine) -> None:
         )
 
 
+def _normalise_database_url(url: str) -> str:
+    """Inject the ``+psycopg`` driver hint when missing.
+
+    SQLAlchemy defaults to the legacy ``psycopg2`` driver when the
+    URL starts with bare ``postgresql://`` (no DB-API hint).
+    ``psycopg2`` is NOT installed in this workspace (only
+    ``psycopg[binary] v3`` is), so a bare ``postgresql://``
+    ``DATABASE_URL`` crashes the lifespan's first
+    ``schema_guard.check_schema_drift()`` call with
+    ``ModuleNotFoundError: No module named 'psycopg2'``.
+
+    Fix: rewrite the unbound + legacy variants to
+    ``postgresql+psycopg://`` so the workspace's installed driver
+    is selected:
+
+    - ``postgresql://...`` (no driver hint) -> rewrite
+    - ``postgres://...`` (the ``postgres://`` shorthand
+      SQLAlchemy accepts, emitted by some connection-string
+      generators) -> rewrite (same crash, same fix)
+    - ``postgresql+psycopg2://...`` (explicit legacy driver)
+      -> rewrite — the workspace ONLY ships psycopg v3, so the
+      legacy driver would crash here too
+
+    Other dialects (``postgresql+asyncpg://``,
+    ``postgresql+pg8000://``, ``postgresql+psycopg://``) are
+    left untouched. The function is idempotent on already-correct
+    URLs (``postgresql+psycopg://`` -> unchanged), so
+    ``create_engine`` calling it twice is harmless.
+
+    Operator intent: this auto-correction is intentionally a
+    no-questions-asked safety net in DEFAULTS only. If an
+    operator truly wants to opt out (e.g. for a Postgres dialect
+    they need to pin), they should set ``DATABASE_URL`` to
+    ``postgresql+<other-driver>://`` so the rewrite no-ops.
+    """
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgres://")
+    if url.startswith("postgresql+psycopg2://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgresql+psycopg2://")
+    return url
+
+
 @cache
 def get_engine() -> Engine:
     """Return the process-wide SQLAlchemy engine, built on first call.
@@ -88,10 +132,25 @@ def get_engine() -> Engine:
     post-create via ``SQLAlchemyInstrumentor``. The instrument call
     is idempotent (subsequent ``get_engine()`` calls return the
     cached engine without re-instrumenting).
+
+    v0.10.26-pre followup-8: the URL is auto-corrected via
+    :func:`_normalise_database_url` so a misconfigured
+    ``DATABASE_URL=postgresql://...`` (or the explicit-but-legacy
+    ``postgresql+psycopg2://...``) still resolves to the
+    workspace's installed ``psycopg`` v3 driver. The rewrite is
+    idempotent and intentional — without it, the very first
+    ``get_engine()`` call from the lifespan's schema-drift guard
+    would crash with
+    ``ModuleNotFoundError: No module named 'psycopg2'`` because
+    SQLAlchemy defaults to the legacy driver when the URL has no
+    ``+<driver>`` hint. Operators who want strict no-rewrite
+    behaviour (e.g. for a Postgres dialect they actually need to
+    pin) can leave the rewrite no-op by setting a
+    ``postgresql+<driver>://`` URL explicitly.
     """
     settings = get_settings()
     engine = create_engine(
-        settings.database_url,
+        _normalise_database_url(settings.database_url),
         future=True,
         pool_pre_ping=True,
     )

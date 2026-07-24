@@ -113,7 +113,7 @@ os.environ.setdefault("S3_SECRET_KEY", "test-secret-key")
 # free it before pytest can run.
 os.environ.setdefault(
     "DATABASE_URL",
-    "postgresql://gw2analytics:gw2analytics@localhost:5432/gw2analytics",
+    "postgresql+psycopg://gw2analytics:gw2analytics@localhost:5432/gw2analytics",
 )
 os.environ.setdefault("SECRETS_KEK", _fernet_placeholder)
 os.environ.setdefault("ALLOW_INREQUEST_PARSE_FALLBACK", "1")
