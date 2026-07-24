@@ -51,12 +51,12 @@ describe("CreateWebhookPanel", () => {
     expect(screen.getByTestId("create-webhook-filter")).toBeInTheDocument();
   });
 
-  it("submits, transitions to reveal, and shows the one-shot secret", async () => {
+  it("submits with explicit filter, transitions to reveal, and shows the one-shot secret", async () => {
     vi.mocked(createWebhook).mockResolvedValueOnce({
       id: "whsub_xyz789",
       url: "https://example.com/wh",
       description: "smoke",
-      filter: null,
+      filter: { kind: "upload_completed" },
       created_at: "2026-07-15T00:00:00+00:00",
       secret: "whsec_DEMO_PLAINTEXT_32B",
     });
@@ -64,7 +64,10 @@ describe("CreateWebhookPanel", () => {
     fireEvent.click(screen.getByTestId("create-webhook-open"));
     changeValue("create-webhook-url", "https://example.com/wh");
     changeValue("create-webhook-description", "smoke");
-    changeValue("create-webhook-filter", '{"upload_status":"completed"}');
+    changeValue(
+      "create-webhook-filter",
+      '{"kind": "upload_completed"}',
+    );
     fireEvent.click(screen.getByTestId("create-webhook-submit"));
 
     await waitFor(() => {
@@ -84,7 +87,33 @@ describe("CreateWebhookPanel", () => {
     expect(createWebhook).toHaveBeenCalledWith({
       url: "https://example.com/wh",
       description: "smoke",
-      filter: { upload_status: "completed" },
+      filter: { kind: "upload_completed" },
+    });
+  });
+
+  it("defaults filter to {kind: upload_completed} when the field is empty", async () => {
+    // Confirms the form's UX promise: "leave empty for default"
+    // actually produces a filter the backend accepts, instead of
+    // 422-ing with ``filter.kind is required``.
+    vi.mocked(createWebhook).mockResolvedValueOnce({
+      id: "whsub_default",
+      url: "https://example.com/wh",
+      description: null,
+      filter: { kind: "upload_completed" },
+      created_at: "2026-07-15T00:00:00+00:00",
+      secret: "whsec_DEFAULT",
+    });
+    render(<CreateWebhookPanel />);
+    fireEvent.click(screen.getByTestId("create-webhook-open"));
+    changeValue("create-webhook-url", "https://example.com/wh");
+    // Filter field is left blank.
+    fireEvent.click(screen.getByTestId("create-webhook-submit"));
+    await waitFor(() => {
+      expect(createWebhook).toHaveBeenCalledWith({
+        url: "https://example.com/wh",
+        description: null,
+        filter: { kind: "upload_completed" },
+      });
     });
   });
 
