@@ -207,7 +207,7 @@ jobs:
         # Uses codecov-action@v5 which gracefully skips upload when
         # no token is available (e.g. on PRs from forks).
         if: github.ref == 'refs/heads/main'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
@@ -277,7 +277,7 @@ jobs:
 
       - name: Upload vitest coverage to Codecov
         if: github.ref == 'refs/heads/main'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: web/coverage/lcov.info
