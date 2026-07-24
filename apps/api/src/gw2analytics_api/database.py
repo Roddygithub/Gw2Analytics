@@ -115,5 +115,9 @@ def get_session() -> Iterator[Session]:
     session = get_sessionmaker()()
     try:
         yield session
+        session.commit()
+    except BaseException:
+        session.rollback()
+        raise
     finally:
         session.close()
