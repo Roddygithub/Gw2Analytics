@@ -35,7 +35,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache Trivy vulnerability DB
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .cache/trivy
           key: trivy-${{ runner.os }}-${{ hashFiles('**/uv.lock', '**/pnpm-lock.yaml') }}

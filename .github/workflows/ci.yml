@@ -70,7 +70,7 @@ jobs:
       # Cache pip-audit's OSV vulnerability database so subsequent
       # runs skip the ~15s download on every invocation.
       - name: Cache pip-audit OSV data
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip-audit
           key: pip-audit-${{ hashFiles('uv.lock') }}
@@ -326,7 +326,7 @@ jobs:
       - uses: ./.github/actions/setup-web
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -432,7 +432,7 @@ jobs:
       - uses: ./.github/actions/setup-web
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
