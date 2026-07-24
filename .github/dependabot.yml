@@ -1,3 +1,12 @@
+# v0.10.6+ (post-PR-#69 followup): dependabot creates one
+# remote branch per dep-update PR. To stop those branches
+# from accumulating (``github.delete_branch_on_merge`` is a
+# GitHub repo setting, NOT a dependabot.yml key), enable
+# **Settings → General → Pull Requests → "Automatically
+# delete head branches"** in the GitHub UI. See CONTRIBUTING.md
+# §"Branch cleanup after merge" for the rationale + a
+# one-sweep cleanup snippet for pre-existing accumulated
+# branches.
 version: 2
 updates:
   - package-ecosystem: "uv"
