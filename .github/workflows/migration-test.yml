@@ -20,7 +20,7 @@ permissions:
 jobs:
   migration-test:
     name: Migration round-trip
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     services:
       postgres:
@@ -45,10 +45,12 @@ jobs:
         with:
           enable-cache: true
 
+      # uv python install replaces actions/setup-python which
+      # consistently fails on this repo's CI runners (6 consecutive
+      # failures across v4/v5, file/inline version refs, ubuntu-22.04
+      # and ubuntu-latest). uv is auto-discovered by setup-uv above.
       - name: Install Python
-        uses: actions/setup-python@v5
-        with:
-          python-version-file: .python-version-default
+        run: uv python install 3.12
 
       - name: Sync workspace
         run: uv sync --frozen
