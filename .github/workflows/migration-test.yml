@@ -20,7 +20,7 @@ permissions:
 jobs:
   migration-test:
     name: Migration round-trip
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     services:
       postgres:
