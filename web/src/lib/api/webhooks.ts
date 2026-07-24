@@ -47,6 +47,23 @@ export interface CreateWebhookPayload {
   filter?: Record<string, unknown> | null;
 }
 
+/**
+ * Canonical default for the ``WebhookSubscriptionCreate.filter``
+ * field, exported as the single source of truth for both the
+ * network-boundary default (this module) and the React form
+ * (CreateWebhookPanel). Mirrors the PyDantic closed set in
+ * ``apps/api/src/gw2analytics_api/schemas/webhook.py`` -- the
+ * backend rejects ``filter.kind``-missing or unknown-kind
+ * payloads with 422; callers (form, third-party integrators)
+ * always get a backend-acceptable filter without having to
+ * hard-code the same literal. When the dispatcher grows the
+ * closed set (e.g. adds ``upload_failed``), bumping this
+ * default is the only JS-side edit required.
+ */
+export const DEFAULT_WEBHOOK_FILTER: Readonly<Record<string, unknown>> = {
+  kind: "upload_completed",
+};
+
 export async function fetchWebhookDeliveries(
   opts: { subscriptionId?: string; limit?: number; offset?: number } = {},
 ): Promise<WebhookDlqRow[]> {
@@ -103,6 +120,12 @@ export async function fetchWebhookSubscriptions(
  * plaintext surface). The caller is responsible for surfacing
  * the secret in an acknowledgement UI before discarding the
  * response.
+ *
+ * The ``filter`` field is required by the Pydantic model with
+ * a closed set of ``filter.kind`` values (currently only
+ * ``upload_completed``). We default to that single supported
+ * kind so callers who don't specify a filter don't end up with
+ * a never-fired subscription.
  */
 export async function createWebhook(
   payload: CreateWebhookPayload,
@@ -114,7 +137,19 @@ export async function createWebhook(
     body: JSON.stringify({
       url: payload.url,
       description: payload.description ?? null,
-      filter: payload.filter ?? {},
+      // The backend Pydantic ``WebhookSubscriptionCreate`` model
+      // requires ``filter.kind`` to be in the closed
+      // ``{"upload_completed"}`` set; sending ``{}`` triggers a
+      // 422 ``filter.kind is required``. The default below mirrors
+      // the dispatcher's only currently-supported kind so callers
+      // who leave the form's filter field blank end up with a
+      // subscription that actually fires. Sharing this default
+      // with :class:\`CreateWebhookPanel\` avoids the magic-literal
+      // duplication flagged by the round-3 code-review.
+      filter:
+        payload.filter && Object.keys(payload.filter).length > 0
+          ? payload.filter
+          : { ...DEFAULT_WEBHOOK_FILTER },
     }),
     cache: "no-store",
   });

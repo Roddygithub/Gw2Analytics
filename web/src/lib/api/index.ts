@@ -81,4 +81,5 @@ export {
   createWebhook,
   revokeWebhook,
   replayDlq,
+  DEFAULT_WEBHOOK_FILTER,
 } from "./webhooks";

@@ -59,6 +59,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import {
   createWebhook,
+  DEFAULT_WEBHOOK_FILTER,
   formatApiError,
   type CreateWebhookPayload,
   type WebhookSubscriptionCreatedRow,
@@ -201,11 +202,19 @@ export function CreateWebhookPanel() {
         return;
       }
       // Parse the optional filter field as JSON. An empty /
-      // whitespace string is treated as "no filter" (the
-      // backend defaults to `{}`). A parse failure surfaces as
-      // an inline error so the analyst can fix the JSON before
-      // submitting; we do NOT silently send malformed JSON.
-      let filterPayload: Record<string, unknown> | null = null;
+      // whitespace string is treated as :data:\`DEFAULT_WEBHOOK_FILTER\`
+      // (``{ kind: "upload_completed" }``) because the backend
+      // rejects ``filter.kind``-missing subscriptions at the
+      // Pydantic validator. The closed set of supported kinds
+      // mirrors the dispatcher's event types -- sending
+      // anything else at creation yields a subscription that
+      // is never fired (the dispatcher silently skips it).
+      // A parse failure surfaces as an inline error so the
+      // analyst can fix the JSON before submitting; we do NOT
+      // silently send malformed JSON.
+      let filterPayload: Record<string, unknown> = {
+        ...DEFAULT_WEBHOOK_FILTER,
+      };
       const filterTrimmed = state.filter.trim();
       if (filterTrimmed !== "") {
         try {
@@ -365,7 +374,7 @@ export function CreateWebhookPanel() {
             </span>
             <textarea
               value={state.filter}
-              placeholder='{"upload_status": "completed"}'
+              placeholder={JSON.stringify(DEFAULT_WEBHOOK_FILTER)}
               rows={3}
               onChange={(e) =>
                 dispatch({
@@ -378,7 +387,11 @@ export function CreateWebhookPanel() {
               data-testid="create-webhook-filter"
             />
             <span className={styles.helpText}>
-              Leave empty for default (every webhook fires).
+              Leave empty to default to{" "}
+              <code>{JSON.stringify(DEFAULT_WEBHOOK_FILTER)}</code>{" "}
+              (the only currently-supported kind; the dispatcher
+              rejects unknown kinds at creation so a typo
+              doesn't yield a subscription that never fires).
             </span>
           </label>
 
