@@ -372,6 +372,74 @@ _MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE: Final[int] = 500 * 1024 * 1024  # 500 MB
 
 
 # ---------------------------------------------------------------------------
+# Elite-spec cross-validation (v0.16.1-api follow-up)
+#
+# arcdps EVTC2025+ builds sometimes write elite-spec values that do not
+# correspond to the parsed profession (e.g. a Warrior with elite=74 which
+# decodes to Virtuoso, a Mesmer-only spec).  When this happens the parser
+# degrades the elite to BASE (no elite) so downstream consumers see a
+# coherent profession/spec pair.  The raw byte is always preserved via
+# ``Agent.elite_raw`` for forensics.
+#
+# Each profession lists the ELITE-SPEC INTEGER VALUES that are valid for
+# it.  Values not in this set are treated as corrupted/misaligned data and
+# reset to BASE (0).  Collisions (Soulbeast/Daredevil both = 55;
+# Weaver/Renegade both = 63) are handled correctly: a Ranger with 55
+# matches, a Thief with 55 matches, an Ele with 63 matches, a Rev with
+# 63 matches — the collision is resolved downstream by whoever first
+# consumes ``EliteSpec(55)`` or ``EliteSpec(63)``.
+#
+# EoD specs (Willbender, Mechanist, Untamed, Catalyst, Virtuoso,
+# Harbinger, Specter, Vindicator) and Janthir Wilds specs are included
+# where the EliteSpec enum has a value.  Specs not yet in the enum
+# (Bladesworn, Luminary, etc.) are out of scope — the base-profession
+# hint is the fallback anyway.
+# ---------------------------------------------------------------------------
+
+_VALID_ELITE_BY_PROFESSION: Final[dict[int, frozenset[int]]] = {
+    Profession.GUARDIAN: frozenset({27, 62, 65}),  # Dragonhunter, Firebrand, Willbender
+    Profession.WARRIOR: frozenset({18, 64}),  # Berserker, Spellbreaker
+    Profession.ENGINEER: frozenset({43, 57, 70}),  # Scrapper, Holosmith, Mechanist
+    Profession.RANGER: frozenset({5, 55, 73}),  # Druid, Soulbeast, Untamed
+    Profession.THIEF: frozenset({55, 71, 72}),  # Daredevil, Deadeye, Specter
+    Profession.ELEMENTALIST: frozenset({48, 63, 75}),  # Tempest, Weaver, Catalyst
+    Profession.MESMER: frozenset({40, 59, 74}),  # Chronomancer, Mirage, Virtuoso
+    Profession.NECROMANCER: frozenset({34, 60, 77}),  # Reaper, Scourge, Harbinger
+    Profession.REVENANT: frozenset({52, 63, 68}),  # Herald, Renegade, Vindicator
+}
+
+
+def _validate_elite_for_profession(profession_int: int, elite_int: int) -> EliteSpec:
+    """Return the validated elite spec for a profession+elite pair.
+
+    If the elite spec value is valid for the given profession, return
+    ``EliteSpec(elite_int)``.  Otherwise return ``EliteSpec.BASE`` (0)
+    and log a debug message so operators can investigate the source file.
+
+    The raw ``elite_int`` is available as ``Agent.elite_raw`` for
+    forensics regardless of this validation outcome.
+    """
+    if elite_int == 0:
+        return EliteSpec.BASE
+    valid = _VALID_ELITE_BY_PROFESSION.get(profession_int)
+    if valid is not None and elite_int in valid:
+        try:
+            return EliteSpec(elite_int)
+        except ValueError:
+            return EliteSpec.UNKNOWN
+    # Cross-validation failed: the elite spec does not belong to this
+    # profession.  Degrade to BASE (no elite) so downstream consumers
+    # see a coherent profession/spec pair.
+    logger.debug(
+        "Elite spec %d invalid for profession %d (agent skipped); "
+        "raw value preserved in elite_raw for forensics",
+        elite_int,
+        profession_int,
+    )
+    return EliteSpec.BASE
+
+
+# ---------------------------------------------------------------------------
 # Implementation
 # ---------------------------------------------------------------------------
 
@@ -1593,10 +1661,8 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
     except ValueError:
         profession = Profession.UNKNOWN
 
-    try:
-        elite = EliteSpec(elite_raw)
-    except ValueError:
-        elite = EliteSpec.UNKNOWN
+    # v0.16.1-api: cross-validate elite spec against profession.
+    elite = _validate_elite_for_profession(int(prof_raw), int(elite_raw))
 
     return Agent(
         id=addr,
@@ -1656,10 +1722,8 @@ def _decode_agent(data: bytes, offset: int) -> Agent:
     except ValueError:
         profession = Profession.UNKNOWN
 
-    try:
-        elite = EliteSpec(elite_raw)
-    except ValueError:
-        elite = EliteSpec.UNKNOWN
+    # v0.16.1-api: cross-validate elite spec against profession.
+    elite = _validate_elite_for_profession(int(prof_raw), int(elite_raw))
 
     return Agent(
         id=aid,

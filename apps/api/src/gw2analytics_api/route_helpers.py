@@ -16,9 +16,21 @@ from gw2analytics_api.schemas import PlayerListRowOut
 
 
 def format_profession(profession: Profession | int) -> str:
-    """Map a profession to its wire-format label."""
+    """Map a profession to its wire-format label.
+
+    Returns the profession's display name (e.g. ``"Guardian"``,
+    ``"Warrior"``) for known core professions, ``"UNKNOWN"`` for
+    value 0, and ``"PROF(N)"`` for unknown profession IDs (the
+    fallback for future professions not yet in the ``Profession``
+    enum).
+    """
     v = profession.value if isinstance(profession, Profession) else int(profession)
-    return "UNKNOWN" if v == 0 else f"PROF({v})"
+    if v == 0:
+        return "UNKNOWN"
+    try:
+        return Profession(v).name.title()
+    except (ValueError, KeyError):
+        return f"PROF({v})"
 
 
 def format_elite_spec(elite: EliteSpec | int) -> str:
