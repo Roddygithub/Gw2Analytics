@@ -1,6 +1,7 @@
 from gw2analytics_api.models.fight import (
     OrmFight,
     OrmFightAgent,
+    OrmFightPlayerBoon,
     OrmFightPlayerSummary,
     OrmFightSkill,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "GuildMember",
     "OrmFight",
     "OrmFightAgent",
+    "OrmFightPlayerBoon",
     "OrmFightPlayerSummary",
     "OrmFightSkill",
     "OrmWebhookDelivery",

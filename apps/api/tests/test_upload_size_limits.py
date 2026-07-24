@@ -172,7 +172,10 @@ def test_caddyfile_request_body_limit_matches_api_cap() -> None:
     This test asserts the Caddy cap is present + parses + is
     >= the API cap default (100 MiB).
     """
-    caddyfile = Path("Caddyfile")
+    # Tests run from ``apps/api/`` (the test file is at
+    # ``apps/api/tests/test_upload_size_limits.py``); Caddyfile is at
+    # repo root (``parents[3]`` from the test file).
+    caddyfile = Path(__file__).resolve().parents[3] / "Caddyfile"
     assert caddyfile.exists(), (
         "Caddyfile missing from repo root -- proxy-layer drift guard cannot run"
     )

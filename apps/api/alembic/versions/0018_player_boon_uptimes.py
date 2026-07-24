@@ -71,7 +71,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # v0.16.0 fix: ``if_exists=True`` makes this downgrade idempotent
+    # across the chain. The later migration ``8534265864ec`` renames
+    # the ``boon_<X>_uptime`` columns emitted here to ``<X>_uptime`` and
+    # owns the outgoing_<X> columns too, with its own
+    # ``DROP COLUMN IF EXISTS`` on downgrade. Hitting this migration's
+    # downgrade after ``8534265864ec``'s has already removed the columns
+    # raises ``UndefinedColumn: outgoing_stealth`` (and the same for
+    # every other boon) without ``if_exists=True``. With it, the
+    # second pass is a no-op and ``alembic downgrade base`` succeeds.
     for col_name, _ in reversed(_OUTGOING_COLUMNS):
-        op.drop_column("fight_player_summaries", col_name)
+        op.drop_column("fight_player_summaries", col_name, if_exists=True)
     for col_name, _ in reversed(_BOON_UPTIME_COLUMNS):
-        op.drop_column("fight_player_summaries", col_name)
+        op.drop_column("fight_player_summaries", col_name, if_exists=True)

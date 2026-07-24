@@ -395,7 +395,7 @@ def test_background_task_session_alive_at_invocation() -> None:
     )
     resp = client.post(
         "/api/v1/uploads",
-        files={"file": ("regression.zevtc", blob, "application/zip")},
+        files={"file": ("regression.zevtc", blob, "application/octet-stream")},
     )
     assert resp.status_code == 201, resp.text
     upload_id = resp.json()["id"]

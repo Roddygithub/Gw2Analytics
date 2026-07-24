@@ -6,12 +6,13 @@ GET detail  : guild info + members.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gw2analytics_api.database import get_session
+from gw2analytics_api.limiter import limiter
 from gw2analytics_api.models import Guild, GuildMember
 from gw2analytics_api.services.guild_service import list_guilds_for_account
 
@@ -43,7 +44,9 @@ class GuildDetailOut(BaseModel):
 
 
 @router.get("", response_model=list[GuildInfoOut])
+@limiter.limit("30/minute")
 def list_guilds(
+    request: Request,  # noqa: ARG001
     account_name: str,
     db: Session = Depends(get_session),  # noqa: B008
 ) -> list[GuildInfoOut]:

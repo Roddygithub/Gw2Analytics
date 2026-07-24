@@ -1,16 +1,23 @@
+"""Event blob persistence and player summary materialization.
+
+Phase 2.2: uses :class:`FightRepository` for fight lookups instead
+of raw ``db.execute(select(...))`` calls.
+"""
+
 from __future__ import annotations
 
 import gzip
+import io
 import logging
 
 from minio.error import S3Error
-from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from gw2_core import Event
 from gw2_evtc_parser import EvtcParseError, PythonEvtcParser
 from gw2analytics_api.models import OrmFight, Upload
+from gw2analytics_api.repositories import FightRepository
 from gw2analytics_api.services.player_summaries import _persist_player_summaries
 from gw2analytics_api.storage import put_events
 
@@ -25,22 +32,7 @@ def _write_summary_for_fight(
     orm_fight: OrmFight,
     events: list[Event],
 ) -> None:
-    """Write ``OrmFightPlayerSummary`` rows for a pre-fetched fight.
-
-    Shared by the empty-events and non-empty-events paths in
-    :func:`_persist_event_blob`. The caller is responsible for
-    fetching the fight row (with ``selectinload(OrmFight.agents)``)
-    and for tolerating a missing row. This helper only performs the
-    summary materialization and logs SQLAlchemy errors so the upload
-    still completes -- the slow-path fallback serves the player
-    routes from the events blob when the summary write fails.
-
-    The empty-events contract: when ``events`` is empty, the caller's
-    conditional pre-seed in :func:`_persist_player_summaries`
-    produces one zero-totals row per attending agent, so the
-    /players fast-path is non-empty even for empty-events fights (the
-    v0.8.4 ATTENDING-agents-always-surface contract).
-    """
+    """Write ``OrmFightPlayerSummary`` rows for a pre-fetched fight."""
     try:
         _persist_player_summaries(db, orm_fight, events)
     except SQLAlchemyError:
@@ -57,55 +49,39 @@ def _persist_event_blob(
     evtc_bytes: bytes,
     fight_id: str,
 ) -> None:
+    """Persist events blob and materialize player summaries.
+
+    Uses :class:`FightRepository` for ORM entity lookups.
+    Phase 4.3: streams JSONL lines through ``gzip.GzipFile``
+    instead of building the full JSONL string in memory.
+    """
     try:
         events = list(_parser.parse_events(evtc_bytes))
     except (EvtcParseError, S3Error, OSError, gzip.BadGzipFile):
-        # v0.9.5 plan 019: narrowed from ``except Exception`` to the
-        # specific exception types this call site can legitimately
-        # raise. A real programming bug (AttributeError, NameError,
-        # TypeError, KeyError) is now propagated UP to the surrounding
-        # caller instead of being silently swallowed.
-        # ``gzip.BadGzipFile`` is a subclass of ``OSError`` since
-        # Python 3.8 but listed explicitly for readability.
         logger.exception("event blob unavailable for fight %s; deep metrics degraded", fight_id)
         return
 
-    # v0.10.11 fix for test_uploads_e2e::test_players_list_returns_accounts_present_in_fight:
-    # the summary write always happens (including the zero-events
-    # case), but the blob write is gated on ``events != []``. The
-    # ``events_blob_uri`` field stays NULL for empty-events fights.
-    # The conditional pre-seed INSIDE ``_persist_player_summaries``
-    # (only when ``events == []``) produces one zero-totals row per
-    # attending agent so the /players fast-path is non-empty.
-    #
-    # Ordering note for test_persist_event_blob_except.py: the
-    # S3Error test exercises the non-empty ``events`` branch and
-    # expects put_events to fail BEFORE the orm_fight fetch (because
-    # the test passes db=None). The non-empty branch therefore
-    # orders the blob attempt FIRST + the summary write SECOND; the
-    # empty branch drops the blob attempt + goes straight to the
-    # summary write.
+    repo = FightRepository(db)
+
     if not events:
         logger.debug("upload %s yielded zero events; events_blob_uri stays NULL", upload.id)
-        orm_fight = db.execute(
-            select(OrmFight).where(OrmFight.id == fight_id).options(selectinload(OrmFight.agents)),
-        ).scalar_one_or_none()
+        orm_fight = repo.get_by_id_with_agents_and_skills(fight_id)
         if orm_fight is None:
             return
         _write_summary_for_fight(db, orm_fight, events)
         return
 
     try:
-        jsonl = "\n".join([event.model_dump_json() for event in events]).encode("utf-8")
-        gz_bytes = gzip.compress(jsonl)
-        blob_uri = put_events(fight_id, gz_bytes)
+        buf = io.BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode="w") as gz:
+            for event in events:
+                gz.write(event.model_dump_json().encode("utf-8") + b"\n")
+        blob_uri = put_events(fight_id, buf.getvalue())
     except (EvtcParseError, S3Error, OSError, gzip.BadGzipFile):
         logger.exception("event blob unavailable for fight %s; deep metrics degraded", fight_id)
         return
 
-    orm_fight = db.execute(
-        select(OrmFight).where(OrmFight.id == fight_id).options(selectinload(OrmFight.agents)),
-    ).scalar_one_or_none()
+    orm_fight = repo.get_by_id_with_agents_and_skills(fight_id)
     if orm_fight is None:
         return
     orm_fight.events_blob_uri = blob_uri

@@ -59,6 +59,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from gw2analytics_api.config import get_settings
 from gw2analytics_api.crypto import FernetInvalidToken, decrypt_webhook_secret
 from gw2analytics_api.models import (
     UPLOAD_STATUS_COMPLETED,
@@ -68,9 +69,6 @@ from gw2analytics_api.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Per design doc \xa75: 10s timeout per outbound POST.
-_REQUEST_TIMEOUT_S = 10.0
 
 # Single supported filter kind for v0.9.0. Future kinds
 # (per-encounter, per-result) are v0.9.1 vocabulary expansion.
@@ -378,7 +376,8 @@ async def dispatch_for_upload(
     requests = prepare_result
     delivered_count = 0
 
-    async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S) as client:
+    timeout_s = get_settings().webhook_dispatch_timeout_s
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
         results = await asyncio.gather(
             *(_dispatch_single_async(client, req) for req in requests),
             return_exceptions=True,

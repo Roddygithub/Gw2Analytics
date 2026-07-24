@@ -34,38 +34,38 @@ client = TestClient(app)
 
 def test_parse_profession_filter_empty_returns_none() -> None:
     """Empty string -> None (no filter applied)."""
-    from gw2analytics_api.routes.players import _parse_profession_filter
+    from gw2analytics_api.route_helpers import parse_profession_filter
 
-    assert _parse_profession_filter("") is None
+    assert parse_profession_filter("") is None
 
 
 def test_parse_profession_filter_valid_name() -> None:
     """Valid enum name (case-insensitive) -> Profession member."""
     from gw2_core import Profession
-    from gw2analytics_api.routes.players import _parse_profession_filter
+    from gw2analytics_api.route_helpers import parse_profession_filter
 
-    assert _parse_profession_filter("MESMER") == Profession.MESMER
-    assert _parse_profession_filter("mesmer") == Profession.MESMER  # lower-case
+    assert parse_profession_filter("MESMER") == Profession.MESMER
+    assert parse_profession_filter("mesmer") == Profession.MESMER  # lower-case
 
 
 def test_parse_profession_filter_valid_integer() -> None:
     """Valid integer string -> Profession member."""
     from gw2_core import Profession
-    from gw2analytics_api.routes.players import _parse_profession_filter
+    from gw2analytics_api.route_helpers import parse_profession_filter
 
     # GUARDIAN=1, WARRIOR=2 (GW2 Profession enum)
-    assert _parse_profession_filter("1") == Profession.GUARDIAN
-    assert _parse_profession_filter("2") == Profession.WARRIOR
+    assert parse_profession_filter("1") == Profession.GUARDIAN
+    assert parse_profession_filter("2") == Profession.WARRIOR
 
 
 def test_parse_profession_filter_invalid_name_raises_422() -> None:
     """Bogus name -> HTTPException(422)."""
     from fastapi import HTTPException
 
-    from gw2analytics_api.routes.players import _parse_profession_filter
+    from gw2analytics_api.route_helpers import parse_profession_filter
 
     with pytest.raises(HTTPException) as exc:
-        _parse_profession_filter("BOOGABOO")
+        parse_profession_filter("BOOGABOO")
     assert exc.value.status_code == 422
 
 
@@ -73,10 +73,10 @@ def test_parse_profession_filter_invalid_integer_raises_422() -> None:
     """Bogus integer string -> HTTPException(422)."""
     from fastapi import HTTPException
 
-    from gw2analytics_api.routes.players import _parse_profession_filter
+    from gw2analytics_api.route_helpers import parse_profession_filter
 
     with pytest.raises(HTTPException) as exc:
-        _parse_profession_filter("99")
+        parse_profession_filter("99")
     assert exc.value.status_code == 422
 
 
@@ -89,10 +89,10 @@ def test_combine_day_midnight_naive_utc() -> None:
     """Naive datetime treated as UTC -> midnight in UTC stays at midnight."""
     from datetime import UTC, datetime
 
-    from gw2analytics_api.routes.players import _combine_day_midnight
+    from gw2analytics_api.services.player_service import combine_day_midnight
 
     naive = datetime(2025, 1, 15, 14, 30, 0)  # naive, effectively UTC
-    result = _combine_day_midnight(naive, ZoneInfo("UTC"))
+    result = combine_day_midnight(naive, ZoneInfo("UTC"))
     assert result == datetime(2025, 1, 15, 0, 0, 0, tzinfo=UTC)
 
 
@@ -100,10 +100,10 @@ def test_combine_day_midnight_aware_utc() -> None:
     """Aware UTC datetime -> midnight in UTC stays at midnight."""
     from datetime import UTC, datetime
 
-    from gw2analytics_api.routes.players import _combine_day_midnight
+    from gw2analytics_api.services.player_service import combine_day_midnight
 
     aware = datetime(2025, 6, 15, 23, 30, 0, tzinfo=UTC)
-    result = _combine_day_midnight(aware, ZoneInfo("America/New_York"))
+    result = combine_day_midnight(aware, ZoneInfo("America/New_York"))
     # 23:30 UTC on Jun 15 is 19:30 EDT on Jun 15 -> midnight in NY is 2025-06-15 00:00 EDT
     # = 2025-06-15 04:00 UTC
     expected = datetime(2025, 6, 15, 4, 0, 0, tzinfo=UTC)
@@ -114,10 +114,10 @@ def test_combine_day_midnight_crosses_utc_day() -> None:
     """23:30 UTC -> midnight in Paris is same UTC day (Paris is UTC+2 in summer)."""
     from datetime import UTC, datetime
 
-    from gw2analytics_api.routes.players import _combine_day_midnight
+    from gw2analytics_api.services.player_service import combine_day_midnight
 
     naive = datetime(2025, 7, 1, 23, 30, 0)  # naive, effectively UTC
-    result = _combine_day_midnight(naive, ZoneInfo("Europe/Paris"))
+    result = combine_day_midnight(naive, ZoneInfo("Europe/Paris"))
     # 23:30 UTC on Jul 1 is 01:30 CEST on Jul 2 -> midnight in Paris is 2025-07-02 00:00 CEST
     # = 2025-07-01 22:00 UTC
     expected = datetime(2025, 7, 1, 22, 0, 0, tzinfo=UTC)
@@ -264,9 +264,9 @@ def test_timeline_pagination_422_out_of_range() -> None:
 def test_profession_label_known() -> None:
     """Known profession returns the canonical label."""
     from gw2_core import Profession
-    from gw2analytics_api.routes.players import _profession_label
+    from gw2analytics_api.route_helpers import format_profession_label
 
-    label = _profession_label(Profession.MESMER)
+    label = format_profession_label(Profession.MESMER)
     assert isinstance(label, str)
     assert len(label) > 0
 
@@ -274,8 +274,8 @@ def test_profession_label_known() -> None:
 def test_elite_label_known() -> None:
     """Known elite spec returns the canonical label."""
     from gw2_core import EliteSpec
-    from gw2analytics_api.routes.players import _elite_label
+    from gw2analytics_api.route_helpers import format_elite_label
 
-    label = _elite_label(EliteSpec.CHRONOMANCER)
+    label = format_elite_label(EliteSpec.CHRONOMANCER)
     assert isinstance(label, str)
     assert len(label) > 0

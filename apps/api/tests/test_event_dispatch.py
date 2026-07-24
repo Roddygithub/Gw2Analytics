@@ -21,6 +21,7 @@ from gw2analytics_api.routes import fights as fights_module
 from gw2analytics_api.routes import players as players_module
 from gw2analytics_api.routes.fights import blob_loader
 from gw2analytics_api.scripts import backfill_player_summaries as backfill
+from gw2analytics_api.services import player_service as player_service_module
 
 
 def _event_line(event: Event) -> bytes:
@@ -102,11 +103,19 @@ def test_routes_fights_drops_local_event_type_adapter() -> None:
     assert "build_event_iterator" in blob_source
 
 
-def test_routes_players_drops_local_event_type_adapter() -> None:
-    """``routes/players.py`` no longer instantiates its own adapter."""
-    source = inspect.getsource(players_module)
-    assert "TypeAdapter(Event)" not in source
-    assert "build_event_iterator" in source
+def test_players_service_dropped_local_event_type_adapter() -> None:
+    """``player_service.py`` imports the canonical adapter (not a local one).
+
+    Post-A2 god-module refactor (plan 021), the ``build_event_iterator``
+    import moved from ``routes/players.py`` to ``services/player_service.py``
+    (the extracted player-service layer). The route file no longer
+    instantiates ``TypeAdapter(Event)`` and the service layer imports
+    the canonical ``build_event_iterator`` helper.
+    """
+    route_source = inspect.getsource(players_module)
+    assert "TypeAdapter(Event)" not in route_source
+    service_source = inspect.getsource(player_service_module)
+    assert "build_event_iterator" in service_source
 
 
 def test_backfill_drops_local_event_type_adapter() -> None:

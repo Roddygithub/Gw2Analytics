@@ -1,3 +1,11 @@
+"""Fight persistence: domain model → ORM translation.
+
+Phase 2.2: uses :class:`FightRepository` for all DB writes instead
+of raw ``db.add()`` / ``db.flush()`` calls. The public helper
+functions (``_save_fight``, ``_sanitize_name``, ``_deduplicate_ids``)
+keep the same signatures so callers are unaffected.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -8,12 +16,8 @@ from typing import Final
 from sqlalchemy.orm import Session
 
 from gw2_core import Fight as DomainFight
-from gw2analytics_api.models import (
-    OrmFight,
-    OrmFightAgent,
-    OrmFightSkill,
-    Upload,
-)
+from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightSkill, Upload
+from gw2analytics_api.repositories import FightRepository
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +30,15 @@ def _sanitize_name(name: str | None, max_length: int = MAX_NAME_LEN) -> str:
     The contract is intentionally non-obvious from the body alone:
 
     - Input contract: ``name`` may be ``None`` or empty; both produce
-      ``""`` (NOT ``None``). The return type is ``str`` (never
+      ``\"\"`` (NOT ``None``). The return type is ``str`` (never
       ``Optional[str]``) so callers can pass the result directly to a
       non-nullable SQLAlchemy ``String`` column without a defensive
-      ``or ""`` wrap.
-    - ``"\\x00"`` is stripped BEFORE truncation so a NUL at position
+      ``or \"\"`` wrap.
+    - ``\"\\\\x00\"`` is stripped BEFORE truncation so a NUL at position
       ``max_length - 1`` cannot push a partial byte past the limit
       (the parser may surface NULs in synthetic agent names).
     - The function is a 1-line wrapper around the static helper, but
-      callers MUST NOT re-wrap with ``or ""`` or re-strip ``\\x00`` --
+      callers MUST NOT re-wrap with ``or \"\"`` or re-strip ``\\\\x00`` --
       both are already handled here. The pre-plan-028 callers were
       already in the right shape; this docstring is preventive against
       future drift.
@@ -68,12 +72,14 @@ def _deduplicate_ids[T](
 
 
 def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
+    """Persist a parsed domain fight to the DB via FightRepository."""
     if cf.header is None:
         msg = "_save_fight called without header"
         raise ValueError(msg)
 
     head = cf.header
     started_at = datetime.now(UTC)
+    repo = FightRepository(db)
 
     orm_fight = OrmFight(
         id=cf.id,
@@ -84,8 +90,8 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
         started_at=started_at,
         game_type=int(cf.game_type),
     )
-    db.add(orm_fight)
-    db.flush()
+    repo.add(orm_fight)
+    repo.flush()
 
     for agent in _deduplicate_ids(
         cf.agents,
@@ -93,7 +99,7 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
         log_type="agent",
         fight_id=cf.id,
     ):
-        db.add(
+        repo.add_agent(
             OrmFightAgent(
                 fight_id=cf.id,
                 agent_id=int(agent.id),
@@ -116,7 +122,7 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
         log_type="skill",
         fight_id=cf.id,
     ):
-        db.add(
+        repo.add_skill(
             OrmFightSkill(
                 fight_id=cf.id,
                 skill_id=int(skill.id),
@@ -132,4 +138,4 @@ def _save_fight(db: Session, upload: Upload, cf: DomainFight) -> None:
     # already 0 -- the condition was dead code.  The parser's own
     # WARNING log is the operator signal.
 
-    db.flush()
+    repo.flush()
