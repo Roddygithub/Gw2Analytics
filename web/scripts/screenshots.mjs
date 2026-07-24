@@ -159,6 +159,16 @@ try {
               performance.now() - window.__gw2LastChangeAt >= stableMs
             );
           },
+          // v0.16.x SYNC POINT: this hydration sentinel MUST stay in
+          // lock-step with the matching one in
+          // ``web/tests/e2e/visual-regression.spec.ts`` (search for
+          // "v0.16.x SYNC POINT" in that file). The shared parameter
+          // triple is ``{ minHeight: 900, stableMs: 500, timeout:
+          // 30000 }``. Any tweak to this triple in one file MUST be
+          // mirrored in the other; otherwise the script's baseline
+          // captures diverge from the spec's diff captures and every
+          // visual-regression run after the divergence becomes a
+          // false positive.
           { minHeight: 900, stableMs: 500 },
           { timeout: 30000 },
         );

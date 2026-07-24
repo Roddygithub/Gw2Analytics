@@ -103,6 +103,12 @@ const VISUAL_REGRESSION_CASES: ReadonlyArray<{
   readonly name: string;
   readonly route: string;
   readonly baseline: string;
+  // v0.16.x: opt-in stable-scroll hydration sentinel for the
+  // dynamic pages (AG Grid + SVG chart mounts). Static pages
+  // (``null``) skip the guard; the spec relies on playwright's
+  // networkidle wait alone for those routes (their scroll
+  // height stays < 900 px and the sentinel would deadlock).
+  readonly hydrationSentinel?: boolean;
 }> = [
   {
     name: "landing",
@@ -123,31 +129,37 @@ const VISUAL_REGRESSION_CASES: ReadonlyArray<{
     name: "fights",
     route: "/fights",
     baseline: "04-fights.png",
+    hydrationSentinel: true,
   },
   {
     name: "players",
     route: "/players",
     baseline: "05-players.png",
+    hydrationSentinel: true,
   },
   {
     name: "player-profile",
     route: "/players/TestAccount.1234",
     baseline: "06-player-profile-with-timeline.png",
+    hydrationSentinel: true,
   },
   {
     name: "player-empty-timeline",
     route: "/players/empty-history.5678",
     baseline: "07-player-empty-timeline.png",
+    hydrationSentinel: true,
   },
   {
     name: "fight-drilldown",
     route: "/fights/fixture-fight-001",
     baseline: "08-fight-drilldown.png",
+    hydrationSentinel: true,
   },
   {
     name: "players-compare",
     route: "/players/compare",
     baseline: "09-players-compare.png",
+    hydrationSentinel: true,
   },
 ];
 
@@ -182,9 +194,12 @@ test.describe("visual regression (v0.8.9 plan/003)", () => {
   // as a near-100% false positive). ``deviceScaleFactor: 1``
   // matches the baseline (DPI scaling would change the pixel
   // counts on high-DPI displays).
-  test.use({ viewport: { width: 1440, height: 900 } });
-
-  for (const { name, route, baseline } of VISUAL_REGRESSION_CASES) {
+  test.use({ viewport: { width: 1440, height: 900 } });    for (const {
+      name,
+      route,
+      baseline,
+      hydrationSentinel = false,
+    } of VISUAL_REGRESSION_CASES) {
     test(`${name} (${route}) matches ${baseline}`, async ({ page }) => {
       // Navigate to the route. The ``waitUntil: "networkidle"``
       // wait condition is critical: a fresh full-page
@@ -199,6 +214,62 @@ test.describe("visual regression (v0.8.9 plan/003)", () => {
       // skills + timeline, per the v0.8.9 plan/002 page
       // contract) all resolve before ``networkidle`` fires.
       await page.goto(route, { waitUntil: "networkidle" });
+
+      // v0.16.x SYNC POINT: this hydration sentinel MUST stay in
+      // lock-step with the matching one in
+      // ``web/scripts/screenshots.mjs`` (search for "v0.16.x SYNC
+      // POINT" in that file). The shared parameter triple is
+      // ``{ minHeight: 900, stableMs: 500, timeout: 30000 }``. Any
+      // tweak to this triple in one file MUST be mirrored in the
+      // other; otherwise the script's baseline captures diverge from
+      // the spec's diff captures and every visual-regression run
+      // after the divergence becomes a false positive.
+
+      // v0.16.x hydration sentinel: wait until body.scrollHeight
+      // has been stable at >= minHeight for >= stableMs before
+      // capturing. Mirrors the equivalent guard in
+      // ``web/scripts/screenshots.mjs`` (the script uses
+      // ``chromium.launch()`` directly and does NOT get the
+      // playwright runner's hidden microtask delays that mask the
+      // AG Grid / SVG chart mount race against ``networkidle``).
+      // Without this guard the spec occasionally captures the
+      // pre-hydration state (1883 px on the fight drilldown
+      // baseline 3368 px), triggering a categorical
+      // dimension-mismatch failure that masks the real diff
+      // percentage. The sentinel sticks ``__gw2LastHeight`` +
+      // ``__gw2LastChangeAt`` on ``window`` so successive polls
+      // see the same sticky state. Only opted-in cases run the
+      // guard (static pages stay < 900 px scroll height and would
+      // deadlock otherwise).
+      if (hydrationSentinel) {
+        await page.waitForFunction(
+          (
+            { minHeight, stableMs }: { minHeight: number; stableMs: number },
+          ): boolean => {
+            const h = document.body.scrollHeight;
+            // The sentinel state lives on ``window`` so it stays
+            // sticky across playwright's polling. Cast through
+            // ``unknown`` -> ``any`` rather than ``any`` directly so
+            // the surrounding function still type-checks; these two
+            // underscored properties are added at runtime and have
+            // no legitimate presence elsewhere in the codebase.
+            const w = window as unknown as {
+              __gw2LastHeight?: number;
+              __gw2LastChangeAt?: number;
+            };
+            if (h < minHeight || w.__gw2LastHeight !== h) {
+              w.__gw2LastHeight = h;
+              w.__gw2LastChangeAt = performance.now();
+              return false;
+            }
+            return (
+              performance.now() - (w.__gw2LastChangeAt ?? 0) >= stableMs
+            );
+          },
+          { minHeight: 900, stableMs: 500 },
+          { timeout: 30000 },
+        );
+      }
 
       // Capture a fresh full-page screenshot to a temp file
       // in the OS tmp dir. ``fullPage: true`` scrolls the
