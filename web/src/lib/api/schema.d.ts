@@ -580,20 +580,12 @@ export interface paths {
         };
         /**
          * List Players
-         * @description Return up to ``limit`` players (skipping the first ``offset``).
+         * @description Return up to ``limit`` players.
          *
-         *     The route computes the cross-fight roll-up over ALL fights
-         *     (not just the paginated window -- the offset/limit apply to
-         *     the final player list, not the underlying fight set), then
-         *     applies the offset/limit to the sorted result. This keeps the
-         *     response stable across page boundaries: a player who was
-         *     page-1 row 5 last request is page-1 row 5 this request (the
-         *     cross-fight roll-up is deterministic).
-         *
-         *     v0.9.0: the optional ``?profession=`` filter is applied
-         *     between the cross-fight roll-up + the offset/limit. An
-         *     invalid name (or integer) surfaces as 422 via the
-         *     :func:`_parse_profession_filter` helper.
+         *     Phase 4.4: supports cursor-based keyset pagination via the
+         *     ``cursor`` query parameter (base64-encoded JSON). When a cursor
+         *     is provided the legacy ``offset`` is ignored. The next-page cursor
+         *     is returned as the ``X-Next-Cursor`` response header.
          */
         get: operations["list_players_api_v1_players_get"];
         put?: never;
@@ -647,18 +639,7 @@ export interface paths {
          * Get Player
          * @description Return the full profile + per-fight breakdown for one account.
          *
-         *     ``account_name`` is the URL-decoded canonical account name (e.g.
-         *     ``account.1234``). The ``:path`` converter lets the value
-         *     contain ``/`` characters that would otherwise terminate the
-         *     path match; FastAPI decodes the URL-encoded form before
-         *     handing the string to the handler. The route raises
-         *     ``404 Not Found`` when no agent in any fight carries the
-         *     requested ``account_name``.
-         *
-         *     The per-fight breakdown is built by filtering the
-         *     cross-fight roll-up to ``account_name`` and emitting one
-         *     :class:`PerFightBreakdownRowOut` per attended fight, sorted
-         *     by ``started_at`` DESC.
+         *     Raises 404 when no agent carries the requested ``account_name``.
          */
         get: operations["get_player_api_v1_players__account_name__get"];
         put?: never;
@@ -680,50 +661,10 @@ export interface paths {
          * Get Player Timeline
          * @description Return the per-fight historical timeline for one account.
          *
-         *     v0.8.0 of the API: the analyst-facing timeline chart on the
-         *     profile page. Reuses :func:`_compute_contributions` (the same
-         *     inner loop the list + detail endpoints use) so the route
-         *     joins + decompresses the events blobs once per request and
-         *     paginates in-memory.
-         *
-         *     Sort order is **recency-first** (``started_at DESC``, with
-         *     ``fight_id ASC`` as the tiebreaker for fights that share a
-         *     timestamp) -- the analyst scans a per-account trend, so the
-         *     most recent fight lands in the top-left slot of the chart.
-         *     The tiebreaker is the canonical deterministic-ordering
-         *     contract from the cross-fight roll-up.
-         *
-         *     ``limit`` is clamped to ``[1, 100]``; ``offset`` is clamped
-         *     to ``[0, inf)``. Out-of-range values raise ``422`` via
-         *     FastAPI's ``Query`` validation (BEFORE the handler runs,
-         *     so the route never sees a bad value).
-         *
-         *     The route raises ``404 Not Found`` when no agent in any
-         *     fight carries the requested ``account_name`` -- mirrors the
-         *     detail endpoint's contract.
-         *
-         *     Declaration order matters
-         *     -------------------------
-         *     This route MUST be declared BEFORE
-         *     ``get_player`` (the catch-all ``{account_name:path}`` route).
-         *     FastAPI matches routes in declaration order; if the catch-all
-         *     is declared first, ``/{account_name:path}`` would greedily
-         *     match ``/TestAccount.1234/timeline`` with
-         *     ``account_name="TestAccount.1234/timeline"`` and return 404
-         *     before the timeline route ever fires. The current declaration
-         *     order (list + timeline + detail) is the canonical
-         *     "more-specific-first" pattern.
-         *
-         *     v0.8.4 perf note
-         *     ----------------
-         *     v0.8.0 of the route did the per-fight roll-up in-memory on
-         *     every request. v0.8.4 materialises the per-(fight, account)
-         *     totals in ``OrmFightPlayerSummary`` (populated by the
-         *     background parser) so the fast-path serves the timeline
-         *     from a single indexed PK lookup per fight. The slow-path
-         *     fallback (the original v0.7.0 blob walk) covers pre-migration
-         *     fights transparently. Per-request latency drops from 5-30s
-         *     to a few milliseconds for users with 100+ fights.
+         *     Sort order is recency-first (``started_at DESC``). The
+         *     ``?bucket=day`` mode collapses all fights sharing a calendar
+         *     day into one summed point. The ``?tz=`` query param selects
+         *     the TZ for day-bucketing (default UTC).
          */
         get: operations["get_player_timeline_api_v1_players__account_name__timeline_get"];
         put?: never;
@@ -2691,7 +2632,9 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
-                /** @description Filter to players whose modal profession matches the enum name (e.g. ?profession=MESMER) or integer value (e.g. ?profession=7). Default (empty / no param) returns all players. */
+                /** @description Cursor for keyset pagination (base64-encoded JSON with ``last_damage`` and ``last_account``). When provided, ``offset`` is ignored and cursor-based navigation is used. The next cursor is returned as the ``X-Next-Cursor`` response header. */
+                cursor?: string | null;
+                /** @description Filter to players whose modal profession matches the enum name (e.g. ?profession=MESMER) or integer value (e.g. ?profession=7). Default (empty) returns all players. */
                 profession?: string;
             };
             header?: never;

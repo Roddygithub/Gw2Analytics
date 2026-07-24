@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 
 from gw2_core import Profession
+from gw2analytics_api.limiter import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ def _to_wire(entry: dict[str, Any]) -> SkillOut:
 
 
 @router.get("", response_model=list[SkillOut])
+@limiter.limit("30/minute")
 async def list_skills(request: Request) -> list[SkillOut]:
     catalog: dict[int, dict[str, Any]] | None = getattr(request.app.state, "skill_catalog", None)
     if catalog is None:

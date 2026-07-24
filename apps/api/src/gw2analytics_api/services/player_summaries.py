@@ -1,9 +1,15 @@
+"""Player summary materialization per fight.
+
+Phase 2.2: uses :class:`PlayerRepository` for the DELETE + INSERT
+of ``OrmFightPlayerSummary`` rows instead of raw ``db.execute(delete(...))``
+and ``db.add(...)`` calls.
+"""
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from gw2_analytics.buff_state import TRACKED_BUFFS, BuffStateTracker
@@ -21,8 +27,9 @@ from gw2_core import (
 from gw2analytics_api.models import (
     OrmFight,
     OrmFightAgent,
-    OrmFightPlayerSummary,
+    OrmFightPlayerBoon,
 )
+from gw2analytics_api.repositories import PlayerRepository
 from gw2analytics_api.services.fight_persistence import _sanitize_name
 
 # Skill IDs that correspond to the tracked positive boons. Any
@@ -80,11 +87,7 @@ def _boon_fields_for_account(
     uptimes_by_agent: dict[int, dict[str, float]],
     outgoing_by_agent: dict[int, dict[str, int]],
 ) -> dict[str, float | int | None]:
-    """Aggregate boon uptimes and outgoing generation for one account.
-
-    A player may appear under multiple agent_ids (disconnect/reconnect),
-    so we aggregate across every agent_id that belongs to the account.
-    """
+    """Aggregate boon uptimes and outgoing generation for one account."""
     agent_ids = account_to_agent_ids.get(account_name, [bucket.agent_id])
     merged_uptime: dict[str, float] = {}
     merged_outgoing: dict[str, int] = {}
@@ -93,7 +96,6 @@ def _boon_fields_for_account(
             merged_uptime[name] = merged_uptime.get(name, 0.0) + pct
         for name, total in outgoing_by_agent.get(aid, {}).items():
             merged_outgoing[name] = merged_outgoing.get(name, 0) + total
-    # Average uptime percentages across the player's agents.
     if len(agent_ids) > 1:
         for name in merged_uptime:
             merged_uptime[name] /= len(agent_ids)
@@ -138,13 +140,7 @@ def _compute_account_roles(
     cleanses: int,
     cc_applied: int,
 ) -> list[str]:
-    """Determine role badges for a single account using the same
-    thresholds as ``aggregate_combat_readout``.
-
-    Extracted as a module-level function so both
-    ``_persist_player_summaries`` and the unit test suite
-    can import it directly.
-    """
+    """Determine role badges for a single account."""
     roles_out: list[str] = []
     if total_squad_healing > 0 and (healing / total_squad_healing) > 0.10:
         roles_out.append("Heal")
@@ -161,37 +157,29 @@ def _compute_account_roles(
     return roles_out
 
 
-def _persist_player_summaries(  # noqa: PLR0912,PLR0915
-    db: Session,
-    orm_fight: OrmFight,
+def _process_events_to_buckets(  # noqa: PLR0912
     events: list[Event],
-) -> None:
-    source_map: dict[int, OrmFightAgent] = {
-        a.agent_id: a for a in orm_fight.agents if a.is_player and a.account_name
-    }
-    if not source_map:
-        return
+    source_map: dict[int, OrmFightAgent],
+    skill_name_map: dict[int, str | None],
+    buff_tracker: BuffStateTracker,
+) -> dict[str, _SummaryBucket]:
+    """Walk the event list and accumulate per-account summary buckets.
 
-    account_to_agent_ids = _build_account_agent_ids(
-        [a for a in orm_fight.agents if a.is_player and a.account_name],
-    )
-    skill_name_map: dict[int, str | None] = {int(s.skill_id): s.name for s in orm_fight.skills}
-
+    Returns a mapping from ``account_name`` to
+    :class:`_SummaryBucket` with damage/healing/strip/CC
+    totals aggregated over every event in the fight.
+    """
     per_account: dict[str, _SummaryBucket] = {}
-    buff_tracker = BuffStateTracker()
-    # Hoist globals / method lookups to local variables so the
-    # per-event hot loop pays local-variable cost only.
     _known_condi_names = KNOWN_CONDI_NAMES
     _skill_name_map_get = skill_name_map.get
 
-    # v0.10.11 fix: pre-seed per_account with zero-totals buckets
-    # for every attending player agent when events is empty.
     if not events:
         for agent in source_map.values():
             account = agent.account_name
             assert account is not None  # noqa: S101
             if account not in per_account:
                 per_account[account] = _make_bucket(agent)
+        return per_account
 
     for event in events:
         if isinstance(event, (BoonApplyEvent, BuffApplyEvent)):
@@ -203,7 +191,6 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
                     assert account is not None  # noqa: S101
                     if account not in per_account:
                         per_account[account] = _make_bucket(evt_agent)
-            # Count tracked-boon strips vs condition cleanses
             if isinstance(event, BoonApplyEvent) and event.kind != "apply":
                 source = source_map.get(event.source_agent_id)
                 if source is not None:
@@ -218,13 +205,12 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
         evt_agent = source_map.get(event.source_agent_id)
         if evt_agent is None:
             continue
+        assert evt_agent.account_name is not None  # noqa: S101
         account = evt_agent.account_name
-        assert account is not None  # noqa: S101
         if account not in per_account:
             per_account[account] = _make_bucket(evt_agent)
         bucket = per_account[account]
 
-        # Inline event application
         if isinstance(event, DamageEvent):
             bucket.damage += event.damage
             skill_name = _skill_name_map_get(event.skill_id)
@@ -240,15 +226,27 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
         elif isinstance(event, CCEvent):
             bucket.cc_applied += 1
 
-    # Compute boon uptimes / outgoing across all processed buff events.
-    duration_s: float = 0.0
-    if events:
-        last_time_ms = max((e.time_ms for e in events), default=0)
-        duration_s = last_time_ms / 1000.0
+    return per_account
+
+
+def _write_summary_and_boon_rows(
+    db: Session,
+    orm_fight: OrmFight,
+    per_account: dict[str, _SummaryBucket],
+    account_to_agent_ids: dict[str, list[int]],
+    buff_tracker: BuffStateTracker,
+    duration_s: float,
+    source_map: dict[int, OrmFightAgent],
+) -> None:
+    """Delete old summary/boon rows and write new ones from the buckets.
+
+    Phase 3.1: dual-write boons to the normalized
+    :class:`OrmFightPlayerBoon` table in addition to the
+    28 inline boon columns on :class:`OrmFightPlayerSummary`.
+    """
     uptimes_by_agent = buff_tracker.compute_all_uptimes(duration_s)
     outgoing_by_agent = buff_tracker.compute_all_outgoing(duration_s)
 
-    # Compute boons_out_rate per account from the buff tracker.
     boons_out_by_account: dict[str, float] = {}
     for account, agent_ids in account_to_agent_ids.items():
         total_stacks = 0
@@ -258,7 +256,6 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
         dur = max(duration_s, 1.0)
         boons_out_by_account[account] = total_stacks / dur
 
-    # Compute total squad healing for Heal role threshold.
     total_squad_healing = sum(b.healing for b in per_account.values())
 
     if not per_account and source_map:
@@ -270,9 +267,11 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
             len(source_map),
         )
 
-    db.execute(
-        delete(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == orm_fight.id),
-    )
+    repo = PlayerRepository(db)
+    repo.delete_boons_for_fight(orm_fight.id)
+
+    summary_rows: list[dict[str, object]] = []
+
     for account_name, bucket in per_account.items():
         sanitized_account = _sanitize_name(account_name)
         if not sanitized_account:
@@ -299,23 +298,23 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
             uptimes_by_agent,
             outgoing_by_agent,
         )
-        db.add(
-            OrmFightPlayerSummary(
-                fight_id=orm_fight.id,
-                account_name=sanitized_account,
-                name=bucket.name,
-                profession=bucket.prof,
-                elite_spec=bucket.elite,
-                total_damage=bucket.damage,
-                total_healing=bucket.healing,
-                total_buff_removal=bucket.strip,
-                detected_role=detected_role,
-                detected_tags=detected_tags,
-                power_damage=bucket.power,
-                condi_damage=bucket.condi,
-                boon_strips=bucket.boon_strips,
-                condition_cleanses=bucket.condition_cleanses,
-                roles=_compute_account_roles(
+        summary_rows.append(
+            {
+                "fight_id": orm_fight.id,
+                "account_name": sanitized_account,
+                "name": bucket.name,
+                "profession": bucket.prof,
+                "elite_spec": bucket.elite,
+                "total_damage": bucket.damage,
+                "total_healing": bucket.healing,
+                "total_buff_removal": bucket.strip,
+                "detected_role": detected_role,
+                "detected_tags": detected_tags,
+                "power_damage": bucket.power,
+                "condi_damage": bucket.condi,
+                "boon_strips": bucket.boon_strips,
+                "condition_cleanses": bucket.condition_cleanses,
+                "roles": _compute_account_roles(
                     healing=bucket.healing,
                     total_squad_healing=total_squad_healing,
                     boons_out_rate=boons_out_by_account.get(account_name, 0.0),
@@ -324,5 +323,85 @@ def _persist_player_summaries(  # noqa: PLR0912,PLR0915
                     cc_applied=bucket.cc_applied,
                 ),
                 **boon_kwargs,
-            ),
+            },
         )
+        # Phase 3.1: dual-write boons to the normalized table.
+        for boon_name in (
+            "might",
+            "fury",
+            "quickness",
+            "alacrity",
+            "protection",
+            "regeneration",
+            "vigor",
+            "aegis",
+            "stability",
+            "swiftness",
+            "resistance",
+            "resolution",
+            "superspeed",
+            "stealth",
+        ):
+            uptime = boon_kwargs.get(f"{boon_name}_uptime")
+            outgoing = boon_kwargs.get(f"outgoing_{boon_name}")
+            if uptime is not None or outgoing is not None:
+                repo.add_boon(
+                    OrmFightPlayerBoon(
+                        fight_id=orm_fight.id,
+                        account_name=sanitized_account,
+                        boon_name=boon_name,
+                        uptime=uptime,
+                        outgoing=outgoing,
+                    ),
+                )
+
+    repo.upsert_summaries(summary_rows)
+
+
+def _persist_player_summaries(
+    db: Session,
+    orm_fight: OrmFight,
+    events: list[Event],
+) -> None:
+    """Materialize per-account player summaries for a fight.
+
+    Phase 2.2: uses :class:`PlayerRepository` for the DELETE + INSERT
+    cycle instead of raw ``db.execute(delete(...))`` and ``db.add(...)``.
+    Phase 5.1: event accumulation extracted into
+    :func:`_process_events_to_buckets` and row writing into
+    :func:`_write_summary_and_boon_rows`.
+    """
+    source_map: dict[int, OrmFightAgent] = {
+        a.agent_id: a for a in orm_fight.agents if a.is_player and a.account_name
+    }
+    if not source_map:
+        return
+
+    account_to_agent_ids = _build_account_agent_ids(
+        [a for a in orm_fight.agents if a.is_player and a.account_name],
+    )
+    skill_name_map: dict[int, str | None] = {int(s.skill_id): s.name for s in orm_fight.skills}
+    buff_tracker = BuffStateTracker()
+
+    per_account = _process_events_to_buckets(
+        events,
+        source_map,
+        skill_name_map,
+        buff_tracker,
+    )
+
+    if events:
+        last_time_ms = max((e.time_ms for e in events), default=0)
+        duration_s = last_time_ms / 1000.0
+    else:
+        duration_s = 0.0
+
+    _write_summary_and_boon_rows(
+        db,
+        orm_fight,
+        per_account,
+        account_to_agent_ids,
+        buff_tracker,
+        duration_s,
+        source_map,
+    )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gw2analytics_api.database import Base
@@ -16,6 +16,8 @@ class Guild(Base):
 
 class GuildMember(Base):
     __tablename__ = "guild_members"
+
+    __table_args__ = (Index("ix_guild_members_account", "account_name"),)
 
     guild_id: Mapped[str] = mapped_column(
         String(72),

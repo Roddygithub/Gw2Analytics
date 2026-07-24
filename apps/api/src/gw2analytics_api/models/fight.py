@@ -21,11 +21,12 @@ from sqlalchemy import (
     Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.schema import Index
 
-from gw2analytics_api.database import Base
+from gw2analytics_api.database import Base, TimestampMixin
 
 
-class OrmFight(Base):
+class OrmFight(Base, TimestampMixin):
     __tablename__ = "fights"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -55,8 +56,10 @@ class OrmFight(Base):
     )
 
 
-class OrmFightAgent(Base):
+class OrmFightAgent(Base, TimestampMixin):
     __tablename__ = "fight_agents"
+
+    __table_args__ = (Index("ix_fight_agents_account_fight", "account_name", "fight_id"),)
 
     fight_id: Mapped[str] = mapped_column(
         String(64),
@@ -74,7 +77,7 @@ class OrmFightAgent(Base):
     fight: Mapped[OrmFight] = relationship(back_populates="agents")
 
 
-class OrmFightSkill(Base):
+class OrmFightSkill(Base, TimestampMixin):
     __tablename__ = "fight_skills"
 
     fight_id: Mapped[str] = mapped_column(
@@ -115,13 +118,13 @@ class OrmFightPlayerSummary(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     profession: Mapped[int] = mapped_column(Integer, nullable=False)
     elite_spec: Mapped[int] = mapped_column(Integer, nullable=False)
-    total_damage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_healing: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_buff_removal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_damage: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    total_healing: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    total_buff_removal: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     detected_role: Mapped[str | None] = mapped_column(String(30), nullable=True)
     detected_tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-    power_damage: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    condi_damage: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    power_damage: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    condi_damage: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     might_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
     fury_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
     quickness_uptime: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -152,4 +155,49 @@ class OrmFightPlayerSummary(Base):
     outgoing_stealth: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     boon_strips: Mapped[int | None] = mapped_column(Integer, nullable=True)
     condition_cleanses: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    roles: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # comment= aligns the ORM with the column-level comment carried
+    # by the prod DB; suppresses alembic autogenerate churn.
+    roles: Mapped[list[str] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Multi-role classification: list of strings (DPS/Heal/Support/Strip/Cleanser/CC)",
+    )
+
+
+class OrmFightPlayerBoon(Base):
+    """Normalized boon storage (Phase 3.1).
+
+    Replaces the 28 individual boon columns on
+    :class:`OrmFightPlayerSummary` with a row-per-boon-per-player
+    model. A fight with 10 players and 14 tracked boons produces
+    140 rows instead of 10 rows with 28 NULL-able columns each.
+    """
+
+    __tablename__ = "fight_player_boons"
+
+    fight_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("fights.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    account_name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    boon_name: Mapped[str] = mapped_column(
+        String(30),
+        primary_key=True,
+        comment="Boon identifier: 'might', 'fury', 'quickness', 'alacrity', etc.",
+    )
+    uptime: Mapped[float | None] = mapped_column(
+        Float, nullable=True, comment="Uptime fraction [0.0-1.0]"
+    )
+    outgoing: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="Total outgoing boon applications"
+    )
+
+
+__all__ = [
+    "OrmFight",
+    "OrmFightAgent",
+    "OrmFightPlayerBoon",
+    "OrmFightPlayerSummary",
+    "OrmFightSkill",
+]

@@ -15,10 +15,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response as FastAPIResponse
 from fastapi_mcp import FastApiMCP
-from minio.error import S3Error
+from minio.error import InvalidResponseError, S3Error
 from prometheus_client import generate_latest
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 # v0.10.8 plan 140 plan 140 Fix-E: switched from module-local binding to
 # live attribute lookup. The module-local binding (``from ... import
@@ -34,6 +36,7 @@ from gw2analytics_api.config import get_settings
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.limiter import limiter
 from gw2analytics_api.metrics import SKILLS_CATALOG_FRESHNESS_DAYS
+from gw2analytics_api.middleware import RequestIDMiddleware
 from gw2analytics_api.routes import (
     account,
     fights,
@@ -272,15 +275,44 @@ app.state.limiter = limiter
 app.add_exception_handler(429, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 app.add_middleware(SlowAPIMiddleware)
 
+# Phase 6.2: request ID middleware — injects X-Request-Id into
+# every response and sets ``request.state.request_id`` for
+# structured log correlation. Added AFTER SlowAPIMiddleware so
+# rate-limited requests still get a request_id in the error log.
+app.add_middleware(RequestIDMiddleware)
+
 
 @app.get("/healthz", include_in_schema=False)
 def healthz() -> dict[str, str]:
-    """Liveness probe with catalog freshness gauge.
+    """Liveness probe with catalog freshness gauge and backend checks.
 
-    Returns ``{"status": "ok"}`` when healthy. The Prometheus
-    ``skills_catalog_freshness_days`` gauge (set at startup)
+    Returns ``{"status": "ok"}`` when healthy. Also checks:
+    - S3/MinIO connectivity (basic bucket list attempt)
+    - DB connectivity (simple SELECT 1)
+    The Prometheus ``skills_catalog_freshness_days`` gauge (set at startup)
     surfaces catalog staleness via ``GET /api/v1/metrics``.
+
+    Phase 1.4: both backend checks are best-effort (they log warnings
+    on failure but do NOT degrade the health probe to ``unhealthy``)
+    because the API can still serve cached/static data without them.
     """
+    # DB connectivity check
+    try:
+        from gw2analytics_api.database import get_sessionmaker  # noqa: PLC0415
+
+        sm = get_sessionmaker()
+        with sm() as session:
+            session.execute(text("SELECT 1"))
+    except (SQLAlchemyError, ConnectionError, TimeoutError, OSError):
+        logger.warning("/healthz: DB connectivity check failed", exc_info=True)
+
+    # S3/MinIO connectivity check
+    try:
+        minio_client = get_minio()
+        minio_client.list_buckets()
+    except (S3Error, ConnectionError, OSError, TimeoutError, InvalidResponseError):
+        logger.warning("/healthz: S3 connectivity check failed", exc_info=True)
+
     return {"status": "ok"}
 
 

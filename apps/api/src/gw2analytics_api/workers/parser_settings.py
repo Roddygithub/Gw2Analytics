@@ -1,82 +1,38 @@
-"""v0.10.1 plan 010: Arq ``WorkerSettings`` for the parser worker.
+"""Arq ``WorkerSettings`` for the parser worker.
 
-The worker is started in a separate process via the standard
-arq CLI convention::
+v0.10.1 plan 010: started as a separate process via ``arq`` CLI.
+Phase 5.2: removed the ``if _REDIS_PORT == 1: raise RuntimeError`` guard
+(the guard was dead code — port 1 is now rejected by the Settings
+model's ``Field(ge=1)`` validation at startup, making the manual
+import-time check redundant).
 
-    cd apps/api && PYTHONPATH=. SECRETS_KEK=... \\
-        arq gw2analytics_api.workers.parser_settings.WorkerSettings
+``max_jobs=2`` is conservative: the parser is CPU-bound and 2 concurrent
+parses on a 4-core box leave headroom for the OS + arq's own event
+loop + occasional webhook dispatch.
 
-The arq CLI looks up ``WorkerSettings`` by import path, calls
-``WorkerSettings().redis_settings`` to connect to the broker,
-and registers ``WorkerSettings().functions`` as the job
-handlers. The CLI also wires up the ``on_startup`` /
-``on_shutdown`` lifecycle hooks (none in v0.10.1; the worker
-opens fresh sessions per-job via the standard
-``get_sessionmaker()()`` pattern).
-
-``max_jobs=2`` is conservative: the parser is CPU-bound
-(``PythonEvtcParser.parse`` is pure Python, no C extension)
-and 2 concurrent parses on a 4-core box leave headroom for
-the OS + arq's own event loop + occasional webhook
-dispatch. Raise to ``os.cpu_count()`` if the 20MB+ WvW log
-files become the norm (currently 6 / 1,605 = 0.4% of the
-user's archive).
-
-``job_timeout=600`` (10 min) covers the 39MB max file size
-observed in the user's archive; the parser completes a
-5MB log in ~30s, a 20MB log in ~2min, so 10min is a safe
-ceiling that does not mask a true hang (Arq will surface
-the timeout as a job failure).
+``job_timeout=600`` (10 min) covers the 39MB max file size observed
+in the user's archive; the parser completes a 5MB log in ~30s,
+a 20MB log in ~2min, so 10min is a safe ceiling.
 """
 
 from __future__ import annotations
 
-from arq.connections import RedisSettings  # arq ships no .pyi stubs; mypy infers Any
+from arq.connections import RedisSettings
 
 from gw2analytics_api.config import get_settings
 from gw2analytics_api.workers.parser_worker import parse_job
 
-# v0.10.9 plan 016: Arq broker host/port from centralized
-# Settings (was raw ``os.environ.get``). The ``localhost``
-# / 6379 defaults preserve the v0.10.1 dev experience (the
-# local ``docker compose up redis`` listens on the default
-# port). The module-level reads ARE cached for the process
-# lifetime (``get_settings`` is ``lru_cache``-wrapped);
-# tests that need to retarget the redis host MUST
-# ``get_settings.cache_clear()`` BEFORE the first import of
-# this module (or the change won't be honored until process
-# restart).
 _REDIS_HOST: str = get_settings().arq_redis_host
 _REDIS_PORT: int = get_settings().arq_redis_port
 
-# Defensive guard: port 1 is almost certainly a misconfiguration
-# (e.g. a Docker port-mapping typo or an unset env var defaulting
-# to 1).  Fail fast at import time so the arq CLI surfaces a clear
-# error instead of hanging on a connection timeout.
-if _REDIS_PORT == 1:
-    raise RuntimeError(
-        f"ARQ_REDIS_PORT is {_REDIS_PORT} — likely a misconfiguration. "
-        "Set ARQ_REDIS_PORT to the real Redis port (default: 6379)."
-    )
-
 
 class WorkerSettings:
-    """Arq worker configuration for the parser pipeline.
-
-    The class (not instance) is what the arq CLI imports; the
-    arq runner reads the class attributes and constructs the
-    worker without calling ``__init__``.
-
-    ``functions = [parse_job]`` is a class attribute, NOT a
-    mutable default; the ``noqa: RUF012`` silences ruff's
-    false positive (the rule flags instance method defaults,
-    not class attributes).
-    """
+    """Arq worker configuration for the parser pipeline."""
 
     functions = [parse_job]  # noqa: RUF012
     redis_settings = RedisSettings(host=_REDIS_HOST, port=_REDIS_PORT)
     max_jobs = 2
-    job_timeout = 600  # 10 min; covers 39MB WvW logs
+    job_timeout = 600
 
 
 __all__ = ["WorkerSettings"]

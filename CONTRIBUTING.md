@@ -108,6 +108,105 @@ dependencies, at the cost of two extra shell invocations per iteration
   database schema -- only the OpenAPI surface from `apps/api`.
 - Each component evolves independently (`pyproject.toml` per lib/app).
 
+### Layered architecture (since Phase 2 refactoring)
+
+The backend follows a strict dependency inversion: routes depend on
+services, services depend on repositories, repositories encapsulate
+SQLAlchemy queries. No layer reaches across boundaries.
+
+```
+Routes (routes/) — thin FastAPI declarations, no business logic
+    ↓
+Services (services/) — business logic orchestration
+    ↓
+Repositories (repositories/) — persistence abstraction
+    ↓
+ORM models (models/) — SQLAlchemy declarative models
+```
+
+**Repository conventions:**
+- ``get_by_*`` — returns a single ORM instance or ``None``.
+- ``find_by_*`` — returns a collection.
+- ``add_*`` — ``session.add()`` (caller commits).
+- ``delete_*`` — ``session.delete()`` or ``session.execute(delete(...))``.
+- Repositories NEVER call ``commit()`` — that's the service's
+  responsibility (keeps transaction boundaries at the use-case level).
+
+**Service conventions:**
+- Each service function accepts a ``Session`` as first parameter.
+- Services orchestrate multiple repository calls within one
+  transaction.
+- No ORM types leak into route responses — models are converted
+  to Pydantic schemas in the route layer.
+
+**ADR process:**
+Architecture Decision Records live in ``docs/adr/``. Each ADR
+follows this template:
+
+```markdown
+# ADR NNN — Title
+
+## Contexte
+Why the decision is needed.
+
+## Décision
+What was decided, including code examples or CLI commands.
+
+## Conséquences
+Trade-offs, migration notes, operational impact.
+
+## Status
+Accepté / Proposed / Deprecated
+```Existing ADRs:
+- ``001-repository-pattern.md`` — why and how we introduced
+  repositories between services and the ORM.
+- ``002-service-layer.md`` — business logic extraction from
+  routes.
+- ``003-boon-normalization.md`` — normalised ``fight_player_boons``
+  table design.
+- ``004-keyset-pagination.md`` — cursor-based pagination for the
+  player list.
+- ``005-streaming-performance.md`` — streaming uploads, iterator
+  parsing, JSONL streaming, and batch UPSERT.
+
+### Migration chain invariants (one-way design)
+
+Some alembic upgrades are intentionally not reversible. The
+canonical cases:
+
+- ``0014_strip_account_colon``: strips the parser-side ``:``
+  prefix from ``fight_agents.account_name`` and
+  ``fight_player_summaries.account_name``. Downgrading would
+  require knowing whether each row originally came from the EVTC
+  parser (which warrants the prefix) vs a manual insert (which
+  doesn't), and that signal is lost on write since the persistence
+  layer normalises on insert. The migration's module docstring
+  spells this out and its ``downgrade()`` raises
+  ``NotImplementedError`` so a careless ``alembic downgrade base``
+  fails loud instead of silently corrupting data.
+- ``8b674a6a9cfc_phase3_schema_changes``: drops 9 SCAFFOLD /
+  transformation-output columns unconditionally. Restore on
+  ``downgrade -1`` (all 9 are recreated), so the cost of a
+  single-step backward move is bounded; full-chain reversal
+  past this point is also bounded by the 0014 ``NotImplemented``
+  above.
+
+If you need a full chain reversal (e.g. to recover from a botched
+deployment), do it in **two moves**:
+
+1. ``alembic downgrade 8b674a6a9cfc`` -- the rollback chain hits
+   ``ea3023c87c0f`` first (the most-recent revision reverts
+   before ``8b674a6a9cfc`` walks back), so the ``Numeric`` agent_id
+   state and the 9 Phase 3 dropped columns are both restored in
+   a single command.
+2. Pre-0014 recovery is operator-driven by design: the ``:``
+   prefix vs. bare-form distinction was lost on the original 0014
+   write (no per-row source marker survives), so re-prefixing from
+   a post-0014 backup risks double-prefixing or mis-attributing
+   manually-inserted rows. Use a known-good pre-v0.10.x snapshot
+   and treat any re-added prefixes as cosmetic; no automatic
+   ``UPDATE`` recipe is safe here.
+
 ## Commit conventions
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/).

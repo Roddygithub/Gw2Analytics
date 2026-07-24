@@ -176,6 +176,23 @@ class Settings(BaseSettings):
         le=100_000,
     )
     # v0.10.25: hard cap on the compressed ``.zevtc`` upload body.
+    # Phase 1.4: optional API key for endpoint authentication.
+    # When set, the ``require_auth`` decorator (auth.py) enforces
+    # ``X-API-Key`` header matching this value. Leave unset for
+    # local dev (no auth).
+    api_key: str | None = Field(
+        default=None,
+        validation_alias="API_KEY",
+    )
+    # Phase 1.4: configurable timeout for outbound webhook HTTP POSTs.
+    # Default 10.0 seconds; raise for high-latency subscribers or lower
+    # for fast-fail on unreachable endpoints.
+    webhook_dispatch_timeout_s: float = Field(
+        default=10.0,
+        validation_alias="WEBHOOK_DISPATCH_TIMEOUT_S",
+        ge=1.0,
+        le=120.0,
+    )
     # Real WvW logs are ~5-40 MB compressed; the cap gives headroom
     # for the largest known files while preventing OOM from malicious
     # or broken clients. The parser's decompressed cap (500 MB) is
@@ -293,7 +310,17 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Cached accessor to avoid re-parsing env on every dependency injection."""
-    return Settings()
+    settings = Settings()
+    # Phase 1.4: warn if SECRETS_KEK is read from .env (best practice
+    # is to use a secret manager or environment injection, not a file).
+    if settings.secrets_kek.get_secret_value():
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "SECRETS_KEK loaded from environment. For production, "
+            "consider using a dedicated secret manager or injecting "
+            "the key via secure env injection rather than .env files."
+        )
+    return settings
 
 
 def setup_logging(*, level: str | int = logging.INFO) -> None:

@@ -74,7 +74,9 @@ from gw2_analytics.cross_account_timeline import (
 )
 from gw2_analytics.player_profile import FightContribution
 from gw2analytics_api.database import get_session
-from gw2analytics_api.routes.players import _load_merged_contributions
+from gw2analytics_api.services.player_service import (
+    load_merged_contributions as _load_merged_contributions,
+)
 
 router = APIRouter(prefix="/api/v1/players", tags=["players"])
 

@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import pathlib
+import tempfile
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -37,6 +39,62 @@ from gw2analytics_api.workers.webhook_dispatch import dispatch_for_upload
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/uploads", tags=["uploads"])
+
+
+_STREAM_THRESHOLD = 10 * 1024 * 1024  # 10 MB
+
+
+async def _read_upload_streaming(
+    file: UploadFile,
+    max_size: int,
+) -> tuple[bytes, str]:
+    """Read an upload file, computing SHA-256 incrementally.
+
+    Phase 4.1: for small files (size known and < 10 MB) reads directly;
+    for larger files streams in 8 KB chunks through a :class:`tempfile`
+    so the parse process never holds the full file in memory.
+    Returns ``(raw_bytes, sha256_hex)``.
+    """
+    sha = hashlib.sha256()
+    file_size = getattr(file, "size", None)
+
+    # Fast path: known small file — read directly.
+    if file_size is not None and file_size < _STREAM_THRESHOLD:
+        data = await file.read()
+        if len(data) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large ({len(data)} bytes). Maximum allowed is {max_size} bytes.",
+            )
+        sha.update(data)
+        return data, sha.hexdigest()
+
+    # Slow path: stream to tempfile in chunks with size enforcement.
+    tmp_path: str | None = None
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp_path = tmp.name
+        total = 0
+        while chunk := await file.read(8192):
+            total += len(chunk)
+            if total > max_size:
+                tmp.close()
+                pathlib.Path(tmp.name).unlink()  # noqa: ASYNC240
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=(
+                        f"File too large ({total} bytes). Maximum allowed is {max_size} bytes."
+                    ),
+                )
+            sha.update(chunk)
+            tmp.write(chunk)
+
+    if tmp_path is not None:
+        p = pathlib.Path(tmp_path)
+        data = p.read_bytes()  # noqa: ASYNC240
+        p.unlink()  # noqa: ASYNC240
+    else:
+        data = b""
+    return data, sha.hexdigest()
 
 
 async def _enqueue_parse(
@@ -153,6 +211,22 @@ async def create_upload(
     """Accept a ``.zevtc`` upload."""
     max_size = _config.get_settings().max_upload_size_bytes
 
+    # Phase 1.4: validate MIME type — only accept ``application/octet-stream``
+    # or ``application/x-zevtc`` (the latter is what the browser may infer
+    # for .zevtc files). Reject ``text/html``, ``image/*``, ``application/pdf``
+    # etc. at the HTTP layer before the bytes are read.
+    if file.content_type is not None and file.content_type not in (
+        "application/octet-stream",
+        "application/x-zevtc",
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                f"Unsupported content type: {file.content_type!r}. "
+                "Expected application/octet-stream."
+            ),
+        )
+
     # Defense-in-depth #1: reject oversized bodies before reading
     # them into memory. ``Content-Length`` is optional (chunked
     # encoding) but when present this short-circuits the OOM risk.
@@ -182,13 +256,7 @@ async def create_upload(
             detail=(f"File too large ({file_size} bytes). Maximum allowed is {max_size} bytes."),
         )
 
-    raw = file.file.read()
-    if len(raw) > max_size:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(f"File too large ({len(raw)} bytes). Maximum allowed is {max_size} bytes."),
-        )
-    sha = hashlib.sha256(raw).hexdigest()
+    raw, sha = await _read_upload_streaming(file, max_size)
 
     # Idempotent: SELECT before INSERT so we never see an IntegrityError
     # for the common re-upload path. The unique index is still the

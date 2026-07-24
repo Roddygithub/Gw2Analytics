@@ -1,3 +1,114 @@
+## [0.16.0] - 2026-07-24
+
+### Added — Full-stack refactoring: Phases 1-7 complete
+
+This release ships the comprehensive 7-phase refactoring plan that
+restructures the backend from monolithic routes to a layered
+architecture with repository pattern, service layer, schema
+normalization, performance streaming, and CI security hardening.
+
+### Phase 1 — Quick Wins (DB + Security)
+- **DB indexes**: composite indexes on `fight_agents(account_name, fight_id)`,
+  `webhook_deliveries(subscription_id, next_attempt_at)`,
+  `guild_members(account_name)`.
+- **Rate limiting**: `30/minute` on players, webhooks, guilds, and
+  skills listing endpoints.
+- **Foreign keys**: `webhook_dlq.subscription_id` now references
+  `webhook_subscriptions.id`.
+- **Security hardening**: S3 + DB healthchecks in `/healthz`,
+  configurable webhook HTTP timeout, MIME type validation on upload,
+  KEK loaded-from-.env warning, optional `require_auth` decorator,
+  `API_KEY` config field.
+
+### Phase 2 — Repository Pattern + Service Layer
+- **NEW `repositories/` package**: 5 repository classes encapsulating
+  all SQLAlchemy access (`FightRepository`, `UploadRepository`,
+  `WebhookRepository`, `PlayerRepository`, `GuildRepository`).
+- **Services refactored**: 6 service files (`player_profiles.py`,
+  `fight_persistence.py`, `player_summaries.py`, `event_blob.py`,
+  `guild_service.py`) now delegate all DB queries to repositories.
+- **`routes/players.py` slimmed**: 882 → 231 lines (74% reduction).
+  Business logic extracted into `services/player_service.py` and
+  `route_helpers.py`. Updated imports in `player_compare.py` and
+  test files.
+
+### Phase 3 — Schema Normalization
+- **`OrmFightPlayerBoon` model**: new `fight_player_boons` table
+  with PK `(fight_id, account_name, boon_name)` + `uptime` +
+  `outgoing` columns. Dual-write from `player_summaries.py`.
+- **INTEGER → BIGINT**: `total_damage`, `total_healing`,
+  `total_buff_removal`, `power_damage`, `condi_damage` on
+  `OrmFightPlayerSummary`; `size_bytes` on `Upload`.
+- **`TimestampMixin`**: new mixin adding `created_at` + `updated_at`
+  to `OrmFight`, `OrmFightAgent`, `OrmFightSkill`.
+- **`OrmFightAgent.agent_id`**: `Numeric(20,0)` → `BigInteger`.
+- **Phase 3 destructive drops** (`phase3_schema_changes`
+  rev `8b674a6a9cfc`): 9 columns that hold either NULL
+  (Phase 6 v2 SCAFFOLD-zero contract — banner retired at
+  v0.12.3) or transformation outputs recoverable from
+  `events_blob_uri`:
+  - `fight_player_summaries.{deaths, stun_breaks, interrupts,
+    downs, dodges, damage_taken, blocked}` — held NULL/0
+    pre-v0.12.x per the SCAFFOLD-zero contract.
+  - `fights.context`, `fight_agents.position_samples` —
+    recomputable from the event blob via `gw2_analytics`.
+  All 9 are restored on `downgrade -1` (the migration is
+  symmetric / reversible). Take a pre-upgrade DB snapshot
+  only if you ran a non-v0.12.x deployment into production
+  with populated SCAFFOLD columns or with non-derivable
+  position-samples payloads.
+
+### Phase 4 — Performance
+- **Streaming upload** (`routes/uploads.py`): new `_read_upload_streaming`
+  helper streams files >10 MB to a tempfile with incremental SHA-256.
+- **Iterator parsing** (`services/parse.py`): removed `list()` call
+  on `_parser.parse()` — uses `next()` + warning loop for extra fights.
+- **Streaming JSONL** (`services/event_blob.py`): replaced list
+  comprehension + `gzip.compress()` with streaming `BytesIO` +
+  `GzipFile.writelines`.
+- **Keyset pagination** (`PlayerRepository.aggregate_profiles_cursor`): new
+  cursor-based pagination method for the player list. Returns
+  `X-Next-Cursor` header for client-side navigation.
+- **Redis cache** (`services/cache_service.py`, NEW): `CacheService`
+  with `get_or_compute` / `invalidate` / `close` methods.
+- **Batch UPSERT** (`PlayerRepository.upsert_summaries`): replaces
+  DELETE + per-row INSERT with a single
+  `postgres_insert.on_conflict_do_update` statement.
+
+### Phase 5 — Quality
+- **Long function refactoring**: `_persist_player_summaries` split
+  into `_process_events_to_buckets` + `_write_summary_and_boon_rows`.
+  `process_parse` extracted `_commit_fight_and_blob` helper.
+- **Dead code removal**: removed `sync_guilds` stub, `port=1` guard
+  in parser settings, reduced excessive docstrings in `crypto.py`
+  and `schema_guard.py`.
+- **Strict types**: `combine_day_midnight` signature from `Any` →
+  `datetime`/`tzinfo`/`datetime`. Added missing return types across
+  services.
+- **CI Security** (`.github/workflows/security.yml`, NEW): Trivy
+  filesystem vulnerability scan on every PR.
+- **detect-secrets** (`.pre-commit-config.yaml`): added pre-commit
+  hook with `.secrets.baseline` allowlist.
+
+### Phase 6 — Monitoring
+- **`RequestIDMiddleware`** (`middleware.py`, NEW): injects
+  `X-Request-Id` header into every response, stores value on
+  `request.state.request_id` for log correlation.
+
+### Phase 7 — Documentation
+- **`CONTRIBUTING.md`**: added layered architecture section
+  documenting the Repository → Service → Route dependency
+  inversion, conventions for each layer, and the ADR process.
+- **ADR docs**: 5 architecture decision records in `docs/adr/`:
+  `001-repository-pattern`, `002-service-layer`,
+  `003-boon-normalization`, `004-keyset-pagination`,
+  `005-streaming-performance`.
+
+### Validation
+- Ruff: 0 errors (full `apps/api/src + libs`)
+- Mypy: 0 errors (150 source files)
+- Ruff format: 67 files already formatted
+
 ## [0.15.2] - 2026-07-24
 
 ### Fixed — DCO check inline bash migration

@@ -30,13 +30,14 @@ import uuid
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gw2analytics_api.config import get_settings
 from gw2analytics_api.crypto import encrypt_webhook_secret
 from gw2analytics_api.database import get_session
+from gw2analytics_api.limiter import limiter
 from gw2analytics_api.models import (
     OrmWebhookDelivery,
     OrmWebhookDlq,
@@ -280,7 +281,9 @@ def create_webhook(
 
 
 @router.get("", response_model=list[WebhookSubscriptionOut])
+@limiter.limit("30/minute")
 def list_webhooks(
+    request: Request,  # noqa: ARG001
     db: Session = Depends(get_session),  # noqa: B008
 ) -> list[WebhookSubscriptionOut]:
     """List active (non-revoked) webhook subscriptions. Secrets never returned."""

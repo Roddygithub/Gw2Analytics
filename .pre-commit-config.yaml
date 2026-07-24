@@ -57,6 +57,19 @@ repos:
         # ``uv run mypy libs apps`` run. The CI invocation also
         # uses ``--no-incremental`` for the same reason.
 
+  # Phase 5.5: secrets scanning via detect-secrets.
+  # Baseline must be regenerated via:
+  #   detect-secrets scan > .secrets.baseline
+  # after any change that intentionally introduces a secret-like
+  # pattern (e.g. a test fixture key). The baseline file is the
+  # allowlist for pre-commit to distinguish real secrets from
+  # false positives.
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

@@ -4,8 +4,8 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from functools import cache
 
-from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy import DateTime, Engine, create_engine, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from gw2analytics_api.config import get_settings
 
@@ -16,6 +16,26 @@ def utcnow() -> datetime:
 
 class Base(DeclarativeBase):
     """Declarative base for every ORM model in this app."""
+
+
+class TimestampMixin:
+    """Mixin adding ``created_at`` and ``updated_at`` columns.
+
+    ``created_at`` defaults to ``now()`` on INSERT.
+    ``updated_at`` updates to ``now()`` on every UPDATE.
+    """
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
 @cache
