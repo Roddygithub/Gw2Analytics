@@ -388,7 +388,7 @@ test.describe("visual regression (v0.8.9 plan/003)", () => {
       // pixels). The diff PNG is the same dimensions as
       // the input; ``pixelmatch`` writes the diff into a
       // pre-allocated ``PNG`` instance.
-      if (diffRatio >= DIFF_THRESHOLD) {
+      if (diffRatio >= threshold) {
         await fs.mkdir(DIFF_OUTPUT_DIR, { recursive: true });
         const diffPath = join(DIFF_OUTPUT_DIR, baseline);
         const diffPng = new PNG({
