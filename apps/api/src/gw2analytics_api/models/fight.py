@@ -155,7 +155,13 @@ class OrmFightPlayerSummary(Base):
     outgoing_stealth: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     boon_strips: Mapped[int | None] = mapped_column(Integer, nullable=True)
     condition_cleanses: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    roles: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # comment= aligns the ORM with the column-level comment carried
+    # by the prod DB; suppresses alembic autogenerate churn.
+    roles: Mapped[list[str] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Multi-role classification: list of strings (DPS/Heal/Support/Strip/Cleanser/CC)",
+    )
 
 
 class OrmFightPlayerBoon(Base):

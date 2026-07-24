@@ -157,19 +157,55 @@ Trade-offs, migration notes, operational impact.
 
 ## Status
 Accepté / Proposed / Deprecated
-```
-
-Existing ADRs:
+```Existing ADRs:
 - ``001-repository-pattern.md`` — why and how we introduced
   repositories between services and the ORM.
 - ``002-service-layer.md`` — business logic extraction from
   routes.
 - ``003-boon-normalization.md`` — normalised ``fight_player_boons``
   table design.
-- ``004-keyset-pagination.md`` — cursor-based pagination for
-  the player list.
+- ``004-keyset-pagination.md`` — cursor-based pagination for the
+  player list.
 - ``005-streaming-performance.md`` — streaming uploads, iterator
   parsing, JSONL streaming, and batch UPSERT.
+
+### Migration chain invariants (one-way design)
+
+Some alembic upgrades are intentionally not reversible. The
+canonical cases:
+
+- ``0014_strip_account_colon``: strips the parser-side ``:``
+  prefix from ``fight_agents.account_name`` and
+  ``fight_player_summaries.account_name``. Downgrading would
+  require knowing whether each row originally came from the EVTC
+  parser (which warrants the prefix) vs a manual insert (which
+  doesn't), and that signal is lost on write since the persistence
+  layer normalises on insert. The migration's module docstring
+  spells this out and its ``downgrade()`` raises
+  ``NotImplementedError`` so a careless ``alembic downgrade base``
+  fails loud instead of silently corrupting data.
+- ``8b674a6a9cfc_phase3_schema_changes``: drops 9 SCAFFOLD /
+  transformation-output columns unconditionally. Restore on
+  ``downgrade -1`` (all 9 are recreated), so the cost of a
+  single-step backward move is bounded; full-chain reversal
+  past this point is also bounded by the 0014 ``NotImplemented``
+  above.
+
+If you need a full chain reversal (e.g. to recover from a botched
+deployment), do it in **two moves**:
+
+1. ``alembic downgrade 8b674a6a9cfc`` -- the rollback chain hits
+   ``ea3023c87c0f`` first (the most-recent revision reverts
+   before ``8b674a6a9cfc`` walks back), so the ``Numeric`` agent_id
+   state and the 9 Phase 3 dropped columns are both restored in
+   a single command.
+2. Pre-0014 recovery is operator-driven by design: the ``:``
+   prefix vs. bare-form distinction was lost on the original 0014
+   write (no per-row source marker survives), so re-prefixing from
+   a post-0014 backup risks double-prefixing or mis-attributing
+   manually-inserted rows. Use a known-good pre-v0.10.x snapshot
+   and treat any re-added prefixes as cosmetic; no automatic
+   ``UPDATE`` recipe is safe here.
 
 ## Commit conventions
 
