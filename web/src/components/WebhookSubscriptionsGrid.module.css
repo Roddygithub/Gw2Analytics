@@ -1,0 +1,43 @@
+.emptyState {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--foreground);
+  opacity: 0.7;
+  font-size: 14px;
+}
+
+.emptyState strong {
+  color: var(--accent);
+}
+
+.revokeButton {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--error, #ff6e6e);
+  background: transparent;
+  color: var(--error, #ff6e6e);
+  cursor: pointer;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-size: 13px;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.revokeButton:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.revokeButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.error {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--error, #ff6e6e) 12%, transparent);
+  border: 1px solid var(--error, #ff6e6e);
+  color: var(--error, #ff6e6e);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
