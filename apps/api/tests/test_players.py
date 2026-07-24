@@ -277,7 +277,7 @@ def test_players_filter_with_pagination() -> None:
     test, so the "many Mesmer accounts from prior runs"
     pollution is gone. We now seed 5 Mesmers deterministically
     to exercise the cross-page consistency contract:
-    1. All rows on every page have ``profession == "PROF(7)"`` (Mesmer)
+    1. All rows on every page have ``profession == "Mesmer"`` (Mesmer)
        -- the filter is applied to every page, not just page 1.
     2. Page 1 + page 2 do not overlap -- the offset/limit
        are consistent on the filtered set.
@@ -300,7 +300,7 @@ def test_players_filter_with_pagination() -> None:
     # applied -- if the filter were broken, page 1 might
     # include a Warrior or Necromancer).
     for row in rows1:
-        assert row["profession"] == "PROF(7)", f"page 1 row should be Mesmer (PROF(7)), got {row}"
+        assert row["profession"] == "Mesmer", f"page 1 row should be Mesmer (PROF(7)), got {row}"
     resp2 = client.get(
         "/api/v1/players",
         params={"profession": "MESMER", "limit": 2, "offset": 2},
@@ -309,7 +309,7 @@ def test_players_filter_with_pagination() -> None:
     rows2 = resp2.json()
     # Every row on page 2 is a Mesmer too.
     for row in rows2:
-        assert row["profession"] == "PROF(7)", f"page 2 row should be Mesmer (PROF(7)), got {row}"
+        assert row["profession"] == "Mesmer", f"page 2 row should be Mesmer (PROF(7)), got {row}"
     page1_accounts = {r["account_name"] for r in rows1}
     page2_accounts = {r["account_name"] for r in rows2}
     # Page 1 + page 2 must not overlap (the offset/limit
@@ -351,9 +351,9 @@ def test_players_filter_does_not_affect_other_responses() -> None:
     # modal profession, not the Warrior filter value).
     assert profile["fights_attended"] >= 1
     # The ``profession`` field is the wire-format string label
-    # (``"PROF(7)"`` for Mesmer -- see :func:`_profession_label`
+    # (``"Mesmer"`` for Mesmer -- see :func:`_profession_label`
     # in routes/players.py for the exact wire shape).
-    assert profile["profession"] == "PROF(7)"
+    assert profile["profession"] == "Mesmer"
     # v0.10.3 plan 083: the per-fight breakdown now carries the
     # role detection (detected_role / detected_tags). The Mesmer
     # seeded above has damage-only events (the back-and-forth
