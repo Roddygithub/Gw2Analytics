@@ -284,12 +284,17 @@ def create_webhook(
 @limiter.limit("30/minute")
 def list_webhooks(
     request: Request,  # noqa: ARG001
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_session),  # noqa: B008
 ) -> list[WebhookSubscriptionOut]:
     """List active (non-revoked) webhook subscriptions. Secrets never returned."""
     rows = (
         db.execute(
-            select(OrmWebhookSubscription).where(OrmWebhookSubscription.revoked_at.is_(None))
+            select(OrmWebhookSubscription)
+            .where(OrmWebhookSubscription.revoked_at.is_(None))
+            .limit(limit)
+            .offset(offset),
         )
         .scalars()
         .all()
