@@ -159,15 +159,27 @@ Format : `Audit #PASS-PROBLÈME → Phase.Action`
 ## Résumé
 
 | Pass | Problèmes | Couverts | Non couverts | Reportés | % |
-|------|-----------|----------|-------------|----------|---|
+|------|-----------|----------|-------------|----------|----|
 | 1 — Architecture | 10 | 10 | 0 | 0 | 100% |
 | 2 — Backend | 20 | 20 | 0 | 0 | 100% |
 | 3 — Frontend | 5 | 2 | 3 | 0 | 40% |
-| 4 — Base de Données | 20 | 16 | 0 | 4 | 100% |
+| 4 — Base de Données | 20 | 16 | 0 | 4 | 80% (4 reportés) |
 | 5 — Performance | 22 | 22 | 0 | 0 | 100% |
 | 6 — Sécurité | 13 | 10 | 3 | 0 | 77% |
 | 7 — Qualité | 24 | 24 | 0 | 0 | 100% |
 | **Total** | **114** | **104** | **6** | **4** | **91%** |
+
+### État réel (vérifié codebase le 2026-07-24)
+
+Tout ce qui était marqué comme "à faire" dans le plan est **déjà implémenté** dans le code :
+
+- **Phase 1** : Index composites (fight_agents, webhook_deliveries, guild_members) ✅, rate limiting slowapi avec limites par route ✅, FK subscription_id sur webhook_dlq ✅ (upload_id volontairement omis — type mismatch String vs UUID), MIME validation ✅, healthcheck S3+DB ✅, auth.py ✅, warning KEK ✅, CORS configurable ✅, timeout webhook configurable ✅
+- **Phase 2** : repositories/ (6 fichiers) ✅, services/ (9 fichiers) ✅, routes players 262 lignes (au lieu de 882) ✅
+- **Phase 3** : OrmFightPlayerBoon ✅, BIGINT ✅, TimestampMixin ✅, agent_id Numeric (reverté) ✅
+- **Phase 4** : streaming upload ✅, streaming parse (iterator) ✅, streaming JSONL (GzipFile) ✅, keyset pagination ✅, CacheService ✅, UPSERT batch ✅
+- **Phase 5** : code mort supprimé ✅, pre-commit hooks ✅, security.yml (Trivy) ✅, ADR ✅
+
+**Mise à jour finale (2026-07-24) :** Phase 6 et 7 complétées — Grafana dashboard (`monitoring/grafana-dashboard.json`), workflow migration test (`.github/workflows/migration-test.yml`), structured logging JSON branché sur le process API + workers Arq. Il ne reste que les items DB dépriorisés (compression, partitionnement, BYTEA) qui n'auront de sens qu'après montée en charge.
 
 ### Problèmes non couverts (6)
 | Pass | Problème | Raison |

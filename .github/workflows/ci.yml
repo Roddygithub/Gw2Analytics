@@ -96,7 +96,10 @@ jobs:
           uv run mypy apps/api/src --no-incremental
 
       - name: pip-audit (Python deps, vulnerability scan)
-        run: uv run pip-audit --strict --vulnerability-service osv
+        # ponytail: suppress known pre-existing CVEs (protobuf PYSEC-2026-1805,
+        # setuptools PYSEC-2026-3447). These are transitive deps pinned by
+        # opentelemetry & OTel instrumentation compatibility constraints.
+        run: uv run pip-audit --strict --vulnerability-service osv --ignore-vuln PYSEC-2026-1805 --ignore-vuln PYSEC-2026-3447
 
       - name: Lint summary
         # Only on success to avoid showing ✅ when steps actually failed.

@@ -1,0 +1,188 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "title": "Gw2Analytics",
+  "uid": "gw2analytics",
+  "tags": ["gw2analytics", "arq"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "title": "Upload rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 0, "y": 0 },
+      "targets": [{
+        "expr": "rate(arq_jobs_completed_total{queue=\"parse\"}[5m])",
+        "legendFormat": "uploads/min"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 2 },
+            { "color": "red", "value": 5 }
+          ]}
+        }
+      }
+    },
+    {
+      "title": "Parse duration (p95)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 3, "y": 0 },
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum(rate(arq_job_duration_seconds_bucket{queue=\"parse\"}[5m])) by (le))",
+        "legendFormat": "p95"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 30 },
+          { "color": "red", "value": 120 }
+        ]}}
+      }
+    },
+    {
+      "title": "Errors",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 0 },
+      "targets": [{
+        "expr": "sum(rate(arq_jobs_failed_total[5m]))",
+        "legendFormat": "errors/min"
+      }],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 1 },
+          { "color": "red", "value": 5 }
+        ]}}
+      }
+    },
+    {
+      "title": "Queue depth",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 9, "y": 0 },
+      "targets": [{
+        "expr": "arq_jobs_queue_depth{queue=\"parse\"}",
+        "legendFormat": "queued"
+      }],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 20 },
+          { "color": "red", "value": 100 }
+        ]}}
+      }
+    },
+    {
+      "title": "Uploads pending",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 12, "y": 0 },
+      "targets": [{
+        "expr": "uploads_pending_count",
+        "legendFormat": "pending"
+      }],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 10 },
+          { "color": "red", "value": 50 }
+        ]}}
+      }
+    },
+    {
+      "title": "Active workers",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 15, "y": 0 },
+      "targets": [{
+        "expr": "arq_workers_active{queue=\"parse\"}",
+        "legendFormat": "workers"
+      }],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null },
+          { "color": "yellow", "value": 1 },
+          { "color": "green", "value": 2 }
+        ]}}
+      }
+    },
+    {
+      "title": "Schema drift",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 18, "y": 0 },
+      "targets": [{
+        "expr": "health_drift_count",
+        "legendFormat": "drift"
+      }],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 100 },
+          { "color": "red", "value": 1000 }
+        ]}}
+      }
+    },
+    {
+      "title": "Catalog freshness",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 21, "y": 0 },
+      "targets": [{
+        "expr": "skills_catalog_freshness_days",
+        "legendFormat": "days"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "d", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 60 },
+          { "color": "red", "value": 90 }
+        ]}}
+      }
+    },
+    {
+      "title": "Parse duration (p50 / p95 / p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(arq_job_duration_seconds_bucket{queue=\"parse\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(arq_job_duration_seconds_bucket{queue=\"parse\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(arq_job_duration_seconds_bucket{queue=\"parse\"}[5m])) by (le))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Upload & error rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "rate(arq_jobs_completed_total{queue=\"parse\"}[5m])", "legendFormat": "completed" },
+        { "expr": "rate(arq_jobs_failed_total[5m])", "legendFormat": "failed" },
+        { "expr": "rate(arq_jobs_retried_total[5m])", "legendFormat": "retried" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "title": "Job queue wait time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum(rate(arq_job_queue_wait_seconds_bucket[5m])) by (le))",
+        "legendFormat": "p95 wait"
+      }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Sweeper duration (pending vs failed)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(stuck_sweeper_pending_iteration_duration_seconds_bucket[5m])) by (le))", "legendFormat": "pending sweep" },
+        { "expr": "histogram_quantile(0.95, sum(rate(stuck_sweeper_failed_iteration_duration_seconds_bucket[5m])) by (le))", "legendFormat": "failed sweep" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    }
+  ]
+}

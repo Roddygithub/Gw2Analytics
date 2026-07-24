@@ -55,6 +55,13 @@ for var in _REQUIRED_ENV:
         default = base64.urlsafe_b64encode(b"a" * 32).decode()
     os.environ.setdefault(var, default)
 
+# Suppress log output during import -- setup_logging() in main.py
+# prints JSON log lines to stderr during app construction, which
+# would contaminate the OpenAPI JSON stdout dump.
+import logging
+
+logging.disable(logging.CRITICAL)
+
 from gw2analytics_api.main import app  # noqa: E402
 
 

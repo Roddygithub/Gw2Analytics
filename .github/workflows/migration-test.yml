@@ -1,0 +1,72 @@
+# Migration round-trip test (Phase 7.3)
+#
+# Runs on every PR that touches a migration or model file.
+# Spins up a fresh Postgres, runs `alembic upgrade head`,
+# then `alembic downgrade -1`, then `alembic upgrade head`
+# again to verify the migration is reversible without data loss.
+
+name: Test migrations
+
+on:
+  pull_request:
+    paths:
+      - apps/api/alembic/**
+      - apps/api/src/gw2analytics_api/models/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  migration-test:
+    name: Migration round-trip
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gw2
+          POSTGRES_PASSWORD: gw2
+          POSTGRES_DB: gw2analytics
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version-default
+
+      - name: Sync workspace
+        run: uv sync --frozen
+
+      - name: Upgrade to head
+        run: uv run alembic upgrade head
+        working-directory: apps/api
+        env:
+          DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics
+
+      - name: Downgrade one step
+        run: uv run alembic downgrade -1
+        working-directory: apps/api
+        env:
+          DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics
+
+      - name: Re-upgrade to head (round-trip complete)
+        run: uv run alembic upgrade head
+        working-directory: apps/api
+        env:
+          DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics

@@ -40,6 +40,37 @@ dependencies = [
     # via ``arq.create_pool``.
     "arq>=0.25",
     "redis>=5.0,<8",
+    # Phase 6.1: OpenTelemetry tracing. Gated behind
+    # ``OTEL_EXPORTER_OTLP_ENDPOINT``; when unset, ``init_otel`` is a
+    # no-op and the import is lazy so the cold-startup footprint is
+    # ~0 bytes. The HTTP/protobuf exporter (vs gRPC) keeps the
+    # ``Dockerfile`` pure-Python -- gRPC would force a C-extension
+    # build step. Versions match OTel-Python semconv 1.27
+    # compatibility across the api/sdk/instrumentation packages.
+    # The instrumentation packages are pinned EXACT (``==0.48b0``)
+    # -- not ``>=0.48b0`` -- because each ``0.NNb0`` release targets
+    # a specific ``opentelemetry-api`` minor. A loose ``>=`` pin
+    # could pull ``0.49b0`` (which instruments against api 1.30+)
+    # and silently clash with our ``api>=1.27,<2`` floor.
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-fastapi==0.48b0",
+    "opentelemetry-instrumentation-sqlalchemy==0.48b0",
+    "opentelemetry-instrumentation-redis==0.48b0",
+    # Phase 6.1 follow-up: ``pkg_resources`` is removed from
+    # Python 3.12 stdlib. The OTel instrumentation packages
+    # (and ``prometheus_client``) read it at import time to
+    # resolve installed distribution versions. Pin setuptools
+    # below 80 because setuptools 80+ DELETED the historical
+    # ``pkg_resources`` submodule (moved out of the bundled
+    # wheel). Without the upper bound, uv resolves to
+    # setuptools 83+ and ``opentelemetry.instrumentation.
+    # dependencies`` at import time fails with
+    # ``ModuleNotFoundError: No module named 'pkg_resources'``.
+    # When OTel instrumentation moves to ``importlib.metadata``
+    # (>0.48b0), this dep can be dropped entirely.
+    "setuptools>=70.0.0,<80",
     "prometheus_client>=0.20",  # v0.10.12 plan 017: Arq worker metrics + /metrics endpoint
     "gw2_core",
     "gw2_evtc_parser",

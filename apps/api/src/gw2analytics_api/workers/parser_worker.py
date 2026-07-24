@@ -1,5 +1,9 @@
 """v0.10.1 plan 010: Arq worker that runs the EVTC parser + webhook dispatch.
 
+Phase 6.2: calls ``setup_logging()`` at module level so the Arq
+worker process (separate from the API process) uses the same
+structured JSON logging format as the API.
+
 Why this exists
 ===============
 
@@ -70,10 +74,14 @@ import time
 from typing import Any
 from uuid import UUID
 
+from gw2analytics_api.config import setup_logging
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.metrics import ARQ_JOB_DURATION, ARQ_JOBS_COMPLETED, ARQ_JOBS_FAILED
 from gw2analytics_api.services import process_parse
 from gw2analytics_api.workers.webhook_dispatch import dispatch_for_upload
+
+# Phase 6.2: structured JSON logging for the Arq worker process.
+setup_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -118,13 +126,8 @@ async def parse_job(
     start_time = time.monotonic()
     try:
         await asyncio.to_thread(process_parse, sf, parsed_upload_id, raw_bytes)
-        # The parser has consumed ``raw_bytes``; release the reference
-        # eagerly so the large upload payload can be garbage-collected
-        # before the (potentially long) webhook dispatch phase.
         del raw_bytes
     except Exception:
-        # Deliberately broad: any parse failure must be recorded as a
-        # failed Arq job and then re-raised so Arq retries the job.
         elapsed = time.monotonic() - start_time
         ARQ_JOBS_FAILED.labels(queue=_QUEUE_LABEL, error_type="parse").inc()
         ARQ_JOB_DURATION.labels(queue=_QUEUE_LABEL, status="failed").observe(elapsed)
@@ -136,10 +139,6 @@ async def parse_job(
     try:
         await dispatch_for_upload(sf, parsed_upload_id)
     except Exception:
-        # Deliberately broad: the parse already committed; a missed
-        # webhook is an operational concern (manual re-dispatch) and is
-        # NOT worth a re-parse (which would create a duplicate fight
-        # row). Log and swallow.
         logger.exception(
             "parse_job dispatch failed for upload %s "
             "(parse already committed; webhook deliveries skipped)",
