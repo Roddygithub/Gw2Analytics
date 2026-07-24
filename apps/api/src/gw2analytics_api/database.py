@@ -57,7 +57,7 @@ def _maybe_instrument_sqlalchemy(engine: Engine) -> None:
     if not settings.otel_exporter_otlp_endpoint:
         return
     try:
-        from opentelemetry.instrumentation.sqlalchemy import (
+        from opentelemetry.instrumentation.sqlalchemy import (  # noqa: PLC0415
             SQLAlchemyInstrumentor,
         )
     except ImportError:
