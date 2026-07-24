@@ -379,25 +379,28 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # v0.16.x: the committed PNG baselines at docs/screenshots/
-    # are from the v0.8.8 era (3+ UI extensions behind v0.16.0's
-    # landing / fights / players reworks). Real diffs vs the
-    # committed baselines are NOT regressions -- they are baseline
-    # staleness. Until a follow-up PR refreshes the 9 baselines
-    # via a CI-equivalent standalone prod build, the
-    # ``continue-on-error: true`` flag stops this job from
-    # blocking PR merges while still running the suite (and
-    # uploading the diff artifacts via the failure() conditionals
-    # below -- they're still useful for whoever refreshes the
-    # baselines next). Local devs retain the same test signal via
+    # are from a pre-v0.16.x commit era (last touched 2026-07-07
+    # to 2026-07-15, ~10 days before the 2026-07-24 release;
+    # verifiable directly via
+    # ``git log -1 --format=%H -- docs/screenshots/<file>`` --
+    # see the "Exit criterion" block below for the verbatim
+    # recipe). Real diffs vs the committed baselines are NOT
+    # regressions -- they are baseline staleness. Until a
+    # follow-up PR refreshes the 9 baselines via a CI-equivalent
+    # standalone prod build, the ``continue-on-error: true`` flag
+    # stops this job from blocking PR merges while still running
+    # the suite (and uploading the diff artifacts via the
+    # ``failure()`` conditionals below -- they're still useful for
+    # whoever refreshes the baselines next). Local devs retain
+    # the same test signal via
     # ``pnpm exec playwright test --project=visual-regression``.
     #
     # Why ``continue-on-error: true`` is sufficient as a gate:
     # the flag only prevents workflow FAILURE on this job's
     # failure; the underlying status check still reports ``failure``.
     # It is currently safe because CONTRIBUTING.md §"Branch
-    # protection for main" lists 6 required-status-checks (Lint
-    # Python, Test Python, Lint Web, Playwright (chromium), ARQ
-    # worker integration, DCO check) and ``Playwright
+    # protection for main" lists 6 required-status-checks (see
+    # that section for the current list), and ``Playwright
     # (visual-regression)`` is NOT among them -- so a failed run
     # here does NOT block the merge gate. WARNING: a future
     # maintainer who adds this job to the required_status_checks
