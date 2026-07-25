@@ -416,6 +416,14 @@ function getSortValue(p: PlayerReadoutOut, field: string): number {
  *  Timeline mini chart
  * ------------------------------------------------------------------ */
 
+// Chart dimensions — hoisted above the component so the
+// handleExportPng callback can reference them without a
+// temporal dead zone violation (ESLint ``no-before-declare``).
+const CHART_W = 800;
+const CHART_H = 100;
+const CHART_PAD = 2;
+const CHART_MAX_POINTS = 200;
+
 function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null }) {
   const [activityOnly, setActivityOnly] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -433,7 +441,7 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
     if (!svgRef.current) return;
     try {
       const str = serializeSvg(svgRef.current);
-      const blob = await renderSvgToPng(str, W, H, 2);
+      const blob = await renderSvgToPng(str, CHART_W, CHART_H, 2);
       triggerDownload(blob, "timeline.png");
     } catch (e) {
       console.error("Timeline PNG export failed", e);
@@ -449,10 +457,6 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
   }
 
   const raw = events.event_windows;
-  const MAX_POINTS = 200;
-  const W = 800;
-  const H = 100;
-  const PAD = 2;
   const durationMin = (raw[raw.length - 1]?.end_ms ?? 0) / 60000;
 
   // Count active (non-zero) windows for the toggle label
@@ -465,14 +469,14 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
   const points = useMemo(() => {
     const source = activityOnly ? activeWindows : raw;
     if (source.length === 0) return [];
-    if (source.length <= MAX_POINTS) {
+    if (source.length <= CHART_MAX_POINTS) {
       return source.map((w) => ({
         x: ((w.start_ms / (raw[raw.length - 1]?.end_ms || 1)) * 100),
         dmg: w.damage_total,
         heal: w.healing_total,
       }));
     }
-    const groupSize = Math.ceil(source.length / MAX_POINTS);
+    const groupSize = Math.ceil(source.length / CHART_MAX_POINTS);
     const result: { x: number; dmg: number; heal: number }[] = [];
     for (let i = 0; i < source.length; i += groupSize) {
       const slice = source.slice(i, i + groupSize);
@@ -506,16 +510,16 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
   const buildArea = (vals: number[], maxVal: number, height: number) => {
     if (points.length === 0) return "";
     const pts = points.map((p, i) => {
-      const x = PAD + (p.x / 100) * (W - 2 * PAD);
-      const y = height - ((vals[i] / maxVal) * (height - PAD));
+      const x = CHART_PAD + (p.x / 100) * (CHART_W - 2 * CHART_PAD);
+      const y = height - ((vals[i] / maxVal) * (height - CHART_PAD));
       return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
     });
-    const lastX = PAD + ((points[points.length - 1]?.x ?? 100) / 100) * (W - 2 * PAD);
-    return `${pts.join(" ")} L${lastX.toFixed(1)},${height} L${PAD},${height} Z`;
+    const lastX = CHART_PAD + ((points[points.length - 1]?.x ?? 100) / 100) * (CHART_W - 2 * CHART_PAD);
+    return `${pts.join(" ")} L${lastX.toFixed(1)},${height} L${CHART_PAD},${height} Z`;
   };
 
-  const dmgPath = buildArea(points.map((p) => p.dmg), maxDmg, H);
-  const healPath = buildArea(points.map((p) => p.heal), maxHeal, H);
+  const dmgPath = buildArea(points.map((p) => p.dmg), maxDmg, CHART_H);
+  const healPath = buildArea(points.map((p) => p.heal), maxHeal, CHART_H);
   const activityPct = raw.length > 0 ? (activeWindows.length / raw.length) * 100 : 0;
 
   return (
@@ -599,7 +603,7 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
       </div>
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
+        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
         style={{
           width: "100%",
           height: 120,
@@ -610,14 +614,14 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
       >
         {/* Gap separator lines — only in activity mode */}
         {gapLines.map((g, i) => {
-          const gx = PAD + (g.x / 100) * (W - 2 * PAD);
+          const gx = CHART_PAD + (g.x / 100) * (CHART_W - 2 * CHART_PAD);
           return (
             <line
               key={i}
               x1={gx}
               y1={0}
               x2={gx}
-              y2={H}
+              y2={CHART_H}
               stroke="rgba(255,255,255,0.18)"
               strokeWidth="1"
               strokeDasharray="3 3"
@@ -629,7 +633,7 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
         {/* Heal area */}
         {healPath && <path d={healPath} fill="rgba(34,197,94,0.2)" stroke="#22c55e" strokeWidth="1" strokeLinejoin="round" />}
         {/* Horizontal zero line */}
-        <line x1={PAD} y1={H} x2={W - PAD} y2={H} stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
+        <line x1={CHART_PAD} y1={CHART_H} x2={CHART_W - CHART_PAD} y2={CHART_H} stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
       </svg>
     </div>
   );
