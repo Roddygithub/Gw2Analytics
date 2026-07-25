@@ -1629,7 +1629,7 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
 
     # v0.16.3-api: cross-validate elite spec against profession.
     # EVTC2025+ logs use official GW2 v2 API IDs natively.
-    elite = _validate_elite_for_profession(int(prof_raw), int(elite_raw))
+    elite = _validate_elite_for_profession(prof_raw, elite_raw)
 
     return Agent(
         id=addr,
@@ -1698,7 +1698,7 @@ def _decode_agent(data: bytes, offset: int) -> Agent:
     # v0.16.3-api: cross-validate elite ID against the agent's
     # profession using the canonical helper (handles shared
     # collision IDs 55, 63, 73, 74, 75, 77).
-    elite = _validate_elite_for_profession(int(prof_raw), int(elite_raw))
+    elite = _validate_elite_for_profession(prof_raw, elite_raw)
 
     return Agent(
         id=aid,
