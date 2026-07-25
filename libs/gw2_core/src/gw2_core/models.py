@@ -90,19 +90,41 @@ class EliteSpec(IntEnum):
     # Ranger elites
     DRUID = 5
     SOULBEAST = 55  # collides with Daredevil pre-2018
-    UNTAMED = 73
+    UNTAMED = 73  # shared with Troubadour (Mesmer)
     # Elementalist elites
     TEMPEST = 48
     WEAVER = 63  # collides with Renegade historically
-    CATALYST = 75
+    CATALYST = 75  # shared with Amalgam (Engineer)
     # Mesmer elites
     CHRONOMANCER = 40
     MIRAGE = 59
-    VIRTUOSO = 74
+    VIRTUOSO = 74  # shared with Paragon (Warrior)
     # Necromancer elites
     REAPER = 34
     SCOURGE = 60
-    HARBINGER = 77
+    HARBINGER = 77  # shared with Antiquary (Thief)
+    RITUALIST = 76
+
+    # Visions of Eternity — new specs sharing IDs where the profession
+    # disambiguates (same pattern as 55=Soulbeast/Daredevil, 63=Weaver/Renegade):
+    # 73=Untamed/Troubadour, 74=Virtuoso/Paragon, 75=Catalyst/Amalgam,
+    # 77=Harbinger/Antiquary.
+    # Guardian
+    LUMINARY = 81
+    # Warrior
+    PARAGON = 74  # alias: same ID as Virtuoso (Mesmer)
+    # Engineer
+    AMALGAM = 75  # alias: same ID as Catalyst (Ele)
+    # Ranger
+    GALESHOT = 78
+    # Thief
+    ANTIQUARY = 77  # alias: same ID as Harbinger (Necro)
+    # Elementalist
+    EVOKER = 80
+    # Mesmer
+    TROUBADOUR = 73  # alias: same ID as Untamed (Ranger)
+    # Revenant
+    CONDUIT = 79
 
 
 class GameType(IntEnum):

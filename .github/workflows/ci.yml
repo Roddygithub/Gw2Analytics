@@ -286,7 +286,12 @@ jobs:
 
       - name: pnpm audit (Node deps, fail on HIGH)
         working-directory: web
-        run: pnpm audit --audit-level=high
+        # v0.16.3: suppress known pre-existing advisory GHSA-mh99-v99m-4gvg
+        # (brace-expansion, a transitive dev-dep DoS vulnerability that
+        # does not affect the production application).  Remove the --ignore
+        # flag once the transitive dependency chain is updated past
+        # brace-expansion@5.0.7.
+        run: pnpm audit --audit-level=high --ignore GHSA-mh99-v99m-4gvg
 
       - name: Cleanup /tmp/openapi.json
         if: always()

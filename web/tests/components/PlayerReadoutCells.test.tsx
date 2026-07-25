@@ -145,11 +145,22 @@ describe("parseWireFormat (wire parser)", () => {
   });
 
   it("returns null for unparseable strings", () => {
+    // v0.16.3-api: canonical names ("Guardian", "Dragonhunter") ARE parseable
+    // since the API now emits human-readable names instead of PROF(N)/ELITE(N).
     expect(parseWireFormat("GUARDIAN")).toBeNull();
-    expect(parseWireFormat("Dragonhunter")).toBeNull();
     expect(parseWireFormat("PROF()")).toBeNull();
     expect(parseWireFormat("PROF(abc)")).toBeNull();
     expect(parseWireFormat("")).toBeNull();
+  });
+
+  it("parses canonical profession name 'Guardian' as profession int 1", () => {
+    // v0.16.3-api: API emits human-readable names, not PROF(N) format.
+    expect(parseWireFormat("Guardian")).toEqual({ kind: "profession", int: 1 });
+  });
+
+  it("parses canonical elite-spec name 'Dragonhunter' as elite int 27", () => {
+    // v0.16.3-api: API emits human-readable names, not ELITE(N) format.
+    expect(parseWireFormat("Dragonhunter")).toEqual({ kind: "elite", int: 27 });
   });
 
   it("returns null for null / undefined inputs", () => {
@@ -183,10 +194,16 @@ describe("getProfessionIconPath", () => {
     expect(getProfessionIconPath("PROF(99)")).toBeNull();
   });
 
-  it("returns null for non-wire strings (TitleCase / UPPER keys)", () => {
-    // Belt-and-braces: backward-compat with v1 callers.
+  it("returns null for non-wire strings (UPPER keys)", () => {
+    // UPPER keys like "GUARDIAN" are never produced by the API.
     expect(getProfessionIconPath("GUARDIAN")).toBeNull();
-    expect(getProfessionIconPath("Guardian")).toBeNull();
+  });
+
+  it("maps canonical 'Guardian' to Guardian icon (v0.16.3-api name-based format)", () => {
+    // v0.16.3-api: API emits human-readable names, not PROF(N) format.
+    expect(getProfessionIconPath("Guardian")).toBe(
+      "/icons/professions/Guardian_tango.png",
+    );
   });
 
   it("returns null for null / undefined", () => {

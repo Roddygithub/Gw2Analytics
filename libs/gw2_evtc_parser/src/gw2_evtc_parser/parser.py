@@ -350,6 +350,30 @@ MAX_EVTC_BYTES: Final[int] = 500 * 1024 * 1024
 #: is present (an empty account_name is also valid).
 ACCOUNT_NAME_PREFIX: Final[bytes] = b":"
 
+#: v0.16.3: per-profession set of valid elite-specialisation IDs.
+#: Used by :func:`_validate_elite_for_profession` and the legacy
+#: decode path to cross-validate the mapped (or raw) elite ID
+#: against the agent's profession.  Shared IDs (55, 63, 73, 74,
+#: 75, 77) resolve via the profession check.
+_VALID_ELITE_BY_PROFESSION: Final[dict[int, set[int]]] = {
+    1: {27, 62, 65, 81},  # Guardian
+    2: {18, 64, 74},  # Warrior
+    3: {43, 57, 70, 75},  # Engineer
+    4: {5, 55, 73, 78},  # Ranger
+    5: {55, 71, 72, 77},  # Thief
+    6: {48, 63, 75, 80},  # Elementalist
+    7: {40, 59, 74, 73},  # Mesmer
+    8: {34, 60, 77, 76},  # Necromancer
+    9: {52, 63, 68, 79},  # Revenant
+}
+
+#: v0.16.3: map legacy arcdps elite IDs to the current API-correct
+#: ID.  Old arcdps revisions sometimes wrote IDs that differ from
+#: the GW2 v2 API IDs used by EVTC2025+.  Currently identity (no
+#: overrides needed for the known old-format IDs) — the EliteSpec
+#: enum already uses API-correct values.
+_LEGACY_ELITE_OVERRIDE: Final[dict[int, int]] = {}
+
 #: v0.11.0 hotfix: sanity cap for damage / heal / strip values.
 #: arcdps uses INT32_MAX (2,147,483,647) as a sentinel for "no
 #: value" or "infinite duration" in buff-metadata fields that
@@ -369,6 +393,22 @@ _DAMAGE_SANITY_CAP: Final[int] = 2_147_483_647
 #: 1-10 MB); 500 MB accommodates the longest possible fights
 #: with headroom.
 _MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE: Final[int] = 500 * 1024 * 1024  # 500 MB
+
+
+def _validate_elite_for_profession(prof_raw: int, elite_raw: int) -> EliteSpec:
+    """Return the correct :class:`EliteSpec` for ``elite_raw`` from
+    ``prof_raw``, or :attr:`EliteSpec.BASE` if the ID is not valid
+    for that profession.
+
+    The per-profession valid set resolves shared IDs (55, 63, 73,
+    74, 75, 77) by profession membership: e.g. elite=55 on a Thief
+    is Daredevil, on a Ranger it is Soulbeast.
+    """
+    valid_set = _VALID_ELITE_BY_PROFESSION.get(prof_raw)
+    if valid_set and elite_raw in valid_set:
+        return EliteSpec(elite_raw)
+    # Unknown profession (e.g. NPC) or elite ID not valid for this profession
+    return EliteSpec.BASE
 
 
 # ---------------------------------------------------------------------------
@@ -1593,10 +1633,9 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
     except ValueError:
         profession = Profession.UNKNOWN
 
-    try:
-        elite = EliteSpec(elite_raw)
-    except ValueError:
-        elite = EliteSpec.UNKNOWN
+    # v0.16.3-api: cross-validate elite spec against profession.
+    # EVTC2025+ logs use official GW2 v2 API IDs natively.
+    elite = _validate_elite_for_profession(int(prof_raw), int(elite_raw))
 
     return Agent(
         id=addr,
@@ -1611,7 +1650,14 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
 
 
 def _decode_agent(data: bytes, offset: int) -> Agent:
-    """Decode a single 96-byte legacy agent record at ``offset``."""
+    """Decode a single 96-byte legacy agent record at ``offset``.
+
+    The legacy path applies ``_LEGACY_ELITE_OVERRIDE`` to map old
+    arcdps IDs to API IDs, then validates the mapped value against
+    the profession.  If validation fails, the raw value is tried
+    (handles collision IDs 55 and 63 where the raw value IS the
+    API ID for one profession).  If both fail, degrades to BASE.
+    """
     aid, prof_raw, elite_raw, _tough, _conc, _heal, _width, name_buf = _AGENT_STRUCT.unpack_from(
         data, offset
     )
@@ -1656,10 +1702,21 @@ def _decode_agent(data: bytes, offset: int) -> Agent:
     except ValueError:
         profession = Profession.UNKNOWN
 
-    try:
-        elite = EliteSpec(elite_raw)
-    except ValueError:
-        elite = EliteSpec.UNKNOWN
+    # v0.16.3-api: map legacy elite ID via override, then validate
+    # against the profession.  If the override fails validation, try
+    # the raw value (handles collision IDs 55 and 63 where the raw
+    # value IS the API ID for one profession).
+    mapped_elite = _LEGACY_ELITE_OVERRIDE.get(int(elite_raw), int(elite_raw))
+    valid_set = _VALID_ELITE_BY_PROFESSION.get(int(prof_raw))
+    if valid_set is not None and mapped_elite in valid_set:
+        elite = EliteSpec(mapped_elite)
+    elif valid_set is not None and int(elite_raw) in valid_set:
+        # Raw value passes — handles collisions where the override
+        # maps away from a value that IS valid for this profession
+        # (e.g. Revenant with elite_raw=63 → 63 in Rev set → Renegade).
+        elite = EliteSpec(int(elite_raw))
+    else:
+        elite = EliteSpec.BASE
 
     return Agent(
         id=aid,
