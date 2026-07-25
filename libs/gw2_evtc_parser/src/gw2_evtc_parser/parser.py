@@ -1645,7 +1645,9 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
 
 
 def _decode_agent(data: bytes, offset: int) -> Agent:
-    """Decode a single 96-byte legacy agent record at ``offset``.    The elite spec is validated against the agent's profession via
+    """Decode a single 96-byte legacy agent record at ``offset``.
+
+    The elite spec is validated against the agent's profession via
     ``_VALID_ELITE_BY_PROFESSION``, which resolves shared collision
     IDs (55, 63, 73, 74, 75, 77) by profession membership.  Falls
     back to ``EliteSpec.BASE`` if validation fails.
