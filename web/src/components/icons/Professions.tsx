@@ -82,23 +82,92 @@ import React from "react";
 /**
  * Result of parsing a Combat-readout wire profession / elite string.
  *
- * - ``kind='profession'`` matches ``"PROF(N)"`` for N ∈ {1..9}.
- * - ``kind='elite'`` matches ``"ELITE(N)"`` for any non-negative integer.
- * - ``kind='unknown'`` matches ``"UNKNOWN"`` (profession 0 sentinel)
- *   OR ``"BASE"`` (elite 0 sentinel — represented as elite:int=0).
- * - ``null`` is returned for any string that fails the wire contract   *   (Phase 6 v2 live data or a future contract widening).
+ * The API ``/api/v1/fights/{id}/readout`` emits canonical profession
+ * names (e.g. ``"Guardian"``) and elite-spec names (e.g. ``"Firebrand"``)
+ * via ``route_helpers.format_profession`` / ``format_elite_spec``.
+ *
+ * - ``kind='profession'`` — a known profession name matched.
+ * - ``kind='elite'`` — a known elite-spec name matched OR ``"BASE"``.
+ * - ``kind='unknown'`` — ``"UNKNOWN"`` sentinel (profession 0).
+ * - ``null`` — unrecognised string.
+ *
+ * Backward-compat: the legacy ``PROF(N)`` / ``ELITE(N)`` wire format
+ * is also parsed for pre-v0.16.2-api fight data still in the database.
  */
 export type ParsedWire =
   | { kind: "profession"; int: number }
   | { kind: "elite"; int: number }
   | { kind: "unknown"; int: 0 };
 
+// Legacy wire format regex (pre-v0.16.2-api: "PROF(1)", "ELITE(27)").
 const WIRE_RE = /^(PROF|ELITE)\((\d+)\)$/;
+
+// Canonical profession name → int (mirrors gw2_core.Profession).
+const PROFESSION_NAME_TO_INT: Record<string, number> = {
+  Guardian: 1,
+  Warrior: 2,
+  Engineer: 3,
+  Ranger: 4,
+  Thief: 5,
+  Elementalist: 6,
+  Mesmer: 7,
+  Necromancer: 8,
+  Revenant: 9,
+};
+
+// Canonical elite-spec name → int (mirrors gw2_core.EliteSpec with
+// API-correct IDs. v0.16.3-api: all IDs match the GW2 v2 API).
+const ELITE_NAME_TO_INT: Record<string, number> = {
+  Druid: 5,
+  Daredevil: 7,
+  Berserker: 18,
+  Dragonhunter: 27,
+  Reaper: 34,
+  Chronomancer: 40,
+  Scrapper: 43,
+  Tempest: 48,
+  Herald: 52,
+  Soulbeast: 55,
+  Weaver: 56,
+  Holosmith: 57,
+  Deadeye: 58,
+  Mirage: 59,
+  Scourge: 60,
+  Spellbreaker: 61,
+  Firebrand: 62,
+  Renegade: 63,
+  Harbinger: 64,
+  Willbender: 65,
+  Virtuoso: 66,
+  Catalyst: 67,
+  Bladesworn: 68,
+  Vindicator: 69,
+  Mechanist: 70,
+  Specter: 71,
+  Untamed: 72,
+  Troubadour: 73,
+  Paragon: 74,
+  Amalgam: 75,
+  Ritualist: 76,
+  Antiquary: 77,
+  Galeshot: 78,
+  Conduit: 79,
+  Evoker: 80,
+  Luminary: 81,
+};
 
 export function parseWireFormat(wire: string | null | undefined): ParsedWire | null {
   if (typeof wire !== "string") return null;
   if (wire === "UNKNOWN") return { kind: "unknown", int: 0 };
   if (wire === "BASE") return { kind: "elite", int: 0 };
+
+  // 1. Try canonical name-based format (current API).
+  const profInt = PROFESSION_NAME_TO_INT[wire];
+  if (profInt !== undefined) return { kind: "profession", int: profInt };
+  const eliteInt = ELITE_NAME_TO_INT[wire];
+  if (eliteInt !== undefined) return { kind: "elite", int: eliteInt };
+
+  // 2. Fall back to legacy "PROF(N)" / "ELITE(N)" format.
   const m = WIRE_RE.exec(wire);
   if (!m) return null;
   const [, prefix, intStr] = m;
@@ -142,8 +211,11 @@ const PROFESSION_ICONS_BY_INT: Record<number, string> = {
  * so the 2D ``ELITE_ICONS_BY_INT_AND_PROFESSION`` map is the
  * SINGLE source of truth for those cases.
  */
+// v0.16.3-api: all IDs match the GW2 v2 API (mirrors
+// libs/gw2_core/gw2_core/models.py EliteSpec IntEnum).
 const ELITE_ICONS_BY_INT: Record<number, string> = {
   5: "/icons/specializations/Druid_tango.png",
+  7: "/icons/specializations/Daredevil_tango.png",
   18: "/icons/specializations/Berserker_tango.png",
   27: "/icons/specializations/Dragonhunter_tango.png",
   34: "/icons/specializations/Reaper_tango.png",
@@ -151,20 +223,31 @@ const ELITE_ICONS_BY_INT: Record<number, string> = {
   43: "/icons/specializations/Scrapper_tango.png",
   48: "/icons/specializations/Tempest_tango.png",
   52: "/icons/specializations/Herald_tango.png",
+  56: "/icons/specializations/Weaver_tango.png",
   57: "/icons/specializations/Holosmith_tango.png",
+  58: "/icons/specializations/Deadeye_tango.png",
   59: "/icons/specializations/Mirage_tango.png",
   60: "/icons/specializations/Scourge_tango.png",
+  61: "/icons/specializations/Spellbreaker_tango.png",
   62: "/icons/specializations/Firebrand_tango.png",
-  64: "/icons/specializations/Spellbreaker_tango.png",
+  64: "/icons/specializations/Harbinger_tango.png",
   65: "/icons/specializations/Willbender_tango.png",
-  68: "/icons/specializations/Vindicator_tango.png",
+  66: "/icons/specializations/Virtuoso_tango.png",
+  67: "/icons/specializations/Catalyst_tango.png",
+  68: "/icons/specializations/Bladesworn_tango.png",
+  69: "/icons/specializations/Vindicator_tango.png",
   70: "/icons/specializations/Mechanist_tango.png",
-  71: "/icons/specializations/Deadeye_tango.png",
-  72: "/icons/specializations/Specter_tango.png",
-  73: "/icons/specializations/Untamed_tango.png",
-  74: "/icons/specializations/Virtuoso_tango.png",
-  75: "/icons/specializations/Catalyst_tango.png",
-  77: "/icons/specializations/Harbinger_tango.png",
+  71: "/icons/specializations/Specter_tango.png",
+  72: "/icons/specializations/Untamed_tango.png",
+  73: "/icons/specializations/Troubadour_tango.png",
+  74: "/icons/specializations/Paragon_tango.png",
+  75: "/icons/specializations/Amalgam_tango.png",
+  76: "/icons/specializations/Ritualist_tango.png",
+  77: "/icons/specializations/Antiquary_tango.png",
+  78: "/icons/specializations/Galeshot_tango.png",
+  79: "/icons/specializations/Conduit_tango.png",
+  80: "/icons/specializations/Evoker_tango.png",
+  81: "/icons/specializations/Luminary_tango.png",
 };
 
 /**
@@ -204,6 +287,7 @@ const PROFESSION_LABEL_BY_INT: Record<number, string> = {
 
 const ELITE_LABEL_BY_INT: Record<number, string> = {
   5: "Druid",
+  7: "Daredevil",
   18: "Berserker",
   27: "Dragonhunter",
   34: "Reaper",
@@ -211,20 +295,31 @@ const ELITE_LABEL_BY_INT: Record<number, string> = {
   43: "Scrapper",
   48: "Tempest",
   52: "Herald",
+  56: "Weaver",
   57: "Holosmith",
+  58: "Deadeye",
   59: "Mirage",
   60: "Scourge",
+  61: "Spellbreaker",
   62: "Firebrand",
-  64: "Spellbreaker",
+  64: "Harbinger",
   65: "Willbender",
-  68: "Vindicator",
+  66: "Virtuoso",
+  67: "Catalyst",
+  68: "Bladesworn",
+  69: "Vindicator",
   70: "Mechanist",
-  71: "Deadeye",
-  72: "Specter",
-  73: "Untamed",
-  74: "Virtuoso",
-  75: "Catalyst",
-  77: "Harbinger",
+  71: "Specter",
+  72: "Untamed",
+  73: "Troubadour",
+  74: "Paragon",
+  75: "Amalgam",
+  76: "Ritualist",
+  77: "Antiquary",
+  78: "Galeshot",
+  79: "Conduit",
+  80: "Evoker",
+  81: "Luminary",
 };
 
 const ELITE_LABEL_BY_INT_AND_PROFESSION: Record<number, Partial<Record<number, string>>> = {

@@ -312,26 +312,28 @@ function IdentityCells({ player }: { player: PlayerReadoutOut }) {
  *  Boon definitions
  * ------------------------------------------------------------------ */
 
+
 interface BoonDef {
   key: string;
   label: string;
+  iconFile: string | null;
 }
 
 const BOONS: BoonDef[] = [
-  { key: "might", label: "Might" },
-  { key: "fury", label: "Fury" },
-  { key: "quickness", label: "Quick" },
-  { key: "alacrity", label: "Alac" },
-  { key: "protection", label: "Prot" },
-  { key: "regeneration", label: "Regen" },
-  { key: "vigor", label: "Vigor" },
-  { key: "aegis", label: "Aegis" },
-  { key: "stability", label: "Stab" },
-  { key: "swiftness", label: "Swift" },
-  { key: "resistance", label: "Resist" },
-  { key: "resolution", label: "Resol" },
-  { key: "superspeed", label: "Speed" },
-  { key: "stealth", label: "Stealth" },
+  { key: "might", label: "Might", iconFile: "Might" },
+  { key: "fury", label: "Fury", iconFile: "Fury" },
+  { key: "quickness", label: "Quick", iconFile: "Quickness" },
+  { key: "alacrity", label: "Alac", iconFile: "Alacrity" },
+  { key: "protection", label: "Prot", iconFile: "Protection" },
+  { key: "regeneration", label: "Regen", iconFile: "Regeneration" },
+  { key: "vigor", label: "Vigor", iconFile: "Vigor" },
+  { key: "aegis", label: "Aegis", iconFile: "Aegis" },
+  { key: "stability", label: "Stab", iconFile: "Stability" },
+  { key: "swiftness", label: "Swift", iconFile: "Swiftness" },
+  { key: "resistance", label: "Resist", iconFile: "Resistance" },
+  { key: "resolution", label: "Resol", iconFile: "Resolution" },
+  { key: "superspeed", label: "Speed", iconFile: "Superspeed" },
+  { key: "stealth", label: "Stealth", iconFile: "Stealth" },
 ];
 
 /* ------------------------------------------------------------------ *
@@ -1065,8 +1067,18 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
                 <Th field="" currentSort={null} onSort={() => {}} style={{ cursor: "default", width: 40 }} rowSpan={2}>Cmd</Th>
                 <Th field="" currentSort={null} onSort={() => {}} style={{ cursor: "default" }} rowSpan={2}>Rôles</Th>
                 {BOONS.map((b) => (
-                  <th key={b.key} style={{ ...TH_STYLE, textAlign: "center", cursor: "default" }} colSpan={2}>
-                    {b.label}
+                  <th key={b.key} style={{ ...TH_STYLE, textAlign: "center", cursor: "default" }} colSpan={2} title={b.label}>
+                    {b.iconFile ? (
+                      <img
+                        src={`/icons/boons/${b.iconFile}_tango.png`}
+                        alt={b.label}
+                        width={22}
+                        height={22}
+                        style={{ display: "block", margin: "0 auto" }}
+                      />
+                    ) : (
+                      b.label
+                    )}
                   </th>
                 ))}
               </tr>
