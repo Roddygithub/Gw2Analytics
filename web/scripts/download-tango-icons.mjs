@@ -72,39 +72,51 @@ const PROFESSIONS = [
  * solo name without the profession prefix).
  */
 const ELITES = [
-  // Guardian
+  // Guardian (4)
   "Dragonhunter",
   "Firebrand",
   "Willbender",
-  // Warrior
+  "Luminary",
+  // Warrior (4)
   "Berserker",
   "Spellbreaker",
   "Bladesworn",
-  // Engineer
+  "Paragon",
+  // Engineer (4)
   "Holosmith",
   "Scrapper",
   "Mechanist",
-  // Ranger
+  "Amalgam",
+  // Ranger (4)
   "Druid",
   "Soulbeast",
-  // Thief
+  "Untamed",
+  "Galeshot",
+  // Thief (4)
   "Daredevil",
   "Deadeye",
   "Specter",
-  // Elementalist
+  "Antiquary",
+  // Elementalist (4)
   "Tempest",
   "Weaver",
-  // Mesmer
+  "Catalyst",
+  "Evoker",
+  // Mesmer (4)
   "Chronomancer",
   "Mirage",
   "Virtuoso",
-  // Necromancer
+  "Troubadour",
+  // Necromancer (4)
   "Reaper",
   "Scourge",
-  // Revenant
+  "Harbinger",
+  "Ritualist",
+  // Revenant (4)
   "Herald",
   "Renegade",
   "Vindicator",
+  "Conduit",
 ];
 
 const ICON_DIR = path.join(__dirname, "..", "public", "icons");
