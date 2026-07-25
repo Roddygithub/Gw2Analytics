@@ -4,6 +4,7 @@ import React from "react";
 
 import { CompareReadoutTable } from "@/components/CompareReadoutTable";
 import { buildPlayerReadoutRow } from "../fixtures/playerReadoutRow";
+import type { PlayerReadoutOut } from "@/lib/api";
 
 /**
  * Build a ``PlayerReadoutOut`` row with nonzero default values
@@ -13,7 +14,7 @@ import { buildPlayerReadoutRow } from "../fixtures/playerReadoutRow";
  * (e.g. ``presence_pct: 95`` → ``getByText("95%")``).
  */
 function buildRow(
-  overrides: Parameters<typeof buildPlayerReadoutRow>[0] = {},
+  overrides: Partial<PlayerReadoutOut> = {},
 ) {
   return buildPlayerReadoutRow({
     name: "Test Player",
