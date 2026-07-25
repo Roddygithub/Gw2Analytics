@@ -20,53 +20,32 @@ import {
   type PlayerReadoutOut,
 } from "@/lib/api";
 import { FightSummaryCards } from "./FightSummaryCards";
-import {
-  EliteSpecCellRenderer,
-  CommanderCellRenderer,
-} from "./PlayerReadoutCells";
 import { ROLE_COLORS, ROLE_FALLBACK } from "@/lib/roleColors";
 import { PlayerPositionHeatmap } from "./PlayerPositionHeatmap";
+import {
+  TABLE_STYLE,
+  TH_STYLE,
+  TD_STYLE,
+  BOONS,
+  useSortedPlayers,
+  DpsBar,
+  HealBar,
+  Th,
+  IdentityCells,
+  TableWrapper,
+} from "@/lib/readoutTableParts";
 
 /* ------------------------------------------------------------------ *
  *  Constants & shared styles
  * ------------------------------------------------------------------ */
 
-type SortField = string;
-type SortDir = "asc" | "desc";
-
-const TABLE_STYLE: React.CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
-  fontSize: 12,
-  fontFamily: "var(--font-geist-sans, sans-serif)",
-  background: "var(--surface, rgba(255,255,255,0.02))",
-  borderRadius: 6,
-  overflow: "hidden",
-};
-
-const TH_STYLE: React.CSSProperties = {
-  position: "sticky",
-  top: 0,
-  padding: "6px 8px",
-  textAlign: "left",
-  fontWeight: 600,
-  fontSize: 10,
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-  color: "var(--foreground)",
-  opacity: 0.7,
-  background: "var(--surface-elevated, rgba(255,255,255,0.05))",
-  borderBottom: "1px solid var(--border)",
-  whiteSpace: "nowrap",
-  cursor: "pointer",
-  userSelect: "none",
-};
-
-const TD_STYLE: React.CSSProperties = {
-  padding: "4px 8px",
-  borderBottom: "1px solid var(--border)",
-  color: "var(--foreground)",
-  whiteSpace: "nowrap",
+const ROLE_TOOLTIPS: Record<string, string> = {
+  DPS: "Dégâts : rôle déterminé par l'effort pondéré (dégâts ×1.0, heal ×2.5, strips ×5000).",
+  Heal: "Heal : spé healer (Druid/Tempest/Scourge/Specter) avec >15% d'effort de soin.",
+  Support: "Support : générateur de boons — spé BOON avec effort non-DPS dominant.",
+  Strip: "Strip : >35% d'effort de retrait de boons ennemis (BuffRemoval).",
+  CC: "CC : >3 compétences de contrôle (stun, daze, knockback…) appliquées.",
+  Cleanser: "Cleanser : >10 altérations (conditions) retirées des alliés.",
 };
 
 const EMPTY_STYLE: React.CSSProperties = {
@@ -76,9 +55,6 @@ const EMPTY_STYLE: React.CSSProperties = {
   color: "var(--foreground)",
   opacity: 0.7,
 };
-
-const BAR_BG = "rgba(255,255,255,0.05)";
-const BAR_HEIGHT = 14;
 
 /* ------------------------------------------------------------------ *
  *  Timeline SVG / PNG export helpers (pure, no React state)
@@ -155,261 +131,6 @@ function triggerDownload(blob: Blob, filename: string): void {
   // Revoke on the next tick so the browser's download manager starts the
   // transfer before we tear the URL down. Otherwise the download may stall.
   setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-/* ------------------------------------------------------------------ *
- *  Bar chart helpers
- * ------------------------------------------------------------------ */
-
-function MiniBar({ pct, color }: { pct: number; color: string }) {
-  return (
-    <div
-      style={{
-        width: `${Math.max(pct, 1)}%`,
-        height: "100%",
-        background: color,
-        borderRadius: 2,
-        transition: "width 0.3s",
-        minWidth: 4,
-      }}
-    />
-  );
-}
-
-function DpsBar({ power, condi, total }: { power: number; condi: number; total: number }) {
-  const max = Math.max(total, 1);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <div style={{ flex: 1, height: BAR_HEIGHT, background: BAR_BG, borderRadius: 3, overflow: "hidden", display: "flex", minWidth: 60 }}>
-        <MiniBar pct={(power / max) * 100} color="linear-gradient(90deg, #f59e0b, #d97706)" />
-        <MiniBar pct={(condi / max) * 100} color="linear-gradient(90deg, #ef4444, #dc2626)" />
-      </div>
-      <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", minWidth: 48, textAlign: "right" }}>
-        {total.toFixed(0)}
-      </span>
-    </div>
-  );
-}
-
-function HealBar({ hps, bps, total }: { hps: number; bps: number; total: number }) {
-  const max = Math.max(hps + bps, 1);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <div style={{ flex: 1, height: BAR_HEIGHT, background: BAR_BG, borderRadius: 3, overflow: "hidden", display: "flex", minWidth: 60 }}>
-        <MiniBar pct={(hps / max) * 100} color="linear-gradient(90deg, #22c55e, #16a34a)" />
-        <MiniBar pct={(bps / max) * 100} color="linear-gradient(90deg, #06b6d4, #0891b2)" />
-      </div>
-      <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", minWidth: 48, textAlign: "right" }}>
-        {total.toFixed(0)}
-      </span>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- *  Role badge with tooltip
- * ------------------------------------------------------------------ */
-
-const ROLE_TOOLTIPS: Record<string, string> = {
-  DPS: "Dégâts : rôle déterminé par l'effort pondéré (dégâts ×1.0, heal ×2.5, strips ×5000).",
-  Heal: "Heal : spé healer (Druid/Tempest/Scourge/Specter) avec >15% d'effort de soin.",
-  Support: "Support : générateur de boons — spé BOON avec effort non-DPS dominant.",
-  Strip: "Strip : >35% d'effort de retrait de boons ennemis (BuffRemoval).",
-  CC: "CC : >3 compétences de contrôle (stun, daze, knockback…) appliquées.",
-  Cleanser: "Cleanser : >10 altérations (conditions) retirées des alliés.",
-};
-
-function RoleBadge({ role }: { role: string }) {
-  const c = ROLE_COLORS[role] ?? ROLE_FALLBACK;
-  return (
-    <span
-      title={ROLE_TOOLTIPS[role] ?? role}
-      style={{
-        padding: "0 5px",
-        borderRadius: 3,
-        fontSize: 9,
-        fontWeight: 700,
-        lineHeight: "15px",
-        background: c.bg,
-        color: c.fg,
-        letterSpacing: "0.03em",
-        cursor: "help",
-      }}
-    >
-      {role}
-    </span>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- *  Sortable table header
- * ------------------------------------------------------------------ */
-
-function Th({
-  children,
-  field,
-  currentSort,
-  onSort,
-  style,
-  colSpan,
-  rowSpan,
-}: {
-  children: React.ReactNode;
-  field: string;
-  currentSort: { field: SortField; dir: SortDir } | null;
-  onSort: (field: SortField) => void;
-  style?: React.CSSProperties;
-  colSpan?: number;
-  rowSpan?: number;
-}) {
-  const active = currentSort?.field === field;
-  return (
-    <th
-      style={{ ...TH_STYLE, ...style }}
-      colSpan={colSpan}
-      rowSpan={rowSpan}
-      onClick={() => onSort(field)}
-    >
-      {children}
-      {active && (
-        <span style={{ marginLeft: 2, fontSize: 9 }}>
-          {currentSort?.dir === "asc" ? " ▲" : " ▼"}
-        </span>
-      )}
-    </th>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- *  Shared identity cells (Groupe, Nom, Spé, Cmd, Rôles)
- * ------------------------------------------------------------------ */
-
-function IdentityCells({ player }: { player: PlayerReadoutOut }) {
-  return (
-    <>
-      <td style={TD_STYLE}>
-        {player.subgroup === 0 ? "—" : `Sub ${player.subgroup}`}
-      </td>
-      <td style={{ ...TD_STYLE, fontWeight: 500 }}>{player.name}</td>
-      <td style={TD_STYLE}>
-        <EliteSpecCellRenderer data={player} />
-      </td>
-      <td style={{ ...TD_STYLE, textAlign: "center" }}>
-        <CommanderCellRenderer data={player} />
-      </td>
-      <td style={TD_STYLE}>
-        <span style={{ display: "inline-flex", gap: 2, flexWrap: "wrap" }}>
-          {player.roles.map((r) => (
-            <RoleBadge key={r} role={r} />
-          ))}
-        </span>
-      </td>
-    </>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- *  Boon definitions
- * ------------------------------------------------------------------ */
-
-
-interface BoonDef {
-  key: string;
-  label: string;
-  iconFile: string | null;
-}
-
-const BOONS: BoonDef[] = [
-  { key: "might", label: "Might", iconFile: "Might" },
-  { key: "fury", label: "Fury", iconFile: "Fury" },
-  { key: "quickness", label: "Quick", iconFile: "Quickness" },
-  { key: "alacrity", label: "Alac", iconFile: "Alacrity" },
-  { key: "protection", label: "Prot", iconFile: "Protection" },
-  { key: "regeneration", label: "Regen", iconFile: "Regeneration" },
-  { key: "vigor", label: "Vigor", iconFile: "Vigor" },
-  { key: "aegis", label: "Aegis", iconFile: "Aegis" },
-  { key: "stability", label: "Stab", iconFile: "Stability" },
-  { key: "swiftness", label: "Swift", iconFile: "Swiftness" },
-  { key: "resistance", label: "Resist", iconFile: "Resistance" },
-  { key: "resolution", label: "Resol", iconFile: "Resolution" },
-  { key: "superspeed", label: "Speed", iconFile: "Superspeed" },
-  { key: "stealth", label: "Stealth", iconFile: "Stealth" },
-];
-
-/* ------------------------------------------------------------------ *
- *  Sorting hook
- * ------------------------------------------------------------------ */
-
-function useSortedPlayers(
-  players: PlayerReadoutOut[],
-  defaultField: SortField,
-  defaultDir: SortDir,
-) {
-  const [sort, setSort] = useState<{ field: SortField; dir: SortDir }>({
-    field: defaultField,
-    dir: defaultDir,
-  });
-
-  const onSort = useCallback(
-    (field: SortField) => {
-      setSort((prev) => ({
-        field,
-        dir: prev.field === field && prev.dir === "desc" ? "asc" : "desc",
-      }));
-    },
-    [],
-  );
-
-  const sorted = useMemo(() => {
-    const dir = sort.dir === "asc" ? 1 : -1;
-    return [...players].sort((a, b) => {
-      const va = getSortValue(a, sort.field);
-      const vb = getSortValue(b, sort.field);
-      if (va === vb) return 0;
-      return va < vb ? -dir : dir;
-    });
-  }, [players, sort]);
-
-  return { sorted, sort, onSort };
-}
-
-function getSortValue(p: PlayerReadoutOut, field: string): number {
-  if (field === "dps_total") return p.damage.dps_total;
-  if (field === "dps_power") return p.damage.dps_power;
-  if (field === "dps_condi") return p.damage.dps_condi;
-  if (field === "strips") return p.damage.strips;
-  if (field === "cc_applied") return p.damage.cc_applied;
-  if (field === "down_contrib") return p.damage.down_contribution_dps;
-  if (field === "cleave") return p.damage.cleave_targets;
-  if (field === "kills") return p.damage.kills;
-  if (field === "kill_part") return p.damage.kill_participation;
-  if (field === "heal_total") return p.heal.heal_total ?? 0;
-  if (field === "hps") return p.heal.hps;
-  if (field === "barrier_ps") return p.heal.barrier_ps;
-  if (field === "cleanses") return p.heal.cleanses;
-  if (field === "stun_breaks") return p.heal.stun_breaks;
-  if (field === "damage_taken") return p.defense.damage_taken;
-  if (field === "deaths") return p.defense.deaths;
-  if (field === "dodges") return p.defense.dodges;
-  if (field === "blocks") return p.defense.blocks;
-  if (field === "interrupts") return p.defense.interrupts;
-  if (field === "cc_taken") return p.defense.cc_taken;
-  if (field === "time_downed") return p.defense.time_downed_ms;
-  if (field === "barrier_absorbed") return p.defense.barrier_absorbed;
-  if (field === "presence_pct") return p.defense.presence_pct ?? 0;
-  if (field === "dist_to_commander") return p.defense.dist_to_commander ?? -1;
-  if (field === "kill_part") return p.defense.kill_participation;
-  if (field === "subgroup") return p.subgroup;
-  if (field.startsWith("boon_in_")) {
-    const boonKey = field.replace("boon_in_", "");
-    return (p.boons as unknown as Record<string, number | null>)[`${boonKey}_uptime`] ?? -1;
-  }
-  if (field.startsWith("boon_out_")) {
-    const boonKey = field.replace("boon_out_", "");
-    return (p.boons as unknown as Record<string, number | null>)[`outgoing_${boonKey}`] ?? -1;
-  }
-  if (field === "name") return (p.name || "").charCodeAt(0) || 0;
-  return 0;
 }
 
 /* ------------------------------------------------------------------ *
@@ -660,27 +381,6 @@ function PositionsSummary({ positions }: { positions: FightPositionsOut | null }
           ? `Plus proche stack: ${closePlayers[0].name} (${closePlayers[0].stack_dist?.toFixed(1)}u)`
           : ""}
       </p>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- *  Wrapper for scrollable tables
- * ------------------------------------------------------------------ */
-
-function TableWrapper({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        width: "100%",
-        overflowX: "auto",
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        maxHeight: 600,
-        overflowY: "auto",
-      }}
-    >
-      {children}
     </div>
   );
 }
@@ -1013,7 +713,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             <tbody>
               {damageSort.sorted.map((p, i) => (
                 <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
-                  <IdentityCells player={p} />
+                  <IdentityCells player={p} roleTooltips={ROLE_TOOLTIPS} />
                   <td style={TD_STYLE}><DpsBar power={p.damage.dps_power} condi={p.damage.dps_condi} total={p.damage.dps_total} /></td>
                   <td style={TD_STYLE}>{p.damage.strips}</td>
                   <td style={TD_STYLE}>{p.damage.cc_applied}</td>
@@ -1048,7 +748,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             <tbody>
               {healSort.sorted.map((p, i) => (
                 <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
-                  <IdentityCells player={p} />
+                  <IdentityCells player={p} roleTooltips={ROLE_TOOLTIPS} />
                   <td style={TD_STYLE}><HealBar hps={p.heal.hps} bps={p.heal.barrier_ps} total={p.heal.heal_total ?? 0} /></td>
                   <td style={TD_STYLE}>{p.heal.cleanses}</td>
                   <td style={TD_STYLE}>{p.heal.stun_breaks}</td>
@@ -1103,7 +803,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             <tbody>
               {boonSort.sorted.map((p, i) => (
                 <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
-                  <IdentityCells player={p} />
+                  <IdentityCells player={p} roleTooltips={ROLE_TOOLTIPS} />
                   {BOONS.map((b) => {
                     const boons = p.boons as unknown as Record<string, number | null>;
                     return (
@@ -1151,7 +851,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             <tbody>
               {defenseSort.sorted.map((p, i) => (
                 <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
-                  <IdentityCells player={p} />
+                  <IdentityCells player={p} roleTooltips={ROLE_TOOLTIPS} />
                   <td style={TD_STYLE}>{p.defense.damage_taken.toLocaleString()}</td>
                   <td style={TD_STYLE}>{p.defense.dodges}</td>
                   <td style={TD_STYLE}>{p.defense.blocks}</td>
