@@ -368,7 +368,6 @@ _VALID_ELITE_BY_PROFESSION: Final[dict[int, set[int]]] = {
 }
 
 
-
 #: v0.11.0 hotfix: sanity cap for damage / heal / strip values.
 #: arcdps uses INT32_MAX (2,147,483,647) as a sentinel for "no
 #: value" or "infinite duration" in buff-metadata fields that
