@@ -3,18 +3,21 @@ import { render, screen } from "@testing-library/react";
 import React from "react";
 
 import { CompareReadoutTable } from "@/components/CompareReadoutTable";
-import type { PlayerReadoutOut } from "@/lib/api";
+import { buildPlayerReadoutRow } from "../fixtures/playerReadoutRow";
 
-function buildRow(overrides: Partial<PlayerReadoutOut> = {}): PlayerReadoutOut {
-  return {
-    agent_id: 1,
-    account_name: ":test.1234",
+/**
+ * Build a ``PlayerReadoutOut`` row with nonzero default values
+ * suitable for data-rendering assertions.  The structural base
+ * (zero defaults) comes from the shared fixture; the test-local
+ * defaults here set the values that individual tests check
+ * (e.g. ``presence_pct: 95`` → ``getByText("95%")``).
+ */
+function buildRow(
+  overrides: Parameters<typeof buildPlayerReadoutRow>[0] = {},
+) {
+  return buildPlayerReadoutRow({
     name: "Test Player",
-    profession: "PROF(1)",
     elite_spec: "ELITE(27)",
-    subgroup: 1,
-    is_commander: false,
-    roles: ["DPS"],
     damage: {
       dps_total: 15000,
       dps_power: 10000,
@@ -87,7 +90,7 @@ function buildRow(overrides: Partial<PlayerReadoutOut> = {}): PlayerReadoutOut {
       kill_participation: 10,
     },
     ...overrides,
-  };
+  });
 }
 
 describe("CompareReadoutTable", () => {
