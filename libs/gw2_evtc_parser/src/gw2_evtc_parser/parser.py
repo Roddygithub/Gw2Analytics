@@ -1695,15 +1695,10 @@ def _decode_agent(data: bytes, offset: int) -> Agent:
     except ValueError:
         profession = Profession.UNKNOWN
 
-    # v0.16.3-api: map legacy elite ID via override, then validate
-    # against the profession.  If the override fails validation, try
-    # the raw value (handles collision IDs 55 and 63 where the raw
-    # value IS the API ID for one profession).
-    valid_set = _VALID_ELITE_BY_PROFESSION.get(int(prof_raw))
-    if valid_set is not None and int(elite_raw) in valid_set:
-        elite = EliteSpec(int(elite_raw))
-    else:
-        elite = EliteSpec.BASE
+    # v0.16.3-api: cross-validate elite ID against the agent's
+    # profession using the canonical helper (handles shared
+    # collision IDs 55, 63, 73, 74, 75, 77).
+    elite = _validate_elite_for_profession(int(prof_raw), int(elite_raw))
 
     return Agent(
         id=aid,
