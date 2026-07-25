@@ -499,6 +499,7 @@ function TangoImage({
       className={className}
       data-testid="tango-icon"
       data-tango-icon={alt}
+      onError={(e) => { e.currentTarget.style.display = "none"; }}
       style={{ display: "inline-block", verticalAlign: "middle" }}
     />
   );

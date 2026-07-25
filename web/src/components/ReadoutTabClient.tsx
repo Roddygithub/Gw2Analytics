@@ -1079,6 +1079,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
                         width={22}
                         height={22}
                         style={{ display: "block", margin: "0 auto" }}
+                        onError={(e) => { e.currentTarget.style.display = "none"; }}
                       />
                     ) : (
                       b.label
