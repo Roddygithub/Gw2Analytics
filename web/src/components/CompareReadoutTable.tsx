@@ -24,7 +24,7 @@ import {
   Th,
   IdentityCells,
   TableWrapper,
-} from "@/components/shared/readoutTableParts";
+} from "@/lib/readoutTableParts";
 
 /* ------------------------------------------------------------------ *
  *  Main component

@@ -353,44 +353,4 @@ vi.mock("@/components/PerFightTimelineSection", () => ({
  * chart be tested directly at the component level.
  */
 
-/**
- * Tour 6 Wave 7 (Workstream F): ``@/components/PlayerReadoutDamage``
- * is the AG Grid Community 34 Client Component for the Combat
- * readout §3 Damage table (per docs/v0.9.0-combat-readout-design.md).
- * Mocked as a no-op at the page-level test layer so the page test
- * can render the wrapper without booting AG Grid's runtime in
- * jsdom (no canvas, no offsetWidth). A dedicated component-level
- * test in :file:`web/tests/components/combat-readout.test.tsx`
- * exercises the column defs + default sort + empty-state panel.
- */
-vi.mock("@/components/PlayerReadoutDamage", () => ({
-  PlayerReadoutDamage: () => null,
-}));
 
-/**
- * Tour 6 Wave 7 (Workstream F): ``@/components/PlayerReadoutHeal``.
- * Mocked as a no-op at the page-level test layer; component-level
- * coverage lives in :file:`web/tests/components/combat-readout.test.tsx`.
- */
-vi.mock("@/components/PlayerReadoutHeal", () => ({
-  PlayerReadoutHeal: () => null,
-}));
-
-/**
- * Tour 6 Wave 7 (Workstream F): ``@/components/PlayerReadoutBoons``.
- * Mocked as a no-op at the page-level test layer; the dynamic
- * ``other_boons_total`` ``valueGetter`` is exercised at the
- * component level in :file:`web/tests/components/combat-readout.test.tsx`.
- */
-vi.mock("@/components/PlayerReadoutBoons", () => ({
-  PlayerReadoutBoons: () => null,
-}));
-
-/**
- * Tour 6 Wave 7 (Workstream F): ``@/components/PlayerReadoutDefense``.
- * Mocked as a no-op at the page-level test layer; component-level
- * coverage lives in :file:`web/tests/components/combat-readout.test.tsx`.
- */
-vi.mock("@/components/PlayerReadoutDefense", () => ({
-  PlayerReadoutDefense: () => null,
-}));

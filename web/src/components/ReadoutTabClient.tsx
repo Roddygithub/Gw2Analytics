@@ -33,7 +33,7 @@ import {
   Th,
   IdentityCells,
   TableWrapper,
-} from "@/components/shared/readoutTableParts";
+} from "@/lib/readoutTableParts";
 
 /* ------------------------------------------------------------------ *
  *  Constants & shared styles
