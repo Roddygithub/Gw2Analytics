@@ -24,10 +24,7 @@ import {
   type FightRow,
   type FightReadoutOut,
 } from "@/lib/api";
-import { PlayerReadoutDamage } from "@/components/PlayerReadoutDamage";
-import { PlayerReadoutHeal } from "@/components/PlayerReadoutHeal";
-import { PlayerReadoutBoons } from "@/components/PlayerReadoutBoons";
-import { PlayerReadoutDefense } from "@/components/PlayerReadoutDefense";
+import { CompareReadoutTable } from "@/components/CompareReadoutTable";
 import { FightSummaryCards } from "@/components/FightSummaryCards";
 
 const CONTAINER: React.CSSProperties = {
@@ -376,30 +373,10 @@ function FightColumn({
       )}
 
       <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div>
-          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-            Damage
-          </h3>
-          <PlayerReadoutDamage rows={readout.players} />
-        </div>
-        <div>
-          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-            Heal
-          </h3>
-          <PlayerReadoutHeal rows={readout.players} />
-        </div>
-        <div>
-          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-            Boons
-          </h3>
-          <PlayerReadoutBoons rows={readout.players} />
-        </div>
-        <div>
-          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-            Defense
-          </h3>
-          <PlayerReadoutDefense rows={readout.players} />
-        </div>
+        <CompareReadoutTable kind="damage" players={readout.players} />
+        <CompareReadoutTable kind="heal" players={readout.players} />
+        <CompareReadoutTable kind="boons" players={readout.players} />
+        <CompareReadoutTable kind="defense" players={readout.players} />
       </section>
     </>
   );
