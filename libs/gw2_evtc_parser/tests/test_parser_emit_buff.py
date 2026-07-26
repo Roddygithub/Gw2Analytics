@@ -75,13 +75,14 @@ def _build_event_record_2025(
     is_statechange: int = 0,
     buff_dmg: int = 0,
     result: int = 0,
-    iff: int = 0xFF,
+    iff: int = 1,
     buff: int = 0,
 ) -> bytes:
     """Build one 64-byte EVTC2025+ cbtevent record (local copy)."""
     flags = bytearray(16)
     flags[0] = iff
     flags[1] = buff
+    flags[2] = result
     flags[8] = is_statechange
     return struct.pack(
         "<QQQiiIIHHHH16B",
@@ -191,27 +192,23 @@ def _build_minimal_evtc(
         events = []
     is_2025 = int(build[:4]) >= 2025
     header = struct.pack(
-        "<4s8sBHBI I",
+        "<4s8sBHBI" if is_2025 else "<4s8sBHBI I",
         b"EVTC",
         build.encode("ascii"),
         0,
         encounter_id,
         0,
         len(agents),
-        len(skills),
+        *(() if is_2025 else (len(skills),)),
     )
     body = bytearray()
     for aid, prof, elite, _name, _is_player in agents:
         if is_2025:
-            # EVTC2025+ agent layout: 6*u32 + 64-byte name + 2*u32 = 96 bytes.
-            name_buf = b"\x00" * _SKILL_NAME_SIZE
-            body += struct.pack("<IIIIII64sII", 0, prof, elite, 0, 0, 0, name_buf, 0, aid)
+            body += struct.pack("<QII6H68s", aid, prof, elite, 0, 0, 0, 0, 0, 0, b"")
         else:
             prefix = struct.pack("<QIIhhhh", aid, prof, elite, 0, 0, 0, 0)
             body += prefix + b"\x00" * _AGENT_NAME_SIZE
-    # Legacy (<2025) skill table has a count prefix before fixed-size records.
-    if not is_2025:
-        body += struct.pack("<I", len(skills))
+    body += struct.pack("<I", len(skills))
     for skill_id, skill_name in skills:
         body += _build_skill_record(skill_id, skill_name)
     for ev in events:
@@ -665,21 +662,11 @@ def test_parse_events_emit_apply_statechange_filtered_upstream() -> None:
 
 
 # ---------------------------------------------------------------------------
-# EVTC2025+ regression: _ev_buff != 0 with value/buff_dmg != 0 emits apply
+# EVTC2025+ condition damage
 # ---------------------------------------------------------------------------
 
 
-def test_parse_events_emit_apply_2025_with_damage_and_strip_yields_boon_only() -> None:
-    """EVTC2025+ APPLY record with value/buff_dmg still emits BoonApply(apply).
-
-    After the v0.10.x guard that suppressed BoonApplyEvent for
-    EVTC2025+ records when ``value != 0`` or ``buff_dmg != 0`` was
-    removed, any non-statechange record with ``_ev_buff != 0`` and
-    ``is_buffremove == 0`` should yield a ``BoonApplyEvent`` with
-    ``kind="apply"`` and then continue so the same record does not
-    also emit a DamageEvent/HealingEvent. This test locks that
-    contract for 2025+ builds.
-    """
+def test_parse_events_2025_is_buff_uses_condition_damage() -> None:
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
         build="20250925",
@@ -692,16 +679,17 @@ def test_parse_events_emit_apply_2025_with_damage_and_strip_yields_boon_only() -
                 value=1_000,
                 buff_dmg=500,
                 skill_id=101,
-                iff=0xFF,
-                buff=101,
+                iff=1,
+                buff=1,
             ),
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
     assert len(events) == 1
     e = events[0]
-    assert isinstance(e, BoonApplyEvent)
-    assert e.kind == "apply"
+    assert isinstance(e, DamageEvent)
+    assert e.damage == 500
+    assert e.buff_dmg == 500
     assert e.skill_id == 101
 
 

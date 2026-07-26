@@ -232,7 +232,7 @@ def _build_event_record_2025(
     is_statechange: int = 0,
     buff_dmg: int = 0,
     result: int = 0,
-    iff: int = 0xFF,
+    iff: int = 1,
     buff: int = 0,
     src_inst: int = 0,
     dst_inst: int = 0,
@@ -245,9 +245,9 @@ def _build_event_record_2025(
     Byte 48 (flags index 0) is ``iff`` (0=FRIEND=heal, !=0=FOE=damage);
     byte 49 (flags index 1) is ``buff`` (arcdps ev.buff ID);
     byte 56 (flags index 8) is ``is_statechange``.
-    Default ``iff=0xFF`` (damage) for backward-compat test data.
-    Pass ``iff=0`` for healing events.
-    Pass ``buff=<skill_id>`` to trigger APPLY-branch in the parser.
+    Default ``iff=1`` (FOE) for damage test data.
+    Pass ``iff=0`` for friendly non-damage events.
+    Pass ``buff=1`` with ``buff_dmg`` for condition damage.
     """
     flags = bytearray(16)
     flags[0] = iff
@@ -988,9 +988,9 @@ def test_parse_events_2025_single_event_with_known_agent_is_accepted() -> None:
     assert events[0].damage == 1_337
 
 
-def test_parse_events_2025_yields_healing_event_on_nondamage() -> None:
-    # Include two events so the EVTC2025+ boundary validator can
-    # locate the event stream. iff=0 (FRIEND) = healing.
+def test_parse_events_2025_does_not_treat_friendly_events_as_healing() -> None:
+    # Base EVTC has no healing magnitude. iff=FRIEND alone identifies
+    # allegiance and must not reinterpret value as healing.
     evtc = _build_minimal_evtc(
         [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
         build="20250925",
@@ -1015,14 +1015,7 @@ def test_parse_events_2025_yields_healing_event_on_nondamage() -> None:
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
-    assert len(events) == 2
-    e = events[0]
-    assert isinstance(e, HealingEvent)
-    assert e.time_ms == 42_500
-    assert e.source_agent_id == 1
-    assert e.target_agent_id == 2
-    assert e.skill_id == 101
-    assert e.healing == 8_500
+    assert events == []
 
 
 # ---------------------------------------------------------------------------

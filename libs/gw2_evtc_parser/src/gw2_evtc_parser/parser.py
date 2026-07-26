@@ -860,6 +860,55 @@ class PythonEvtcParser:
                 # pure-damage and buff-interaction records as SEPARATE
                 # 64-byte rows; a single record never carries both.
                 continue
+            elif is_evtc_2025:
+                # EVTC rev1 uses iff=FOE for damage. isBuff selects the
+                # magnitude field: direct hits use value, condition ticks
+                # use buff_dmg. Crowd-control and activation records carry
+                # values but are not health damage.
+                if _iff != 1:
+                    continue
+                if _ev_buff:
+                    magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
+                    condition_damage = magnitude
+                else:
+                    if _result == 3:
+                        yield BlockEvent(
+                            time_ms=time_ms,
+                            source_agent_id=dst_agent,
+                            target_agent_id=0,
+                            skill_id=0,
+                        )
+                    elif _result == 4:
+                        yield DodgeEvent(
+                            time_ms=time_ms,
+                            source_agent_id=dst_agent,
+                            target_agent_id=0,
+                            skill_id=0,
+                        )
+                    elif _result == 5:
+                        yield InterruptEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                        )
+                    if _result in {5, 8, 9, 10, 11, 12}:
+                        continue
+                    magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                    condition_damage = 0
+                if magnitude:
+                    yield DamageEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=dst_agent,
+                        skill_id=skill_id,
+                        damage=magnitude,
+                        buff_dmg=condition_damage,
+                        iff=_iff,
+                        src_master_instid=src_master_inst,
+                        dst_master_instid=dst_master_inst,
+                    )
+                continue
             elif _ev_buff != 0:
                 # Phase 9 Step 3 APPLY-BRANCH.
                 # Predicate: ``_ev_buff != 0 AND is_buffremove == 0 AND

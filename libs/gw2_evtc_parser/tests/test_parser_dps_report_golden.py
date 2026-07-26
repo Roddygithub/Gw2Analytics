@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from gw2_core import DamageEvent
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
 _DEFAULT_LOG = Path(
@@ -60,3 +61,11 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
     assert players_by_account["EstaticFear.7692"] == (4_240, 2_763)
     assert players_by_account["Demandred.9035"] == (4_882, 2_763)
     assert len(fight.skills) == 168
+
+    damage = [
+        event
+        for event in PythonEvtcParser().parse_events(raw)
+        if isinstance(event, DamageEvent) and event.source_agent_id == 45_947
+    ]
+    assert sum(event.damage for event in damage) == 27_214
+    assert sum(event.buff_dmg for event in damage) == 1_130
