@@ -13,6 +13,7 @@ from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
     BuffRemovalEvent,
+    CCEvent,
     DamageEvent,
     HealingEvent,
     SkillActivationEvent,
@@ -165,4 +166,17 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: 
         (29_458, 10_359, 599),
         (30_278, 10_958, 565),
         (29_442, 11_523, 266),
+    ]
+
+    crowd_control = [
+        event
+        for event in events
+        if isinstance(event, CCEvent) and event.source_agent_id == 45_947
+    ]
+    assert [
+        (event.time_ms - 42_047_693, event.target_agent_id, event.skill_id, event.cc_value)
+        for event in crowd_control
+    ] == [
+        (4_843, 53_411, 23_295, 1_500),
+        (8_520, 53_411, 23_299, 1_000),
     ]

@@ -79,6 +79,7 @@ from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
     BuffRemovalEvent,
+    CCEvent,
     DamageEvent,
     DeathEvent,
     DodgeEvent,
@@ -937,6 +938,17 @@ class PythonEvtcParser:
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                     condition_damage = magnitude
                 else:
+                    if _result == 12:
+                        yield CCEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                            cc_value=(
+                                0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                            ),
+                        )
+                        continue
                     if _result == 3:
                         yield BlockEvent(
                             time_ms=time_ms,
@@ -958,7 +970,7 @@ class PythonEvtcParser:
                             target_agent_id=dst_agent,
                             skill_id=skill_id,
                         )
-                    if _result in {5, 8, 9, 10, 11, 12}:
+                    if _result in {5, 8, 9, 10, 11}:
                         continue
                     magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
                     condition_damage = 0

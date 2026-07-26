@@ -46,6 +46,7 @@ from gw2_core import (
     ActivationType,
     BoonApplyEvent,
     BuffApplyEvent,
+    CCEvent,
     DamageEvent,
     EffectEvent,
     SkillActivationEvent,
@@ -283,6 +284,34 @@ def test_parse_events_emits_skill_activation_from_byte_51() -> None:
             activation=ActivationType.NORMAL,
             duration_ms=700,
             expected_duration_ms=1_000,
+        )
+    ]
+
+
+def test_parse_events_emits_cc_from_result_12() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=1_500,
+                skill_id=23295,
+                result=12,
+                iff=1,
+            )
+        ],
+    )
+
+    assert list(PythonEvtcParser().parse_events(evtc)) == [
+        CCEvent(
+            time_ms=1_000,
+            source_agent_id=1,
+            target_agent_id=2,
+            skill_id=23295,
+            cc_value=1_500,
         )
     ]
 

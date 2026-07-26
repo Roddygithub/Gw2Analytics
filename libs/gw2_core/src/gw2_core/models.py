@@ -502,9 +502,7 @@ class CCEvent(BaseEvent):
     table ``CC appliqués`` column. ``cc_value`` is the magnitude of
     the crowd-control effect (defiance-bar damage or duration in
     milliseconds — exact semantics TBD during parser integration).
-    Emitted from arcdps defiance-bar / breakbar statechange records
-    once the parser is extended; until then this model exists only
-    for API/aggregator design.
+    Emitted from combat records whose result byte is CBT_RESULT=12.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
