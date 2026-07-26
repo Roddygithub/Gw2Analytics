@@ -51,9 +51,10 @@ def test_build_skill_rotation_pairs_and_infers_casts() -> None:
         ),
     ]
 
-    assert [(cast.skill_id, cast.time_ms, cast.duration_ms) for cast in build_skill_rotation(
-        events, duration_ms=1_000, start_time_ms=origin
-    )] == [
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+    ] == [
         (30792, 99, 0),
         (-2, 100, 0),
         (29560, 100, 0),

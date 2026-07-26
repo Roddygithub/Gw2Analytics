@@ -176,14 +176,10 @@ class BuffStateTracker:
             )
             if next_expiry is None or next_expiry > new_time_ms:
                 break
-            stack.cumulative_stack_ms += len(stack.expirations) * (
-                next_expiry - stack.last_time_ms
-            )
+            stack.cumulative_stack_ms += len(stack.expirations) * (next_expiry - stack.last_time_ms)
             stack.last_time_ms = next_expiry
             stack.expirations.remove(next_expiry)
-        stack.cumulative_stack_ms += len(stack.expirations) * (
-            new_time_ms - stack.last_time_ms
-        )
+        stack.cumulative_stack_ms += len(stack.expirations) * (new_time_ms - stack.last_time_ms)
         stack.last_time_ms = new_time_ms
 
     def _relative_time(self, time_ms: int) -> int:
@@ -217,15 +213,11 @@ class BuffStateTracker:
 
         if event.kind == "apply":
             if _max_stacks_for(buff_name) > 1:
-                target_tracker.expirations.extend(
-                    [time_ms + event.duration_ms] * event.stacks
-                )
+                target_tracker.expirations.extend([time_ms + event.duration_ms] * event.stacks)
                 del target_tracker.expirations[_max_stacks_for(buff_name) :]
             elif event.duration_ms > 0 and None not in target_tracker.expirations:
                 current_expiry = max(target_tracker.expirations, default=time_ms)
-                target_tracker.expirations = [
-                    max(time_ms, current_expiry) + event.duration_ms
-                ]
+                target_tracker.expirations = [max(time_ms, current_expiry) + event.duration_ms]
         elif event.kind == "remove_single":
             if target_tracker.expirations:
                 finite = [expiry for expiry in target_tracker.expirations if expiry is not None]

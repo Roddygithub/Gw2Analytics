@@ -93,9 +93,17 @@ def _build_event_record_2025(
     flags[8] = is_statechange
     return struct.pack(
         "<QQQiiIIHHHH16B",
-        time_ms, src_agent, dst_agent, value, buff_dmg,
-        0, skill_id,
-        0, 0, 0, 0,
+        time_ms,
+        src_agent,
+        dst_agent,
+        value,
+        buff_dmg,
+        0,
+        skill_id,
+        0,
+        0,
+        0,
+        0,
         *flags,
     )
 
@@ -321,8 +329,7 @@ def test_parse_events_preserves_zero_damage_attempt_results() -> None:
         [(1, 1, 1, "Src", True)],
         build="20250925",
         events=[
-            _build_event_record_2025(1_000, 1, 2, 0, result=result, iff=1)
-            for result in (6, 9)
+            _build_event_record_2025(1_000, 1, 2, 0, result=result, iff=1) for result in (6, 9)
         ],
     )
 

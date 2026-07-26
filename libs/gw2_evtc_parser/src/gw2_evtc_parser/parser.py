@@ -527,16 +527,27 @@ class PythonEvtcParser:
         if is_evtc_2025:
             scan_cursor = offset
             while scan_cursor + EVENT_SIZE <= end:
-                (_stime, s_src, s_dst, _sv, _sbd, _ssid,
-                 s_src_inst, s_dst_inst, _ssmi, _sdmi, *_srest) = _unpack_event(data, scan_cursor)
+                (
+                    _stime,
+                    s_src,
+                    s_dst,
+                    _sv,
+                    _sbd,
+                    _ssid,
+                    s_src_inst,
+                    s_dst_inst,
+                    _ssmi,
+                    _sdmi,
+                    *_srest,
+                ) = _unpack_event(data, scan_cursor)
                 if s_src != 0 and s_src_inst != 0:
                     inst_to_agent.setdefault(s_src_inst, s_src)
                 if s_dst != 0 and s_dst_inst != 0:
                     inst_to_agent.setdefault(s_dst_inst, s_dst)
                 if _srest[-1] == 46:
                     effect_guids[_ssid] = (
-                        s_src.to_bytes(8, "little") + s_dst.to_bytes(8, "little")
-                    ).hex().upper()
+                        (s_src.to_bytes(8, "little") + s_dst.to_bytes(8, "little")).hex().upper()
+                    )
                 scan_cursor += EVENT_SIZE
         while cursor + EVENT_SIZE <= end:
             if is_evtc_2025:
@@ -636,9 +647,7 @@ class PythonEvtcParser:
             # to byte 48 (struct slot 12).
             if is_statechange == 18:
                 duration = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
-                original_duration = (
-                    0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
-                )
+                original_duration = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                 yield BuffApplyEvent(
                     time_ms=time_ms,
                     source_agent_id=src_agent,
@@ -650,8 +659,10 @@ class PythonEvtcParser:
                 continue
             if is_statechange == 46:
                 effect_guids[skill_id] = (
-                    src_agent.to_bytes(8, "little") + dst_agent.to_bytes(8, "little")
-                ).hex().upper()
+                    (src_agent.to_bytes(8, "little") + dst_agent.to_bytes(8, "little"))
+                    .hex()
+                    .upper()
+                )
                 continue
             if is_statechange == 11:
                 yield WeaponSwapEvent(
@@ -945,9 +956,7 @@ class PythonEvtcParser:
                             source_agent_id=src_agent,
                             target_agent_id=dst_agent,
                             skill_id=skill_id,
-                            cc_value=(
-                                0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
-                            ),
+                            cc_value=(0 if value >= _DAMAGE_SANITY_CAP else max(0, value)),
                         )
                         continue
                     if _result == 3:
@@ -1022,10 +1031,10 @@ class PythonEvtcParser:
                             skill_id=skill_id,
                             healing=heal_magnitude,
                             barrier=barrier,
-                    iff=_iff & 0xFF if is_evtc_2025 else 0,
-                    src_master_instid=src_master_inst if is_evtc_2025 else 0,
-                    dst_master_instid=dst_master_inst if is_evtc_2025 else 0,
-                )
+                            iff=_iff & 0xFF if is_evtc_2025 else 0,
+                            src_master_instid=src_master_inst if is_evtc_2025 else 0,
+                            dst_master_instid=dst_master_inst if is_evtc_2025 else 0,
+                        )
                 yield BoonApplyEvent(
                     time_ms=time_ms,
                     source_agent_id=src_agent,
@@ -1351,9 +1360,7 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     omit from the agent table.
     """
     if len(data) < _HEADER_BASE_SIZE:
-        raise EvtcParseError(
-            f"EVTC blob is {len(data)} bytes, header needs {_HEADER_BASE_SIZE}"
-        )
+        raise EvtcParseError(f"EVTC blob is {len(data)} bytes, header needs {_HEADER_BASE_SIZE}")
 
     magic, build, _rev, encounter_id, _unused, agent_count = _HEADER_BASE_STRUCT.unpack_from(
         data, 0

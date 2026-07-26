@@ -171,9 +171,7 @@ def _compare_ei_metadata(  # noqa: PLR0912, PLR0915
                 defense = defense_by_agent.setdefault(event.source_agent_id, {})
                 defense["deadCount"] = defense.get("deadCount", 0) + 1
         agents_by_account = {
-            agent.account_name.lstrip(":"): agent
-            for agent in fight.agents
-            if agent.account_name
+            agent.account_name.lstrip(":"): agent for agent in fight.agents if agent.account_name
         }
         compared_players: dict[str, object] = {}
         for player in expected_players:

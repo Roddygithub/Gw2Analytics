@@ -621,11 +621,7 @@ def detect_role_lite(
             outgoing_might,
         )
     )
-    boon_active = (
-        _any_boon_data
-        and boon_weighted >= _BOON_WEIGHTED_MIN
-        and "BOON" in caps
-    )
+    boon_active = _any_boon_data and boon_weighted >= _BOON_WEIGHTED_MIN and "BOON" in caps
     # 5. Fallback to spec / profession hint (only when no axis crossed;
     # the helper returns the input unchanged when ``badges`` is non-empty,
     # so the call is a no-op when the per-axis check already populated

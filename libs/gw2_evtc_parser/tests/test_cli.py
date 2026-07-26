@@ -92,9 +92,7 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
     )
 
     assert result["matches"] is False
-    assert result["differences"] == {
-        "durationMS": {"expected": 12_000, "actual": 11_789}
-    }
+    assert result["differences"] == {"durationMS": {"expected": 12_000, "actual": 11_789}}
 
 
 def test_compare_ei_command_is_registered() -> None:

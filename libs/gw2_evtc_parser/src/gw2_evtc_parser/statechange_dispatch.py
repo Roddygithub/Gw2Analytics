@@ -56,6 +56,7 @@ STATE_CHANGE_DEATH: Final[int] = 4
 #: ``parser.py`` alongside bytes 4 and 6.  See ``STATE_CHANGE_DEATH``.
 STATE_CHANGE_DOWN: Final[int] = 5
 
+
 def _emit_stun_break(
     time_ms: int,
     src_agent: int,

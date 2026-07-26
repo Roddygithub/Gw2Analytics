@@ -190,10 +190,7 @@ def list_fights(
     """Return up to ``limit`` fights (skipping the first ``offset``)."""
     rows = (
         db.execute(
-            select(OrmFight)
-            .order_by(OrmFight.started_at.desc())
-            .limit(limit)
-            .offset(offset),
+            select(OrmFight).order_by(OrmFight.started_at.desc()).limit(limit).offset(offset),
         )
         .scalars()
         .all()

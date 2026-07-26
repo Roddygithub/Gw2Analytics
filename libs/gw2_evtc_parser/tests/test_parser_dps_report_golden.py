@@ -24,9 +24,7 @@ from gw2_core import (
 )
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
-_DEFAULT_LOG = Path(
-    "/home/roddy/Projects/WvW/WvW (1)/Ess Kitable/20250928-230925.zevtc"
-)
+_DEFAULT_LOG = Path("/home/roddy/Projects/WvW/WvW (1)/Ess Kitable/20250928-230925.zevtc")
 
 
 def _golden_log_path() -> Path:
@@ -88,14 +86,18 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: 
 
     events = list(PythonEvtcParser().parse_events(raw))
     lullupa_id = 45_859
-    assert sum(
-        event.damage
-        for event in events
-        if isinstance(event, DamageEvent) and event.target_agent_id == lullupa_id
-    ) == 771
-    assert sum(
-        isinstance(event, BlockEvent) and event.source_agent_id == 45_822 for event in events
-    ) == 1
+    assert (
+        sum(
+            event.damage
+            for event in events
+            if isinstance(event, DamageEvent) and event.target_agent_id == lullupa_id
+        )
+        == 771
+    )
+    assert (
+        sum(isinstance(event, BlockEvent) and event.source_agent_id == 45_822 for event in events)
+        == 1
+    )
     assert not any(isinstance(event, HealingEvent) for event in events)
     assert not any(isinstance(event, BuffRemovalEvent) for event in events)
     ei_player_ids = {2_000, 45_822, 45_859, 45_946, 45_947}
@@ -172,9 +174,7 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: 
     ]
 
     crowd_control = [
-        event
-        for event in events
-        if isinstance(event, CCEvent) and event.source_agent_id == 45_947
+        event for event in events if isinstance(event, CCEvent) and event.source_agent_id == 45_947
     ]
     assert [
         (event.time_ms - 42_047_693, event.target_agent_id, event.skill_id, event.cc_value)
@@ -192,11 +192,7 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: 
     assert len(demandred_attempts) == 24
     assert sum(event.damage > 0 for event in demandred_attempts) == 20
     assert sum(event.result in {6, 9} for event in demandred_attempts) == 4
-    criticals = [
-        event
-        for event in demandred_attempts
-        if event.result == 1 and event.buff_dmg == 0
-    ]
+    criticals = [event for event in demandred_attempts if event.result == 1 and event.buff_dmg == 0]
     assert len(criticals) == 12
     assert sum(event.damage for event in criticals) == 21_908
 
