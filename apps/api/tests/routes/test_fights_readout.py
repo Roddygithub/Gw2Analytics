@@ -78,7 +78,7 @@ def test_readout_200_happy_path_with_player(client: TestClient) -> None:
 
     # Wire envelope: ``fight_id`` + ``duration_s`` round-trip exactly.
     assert payload["fight_id"] == fight_id
-    assert payload["duration_s"] == 2.0  # 2 events, max time_ms=2000 -> 2.0 sec sentinel
+    assert payload["duration_s"] == 1.0  # events at 1000 and 2000 ms
     assert isinstance(payload["players"], list)
     assert len(payload["players"]) == 2  # 2 player agents (a + b)
 
@@ -91,11 +91,11 @@ def test_readout_200_happy_path_with_player(client: TestClient) -> None:
     assert a_row["elite_spec"] != "UNKNOWN"  # format_elite_spec(Berserker=18) -> "Berserker"
     assert a_row["is_commander"] is False
     assert a_row["roles"] == ["DPS"]
-    # DPS: total_damage=1000 / duration_s=2.0 = 500.0
-    assert a_row["damage"]["dps_total"] == 500.0
+    # DPS: total_damage=1000 / duration_s=1.0 = 1000.0
+    assert a_row["damage"]["dps_total"] == 1000.0
     # v0.12.1: Phase 6 v2 DpsSplitGetter wired — buff_dmg=0 on the
     # fixture's damage event, so everything is power (condi=0).
-    assert a_row["damage"]["dps_power"] == 500.0
+    assert a_row["damage"]["dps_power"] == 1000.0
     assert a_row["damage"]["dps_condi"] == 0.0
     assert a_row["damage"]["strips"] == 0
     # Heal side: stay zero (no outgoing heals from a)

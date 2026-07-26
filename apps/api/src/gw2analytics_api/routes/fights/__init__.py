@@ -88,7 +88,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from gw2_analytics.buff_state import TRACKED_BUFFS
 from gw2_analytics.event_window import EventWindowAggregator
@@ -124,6 +124,7 @@ from gw2analytics_api.routes.fights.fight_aggregators import (
 )
 from gw2analytics_api.routes.fights.mappers import (
     _to_fight_out,
+    _to_fight_out_list,
     agent_id_to_identity,
     agent_id_to_name,
     agent_id_to_subgroup,
@@ -186,37 +187,16 @@ def list_fights(
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_session),  # noqa: B008
 ) -> FightsPageOut:
-    """Return up to ``limit`` fights (skipping the first ``offset``).
-
-    v0.10.12 PR 3.2: the pre-PR-3.2 response shape was a naked
-    ``list[FightOut]`` which carried no pagination cursor on the
-    wire. The wrapper :class:`FightsPageOut` carries both the
-    trimmed page (the ``fights`` list) AND the cursor (``limit``
-    + ``offset``) so a future frontend pagination UX can render
-    "Showing X-Y of N" without a second round-trip. See the
-    schema docstring for the cursor-vs-total-count design
-    trade-off (we deliberately omit ``total_count`` to avoid
-    forcing a per-request ``COUNT(*)`` query).
-    """
+    """Return up to ``limit`` fights (skipping the first ``offset``)."""
     rows = (
         db.execute(
-            select(OrmFight)
-            .options(selectinload(OrmFight.agents), selectinload(OrmFight.skills))
-            .order_by(OrmFight.started_at.desc())
-            .limit(limit)
-            .offset(offset),
+            select(OrmFight).order_by(OrmFight.started_at.desc()).limit(limit).offset(offset),
         )
         .scalars()
         .all()
     )
-    # Build the trimmed page via the shared ``_to_fight_out``
-    # helper (the same one ``get_fight`` uses -- single source of
-    # truth for the FightOut construction including the agents +
-    # skills selectinload + the profession/elite spec wire-format
-    # labels). The cursor echoes the request params so the
-    # frontend can reconcile state when it paginates.
     return FightsPageOut(
-        fights=[_to_fight_out(f) for f in rows],
+        fights=[_to_fight_out_list(f) for f in rows],
         limit=limit,
         offset=offset,
     )
@@ -522,13 +502,18 @@ def get_fight(
 ) -> FightOut:
     """Return a fight by id (the upload's sha256)."""
     fight = db.execute(
-        select(OrmFight)
-        .where(OrmFight.id == fight_id)
-        .options(selectinload(OrmFight.agents), selectinload(OrmFight.skills)),
+        select(OrmFight).where(OrmFight.id == fight_id),
     ).scalar_one_or_none()
     if fight is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "fight not found")
-    return _to_fight_out(fight)
+    all_agents = list(
+        db.execute(
+            select(OrmFightAgent).where(
+                OrmFightAgent.fight_id == fight_id,
+            ),
+        ).scalars()
+    )
+    return _to_fight_out(fight, all_agents)
 
 
 # Default ``window_s`` of 5 seconds matches the standard GW2 toolchain

@@ -17,8 +17,8 @@ _AGENT_PREFIX_SIZE = struct.calcsize(_AGENT_RECORD_FMT)
 _AGENT_NAME_SIZE = 72
 _AGENT_SIZE = _AGENT_PREFIX_SIZE + _AGENT_NAME_SIZE  # 96
 
-_AGENT_NAME_SIZE_2025 = 64
-_AGENT_FMT_2025 = f"<IIIIII{_AGENT_NAME_SIZE_2025}sII"
+_AGENT_NAME_SIZE_2025 = 68
+_AGENT_FMT_2025 = f"<QII6H{_AGENT_NAME_SIZE_2025}s"
 
 _SKILL_RECORD_SIZE = 68
 
@@ -82,6 +82,8 @@ def make_cbtevent(
     """
     if is_evtc2025:
         flags = bytearray(16)
+        # byte 48 (index 0) = iff. 0=FRIEND (heal), 1=FOE (damage), 2=SELF.
+        flags[0] = 0 if is_nondamage > 0 else 1
         # byte 50 (index 2) = result. 13 = CBTR_HEAL, 14 = CBTR_BUFFHEAL.
         flags[2] = 13 if is_nondamage > 0 else 0
         # byte 56 (index 8) = is_statechange.
@@ -146,15 +148,16 @@ def _encode_agent(
         name_buf = raw_name + b"\x00" * (_AGENT_NAME_SIZE_2025 - len(raw_name))
         return struct.pack(
             _AGENT_FMT_2025,
-            0,  # iid_low (unused)
+            aid,
             prof,
             elite,
             0,  # toughness
-            0,  # healing
             0,  # concentration
+            0,  # healing
+            0,  # hitbox width
+            0,  # condition
+            0,  # hitbox height
             name_buf,
-            0,  # subgroup
-            aid,  # addr (event-matching id for 2025+)
         )
 
     prefix = struct.pack(_AGENT_RECORD_FMT, aid, prof, elite, 0, 0, 0, 0)
@@ -185,23 +188,22 @@ def make_minimal_zevtc(
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
         header = struct.pack(
-            _HEADER_FMT,
+            "<4s8sBHBI" if is_2025 else _HEADER_FMT,
             b"EVTC",
             build.encode("ascii"),
             0,
             0,
             0,
             len(agents),
-            len(skills),
+            *(() if is_2025 else (len(skills),)),
         )
-        assert len(header) == _HEADER_SIZE
+        assert len(header) == (20 if is_2025 else _HEADER_SIZE)
         body = bytearray()
 
         for aid, prof, elite, name, is_player in agents:
             body += _encode_agent(aid, prof, elite, name, is_player, is_2025=is_2025)
 
-        if not is_2025:
-            body += struct.pack("<I", len(skills))
+        body += struct.pack("<I", len(skills))
 
         for skill_id, skill_name in skills:
             name_bytes = skill_name.encode("utf-8")[:64]

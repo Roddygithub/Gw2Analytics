@@ -43,9 +43,14 @@ from typing import Final
 import pytest
 
 from gw2_core import (
+    ActivationType,
     BoonApplyEvent,
     BuffApplyEvent,
+    CCEvent,
     DamageEvent,
+    EffectEvent,
+    SkillActivationEvent,
+    WeaponSwapEvent,
 )
 from gw2_core.models import _EVENT_MAP, EventType
 from gw2_core.models import EventType as _EventType
@@ -63,6 +68,44 @@ _AGENT_NAME_SIZE: Final[int] = 72
 
 #: Size of one fixed-size skill record (u32 id + 64-byte null-padded name).
 _SKILL_NAME_SIZE: Final[int] = 64
+
+
+def _build_event_record_2025(
+    time_ms: int,
+    src_agent: int,
+    dst_agent: int,
+    value: int,
+    skill_id: int = 42,
+    *,
+    is_statechange: int = 0,
+    buff_dmg: int = 0,
+    result: int = 0,
+    iff: int = 1,
+    buff: int = 0,
+    is_activation: int = 0,
+) -> bytes:
+    """Build one 64-byte EVTC2025+ cbtevent record (local copy)."""
+    flags = bytearray(16)
+    flags[0] = iff
+    flags[1] = buff
+    flags[2] = result
+    flags[3] = is_activation
+    flags[8] = is_statechange
+    return struct.pack(
+        "<QQQiiIIHHHH16B",
+        time_ms,
+        src_agent,
+        dst_agent,
+        value,
+        buff_dmg,
+        0,
+        skill_id,
+        0,
+        0,
+        0,
+        0,
+        *flags,
+    )
 
 
 def _build_event_record(
@@ -164,27 +207,23 @@ def _build_minimal_evtc(
         events = []
     is_2025 = int(build[:4]) >= 2025
     header = struct.pack(
-        "<4s8sBHBI I",
+        "<4s8sBHBI" if is_2025 else "<4s8sBHBI I",
         b"EVTC",
         build.encode("ascii"),
         0,
         encounter_id,
         0,
         len(agents),
-        len(skills),
+        *(() if is_2025 else (len(skills),)),
     )
     body = bytearray()
     for aid, prof, elite, _name, _is_player in agents:
         if is_2025:
-            # EVTC2025+ agent layout: 6*u32 + 64-byte name + 2*u32 = 96 bytes.
-            name_buf = b"\x00" * _SKILL_NAME_SIZE
-            body += struct.pack("<IIIIII64sII", 0, prof, elite, 0, 0, 0, name_buf, 0, aid)
+            body += struct.pack("<QII6H68s", aid, prof, elite, 0, 0, 0, 0, 0, 0, b"")
         else:
             prefix = struct.pack("<QIIhhhh", aid, prof, elite, 0, 0, 0, 0)
             body += prefix + b"\x00" * _AGENT_NAME_SIZE
-    # Legacy (<2025) skill table has a count prefix before fixed-size records.
-    if not is_2025:
-        body += struct.pack("<I", len(skills))
+    body += struct.pack("<I", len(skills))
     for skill_id, skill_name in skills:
         body += _build_skill_record(skill_id, skill_name)
     for ev in events:
@@ -224,6 +263,121 @@ def test_parse_events_emit_buff_skipped_for_is_buffremove_zero() -> None:
     assert len(events) == 1
     assert all(not isinstance(e, BoonApplyEvent) for e in events)
     assert isinstance(events[0], DamageEvent)
+
+
+def test_parse_events_emits_skill_activation_from_byte_51() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        skills=[(101, "Skill")],
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=999,
+                value=700,
+                buff_dmg=1_000,
+                skill_id=101,
+                is_activation=1,
+            )
+        ],
+    )
+
+    assert list(PythonEvtcParser().parse_events(evtc)) == [
+        SkillActivationEvent(
+            time_ms=1_000,
+            source_agent_id=1,
+            target_agent_id=0,
+            skill_id=101,
+            activation=ActivationType.NORMAL,
+            duration_ms=700,
+            expected_duration_ms=1_000,
+        )
+    ]
+
+
+def test_parse_events_emits_cc_from_result_12() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=2,
+                value=1_500,
+                skill_id=23295,
+                result=12,
+                iff=1,
+            )
+        ],
+    )
+
+    assert list(PythonEvtcParser().parse_events(evtc)) == [
+        CCEvent(
+            time_ms=1_000,
+            source_agent_id=1,
+            target_agent_id=2,
+            skill_id=23295,
+            cc_value=1_500,
+        )
+    ]
+
+
+def test_parse_events_preserves_zero_damage_attempt_results() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(1_000, 1, 2, 0, result=result, iff=1) for result in (6, 9)
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert [(event.damage, event.result) for event in events if isinstance(event, DamageEvent)] == [
+        (0, 6),
+        (0, 9),
+    ]
+
+
+def test_parse_events_emits_weapon_swap_and_late_mapped_effect() -> None:
+    guid = bytes.fromhex("C4E8DD3234E0C647993857940ED79AC1")
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=5,
+                value=3,
+                skill_id=0,
+                is_statechange=11,
+            ),
+            _build_event_record_2025(
+                time_ms=1_100,
+                src_agent=1,
+                dst_agent=0,
+                value=0,
+                skill_id=8553,
+                is_statechange=60,
+            ),
+            _build_event_record_2025(
+                time_ms=0,
+                src_agent=int.from_bytes(guid[:8], "little"),
+                dst_agent=int.from_bytes(guid[8:], "little"),
+                value=0,
+                skill_id=8553,
+                is_statechange=46,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert isinstance(events[0], WeaponSwapEvent)
+    assert (events[0].swapped_from, events[0].swapped_to) == (3, 5)
+    assert isinstance(events[1], EffectEvent)
+    assert events[1].guid == guid.hex().upper()
 
 
 def test_parse_events_emit_buff_remove_all_yields_boon_apply_event() -> None:
@@ -638,43 +792,68 @@ def test_parse_events_emit_apply_statechange_filtered_upstream() -> None:
 
 
 # ---------------------------------------------------------------------------
-# EVTC2025+ regression: _ev_buff != 0 with value/buff_dmg != 0 emits apply
+# EVTC2025+ condition damage
 # ---------------------------------------------------------------------------
 
 
-def test_parse_events_emit_apply_2025_with_damage_and_strip_yields_boon_only() -> None:
-    """EVTC2025+ APPLY record with value/buff_dmg still emits BoonApply(apply).
-
-    After the v0.10.x guard that suppressed BoonApplyEvent for
-    EVTC2025+ records when ``value != 0`` or ``buff_dmg != 0`` was
-    removed, any non-statechange record with ``_ev_buff != 0`` and
-    ``is_buffremove == 0`` should yield a ``BoonApplyEvent`` with
-    ``kind="apply"`` and then continue so the same record does not
-    also emit a DamageEvent/HealingEvent. This test locks that
-    contract for 2025+ builds.
-    """
+def test_parse_events_2025_is_buff_uses_condition_damage() -> None:
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
         build="20250925",
         skills=[(101, "Quickness")],
         events=[
-            _build_event_record(
+            _build_event_record_2025(
                 time_ms=10_000,
                 src_agent=1,
                 dst_agent=2,
-                value=1_000,  # non-zero in EVTC2025+ apply record
-                buff_dmg=500,  # non-zero in EVTC2025+ apply record
+                value=1_000,
+                buff_dmg=500,
                 skill_id=101,
-                ev_buff=101,
+                iff=1,
+                buff=1,
             ),
         ],
     )
     events = list(PythonEvtcParser().parse_events(evtc))
     assert len(events) == 1
     e = events[0]
-    assert isinstance(e, BoonApplyEvent)
-    assert e.kind == "apply"
+    assert isinstance(e, DamageEvent)
+    assert e.damage == 500
+    assert e.buff_dmg == 500
     assert e.skill_id == 101
+
+
+def test_parse_events_2025_friendly_is_buff_applies_boon() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        skills=[(1187, "Quickness")],
+        events=[
+            _build_event_record_2025(
+                time_ms=10_000,
+                src_agent=1,
+                dst_agent=1,
+                value=3_000,
+                skill_id=1187,
+                iff=0,
+                buff=1,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert events == [
+        BoonApplyEvent(
+            time_ms=10_000,
+            source_agent_id=1,
+            target_agent_id=1,
+            skill_id=1187,
+            duration_ms=3_000,
+            stacks=1,
+            kind="apply",
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------

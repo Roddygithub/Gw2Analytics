@@ -63,7 +63,7 @@ class TestBuffStateTracker:
         assert uptimes["fury"] == pytest.approx(50.0, rel=0.01)
 
     def test_might_stacking(self) -> None:
-        """Might stacks up to 25; 25 might at 100% = 100% uptime per stack cap."""
+        """Intensity boons report average stacks, matching Elite Insights."""
         might_id = TRACKED_BUFFS["might"]
         tracker = BuffStateTracker()
         # Apply 25 stacks at fight start
@@ -71,10 +71,10 @@ class TestBuffStateTracker:
             _boon_apply(skill_id=might_id, target=1, time_ms=0, duration_ms=100000, stacks=25)
         )
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=100000)
-        assert uptimes["might"] == pytest.approx(100.0, rel=0.01)
+        assert uptimes["might"] == pytest.approx(25.0, rel=0.01)
 
     def test_partial_might_uptime(self) -> None:
-        """10 stacks of might for half fight → 20% uptime (10/25 * 50%)."""
+        """10 stacks of might for half a fight averages 5 stacks."""
         might_id = TRACKED_BUFFS["might"]
         tracker = BuffStateTracker()
         tracker.process(
@@ -82,8 +82,7 @@ class TestBuffStateTracker:
         )
         tracker.process(_boon_apply(skill_id=might_id, target=1, time_ms=50000, kind="remove_all"))
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=100000)
-        # 10 stacks for 50s out of 100s → (10*50000) / (25*100000) = 500000/2500000 = 0.2 → 20%
-        assert uptimes["might"] == pytest.approx(20.0, rel=0.01)
+        assert uptimes["might"] == pytest.approx(5.0, rel=0.01)
 
     def test_outgoing_boon(self) -> None:
         """Boon applied to another player tracks as outgoing."""
@@ -128,7 +127,7 @@ class TestBuffStateTracker:
         )
         uptimes = tracker.compute_all_uptimes(duration_s=100.0)
         assert uptimes[1]["fury"] == pytest.approx(50.0, rel=0.01)
-        assert uptimes[2]["might"] == pytest.approx(100.0, rel=0.01)
+        assert uptimes[2]["might"] == pytest.approx(25.0, rel=0.01)
 
     def test_remove_single_stacks(self) -> None:
         """remove_single decrements by 1 stack."""
@@ -141,9 +140,8 @@ class TestBuffStateTracker:
             _boon_apply(skill_id=might_id, target=1, time_ms=50000, kind="remove_single")
         )
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=100000)
-        # 5 stacks for 50s + 4 stacks for 50s = (5*50000 + 4*50000) / (25*100000)
-        # = 450000 / 2500000 = 0.18 → 18%
-        assert uptimes["might"] == pytest.approx(18.0, rel=0.01)
+        # 5 stacks for 50s + 4 stacks for 50s averages 4.5 stacks.
+        assert uptimes["might"] == pytest.approx(4.5, rel=0.01)
 
     def test_zero_duration(self) -> None:
         """Zero fight duration → empty uptimes dict."""
@@ -158,11 +156,8 @@ class TestBuffStateTracker:
         # Apply fury at t=50000 for 100000ms (should last until t=150000)
         tracker.process(_boon_apply(skill_id=fury_id, target=1, time_ms=50000, duration_ms=100000))
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=200000)
-        # fury is active from t=50000 to t=200000 (end) = 150000ms out of 200000ms
-        # But the remove_all at the end of duration_ms is not emitted by parser
-        # So the stack is active from 50000 to end = 150000ms
-        # 150000 / 200000 = 75%
-        assert uptimes["fury"] == pytest.approx(75.0, rel=0.01)
+        # The encoded duration expires at t=150000 without a removal event.
+        assert uptimes["fury"] == pytest.approx(50.0, rel=0.01)
 
     def test_preserves_tracked_buffs_count(self) -> None:
         """All 14 tracked buffs are present in the output dict."""
@@ -292,8 +287,8 @@ class TestBuffStateTracker:
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=10000)
         assert uptimes["fury"] == pytest.approx(60.0, rel=0.01)
 
-    def test_buff_apply_event_might_one_stack_is_four_pct(self) -> None:
-        """A single might stack from BuffApplyEvent yields %/25 stacks."""
+    def test_buff_apply_event_might_reports_average_stack(self) -> None:
+        """A single might stack reports one average stack."""
         might_id = TRACKED_BUFFS["might"]
         tracker = BuffStateTracker()
         tracker.process(
@@ -305,8 +300,7 @@ class TestBuffStateTracker:
             )
         )
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=5000)
-        # 1 stack of might / 25 max stacks for full fight -> 4%
-        assert uptimes["might"] == pytest.approx(4.0, rel=0.01)
+        assert uptimes["might"] == pytest.approx(1.0, rel=0.01)
 
     def test_buff_apply_event_then_remove_all(self) -> None:
         """BuffApplyEvent at t=0 followed by remove_all at t=5000 -> 50%."""
@@ -333,4 +327,17 @@ class TestBuffStateTracker:
         first = tracker.compute_player_uptimes(agent_id=1, duration_ms=100000)
         second = tracker.compute_player_uptimes(agent_id=1, duration_ms=100000)
         assert first["fury"] == pytest.approx(second["fury"])
-        assert first["fury"] == pytest.approx(100.0, rel=0.01)
+        assert first["fury"] == pytest.approx(50.0, rel=0.01)
+
+    def test_absolute_event_times_use_fight_origin(self) -> None:
+        fury_id = TRACKED_BUFFS["fury"]
+        tracker = BuffStateTracker(start_time_ms=42_047_693)
+        tracker.process(
+            _boon_apply(
+                skill_id=fury_id,
+                target=1,
+                time_ms=42_047_693,
+                duration_ms=5_000,
+            )
+        )
+        assert tracker.compute_player_uptimes(1, 10_000)["fury"] == pytest.approx(50.0)

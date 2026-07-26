@@ -5,8 +5,7 @@ into a dispatch table that emits Pydantic domain events for the
 arcdps statechange kinds that have a matching subclass in
 ``libs/gw2_core/src/gw2_core/models.py``. A.4 ships 4 emit entries:
 ``StunBreakEvent`` (byte 56), ``BarrierEvent`` (byte 38),
-``DeathEvent`` (byte 4), ``DownEvent`` (byte 5),
-``CCEvent`` (byte 35).
+``DeathEvent`` (byte 4), and ``DownEvent`` (byte 5).
 
 The tests in this file lock the A.4.1 dispatch contract so a future
 refactor that:
@@ -49,19 +48,18 @@ from typing import Final
 from gw2_core import (
     BarrierEvent,
     BlockEvent,
-    CCEvent,
     DamageEvent,
     DeathEvent,
     DodgeEvent,
     DownEvent,
     InterruptEvent,
+    PositionEvent,
     StunBreakEvent,
 )
 from gw2_evtc_parser import PythonEvtcParser
 from gw2_evtc_parser.parser import _EVENT_STRUCT
 from gw2_evtc_parser.statechange_dispatch import (
     STATE_CHANGE_BARRIER_UPDATE,
-    STATE_CHANGE_BREAKBAR_PERCENT,
     STATE_CHANGE_DEATH,
     STATE_CHANGE_DOWN,
     STATE_CHANGE_STUN_BREAK,
@@ -74,6 +72,7 @@ from gw2_evtc_parser.statechange_dispatch import (
 #: Reused struct format -- mirrors the parser's ``_EVENT_STRUCT`` literal 1:1.
 _CBTEVENT_FMT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 _AGENT_NAME_SIZE: Final[int] = 72
+_STATE_CHANGE_POSITION: Final[int] = 19
 
 
 def _build_event_record(
@@ -354,40 +353,48 @@ def test_parse_events_dispatch_down_yields_event() -> None:
     assert e.downtime_ms == 0
 
 
-def test_parse_events_dispatch_cc_yields_event() -> None:
-    """Statechange byte 35 (BreakbarPercent) yields ONE CCEvent.
-
-    Locks the A.4 dispatch contract for the CC (crowd-control) byte.
-    The cbtevent ``value`` field carries the breakbar percent (0-100)
-    and is mapped to ``cc_value``. ``source_agent_id`` is the player
-    applying CC; ``target_agent_id`` is the NPC whose breakbar is
-    affected. Byte 34 (BreakbarState -- phase indicator) is NOT
-    dispatched separately (dual-byte tracking deferred to Phase 6 v2).
-    """
+def test_parse_events_dispatch_position_reads_current_record_coordinates() -> None:
+    """Statechange byte 19 reads x/y from the current cbtevent record."""
+    position_record = bytearray(
+        _build_event_record(
+            time_ms=10_000,
+            src_agent=99,
+            dst_agent=0,
+            value=0,
+            skill_id=0,
+            is_statechange=_STATE_CHANGE_POSITION,
+        )
+    )
+    struct.pack_into("<3f", position_record, 16, 123.5, -456.25, 7.0)
+    next_record = _build_event_record(
+        time_ms=11_000,
+        src_agent=1,
+        dst_agent=1,
+        value=999,
+        skill_id=42,
+    )
     evtc = _build_minimal_evtc(
-        [(1, 1, 1, "Src", True), (2, 1, 1, "Dst", True)],
+        [(1, 1, 1, "Src", True), (99, 1, 1, "Mover", True)],
         skills=[(42, "Skill")],
         events=[
             _build_event_record(time_ms=1, src_agent=1, dst_agent=1, value=0),
-            _build_event_record(
-                time_ms=10_000,
-                src_agent=99,
-                dst_agent=200,
-                value=75,  # breakbar at 75%
-                skill_id=888,
-                is_statechange=STATE_CHANGE_BREAKBAR_PERCENT,  # byte 35
-            ),
+            bytes(position_record),
+            next_record,
         ],
     )
+
     events = list(PythonEvtcParser().parse_events(evtc))
-    assert len(events) == 1
-    e = events[0]
-    assert isinstance(e, CCEvent)
+    position_events = [e for e in events if isinstance(e, PositionEvent)]
+    fight = next(PythonEvtcParser().parse(evtc))
+    coordinate_bytes_as_agent = struct.unpack_from("<Q", position_record, 16)[0]
+
+    assert len(position_events) == 1
+    e = position_events[0]
     assert e.time_ms == 10_000
     assert e.source_agent_id == 99
-    assert e.target_agent_id == 200
-    assert e.skill_id == 888
-    assert e.cc_value == 75
+    assert e.x == 123.5
+    assert e.y == -456.25
+    assert coordinate_bytes_as_agent not in {agent.id for agent in fight.agents}
 
 
 def test_parse_events_dispatch_unmapped_statechange_yields_no_event() -> None:

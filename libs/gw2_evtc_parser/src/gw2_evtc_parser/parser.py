@@ -2,10 +2,9 @@
 
 This implementation reads:
 
-* the 24-byte file header (``EVTC`` magic + ``yyyymmdd`` build date +
-  revision byte + combat_id + unused + ``agent_count`` u32 +
-  ``map_id`` u32) for rev>=1, or the 24-byte extended rev0 header
-  (``skill_count`` at bytes 20-23),
+* the 20-byte base file header (``EVTC`` magic + ``yyyymmdd`` build date +
+  revision byte + combat_id + unused + ``agent_count`` u32). Legacy
+  fixtures may append a 4-byte extension before the agent table,
 * ``agent_count`` **fixed-size** agent records of 96 bytes each,
   matching the C ``struct ag`` in ``arcdps.h`` exactly:
 
@@ -32,12 +31,13 @@ This implementation reads:
     |  4  | 64s    | name (null-padded UTF-8 buffer)            |
     +-----+--------+--------------------------------------------+
 
-  The skill table is stored in one of two wire formats:
+  The skill table can be stored in one of two wire formats:
 
   * **Legacy** (pre-2025): a 4-byte ``skill_count`` prefix followed by
     ``skill_count`` consecutive 68-byte records.
-  * **EVTC2025+**: no count prefix; consecutive 68-byte records run
+  * **Alternative**: no count prefix; consecutive 68-byte records run
     until the parser's heuristic detects the start of the event stream.
+    Current EVTC2025 logs use the count-prefixed format.
 
   The name buffer is a fixed 64-byte null-padded UTF-8 string. Any
   bytes after the first null terminator are ignored, so embedded nulls
@@ -73,15 +73,18 @@ from pathlib import Path
 from typing import BinaryIO, Final
 
 from gw2_core import (
+    ActivationType,
     Agent,
     BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
     BuffRemovalEvent,
+    CCEvent,
     DamageEvent,
     DeathEvent,
     DodgeEvent,
     DownEvent,
+    EffectEvent,
     EliteSpec,
     Event,
     EvtcHeader,
@@ -91,6 +94,8 @@ from gw2_core import (
     PositionEvent,
     Profession,
     Skill,
+    SkillActivationEvent,
+    WeaponSwapEvent,
 )
 from gw2_evtc_parser.exceptions import EvtcParseError
 from gw2_evtc_parser.statechange_dispatch import dispatch_statechange
@@ -104,18 +109,15 @@ logger = logging.getLogger(__name__)
 # Binary layout constants
 # ---------------------------------------------------------------------------
 
-#: Total size of the EVTC file header in bytes for rev>=1.
-#: Layout (per ``arcdps.h`` ``evtc_header``): magic(4) + build(8) +
-#: rev(1) + combat_id(2) + unused(1) + agent_count(4) + map_id(4)
-#: = 24 bytes.  For rev>=1 some builds append a ``skill_count(4)``
-#: extension making the header 28 bytes total; this parser only reads
-#: the first 24 bytes and derives the agent table start from there.
+#: Legacy extended header size retained for pre-2025 fixtures.
 HEADER_SIZE: Final[int] = 24
+_HEADER_BASE_SIZE: Final[int] = 20
 
 #: ``struct`` format for the 24-byte file header (rev>=1).
 #: Fields: magic(4s) + build(8s) + rev(B) + combat_id(H) + unused(B)
 #: + agent_count(I) + map_id(I).
 _HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<4s8sBHBI I")
+_HEADER_BASE_STRUCT: Final[struct.Struct] = struct.Struct("<4s8sBHBI")
 
 #: Byte offset of the agent_count field inside the header.
 AGENT_COUNT_OFFSET: Final[int] = 16
@@ -126,9 +128,9 @@ BUILD_OFFSET: Final[int] = 4
 #: Byte offset of the skill_count field inside the header (bytes 20-23).
 SKILL_COUNT_OFFSET: Final[int] = 20
 
-#: Byte offset where agent records start (right after the 24-byte
-#: header). For rev>=1 agents begin immediately after the header.
+#: Byte offset where agent records start in legacy extended fixtures.
 AGENTS_OFFSET: Final[int] = HEADER_SIZE
+_AGENTS_OFFSET_2025: Final[int] = _HEADER_BASE_SIZE
 
 #: Total size of one agent record on disk (the C ``struct ag`` size).
 AGENT_SIZE: Final[int] = 96
@@ -145,14 +147,10 @@ AGENT_NAME_SIZE: Final[int] = AGENT_SIZE - AGENT_PREFIX_SIZE
 #: 72-byte name buffer.
 _AGENT_STRUCT: Final[struct.Struct] = struct.Struct(f"<QIIhhhh{AGENT_NAME_SIZE}s")
 
-#: Size of the 64-byte name buffer inside an EVTC2025+ agent record.
-#: The 2025 layout is: iid_low(u32) + prof(u32) + is_elite(u32) +
-#: toughness(u32) + healing(u32) + concentration(u32) + name(64s) +
-#: subgroup(u32) + addr(u32) = 96 bytes.
-AGENT_NAME_SIZE_2025: Final[int] = 64
-
-#: ``struct`` format for the EVTC2025+ 96-byte agent record.
-_AGENT_STRUCT_2025: Final[struct.Struct] = struct.Struct(f"<IIIIII{AGENT_NAME_SIZE_2025}sII")
+#: EVTC2025+ agent: address(u64), profession(u32), elite(u32), six
+#: uint16 stats/hitbox fields, then the 68-byte combo-name buffer.
+AGENT_NAME_SIZE_2025: Final[int] = 68
+_AGENT_STRUCT_2025: Final[struct.Struct] = struct.Struct(f"<QII6H{AGENT_NAME_SIZE_2025}s")
 
 #: Size of one fixed-size skill record: skill_id(u32) + name(64B).
 #: arcdps writes skill names as a fixed 64-byte null-padded buffer
@@ -165,6 +163,17 @@ _SKILL_ID_STRUCT: Final[struct.Struct] = struct.Struct("<I")
 
 #: Total size of one cbtevent record on disk (arcdps EVTC event record).
 EVENT_SIZE: Final[int] = 64
+
+# Elite Insights LogIDs: WvWMask | map-specific mask.
+_WVW_EI_ENCOUNTER_IDS: Final[dict[int, int]] = {
+    38: 0x070100,
+    95: 0x070200,
+    96: 0x070300,
+    1099: 0x070400,
+    899: 0x070500,
+    968: 0x070600,
+    1315: 0x070700,
+}
 
 #: ``struct`` format for one cbtevent record.
 #: arcdps ``cbtevent`` layout (per ``arcdps.h`` -- ``<GW2-ArcDPS-Mechanics-Log>
@@ -248,7 +257,7 @@ _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 #: positions are identical to the legacy 22-field struct above;
 #: this variant avoids allocating / assigning 12 unused values
 #: per event in the hot loop.
-_EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct("<QQQii 4x I 7x bbb 2x b 11x")
+_EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct("<QQQii 4x I 7x bbb b b b 11x")
 
 #: Standard arcdps cbtevent struct for EVTC2025+ builds.  arcdps
 #: reverted to the documented ``arcdps.h`` layout for 2025+ logs:
@@ -260,12 +269,17 @@ _EVENT_STRUCT_2025: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHH16B")
 #: Optimized event struct for EVTC2025+ builds.  Reads the fields
 #: consumed by :meth:`PythonEvtcParser.parse_events` using the
 #: standard flag byte positions:
+#:   byte 40-41 = src_instid
+#:   byte 42-43 = dst_instid
+#:   byte 44-45 = src_master_instid
+#:   byte 46-47 = dst_master_instid
 #:   byte 48 = iff
 #:   byte 49 = ev.buff
 #:   byte 50 = result
+#:   byte 51 = is_activation
 #:   byte 52 = is_buffremove
 #:   byte 56 = is_statechange
-_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct("<QQQii 4x I 8x bbbx b 3x b 7x")
+_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct("<QQQii 4x I HHHH bbbb b 3x b 7x")
 
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
 #: byte values 1, 2, 3 ↔ ``BoonApplyEvent.kind: Literal["remove_all",
@@ -357,14 +371,14 @@ ACCOUNT_NAME_PREFIX: Final[bytes] = b":"
 #: 75, 77) resolve via the profession check.
 _VALID_ELITE_BY_PROFESSION: Final[dict[int, set[int]]] = {
     1: {27, 62, 65, 81},  # Guardian
-    2: {18, 64, 74},  # Warrior
+    2: {18, 61, 74},  # Warrior — Berserker, Spellbreaker, Paragon
     3: {43, 57, 70, 75},  # Engineer
-    4: {5, 55, 73, 78},  # Ranger
-    5: {55, 71, 72, 77},  # Thief
+    4: {5, 55, 72, 78},  # Ranger — Druid, Soulbeast, Untamed, Galeshot
+    5: {55, 71, 72, 77},  # Thief — Daredevil, Specter, Deadeye, Antiquary
     6: {48, 63, 75, 80},  # Elementalist
-    7: {40, 59, 74, 73},  # Mesmer
-    8: {34, 60, 77, 76},  # Necromancer
-    9: {52, 63, 68, 79},  # Revenant
+    7: {40, 59, 66, 73},  # Mesmer — Chronomancer, Mirage, Virtuoso, Troubadour
+    8: {34, 60, 64, 76},  # Necromancer — Reaper, Scourge, Harbinger, Ritualist
+    9: {52, 63, 69, 79},  # Revenant — Herald, Renegade, Vindicator, Conduit
 }
 
 
@@ -505,6 +519,36 @@ class PythonEvtcParser:
         # Populated by ChangeDown (byte 5), consumed by ChangeUp (byte 6)
         # and ChangeDead (byte 4).
         down_start: dict[int, int] = {}
+        effect_guids: dict[int, str] = {}
+        # First pass: build instance_id -> agent_id mapping from event stream.
+        # Used to attribute minion/NPC damage to the owning player via
+        # src_master_instid.
+        inst_to_agent: dict[int, int] = {}
+        if is_evtc_2025:
+            scan_cursor = offset
+            while scan_cursor + EVENT_SIZE <= end:
+                (
+                    _stime,
+                    s_src,
+                    s_dst,
+                    _sv,
+                    _sbd,
+                    _ssid,
+                    s_src_inst,
+                    s_dst_inst,
+                    _ssmi,
+                    _sdmi,
+                    *_srest,
+                ) = _unpack_event(data, scan_cursor)
+                if s_src != 0 and s_src_inst != 0:
+                    inst_to_agent.setdefault(s_src_inst, s_src)
+                if s_dst != 0 and s_dst_inst != 0:
+                    inst_to_agent.setdefault(s_dst_inst, s_dst)
+                if _srest[-1] == 46:
+                    effect_guids[_ssid] = (
+                        (s_src.to_bytes(8, "little") + s_dst.to_bytes(8, "little")).hex().upper()
+                    )
+                scan_cursor += EVENT_SIZE
         while cursor + EVENT_SIZE <= end:
             if is_evtc_2025:
                 (
@@ -514,6 +558,15 @@ class PythonEvtcParser:
                     value,
                     buff_dmg,
                     skill_id,
+                    # bytes 40-41: src_instid
+                    # bytes 42-43: dst_instid
+                    # bytes 44-45: src_master_instid
+                    # bytes 46-47: dst_master_instid
+                    _src_inst,
+                    _dst_inst,
+                    src_master_inst,
+                    dst_master_inst,
+                    # byte 48 = arcdps ``iff``
                     _iff,
                     # byte 49 = arcdps ``ev.buff`` field -- the buff ID for
                     # mid-combat APPLY records per F1 byte mapping.
@@ -521,13 +574,24 @@ class PythonEvtcParser:
                     # byte 50 = arcdps ``result`` enum.  Values 13/14
                     # (CBTR_HEAL / CBTR_BUFFHEAL) mark heal-class events.
                     _result,
+                    # byte 51 = arcdps ``is_activation`` byte.
+                    is_activation,
                     # byte 52 = arcdps ``is_buffremove`` byte.
                     is_buffremove,
                     # byte 56 = arcdps ``is_statechange`` byte.
                     is_statechange,
                 ) = _unpack_event(data, cursor)
-                # arcdps result enum: 13 = CBTR_HEAL, 14 = CBTR_BUFFHEAL.
-                is_nondamage = 1 if _result in (13, 14) else 0
+                # Resolve master-instance attribution: when src_master_instid
+                # is non-zero the event comes from a minion/pet/gadget owned
+                # by the agent whose instance_id matches.
+                if src_master_inst:
+                    resolved = inst_to_agent.get(src_master_inst)
+                    if resolved is not None:
+                        src_agent = resolved
+                # 2025+: iff=0 (FRIEND) = healing, iff!=0 (FOE) = damage.
+                # The result byte no longer carries heal/damage discrimination;
+                # values 13/14 are CBTR_INVERT / CBTR_BUFF_DAMAGECYCLE (damage).
+                is_nondamage = 1 if _iff == 0 else 0
             else:
                 (
                     time_ms,
@@ -546,6 +610,11 @@ class PythonEvtcParser:
                     # unchanged so the existing damage / heal / strip
                     # / REMOVE-emit logic is unaffected.
                     _ev_buff,
+                    # byte 50 = arcdps ``result`` enum (CBTR_BLOCK=3,
+                    # CBTR_EVADE=4, CBTR_INTERRUPT=5).
+                    _result,
+                    # byte 51 = arcdps ``is_activation`` byte.
+                    is_activation,
                     # v0.10.6+ Phase 9 step 2: bytes 52-53 of the arcdps
                     # ``cbtevent`` record are the ``is_buffremove`` byte
                     # (the arcdps ``cbtbuffremove`` enum: 0=NONE in this
@@ -557,17 +626,13 @@ class PythonEvtcParser:
                     # logic is unaffected.
                     is_buffremove,
                 ) = _unpack_event(data, cursor)
-                # Phase B: extract result byte (offset 50) for
-                # block/dodge/interrupt detection. The byte position
-                # matches the arcdps cbtevent layout verified by the
-                # F1 calibration pilot (byte 50 = arcdps result enum).
-                _result = struct.unpack_from("<b", data, cursor + 50)[0]
             # NOTE: ``is_buffremove`` is consumed below by
             # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``) AND
             # by Step 3 APPLY-BRANCH (predicate ``_ev_buff != 0 AND
             # is_buffremove == 0``). ``is_ninety`` is unpacked but not
             # yet surfaced to the Event stream (a future Phase 9 step
             # may use it for 90%-threshold markers on Removals).
+            event_offset = cursor
             cursor += EVENT_SIZE
             # v0.11.0 WAVE-8 A.4: CBTS_BUFFAPPLY=18 statechange emit path.
             # arcdps encodes BUFF_APPLY via two channels:
@@ -581,11 +646,41 @@ class PythonEvtcParser:
             # is uniform. The F1 byte-alignment lock pins is_statechange
             # to byte 48 (struct slot 12).
             if is_statechange == 18:
+                duration = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                original_duration = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                 yield BuffApplyEvent(
                     time_ms=time_ms,
                     source_agent_id=src_agent,
                     target_agent_id=dst_agent,
                     skill_id=skill_id,
+                    duration_ms=duration,
+                    original_duration_ms=original_duration or duration,
+                )
+                continue
+            if is_statechange == 46:
+                effect_guids[skill_id] = (
+                    (src_agent.to_bytes(8, "little") + dst_agent.to_bytes(8, "little"))
+                    .hex()
+                    .upper()
+                )
+                continue
+            if is_statechange == 11:
+                yield WeaponSwapEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent,
+                    target_agent_id=0,
+                    skill_id=0,
+                    swapped_from=max(0, value),
+                    swapped_to=dst_agent,
+                )
+                continue
+            if is_statechange in (45, 51, 60, 62) and skill_id in effect_guids:
+                yield EffectEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent or dst_agent,
+                    target_agent_id=0,
+                    skill_id=skill_id,
+                    guid=effect_guids[skill_id],
                 )
                 continue
             if is_statechange != 0:
@@ -595,7 +690,7 @@ class PythonEvtcParser:
                 # This must be handled inline because the dispatch function
                 # doesn't have access to the raw bytes.
                 if is_statechange == 19:
-                    x, y, z = struct.unpack_from("<3f", data, cursor + 16)
+                    x, y, z = struct.unpack_from("<3f", data, event_offset + 16)
                     if (
                         math.isfinite(x)
                         and math.isfinite(y)
@@ -677,6 +772,17 @@ class PythonEvtcParser:
                 )
                 if statechange_event is not None:
                     yield statechange_event
+                continue
+            if 1 <= is_activation <= 6:
+                yield SkillActivationEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent,
+                    target_agent_id=0,
+                    skill_id=skill_id,
+                    activation=ActivationType(is_activation),
+                    duration_ms=max(0, value),
+                    expected_duration_ms=max(0, buff_dmg),
+                )
                 continue
             # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11, commit
             # ``e13ab3b``). Predicate: ``is_buffremove`` byte in the
@@ -821,6 +927,78 @@ class PythonEvtcParser:
                 # pure-damage and buff-interaction records as SEPARATE
                 # 64-byte rows; a single record never carries both.
                 continue
+            elif is_evtc_2025:
+                # EVTC rev1 uses iff=FOE for damage. isBuff selects the
+                # magnitude field: direct hits use value, condition ticks
+                # use buff_dmg. Crowd-control and activation records carry
+                # values but are not health damage.
+                if _iff != 1:
+                    duration = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                    if _ev_buff and dst_agent:
+                        yield BoonApplyEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                            duration_ms=duration,
+                            stacks=1,
+                            kind="apply",
+                        )
+                    continue
+                if _ev_buff:
+                    magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
+                    condition_damage = magnitude
+                    is_attempt = magnitude > 0
+                else:
+                    if _result == 12:
+                        yield CCEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                            cc_value=(0 if value >= _DAMAGE_SANITY_CAP else max(0, value)),
+                        )
+                        continue
+                    if _result == 3:
+                        yield BlockEvent(
+                            time_ms=time_ms,
+                            source_agent_id=dst_agent,
+                            target_agent_id=0,
+                            skill_id=0,
+                        )
+                    elif _result == 4:
+                        yield DodgeEvent(
+                            time_ms=time_ms,
+                            source_agent_id=dst_agent,
+                            target_agent_id=0,
+                            skill_id=0,
+                        )
+                    elif _result == 5:
+                        yield InterruptEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                        )
+                    if _result in {5, 8, 10, 11}:
+                        continue
+                    magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                    condition_damage = 0
+                    is_attempt = magnitude > 0 or _result in {6, 9}
+                if is_attempt:
+                    yield DamageEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=dst_agent,
+                        skill_id=skill_id,
+                        damage=magnitude,
+                        buff_dmg=condition_damage,
+                        result=_result,
+                        iff=_iff,
+                        src_master_instid=src_master_inst,
+                        dst_master_instid=dst_master_inst,
+                    )
+                continue
             elif _ev_buff != 0:
                 # Phase 9 Step 3 APPLY-BRANCH.
                 # Predicate: ``_ev_buff != 0 AND is_buffremove == 0 AND
@@ -838,27 +1016,25 @@ class PythonEvtcParser:
                 # was written), which is exactly an APPLY for that
                 # ``skill_id`` buff.
                 #
-                # Real EVTC2025+ logs carry ``value`` / ``buff_dmg`` on
-                # many buff-interaction records (condition ticks,
-                # heal-and-apply combos, etc.). Those records are still
-                # buff applies at the ``ev.buff`` level; downstream
-                # ``BuffStateTracker`` ignores untracked skill_ids, so
-                # condition ticks are safely no-ops. Keep the dedicated
-                # ``continue`` here so the same record does NOT also
-                # emit a DamageEvent/HealingEvent from the ``value``
-                # field, which carries buff metadata rather than real
-                # damage/heal for these interaction records.
-                #
-                # Conservative default ``duration_ms=0``: cbtevent does
-                # not carry a duration field; the buff duration lives
-                # in the project skills DB (loaded in Phase 10 by the
-                # upstream buff_uptime.accumulate_buff_events aggregator).
-                # Conservative default ``stacks=1``: cbtevent does not
-                # carry a stacks field; mid-combat apply events in
-                # arcdps represent a single stack magnitude delta (a
-                # future arcdps revision could emit multi-stack applies
-                # -- locked in Phase 10 once the aggregator surfaces
-                # the stack-count delta).
+                # In 2025+, healing events (iff=0) also carry buff=1
+                # because arcdps records them as buff-interaction records.
+                # Yield the healing component before the BoonApplyEvent
+                # so healing is not lost.
+                if is_nondamage:
+                    heal_magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                    barrier = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
+                    if heal_magnitude > 0 or barrier > 0:
+                        yield HealingEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                            healing=heal_magnitude,
+                            barrier=barrier,
+                            iff=_iff & 0xFF if is_evtc_2025 else 0,
+                            src_master_instid=src_master_inst if is_evtc_2025 else 0,
+                            dst_master_instid=dst_master_inst if is_evtc_2025 else 0,
+                        )
                 yield BoonApplyEvent(
                     time_ms=time_ms,
                     source_agent_id=src_agent,
@@ -868,10 +1044,6 @@ class PythonEvtcParser:
                     stacks=1,
                     kind="apply",
                 )
-                # Same rationale as the REMOVE branch above: the
-                # cbtevent ``value`` field carries buff metadata,
-                # not damage.  Prevent fall-through to the damage /
-                # heal path below.
                 continue
             # v0.11.0 hotfix: sanity cap on damage/heal values.
             # Real GW2 damage per individual hit fits easily within
@@ -937,6 +1109,10 @@ class PythonEvtcParser:
                     # of the hit; the aggregator-tier DpsSplitGetter
                     # decides how to use it based on build date.
                     buff_dmg=buff_strip,
+                    result=_result,
+                    iff=_iff & 0xFF if is_evtc_2025 else 0,
+                    src_master_instid=src_master_inst if is_evtc_2025 else 0,
+                    dst_master_instid=dst_master_inst if is_evtc_2025 else 0,
                 )
             else:
                 # ``is_nondamage > 0`` is the healing-class signal. We
@@ -955,6 +1131,9 @@ class PythonEvtcParser:
                         # records.  On heal records arcdps encodes the
                         # barrier/shield portion in buff_dmg.
                         barrier=buff_strip,
+                        iff=_iff & 0xFF if is_evtc_2025 else 0,
+                        src_master_instid=src_master_inst if is_evtc_2025 else 0,
+                        dst_master_instid=dst_master_inst if is_evtc_2025 else 0,
                     )
                 # Phase 8 buff-strip emission. Yields a SEPARATE
                 # ``BuffRemovalEvent`` event alongside the heal (or
@@ -1076,8 +1255,11 @@ def _detect_skill_format_nonzero(
     legacy_boundary = skill_offset + 4 + capped_count * SKILL_RECORD_SIZE
     if legacy_boundary == len(data) or (
         legacy_boundary <= len(data)
-        and _validate_event_candidate(
-            data, legacy_boundary, known_agents, is_evtc_2025=is_evtc_2025
+        and (
+            _validate_event_candidate(
+                data, legacy_boundary, known_agents, is_evtc_2025=is_evtc_2025
+            )
+            or (is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, legacy_boundary))
         )
     ):
         return True, capped_count, skill_offset + 4
@@ -1177,11 +1359,11 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     environmental objects, and transient entities that arcdps may
     omit from the agent table.
     """
-    if len(data) < HEADER_SIZE:
-        raise EvtcParseError(f"EVTC blob is {len(data)} bytes, header needs {HEADER_SIZE}")
+    if len(data) < _HEADER_BASE_SIZE:
+        raise EvtcParseError(f"EVTC blob is {len(data)} bytes, header needs {_HEADER_BASE_SIZE}")
 
-    magic, build, _rev, encounter_id, _unused, agent_count, _skill_count_hdr = (
-        _HEADER_STRUCT.unpack_from(data, 0)
+    magic, build, _rev, encounter_id, _unused, agent_count = _HEADER_BASE_STRUCT.unpack_from(
+        data, 0
     )
 
     if magic != b"EVTC":
@@ -1202,7 +1384,8 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
 
     # Walk the skill table.  Detect whether there's a count prefix (legacy)
     # or consecutive 68-byte records (EVTC2025+).
-    skill_offset = AGENTS_OFFSET + agent_count * AGENT_SIZE
+    agents_offset = _AGENTS_OFFSET_2025 if is_evtc_2025 else AGENTS_OFFSET
+    skill_offset = agents_offset + agent_count * AGENT_SIZE
     _has_count, skill_count, records_offset = _detect_skill_format(
         data, skill_offset, known_agents_frozen, is_evtc_2025=is_evtc_2025
     )
@@ -1217,6 +1400,9 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
         )
     )
     actual_skill_count = len(skills)
+    if is_evtc_2025:
+        event_offset = records_offset + actual_skill_count * SKILL_RECORD_SIZE
+        agents = _enrich_evtc2025_agents(data, agents, event_offset)
 
     # v0.11.0: CompleteAgents step (matching GW2EI's CompleteAgents()).
     # Scan the event stream for agent IDs referenced in src_agent or
@@ -1224,21 +1410,32 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     # NPC agents for them so event-to-agent attribution works for
     # minions, pets, environmental objects, gadgets, and transient
     # entities that arcdps may omit from the agent table.
-    agents = _complete_agents(data, agents, is_evtc_2025=is_evtc_2025)
+    if not is_evtc_2025:
+        agents = _complete_agents(data, agents, is_evtc_2025=is_evtc_2025)
+    metadata = _extract_evtc2025_metadata(data) if is_evtc_2025 else {}
 
     header = EvtcHeader(
         build_version=build_str,
         encounter_id=encounter_id,
         skill_count=actual_skill_count,
         agent_count=agent_count,
+        gw2_build=metadata.get("gw2_build"),
+        map_id=metadata.get("map_id"),
+        arc_revision=metadata.get("arc_revision"),
+        duration_ms=metadata.get("duration_ms"),
     )
 
     fight_id = hashlib.sha256(data).hexdigest()
+    ei_encounter_id = (
+        _WVW_EI_ENCOUNTER_IDS.get(header.map_id) if header.map_id is not None else None
+    )
     yield Fight(
         id=fight_id,
         header=header,
         agents=agents,
         skills=skills,
+        success=True if header.map_id in _WVW_EI_ENCOUNTER_IDS else None,
+        ei_encounter_id=ei_encounter_id,
     )
 
 
@@ -1250,7 +1447,7 @@ def _iter_agents(data: bytes, count: int, *, is_evtc_2025: bool = False) -> Iter
     """
     if count == 0:
         return
-    cursor = AGENTS_OFFSET
+    cursor = _AGENTS_OFFSET_2025 if is_evtc_2025 else AGENTS_OFFSET
     end = len(data)
     decoder = _decode_agent_2025 if is_evtc_2025 else _decode_agent
     for _ in range(count):
@@ -1261,6 +1458,31 @@ def _iter_agents(data: bytes, count: int, *, is_evtc_2025: bool = False) -> Iter
             )
         yield decoder(data, cursor)
         cursor += AGENT_SIZE
+
+
+def _enrich_evtc2025_agents(data: bytes, agents: list[Agent], event_offset: int) -> list[Agent]:
+    by_id = {agent.id: agent for agent in agents}
+    instance_ids: dict[int, int] = {}
+    team_ids: dict[int, int] = {}
+    for cursor in range(event_offset, len(data) - EVENT_SIZE + 1, EVENT_SIZE):
+        event = _EVENT_STRUCT_2025.unpack_from(data, cursor)
+        src_agent, dst_agent = int(event[1]), int(event[2])
+        src_inst, dst_inst, statechange = int(event[7]), int(event[8]), int(event[19])
+        if src_agent in by_id and src_inst:
+            instance_ids.setdefault(src_agent, src_inst)
+        if dst_agent in by_id and dst_inst:
+            instance_ids.setdefault(dst_agent, dst_inst)
+        if statechange == 22 and src_agent in by_id:
+            team_ids[src_agent] = int(event[3])
+    return [
+        agent.model_copy(
+            update={
+                "instance_id": instance_ids.get(agent.id, 0),
+                "team_id": team_ids.get(agent.id, 0),
+            }
+        )
+        for agent in agents
+    ]
 
 
 def _iter_skill_records(
@@ -1304,6 +1526,13 @@ def _iter_skill_records(
         # event stream, not a skill record. This is the most reliable
         # way to know we've walked past the skill table in the no-count
         # EVTC2025+ format.
+        if use_heuristic and is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, cursor):
+            logger.debug(
+                "Skill table ends at skill %d: offset %d looks like EVTC2025 metadata events",
+                skill_index,
+                cursor,
+            )
+            return
         if use_heuristic and _validate_event_candidate(
             data, cursor, known_agents, is_evtc_2025=is_evtc_2025
         ):
@@ -1425,7 +1654,72 @@ def _validate_event_candidate(
     return saw_agent
 
 
-def _compute_post_skills_offset(  # noqa: PLR0912
+def _validate_evtc2025_metadata_candidate(data: bytes, offset: int) -> bool:
+    """Return True when ``offset`` points at the EVTC2025 metadata event prelude."""
+    if offset + EVENT_SIZE * 4 > len(data):
+        return False
+    first_time = None
+    # EVTC2025 WvW logs can start with metadata statechanges before any
+    # combatant agent appears. Those rows share one sane timestamp and use
+    # non-combat statechange IDs, so the normal known-agent boundary check
+    # rejects the real event start.
+    metadata_statechanges = {9, 13, 14, 15, 16, 25, 54}
+    for i in range(4):
+        ev = _EVENT_STRUCT_2025.unpack_from(data, offset + i * EVENT_SIZE)
+        time_ms = ev[0]
+        statechange = ev[19]
+        if not (0 < time_ms < 86_400_000):
+            return False
+        if first_time is None:
+            first_time = time_ms
+        elif time_ms != first_time:
+            return False
+        if statechange not in metadata_statechanges:
+            return False
+    return True
+
+
+def _extract_evtc2025_metadata(data: bytes) -> dict[str, int]:  # noqa: PLR0912
+    """Extract EI-visible metadata from EVTC2025 pre-combat statechanges."""
+    offset = _compute_post_skills_offset(data, is_evtc_2025=True)
+    if not _validate_evtc2025_metadata_candidate(data, offset):
+        return {}
+    out: dict[str, int] = {}
+    start_time_ms: int | None = None
+    cursor = offset
+    end = len(data)
+    while cursor + EVENT_SIZE <= end:
+        ev = _EVENT_STRUCT_2025.unpack_from(data, cursor)
+        statechange = ev[19]
+        if statechange == 9:
+            start_time_ms = int(ev[0])
+        elif statechange == 15:
+            out["gw2_build"] = int(ev[1])
+        elif statechange == 25:
+            out["map_id"] = int(ev[1])
+        elif statechange == 54:
+            payload = struct.pack("<QQii", ev[1], ev[2], ev[3], ev[4]).split(b"\x00", 1)[0]
+            arc_build = payload.decode("ascii", errors="ignore")
+            if "." in arc_build:
+                revision = arc_build.split(".", 1)[1].split("-", 1)[0]
+                if revision.isdecimal():
+                    out["arc_revision"] = int(revision)
+        elif statechange not in {9, 13, 14, 16, 18, 29, 42, 54}:
+            break
+        if "gw2_build" in out and "map_id" in out:
+            break
+        cursor += EVENT_SIZE
+    if start_time_ms is not None:
+        last_event_offset = offset + ((end - offset) // EVENT_SIZE - 1) * EVENT_SIZE
+        for cursor in range(last_event_offset, offset - 1, -EVENT_SIZE):
+            ev = _EVENT_STRUCT_2025.unpack_from(data, cursor)
+            if ev[19] == 10 and ev[0] >= start_time_ms:
+                out["duration_ms"] = int(ev[0]) - start_time_ms
+                break
+    return out
+
+
+def _compute_post_skills_offset(  # noqa: PLR0911, PLR0912
     data: bytes,
     *,
     is_evtc_2025: bool | None = None,
@@ -1445,30 +1739,28 @@ def _compute_post_skills_offset(  # noqa: PLR0912
     4. If the walker result doesn't validate as events, scan forward
        in EVENT_SIZE-aligned blocks.
     """
-    if len(data) < HEADER_SIZE:
+    if len(data) < _HEADER_BASE_SIZE:
         return len(data)
-    unpacked_header = _HEADER_STRUCT.unpack_from(data, 0)
+    unpacked_header = _HEADER_BASE_STRUCT.unpack_from(data, 0)
     agent_count = int(unpacked_header[5])
     if is_evtc_2025 is None:
         build_str = unpacked_header[1].decode("ascii", errors="replace")
         is_evtc_2025 = _build_version_from_build_str(build_str) >= 2025_00_00
-    skill_offset = AGENTS_OFFSET + agent_count * AGENT_SIZE
+    agents_offset = _AGENTS_OFFSET_2025 if is_evtc_2025 else AGENTS_OFFSET
+    skill_offset = agents_offset + agent_count * AGENT_SIZE
 
     # Build the set of known agent IDs for event-stream validation.
-    # EVTC2025+ stores the real event address at byte +92, not at the
-    # start of the record.
     known_agents: set[int] = set()
     for i in range(min(agent_count, MAX_AGENTS)):
-        aoff = AGENTS_OFFSET + i * AGENT_SIZE
+        aoff = agents_offset + i * AGENT_SIZE
         if aoff + AGENT_SIZE > len(data):
             break
-        if is_evtc_2025:
-            known_agents.add(int(struct.unpack_from("<I", data, aoff + 92)[0]))
-        else:
-            known_agents.add(int(struct.unpack_from("<Q", data, aoff)[0]))
+        known_agents.add(int(struct.unpack_from("<Q", data, aoff)[0]))
     known_agents_frozen = frozenset(known_agents)
 
     # Quick check: if no skills, events start right here.
+    if is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, skill_offset):
+        return skill_offset
     if _validate_event_candidate(
         data, skill_offset, known_agents_frozen, is_evtc_2025=is_evtc_2025
     ):
@@ -1505,6 +1797,9 @@ def _compute_post_skills_offset(  # noqa: PLR0912
     ):
         cursor += SKILL_RECORD_SIZE
 
+    if is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, cursor):
+        return cursor
+
     if _validate_event_candidate(data, cursor, known_agents_frozen, is_evtc_2025=is_evtc_2025):
         return cursor
 
@@ -1520,6 +1815,8 @@ def _compute_post_skills_offset(  # noqa: PLR0912
     aligned = (cursor + EVENT_SIZE - 1) & ~(EVENT_SIZE - 1)
     max_forward = min(len(data) - EVENT_SIZE * 4, skill_offset + MAX_SKILLS * SKILL_RECORD_SIZE)
     for candidate in range(aligned, max_forward, EVENT_SIZE):
+        if is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, candidate):
+            return candidate
         if _validate_event_candidate(
             data, candidate, known_agents_frozen, is_evtc_2025=is_evtc_2025
         ):
@@ -1552,7 +1849,7 @@ def _complete_agents(
     known_ids = frozenset(a.id for a in agents)
     event_cursor = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
     end = len(data)
-    event_struct = _EVENT_STRUCT_2025 if is_evtc_2025 else _EVENT_STRUCT
+    event_struct = _EVENT_STRUCT_EVENTS_2025 if is_evtc_2025 else _EVENT_STRUCT_EVENTS
     max_time_ms = 86_400_000
     missing_ids: set[int] = set()
 
@@ -1563,9 +1860,10 @@ def _complete_agents(
             break
         src_agent = ev[1]
         dst_agent = ev[2]
+        is_statechange = ev[14] if is_evtc_2025 else ev[7]
         if src_agent != 0 and src_agent not in known_ids:
             missing_ids.add(src_agent)
-        if dst_agent != 0 and dst_agent not in known_ids:
+        if is_statechange != 19 and dst_agent != 0 and dst_agent not in known_ids:
             missing_ids.add(dst_agent)
         event_cursor += EVENT_SIZE
 
@@ -1591,23 +1889,23 @@ def _complete_agents(
 def _decode_agent_2025(data: bytes, offset: int) -> Agent:
     """Decode a single 96-byte EVTC2025+ agent record at ``offset``.
 
-    The EVTC2025+ layout stores the agent's event address at byte +92
-    (``addr``), not at the start of the record. The leading u32 is an
-    instance-id low word that is not used for event matching.
+    The event address is the leading uint64, followed by profession,
+    elite, six uint16 stat/hitbox fields, and a 68-byte name buffer.
     """
     (
-        _iid_low,
+        addr,
         prof_raw,
         elite_raw,
         _tough,
-        _heal,
         _conc,
+        _heal,
+        _width,
+        _condition,
+        _height,
         name_buf,
-        _subgroup,
-        addr,
     ) = _AGENT_STRUCT_2025.unpack_from(data, offset)
 
-    # The 64-byte name buffer uses the same combo-string convention as
+    # The 68-byte name buffer uses the same combo-string convention as
     # the legacy layout: ``char\0account\0subgroup\0``.
     parts = name_buf.split(b"\x00")
 
@@ -1631,13 +1929,26 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
     # EVTC2025+ logs use official GW2 v2 API IDs natively.
     elite = _validate_elite_for_profession(prof_raw, elite_raw)
 
+    # NPC/Gadget detection via elite_raw == 0xFFFFFFFF.
+    # This is the definitive arcdps signal: players always have
+    # a valid elite spec ID (0 for core), while NPCs/gadgets
+    # set the field to uint32 max.
+    species_id: int | None = None
+    is_gadget = False
+    if elite_raw == 0xFFFFFFFF:
+        is_player = False
+        species_id = prof_raw & 0xFFFF
+        is_gadget = (prof_raw >> 16) == 0xFFFF
+
     return Agent(
         id=addr,
         name=char_name,
         profession=profession,
         elite=elite,
         elite_raw=elite_raw,
+        species_id=species_id,
         is_player=is_player,
+        is_gadget=is_gadget,
         account_name=account_name,
         subgroup=subgroup,
     )
@@ -1700,13 +2011,23 @@ def _decode_agent(data: bytes, offset: int) -> Agent:
     # collision IDs 55, 63, 73, 74, 75, 77).
     elite = _validate_elite_for_profession(prof_raw, elite_raw)
 
+    # NPC/Gadget detection via elite_raw == 0xFFFFFFFF.
+    species_id: int | None = None
+    is_gadget = False
+    if elite_raw == 0xFFFFFFFF:
+        is_player = False
+        species_id = prof_raw & 0xFFFF
+        is_gadget = (prof_raw >> 16) == 0xFFFF
+
     return Agent(
         id=aid,
         name=char_name,
         profession=profession,
         elite=elite,
         elite_raw=elite_raw,
+        species_id=species_id,
         is_player=is_player,
+        is_gadget=is_gadget,
         account_name=account_name,
         subgroup=subgroup,
     )
