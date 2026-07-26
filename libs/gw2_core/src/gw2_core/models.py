@@ -369,6 +369,7 @@ class DamageEvent(BaseEvent):
     event_type: Literal[EventType.DAMAGE] = EventType.DAMAGE
     damage: int = Field(..., ge=0)
     buff_dmg: int = Field(default=0, ge=0)
+    result: int = Field(default=0, ge=0, le=255, description="arcdps combat result byte")
     iff: int = Field(
         default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=SELF"
     )

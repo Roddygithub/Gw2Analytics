@@ -180,3 +180,19 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: 
         (4_843, 53_411, 23_295, 1_500),
         (8_520, 53_411, 23_299, 1_000),
     ]
+
+    demandred_attempts = [
+        event
+        for event in events
+        if isinstance(event, DamageEvent) and event.source_agent_id == 45_947
+    ]
+    assert len(demandred_attempts) == 24
+    assert sum(event.damage > 0 for event in demandred_attempts) == 20
+    assert sum(event.result in {6, 9} for event in demandred_attempts) == 4
+    criticals = [
+        event
+        for event in demandred_attempts
+        if event.result == 1 and event.buff_dmg == 0
+    ]
+    assert len(criticals) == 12
+    assert sum(event.damage for event in criticals) == 21_908

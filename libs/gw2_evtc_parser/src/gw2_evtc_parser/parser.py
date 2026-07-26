@@ -937,6 +937,7 @@ class PythonEvtcParser:
                 if _ev_buff:
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                     condition_damage = magnitude
+                    is_attempt = magnitude > 0
                 else:
                     if _result == 12:
                         yield CCEvent(
@@ -970,11 +971,12 @@ class PythonEvtcParser:
                             target_agent_id=dst_agent,
                             skill_id=skill_id,
                         )
-                    if _result in {5, 8, 9, 10, 11}:
+                    if _result in {5, 8, 10, 11}:
                         continue
                     magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
                     condition_damage = 0
-                if magnitude:
+                    is_attempt = magnitude > 0 or _result in {6, 9}
+                if is_attempt:
                     yield DamageEvent(
                         time_ms=time_ms,
                         source_agent_id=src_agent,
@@ -982,6 +984,7 @@ class PythonEvtcParser:
                         skill_id=skill_id,
                         damage=magnitude,
                         buff_dmg=condition_damage,
+                        result=_result,
                         iff=_iff,
                         src_master_instid=src_master_inst,
                         dst_master_instid=dst_master_inst,
@@ -1097,6 +1100,7 @@ class PythonEvtcParser:
                     # of the hit; the aggregator-tier DpsSplitGetter
                     # decides how to use it based on build date.
                     buff_dmg=buff_strip,
+                    result=_result,
                     iff=_iff & 0xFF if is_evtc_2025 else 0,
                     src_master_instid=src_master_inst if is_evtc_2025 else 0,
                     dst_master_instid=dst_master_inst if is_evtc_2025 else 0,

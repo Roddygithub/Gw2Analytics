@@ -316,6 +316,23 @@ def test_parse_events_emits_cc_from_result_12() -> None:
     ]
 
 
+def test_parse_events_preserves_zero_damage_attempt_results() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(1_000, 1, 2, 0, result=result, iff=1)
+            for result in (6, 9)
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert [(event.damage, event.result) for event in events if isinstance(event, DamageEvent)] == [
+        (0, 6),
+        (0, 9),
+    ]
+
+
 def test_parse_events_emits_weapon_swap_and_late_mapped_effect() -> None:
     guid = bytes.fromhex("C4E8DD3234E0C647993857940ED79AC1")
     evtc = _build_minimal_evtc(
