@@ -334,7 +334,7 @@ def test_parse_events_emits_cc_from_result_12() -> None:
     ]
 
 
-def test_parse_events_preserves_zero_damage_attempt_results() -> None:
+def test_parse_events_preserves_absorbed_attempt_but_not_down_outcome() -> None:
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
         build="20250925",
@@ -346,8 +346,10 @@ def test_parse_events_preserves_zero_damage_attempt_results() -> None:
     events = list(PythonEvtcParser().parse_events(evtc))
     assert [(event.damage, event.result) for event in events if isinstance(event, DamageEvent)] == [
         (0, 6),
-        (0, 9),
     ]
+    assert any(
+        isinstance(event, CombatOutcomeEvent) and event.outcome == "downed" for event in events
+    )
 
 
 def test_parse_events_emits_weapon_swap_and_late_mapped_effect() -> None:
@@ -891,9 +893,9 @@ def test_parse_events_2025_keeps_blocked_damage_attempt() -> None:
 
 @pytest.mark.parametrize(
     ("result", "outcome_type"),
-    [(5, InterruptEvent), (8, CombatOutcomeEvent)],
+    [(5, InterruptEvent), (8, CombatOutcomeEvent), (9, CombatOutcomeEvent)],
 )
-def test_parse_events_2025_keeps_interrupt_and_killing_blow_damage(
+def test_parse_events_2025_keeps_outcome_without_damage(
     result: int, outcome_type: type[Event]
 ) -> None:
     evtc = _build_minimal_evtc(
@@ -915,11 +917,8 @@ def test_parse_events_2025_keeps_interrupt_and_killing_blow_damage(
 
     events = list(PythonEvtcParser().parse_events(evtc))
 
-    assert len(events) == 2
+    assert len(events) == 1
     assert isinstance(events[0], outcome_type)
-    assert isinstance(events[1], DamageEvent)
-    assert events[1].damage == 500
-    assert events[1].result == result
 
 
 def test_parse_events_2025_keeps_unknown_iff_damage() -> None:

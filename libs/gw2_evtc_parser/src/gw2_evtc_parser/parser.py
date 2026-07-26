@@ -1013,11 +1013,11 @@ class PythonEvtcParser:
                             target_agent_id=dst_agent,
                             skill_id=skill_id,
                         )
-                    if _result in {10, 11}:
+                    if _result in {5, 8, 9, 10, 11}:
                         continue
                     magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
                     condition_damage = 0
-                    is_attempt = magnitude > 0 or _result in {3, 4, 6, 7, 9, 13}
+                    is_attempt = magnitude > 0 or _result in {3, 4, 6, 7, 13}
                     against_downed = bool(is_offcycle)
                     is_life_leech = False
                 if is_attempt:
