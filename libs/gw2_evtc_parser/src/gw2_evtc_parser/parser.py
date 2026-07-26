@@ -83,6 +83,7 @@ from gw2_core import (
     DeathEvent,
     DodgeEvent,
     DownEvent,
+    EffectEvent,
     EliteSpec,
     Event,
     EvtcHeader,
@@ -93,6 +94,7 @@ from gw2_core import (
     Profession,
     Skill,
     SkillActivationEvent,
+    WeaponSwapEvent,
 )
 from gw2_evtc_parser.exceptions import EvtcParseError
 from gw2_evtc_parser.statechange_dispatch import dispatch_statechange
@@ -516,6 +518,7 @@ class PythonEvtcParser:
         # Populated by ChangeDown (byte 5), consumed by ChangeUp (byte 6)
         # and ChangeDead (byte 4).
         down_start: dict[int, int] = {}
+        effect_guids: dict[int, str] = {}
         # First pass: build instance_id -> agent_id mapping from event stream.
         # Used to attribute minion/NPC damage to the owning player via
         # src_master_instid.
@@ -529,6 +532,10 @@ class PythonEvtcParser:
                     inst_to_agent.setdefault(s_src_inst, s_src)
                 if s_dst != 0 and s_dst_inst != 0:
                     inst_to_agent.setdefault(s_dst_inst, s_dst)
+                if _srest[-1] == 46:
+                    effect_guids[_ssid] = (
+                        s_src.to_bytes(8, "little") + s_dst.to_bytes(8, "little")
+                    ).hex().upper()
                 scan_cursor += EVENT_SIZE
         while cursor + EVENT_SIZE <= end:
             if is_evtc_2025:
@@ -638,6 +645,30 @@ class PythonEvtcParser:
                     skill_id=skill_id,
                     duration_ms=duration,
                     original_duration_ms=original_duration or duration,
+                )
+                continue
+            if is_statechange == 46:
+                effect_guids[skill_id] = (
+                    src_agent.to_bytes(8, "little") + dst_agent.to_bytes(8, "little")
+                ).hex().upper()
+                continue
+            if is_statechange == 11:
+                yield WeaponSwapEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent,
+                    target_agent_id=0,
+                    skill_id=0,
+                    swapped_from=max(0, value),
+                    swapped_to=dst_agent,
+                )
+                continue
+            if is_statechange in (45, 51, 60, 62) and skill_id in effect_guids:
+                yield EffectEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent or dst_agent,
+                    target_agent_id=0,
+                    skill_id=skill_id,
+                    guid=effect_guids[skill_id],
                 )
                 continue
             if is_statechange != 0:
@@ -891,7 +922,7 @@ class PythonEvtcParser:
                 # values but are not health damage.
                 if _iff != 1:
                     duration = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
-                    if _ev_buff and duration and dst_agent:
+                    if _ev_buff and dst_agent:
                         yield BoonApplyEvent(
                             time_ms=time_ms,
                             source_agent_id=src_agent,

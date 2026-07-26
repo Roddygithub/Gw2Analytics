@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from gw2_analytics.buff_state import BuffStateTracker
+from gw2_analytics.rotation import build_skill_rotation
 from gw2_core import (
     ActivationType,
     BlockEvent,
@@ -142,3 +143,26 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: 
     assert [event.activation for event in activations].count(ActivationType.MINIMUM) == 6
     assert [event.activation for event in activations].count(ActivationType.CANCEL) == 2
     assert [event.activation for event in activations].count(ActivationType.RESET) == 2
+
+    rotation = build_skill_rotation(events, duration_ms=11_789, start_time_ms=42_047_693)
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in rotation
+        if cast.source_agent_id == 45_947
+    ] == [
+        (-2, 2_280, 0),
+        (29_740, 3_719, 1_084),
+        (30_792, 5_646, 0),
+        (-2, 5_647, 0),
+        (29_560, 5_647, 0),
+        (30_504, 5_842, 2_280),
+        (29_958, 8_080, 0),
+        (29_442, 8_122, 122),
+        (29_709, 8_244, 314),
+        (29_442, 8_558, 201),
+        (30_825, 8_759, 1_000),
+        (29_442, 9_963, 396),
+        (29_458, 10_359, 599),
+        (30_278, 10_958, 565),
+        (29_442, 11_523, 266),
+    ]

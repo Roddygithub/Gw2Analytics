@@ -324,6 +324,8 @@ class EventType(StrEnum):
     BUFF_APPLY = "BUFF_APPLY"
     POSITION = "POSITION"
     SKILL_ACTIVATION = "SKILL_ACTIVATION"
+    WEAPON_SWAP = "WEAPON_SWAP"
+    EFFECT = "EFFECT"
 
 
 class ActivationType(IntEnum):
@@ -818,6 +820,21 @@ class SkillActivationEvent(BaseEvent):
     expected_duration_ms: int = Field(..., ge=0)
 
 
+class WeaponSwapEvent(BaseEvent):
+    """One arcdps weapon-set transition."""
+
+    event_type: Literal[EventType.WEAPON_SWAP] = EventType.WEAPON_SWAP
+    swapped_from: int = Field(..., ge=0)
+    swapped_to: int = Field(..., ge=0)
+
+
+class EffectEvent(BaseEvent):
+    """One effect creation resolved through an arcdps ID-to-GUID record."""
+
+    event_type: Literal[EventType.EFFECT] = EventType.EFFECT
+    guid: str = Field(..., min_length=32, max_length=32)
+
+
 _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.DAMAGE: DamageEvent,
     EventType.HEALING: HealingEvent,
@@ -835,6 +852,8 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.BUFF_APPLY: BuffApplyEvent,
     EventType.POSITION: PositionEvent,
     EventType.SKILL_ACTIVATION: SkillActivationEvent,
+    EventType.WEAPON_SWAP: WeaponSwapEvent,
+    EventType.EFFECT: EffectEvent,
 }
 
 

@@ -47,7 +47,9 @@ from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
     DamageEvent,
+    EffectEvent,
     SkillActivationEvent,
+    WeaponSwapEvent,
 )
 from gw2_core.models import _EVENT_MAP, EventType
 from gw2_core.models import EventType as _EventType
@@ -283,6 +285,46 @@ def test_parse_events_emits_skill_activation_from_byte_51() -> None:
             expected_duration_ms=1_000,
         )
     ]
+
+
+def test_parse_events_emits_weapon_swap_and_late_mapped_effect() -> None:
+    guid = bytes.fromhex("C4E8DD3234E0C647993857940ED79AC1")
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=5,
+                value=3,
+                skill_id=0,
+                is_statechange=11,
+            ),
+            _build_event_record_2025(
+                time_ms=1_100,
+                src_agent=1,
+                dst_agent=0,
+                value=0,
+                skill_id=8553,
+                is_statechange=60,
+            ),
+            _build_event_record_2025(
+                time_ms=0,
+                src_agent=int.from_bytes(guid[:8], "little"),
+                dst_agent=int.from_bytes(guid[8:], "little"),
+                value=0,
+                skill_id=8553,
+                is_statechange=46,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert isinstance(events[0], WeaponSwapEvent)
+    assert (events[0].swapped_from, events[0].swapped_to) == (3, 5)
+    assert isinstance(events[1], EffectEvent)
+    assert events[1].guid == guid.hex().upper()
 
 
 def test_parse_events_emit_buff_remove_all_yields_boon_apply_event() -> None:
