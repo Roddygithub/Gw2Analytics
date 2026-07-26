@@ -31,5 +31,16 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
     assert fight.header.gw2_build == 188004
     assert fight.header.map_id == 96
     assert len(fight.agents) == 13
-    assert len([a for a in fight.agents if a.is_player and a.account_name]) == 9
+    accounts = {a.account_name.lstrip(":") for a in fight.agents if a.is_player and a.account_name}
+    assert accounts == {
+        "Demandred.9035",
+        "EstaticFear.7692",
+        "Fabzzz.1439",
+        "Kurupt.6378",
+        "LuiStheGamers.5132",
+        "Lullupa.5768",
+        "esskape.5047",
+        "krill le faucheur.1679",
+        "talon.6751",
+    }
     assert len(fight.skills) == 168
