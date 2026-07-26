@@ -523,9 +523,8 @@ class PythonEvtcParser:
         _cbtbufremove_kinds = _CBTBUFREMOVE_KINDS
         down_durations: dict[tuple[int, int], int] = {}
         effect_guids: dict[int, str] = {}
-        # First pass: build instance_id -> agent_id mapping from event stream.
-        # Used to attribute minion/NPC damage to the owning player via
-        # src_master_instid.
+        # Updated chronologically during the second pass so reused instance
+        # IDs resolve to the owner active at the event time.
         inst_to_agent: dict[int, int] = {}
         if is_evtc_2025:
             last_aware: dict[int, int] = {}
@@ -539,16 +538,12 @@ class PythonEvtcParser:
                     _sv,
                     _sbd,
                     _ssid,
-                    s_src_inst,
-                    s_dst_inst,
+                    _s_src_inst,
+                    _s_dst_inst,
                     _ssmi,
                     _sdmi,
                     *_srest,
                 ) = _unpack_event(data, scan_cursor)
-                if s_src != 0 and s_src_inst != 0:
-                    inst_to_agent.setdefault(s_src_inst, s_src)
-                if s_dst != 0 and s_dst_inst != 0:
-                    inst_to_agent.setdefault(s_dst_inst, s_dst)
                 statechange = _srest[5]
                 if _stime > 0:
                     if s_src:
@@ -564,7 +559,7 @@ class PythonEvtcParser:
                 scan_cursor += EVENT_SIZE
             open_downs: dict[int, int] = {}
             for transition_time, actor, statechange in lifecycle:
-                if statechange == 5:
+                if statechange == 5 and actor not in open_downs:
                     open_downs[actor] = transition_time
                 elif statechange in (3, 4) and actor in open_downs:
                     started = open_downs.pop(actor)
@@ -606,6 +601,11 @@ class PythonEvtcParser:
                     is_offcycle,
                     pad1,
                 ) = _unpack_event(data, cursor)
+                event_src_agent = src_agent
+                if src_agent and _src_inst:
+                    inst_to_agent[_src_inst] = src_agent
+                if dst_agent and _dst_inst:
+                    inst_to_agent[_dst_inst] = dst_agent
                 # Resolve master-instance attribution: when src_master_instid
                 # is non-zero the event comes from a minion/pet/gadget owned
                 # by the agent whose instance_id matches.
@@ -651,6 +651,7 @@ class PythonEvtcParser:
                     # logic is unaffected.
                     is_buffremove,
                 ) = _unpack_event(data, cursor)
+                event_src_agent = src_agent
                 is_offcycle = 0
                 pad1 = 0
             # NOTE: ``is_buffremove`` is consumed below by
@@ -677,7 +678,7 @@ class PythonEvtcParser:
                 original_duration = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                 yield BuffApplyEvent(
                     time_ms=time_ms,
-                    source_agent_id=src_agent,
+                    source_agent_id=event_src_agent,
                     target_agent_id=dst_agent,
                     skill_id=skill_id,
                     duration_ms=duration,
@@ -686,7 +687,7 @@ class PythonEvtcParser:
                 continue
             if is_statechange == 46:
                 effect_guids[skill_id] = (
-                    (src_agent.to_bytes(8, "little") + dst_agent.to_bytes(8, "little"))
+                    (event_src_agent.to_bytes(8, "little") + dst_agent.to_bytes(8, "little"))
                     .hex()
                     .upper()
                 )
@@ -694,7 +695,7 @@ class PythonEvtcParser:
             if is_statechange == 11:
                 yield WeaponSwapEvent(
                     time_ms=time_ms,
-                    source_agent_id=src_agent,
+                    source_agent_id=event_src_agent,
                     target_agent_id=0,
                     skill_id=0,
                     swapped_from=max(0, value),
@@ -704,7 +705,7 @@ class PythonEvtcParser:
             if is_statechange in (45, 51, 60, 62) and skill_id in effect_guids:
                 yield EffectEvent(
                     time_ms=time_ms,
-                    source_agent_id=src_agent or dst_agent,
+                    source_agent_id=event_src_agent or dst_agent,
                     target_agent_id=0,
                     skill_id=skill_id,
                     guid=effect_guids[skill_id],
@@ -726,7 +727,7 @@ class PythonEvtcParser:
                     ):
                         yield PositionEvent(
                             time_ms=time_ms,
-                            source_agent_id=src_agent,
+                            source_agent_id=event_src_agent,
                             target_agent_id=0,
                             skill_id=0,
                             x=x,
@@ -736,24 +737,26 @@ class PythonEvtcParser:
                 if is_statechange == 3:  # ChangeUp
                     yield UpEvent(
                         time_ms=time_ms,
-                        source_agent_id=src_agent,
+                        source_agent_id=event_src_agent,
                         target_agent_id=0,
                         skill_id=0,
                     )
                     continue
                 if is_statechange == 5:  # ChangeDown
+                    if is_evtc_2025 and (event_src_agent, time_ms) not in down_durations:
+                        continue
                     yield DownEvent(
                         time_ms=time_ms,
-                        source_agent_id=src_agent,
+                        source_agent_id=event_src_agent,
                         target_agent_id=0,
                         skill_id=0,
-                        downtime_ms=down_durations.get((src_agent, time_ms), 0),
+                        downtime_ms=down_durations.get((event_src_agent, time_ms), 0),
                     )
                     continue
                 if is_statechange == 4:  # ChangeDead
                     yield DeathEvent(
                         time_ms=time_ms,
-                        source_agent_id=src_agent,
+                        source_agent_id=event_src_agent,
                         target_agent_id=0,
                         skill_id=0,
                     )
@@ -761,7 +764,7 @@ class PythonEvtcParser:
                 if is_statechange == 8:
                     yield HealthUpdateEvent(
                         time_ms=time_ms,
-                        source_agent_id=src_agent,
+                        source_agent_id=event_src_agent,
                         target_agent_id=0,
                         skill_id=0,
                         health_percent=min(100.0, max(0.0, dst_agent / 100.0)),
@@ -783,7 +786,7 @@ class PythonEvtcParser:
                 statechange_event = dispatch_statechange(
                     is_statechange=is_statechange,
                     time_ms=time_ms,
-                    src_agent=src_agent,
+                    src_agent=event_src_agent,
                     dst_agent=dst_agent,
                     value=value,
                     skill_id=skill_id,
@@ -794,7 +797,7 @@ class PythonEvtcParser:
             if 1 <= is_activation <= 6:
                 yield SkillActivationEvent(
                     time_ms=time_ms,
-                    source_agent_id=src_agent,
+                    source_agent_id=event_src_agent,
                     target_agent_id=0,
                     skill_id=skill_id,
                     activation=ActivationType(is_activation),
@@ -980,8 +983,6 @@ class PythonEvtcParser:
                             skill_id=skill_id,
                             outcome="killed" if _result == 8 else "downed",
                         )
-                        if _result == 8:
-                            continue
                     if _result == 12:
                         yield CCEvent(
                             time_ms=time_ms,
@@ -1012,7 +1013,7 @@ class PythonEvtcParser:
                             target_agent_id=dst_agent,
                             skill_id=skill_id,
                         )
-                    if _result in {5, 8, 10, 11}:
+                    if _result in {10, 11}:
                         continue
                     magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
                     condition_damage = 0
