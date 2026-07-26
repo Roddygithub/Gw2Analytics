@@ -191,11 +191,11 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: 
         for event in events
         if isinstance(event, DamageEvent) and event.source_agent_id == 45_947
     ]
-    assert len(demandred_attempts) == 23
+    assert len(demandred_attempts) == 44
     assert sum(event.damage > 0 for event in demandred_attempts) == 20
     assert sum(event.result == 6 for event in demandred_attempts) == 3
     criticals = [event for event in demandred_attempts if event.result == 1 and event.buff_dmg == 0]
-    assert len(criticals) == 12
+    assert len(criticals) == 13
     assert sum(event.damage for event in criticals) == 21_908
 
     down_rows = DownContributionAggregator().aggregate(

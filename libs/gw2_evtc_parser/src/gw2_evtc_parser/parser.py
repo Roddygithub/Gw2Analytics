@@ -971,7 +971,7 @@ class PythonEvtcParser:
                 if _ev_buff:
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                     condition_damage = magnitude
-                    is_attempt = magnitude > 0
+                    is_attempt = True
                     against_downed = bool(pad1)
                     is_life_leech = is_offcycle in {3, 5}
                 else:
