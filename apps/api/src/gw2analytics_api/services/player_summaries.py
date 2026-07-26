@@ -390,7 +390,8 @@ def _persist_player_summaries(
         [a for a in orm_fight.agents if a.is_player and a.account_name],
     )
     skill_name_map: dict[int, str | None] = {int(s.skill_id): s.name for s in orm_fight.skills}
-    buff_tracker = BuffStateTracker()
+    first_time_ms = min((e.time_ms for e in events), default=0)
+    buff_tracker = BuffStateTracker(start_time_ms=first_time_ms)
 
     per_account = _process_events_to_buckets(
         events,
@@ -401,7 +402,7 @@ def _persist_player_summaries(
 
     if events:
         last_time_ms = max((e.time_ms for e in events), default=0)
-        duration_s = last_time_ms / 1000.0
+        duration_s = (last_time_ms - first_time_ms) / 1000.0
     else:
         duration_s = 0.0
 

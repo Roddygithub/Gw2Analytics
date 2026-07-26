@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from gw2_analytics.buff_state import BuffStateTracker
 from gw2_core import (
     BlockEvent,
     BoonApplyEvent,
@@ -116,3 +117,18 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
         and event.initial
         for event in events
     )
+
+    tracker = BuffStateTracker(start_time_ms=min(event.time_ms for event in events))
+    for event in events:
+        if isinstance(event, (BoonApplyEvent, BuffApplyEvent)):
+            tracker.process(event)
+
+    lullupa = tracker.compute_player_uptimes(45_859, 11_789)
+    krill = tracker.compute_player_uptimes(45_822, 11_789)
+    demandred = tracker.compute_player_uptimes(45_947, 11_789)
+    assert lullupa["resolution"] == pytest.approx(97.54, abs=0.001)
+    assert krill["aegis"] == pytest.approx(39.002, abs=0.001)
+    assert krill["resolution"] == pytest.approx(60.998, abs=0.001)
+    assert demandred["quickness"] == pytest.approx(52.099, abs=0.001)
+    assert demandred["might"] == pytest.approx(3.917, abs=0.001)
+    assert demandred["stability"] == pytest.approx(0.763, abs=0.001)
