@@ -73,6 +73,7 @@ from pathlib import Path
 from typing import BinaryIO, Final
 
 from gw2_core import (
+    ActivationType,
     Agent,
     BlockEvent,
     BoonApplyEvent,
@@ -91,6 +92,7 @@ from gw2_core import (
     PositionEvent,
     Profession,
     Skill,
+    SkillActivationEvent,
 )
 from gw2_evtc_parser.exceptions import EvtcParseError
 from gw2_evtc_parser.statechange_dispatch import dispatch_statechange
@@ -252,7 +254,7 @@ _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 #: positions are identical to the legacy 22-field struct above;
 #: this variant avoids allocating / assigning 12 unused values
 #: per event in the hot loop.
-_EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct("<QQQii 4x I 7x bbb b x b 11x")
+_EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct("<QQQii 4x I 7x bbb b b b 11x")
 
 #: Standard arcdps cbtevent struct for EVTC2025+ builds.  arcdps
 #: reverted to the documented ``arcdps.h`` layout for 2025+ logs:
@@ -271,9 +273,10 @@ _EVENT_STRUCT_2025: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHH16B")
 #:   byte 48 = iff
 #:   byte 49 = ev.buff
 #:   byte 50 = result
+#:   byte 51 = is_activation
 #:   byte 52 = is_buffremove
 #:   byte 56 = is_statechange
-_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct("<QQQii 4x I HHHH bbbx b 3x b 7x")
+_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct("<QQQii 4x I HHHH bbbb b 3x b 7x")
 
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
 #: byte values 1, 2, 3 ↔ ``BoonApplyEvent.kind: Literal["remove_all",
@@ -552,6 +555,8 @@ class PythonEvtcParser:
                     # byte 50 = arcdps ``result`` enum.  Values 13/14
                     # (CBTR_HEAL / CBTR_BUFFHEAL) mark heal-class events.
                     _result,
+                    # byte 51 = arcdps ``is_activation`` byte.
+                    is_activation,
                     # byte 52 = arcdps ``is_buffremove`` byte.
                     is_buffremove,
                     # byte 56 = arcdps ``is_statechange`` byte.
@@ -589,6 +594,8 @@ class PythonEvtcParser:
                     # byte 50 = arcdps ``result`` enum (CBTR_BLOCK=3,
                     # CBTR_EVADE=4, CBTR_INTERRUPT=5).
                     _result,
+                    # byte 51 = arcdps ``is_activation`` byte.
+                    is_activation,
                     # v0.10.6+ Phase 9 step 2: bytes 52-53 of the arcdps
                     # ``cbtevent`` record are the ``is_buffremove`` byte
                     # (the arcdps ``cbtbuffremove`` enum: 0=NONE in this
@@ -722,6 +729,17 @@ class PythonEvtcParser:
                 )
                 if statechange_event is not None:
                     yield statechange_event
+                continue
+            if 1 <= is_activation <= 6:
+                yield SkillActivationEvent(
+                    time_ms=time_ms,
+                    source_agent_id=src_agent,
+                    target_agent_id=0,
+                    skill_id=skill_id,
+                    activation=ActivationType(is_activation),
+                    duration_ms=max(0, value),
+                    expected_duration_ms=max(0, buff_dmg),
+                )
                 continue
             # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11, commit
             # ``e13ab3b``). Predicate: ``is_buffremove`` byte in the

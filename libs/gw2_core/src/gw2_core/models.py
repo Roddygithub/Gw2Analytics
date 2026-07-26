@@ -323,6 +323,18 @@ class EventType(StrEnum):
     BARRIER = "BARRIER"
     BUFF_APPLY = "BUFF_APPLY"
     POSITION = "POSITION"
+    SKILL_ACTIVATION = "SKILL_ACTIVATION"
+
+
+class ActivationType(IntEnum):
+    """arcdps ``is_activation`` byte values."""
+
+    NORMAL = 1
+    QUICKNESS = 2
+    MINIMUM = 3
+    CANCEL = 4
+    RESET = 5
+    NO_DATA = 6
 
 
 class BaseEvent(BaseModel):
@@ -797,6 +809,15 @@ class PositionEvent(BaseEvent):
     y: float
 
 
+class SkillActivationEvent(BaseEvent):
+    """One raw arcdps skill activation start or stop marker."""
+
+    event_type: Literal[EventType.SKILL_ACTIVATION] = EventType.SKILL_ACTIVATION
+    activation: ActivationType
+    duration_ms: int = Field(..., ge=0)
+    expected_duration_ms: int = Field(..., ge=0)
+
+
 _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.DAMAGE: DamageEvent,
     EventType.HEALING: HealingEvent,
@@ -813,6 +834,7 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.INTERRUPT: InterruptEvent,
     EventType.BUFF_APPLY: BuffApplyEvent,
     EventType.POSITION: PositionEvent,
+    EventType.SKILL_ACTIVATION: SkillActivationEvent,
 }
 
 

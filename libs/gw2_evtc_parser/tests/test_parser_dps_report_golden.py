@@ -7,12 +7,14 @@ import pytest
 
 from gw2_analytics.buff_state import BuffStateTracker
 from gw2_core import (
+    ActivationType,
     BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
     BuffRemovalEvent,
     DamageEvent,
     HealingEvent,
+    SkillActivationEvent,
     StunBreakEvent,
 )
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
@@ -30,7 +32,7 @@ def _golden_log_path() -> Path:
     not _golden_log_path().exists(),
     reason="golden WvW log unavailable; set GW2ANALYTICS_GOLDEN_LOG",
 )
-def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
+def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: PLR0915
     """Golden metadata from dps.report upload 9wGp-20250928-230925."""
     raw = read_zevtc_archive(_golden_log_path())
     fight = next(PythonEvtcParser().parse(raw))
@@ -132,3 +134,11 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
     assert demandred["quickness"] == pytest.approx(52.099, abs=0.001)
     assert demandred["might"] == pytest.approx(3.917, abs=0.001)
     assert demandred["stability"] == pytest.approx(0.763, abs=0.001)
+
+    activations = [event for event in events if isinstance(event, SkillActivationEvent)]
+    assert {event.source_agent_id for event in activations} == {45_947}
+    assert len(activations) == 21
+    assert [event.activation for event in activations].count(ActivationType.NORMAL) == 11
+    assert [event.activation for event in activations].count(ActivationType.MINIMUM) == 6
+    assert [event.activation for event in activations].count(ActivationType.CANCEL) == 2
+    assert [event.activation for event in activations].count(ActivationType.RESET) == 2
