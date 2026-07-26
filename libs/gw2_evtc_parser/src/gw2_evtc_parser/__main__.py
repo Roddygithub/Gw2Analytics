@@ -19,7 +19,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-from gw2_core import Fight
+from gw2_core import DamageEvent, Fight
 from gw2_evtc_parser.exceptions import EvtcParseError, UnsupportedVersionError
 from gw2_evtc_parser.parser import PythonEvtcParser, read_zevtc_archive
 
@@ -119,7 +119,9 @@ def cmd_inspect_zip(args: argparse.Namespace) -> int:
     return 0
 
 
-def _compare_ei_metadata(fight: Fight, expected: dict[str, object]) -> dict[str, object]:
+def _compare_ei_metadata(
+    fight: Fight, expected: dict[str, object], events: list[object] | None = None
+) -> dict[str, object]:
     header = fight.header
     actual: dict[str, object] = {
         "arcVersion": f"EVTC{header.build_version}" if header else None,
@@ -138,6 +140,14 @@ def _compare_ei_metadata(fight: Fight, expected: dict[str, object]) -> dict[str,
     }
     expected_players = expected.get("players")
     if isinstance(expected_players, list):
+        damage_by_agent: dict[int, tuple[int, int]] = {}
+        for event in events or []:
+            if isinstance(event, DamageEvent):
+                damage, condition = damage_by_agent.get(event.source_agent_id, (0, 0))
+                damage_by_agent[event.source_agent_id] = (
+                    damage + event.damage,
+                    condition + event.buff_dmg,
+                )
         agents_by_account = {
             agent.account_name.lstrip(":"): agent
             for agent in fight.agents
@@ -169,6 +179,21 @@ def _compare_ei_metadata(fight: Fight, expected: dict[str, object]) -> dict[str,
                         "expected": player.get(field),
                         "actual": value,
                     }
+            dps_all = player.get("dpsAll")
+            if isinstance(dps_all, list) and dps_all and isinstance(dps_all[0], dict):
+                damage, condition = damage_by_agent.get(agent.id, (0, 0))
+                damage_values = {
+                    "damage": damage,
+                    "condiDamage": condition,
+                    "powerDamage": damage - condition,
+                }
+                values["dpsAll"] = damage_values
+                for field, value in damage_values.items():
+                    if dps_all[0].get(field) != value:
+                        differences[f"players[{account}].dpsAll.{field}"] = {
+                            "expected": dps_all[0].get(field),
+                            "actual": value,
+                        }
         actual["players"] = compared_players
     return {"matches": not differences, "compared": actual, "differences": differences}
 
@@ -176,7 +201,10 @@ def _compare_ei_metadata(fight: Fight, expected: dict[str, object]) -> dict[str,
 def cmd_compare_ei(args: argparse.Namespace) -> int:
     try:
         expected = json.loads(args.expected.read_text())
-        fight = next(PythonEvtcParser().parse(_load_payload(args.file)))
+        raw = _load_payload(args.file)
+        parser = PythonEvtcParser()
+        fight = next(parser.parse(raw))
+        events = list(parser.parse_events(raw))
     except (
         EvtcParseError,
         UnsupportedVersionError,
@@ -189,7 +217,7 @@ def cmd_compare_ei(args: argparse.Namespace) -> int:
     if not isinstance(expected, dict):
         sys.stderr.write("ERROR: Elite Insights JSON must be an object\n")
         return 2
-    result = _compare_ei_metadata(fight, expected)
+    result = _compare_ei_metadata(fight, expected, events)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if result["matches"] else 1
 

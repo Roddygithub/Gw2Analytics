@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from gw2_core import EvtcHeader, Fight
+from gw2_core import Agent, DamageEvent, EvtcHeader, Fight
 from gw2_evtc_parser.__main__ import _build_parser, _compare_ei_metadata
 
 
@@ -9,6 +9,17 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
         id="golden",
         success=True,
         ei_encounter_id=459_520,
+        agents=[
+            Agent(
+                id=1,
+                name="Player",
+                is_player=True,
+                account_name=":Player.1234",
+                subgroup="1",
+                instance_id=10,
+                team_id=20,
+            )
+        ],
         header=EvtcHeader(
             build_version="20250925",
             encounter_id=1,
@@ -28,9 +39,32 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
         "durationMS": 12_000,
         "success": True,
         "eiEncounterID": 459_520,
+        "players": [
+            {
+                "account": "Player.1234",
+                "name": "Player",
+                "group": 1,
+                "instanceID": 10,
+                "teamID": 20,
+                "dpsAll": [{"damage": 100, "condiDamage": 30, "powerDamage": 70}],
+            }
+        ],
     }
 
-    result = _compare_ei_metadata(fight, expected)
+    result = _compare_ei_metadata(
+        fight,
+        expected,
+        [
+            DamageEvent(
+                time_ms=1,
+                source_agent_id=1,
+                target_agent_id=2,
+                skill_id=3,
+                damage=100,
+                buff_dmg=30,
+            )
+        ],
+    )
 
     assert result["matches"] is False
     assert result["differences"] == {
