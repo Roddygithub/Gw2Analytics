@@ -791,6 +791,21 @@ def test_synthetic_npc_agent_2025_has_no_account() -> None:
     assert a.subgroup is None
 
 
+def test_evtc2025_profession_agent_without_account_is_not_player() -> None:
+    evtc = _build_minimal_evtc(
+        [(789012, Profession.NECROMANCER.value, EliteSpec.HARBINGER.value, "Harbinger", False)],
+        build="20250925",
+    )
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+
+    a = fight.agents[0]
+    assert a.name == "Harbinger"
+    assert a.profession == Profession.NECROMANCER
+    assert a.elite == EliteSpec.HARBINGER
+    assert a.is_player is False
+    assert a.account_name is None
+
+
 def test_synthetic_skill_table_2025_parses_without_count_prefix() -> None:
     # EVTC2025+ has no skill count prefix; the parser discovers the
     # skill-to-event boundary by inspecting the event stream. Include

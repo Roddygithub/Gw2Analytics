@@ -1679,22 +1679,6 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
         species_id = prof_raw & 0xFFFF
         is_gadget = (prof_raw >> 16) == 0xFFFF
 
-    # Enemy players in 2025+ format have prof_raw in [1,9] and
-    # elite_raw != 0xFFFFFFFF but no combo string (no account_name,
-    # no subgroup). Classify them as players too.
-    # The _subgroup field discriminates: player agents have non-zero
-    # subgroup (squad/party assignment), NPCs have subgroup=0.
-    if (
-        not is_player
-        and _subgroup != 0
-        and 1 <= prof_raw <= 9
-        and elite_raw != 0xFFFFFFFF
-        and char_name
-    ):
-        is_player = True
-        if not subgroup:
-            subgroup = str(_subgroup)
-
     return Agent(
         id=addr,
         name=char_name,
