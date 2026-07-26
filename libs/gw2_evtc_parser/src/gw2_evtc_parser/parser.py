@@ -166,6 +166,17 @@ _SKILL_ID_STRUCT: Final[struct.Struct] = struct.Struct("<I")
 #: Total size of one cbtevent record on disk (arcdps EVTC event record).
 EVENT_SIZE: Final[int] = 64
 
+# Elite Insights LogIDs: WvWMask | map-specific mask.
+_WVW_EI_ENCOUNTER_IDS: Final[dict[int, int]] = {
+    38: 0x070100,
+    95: 0x070200,
+    96: 0x070300,
+    1099: 0x070400,
+    899: 0x070500,
+    968: 0x070600,
+    1315: 0x070700,
+}
+
 #: ``struct`` format for one cbtevent record.
 #: arcdps ``cbtevent`` layout (per ``arcdps.h`` -- ``<GW2-ArcDPS-Mechanics-Log>
 #:   /src/arcdps_datastructures.h`` revision 1 mirror):
@@ -1283,6 +1294,8 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
         header=header,
         agents=agents,
         skills=skills,
+        success=True if header.map_id in _WVW_EI_ENCOUNTER_IDS else None,
+        ei_encounter_id=_WVW_EI_ENCOUNTER_IDS.get(header.map_id),
     )
 
 

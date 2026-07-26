@@ -835,6 +835,8 @@ def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
     assert fight.header.map_id == 96
     assert fight.header.arc_revision == 162_433
     assert fight.header.duration_ms == 1_789
+    assert fight.success is True
+    assert fight.ei_encounter_id == 459_520
     assert len(events) == 1
     assert isinstance(events[0], DamageEvent)
     assert events[0].damage == 200

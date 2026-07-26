@@ -128,6 +128,8 @@ def _compare_ei_metadata(fight: Fight, expected: dict[str, object]) -> dict[str,
         "mapID": header.map_id if header else None,
         "arcRevision": header.arc_revision if header else None,
         "durationMS": header.duration_ms if header else None,
+        "success": fight.success,
+        "eiEncounterID": fight.ei_encounter_id,
     }
     differences = {
         field: {"expected": expected.get(field), "actual": value}

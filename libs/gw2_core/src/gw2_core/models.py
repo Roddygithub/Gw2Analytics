@@ -258,6 +258,8 @@ class Fight(BaseModel):
         ),
     )
     game_type: GameType = Field(default=GameType.WVW)
+    success: bool | None = None
+    ei_encounter_id: int | None = Field(default=None, ge=0)
 
     # Parser-driven payload (V0)
     header: EvtcHeader | None = None

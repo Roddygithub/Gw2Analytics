@@ -7,6 +7,8 @@ from gw2_evtc_parser.__main__ import _build_parser, _compare_ei_metadata
 def test_compare_ei_metadata_reports_exact_differences() -> None:
     fight = Fight(
         id="golden",
+        success=True,
+        ei_encounter_id=459_520,
         header=EvtcHeader(
             build_version="20250925",
             encounter_id=1,
@@ -24,6 +26,8 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
         "mapID": 96,
         "arcRevision": 162_433,
         "durationMS": 12_000,
+        "success": True,
+        "eiEncounterID": 459_520,
     }
 
     result = _compare_ei_metadata(fight, expected)
