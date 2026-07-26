@@ -731,6 +731,35 @@ def test_evtc2025_boundary_two_events_parses() -> None:
     assert events[1].damage == 200
 
 
+def test_evtc2025_parse_does_not_complete_unknown_event_agents() -> None:
+    """EVTC2025+ agent table is authoritative; event fields can carry non-agent values."""
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(101, "Whirlwind")],
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=999_999,
+                value=100,
+                skill_id=101,
+            ),
+            _build_event_record_2025(
+                time_ms=2_000,
+                src_agent=1,
+                dst_agent=999_999,
+                value=200,
+                skill_id=101,
+            ),
+        ],
+    )
+
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+
+    assert [agent.id for agent in fight.agents] == [1]
+
+
 def test_synthetic_player_agent_2025_has_account_and_is_player() -> None:
     evtc = _build_minimal_evtc(
         [(123456, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Test Guardian", True)],

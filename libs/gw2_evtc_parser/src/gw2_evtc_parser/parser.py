@@ -602,6 +602,7 @@ class PythonEvtcParser:
             # is_buffremove == 0``). ``is_ninety`` is unpacked but not
             # yet surfaced to the Event stream (a future Phase 9 step
             # may use it for 90%-threshold markers on Removals).
+            event_offset = cursor
             cursor += EVENT_SIZE
             # v0.11.0 WAVE-8 A.4: CBTS_BUFFAPPLY=18 statechange emit path.
             # arcdps encodes BUFF_APPLY via two channels:
@@ -629,7 +630,7 @@ class PythonEvtcParser:
                 # This must be handled inline because the dispatch function
                 # doesn't have access to the raw bytes.
                 if is_statechange == 19:
-                    x, y, z = struct.unpack_from("<3f", data, cursor + 16)
+                    x, y, z = struct.unpack_from("<3f", data, event_offset + 16)
                     if (
                         math.isfinite(x)
                         and math.isfinite(y)
@@ -1258,7 +1259,8 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     # NPC agents for them so event-to-agent attribution works for
     # minions, pets, environmental objects, gadgets, and transient
     # entities that arcdps may omit from the agent table.
-    agents = _complete_agents(data, agents, is_evtc_2025=is_evtc_2025)
+    if not is_evtc_2025:
+        agents = _complete_agents(data, agents, is_evtc_2025=is_evtc_2025)
 
     header = EvtcHeader(
         build_version=build_str,
@@ -1597,9 +1599,10 @@ def _complete_agents(
             break
         src_agent = ev[1]
         dst_agent = ev[2]
+        is_statechange = ev[14] if is_evtc_2025 else ev[7]
         if src_agent != 0 and src_agent not in known_ids:
             missing_ids.add(src_agent)
-        if dst_agent != 0 and dst_agent not in known_ids:
+        if is_statechange != 19 and dst_agent != 0 and dst_agent not in known_ids:
             missing_ids.add(dst_agent)
         event_cursor += EVENT_SIZE
 
@@ -1681,7 +1684,13 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
     # no subgroup). Classify them as players too.
     # The _subgroup field discriminates: player agents have non-zero
     # subgroup (squad/party assignment), NPCs have subgroup=0.
-    if not is_player and _subgroup != 0 and 1 <= prof_raw <= 9 and elite_raw != 0xFFFFFFFF and char_name:
+    if (
+        not is_player
+        and _subgroup != 0
+        and 1 <= prof_raw <= 9
+        and elite_raw != 0xFFFFFFFF
+        and char_name
+    ):
         is_player = True
         if not subgroup:
             subgroup = str(_subgroup)

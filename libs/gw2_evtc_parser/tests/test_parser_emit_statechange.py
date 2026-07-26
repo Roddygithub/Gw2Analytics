@@ -55,6 +55,7 @@ from gw2_core import (
     DodgeEvent,
     DownEvent,
     InterruptEvent,
+    PositionEvent,
     StunBreakEvent,
 )
 from gw2_evtc_parser import PythonEvtcParser
@@ -74,6 +75,7 @@ from gw2_evtc_parser.statechange_dispatch import (
 #: Reused struct format -- mirrors the parser's ``_EVENT_STRUCT`` literal 1:1.
 _CBTEVENT_FMT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 _AGENT_NAME_SIZE: Final[int] = 72
+_STATE_CHANGE_POSITION: Final[int] = 19
 
 
 def _build_event_record(
@@ -388,6 +390,50 @@ def test_parse_events_dispatch_cc_yields_event() -> None:
     assert e.target_agent_id == 200
     assert e.skill_id == 888
     assert e.cc_value == 75
+
+
+def test_parse_events_dispatch_position_reads_current_record_coordinates() -> None:
+    """Statechange byte 19 reads x/y from the current cbtevent record."""
+    position_record = bytearray(
+        _build_event_record(
+            time_ms=10_000,
+            src_agent=99,
+            dst_agent=0,
+            value=0,
+            skill_id=0,
+            is_statechange=_STATE_CHANGE_POSITION,
+        )
+    )
+    struct.pack_into("<3f", position_record, 16, 123.5, -456.25, 7.0)
+    next_record = _build_event_record(
+        time_ms=11_000,
+        src_agent=1,
+        dst_agent=1,
+        value=999,
+        skill_id=42,
+    )
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True), (99, 1, 1, "Mover", True)],
+        skills=[(42, "Skill")],
+        events=[
+            _build_event_record(time_ms=1, src_agent=1, dst_agent=1, value=0),
+            bytes(position_record),
+            next_record,
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+    position_events = [e for e in events if isinstance(e, PositionEvent)]
+    fight = next(PythonEvtcParser().parse(evtc))
+    coordinate_bytes_as_agent = struct.unpack_from("<Q", position_record, 16)[0]
+
+    assert len(position_events) == 1
+    e = position_events[0]
+    assert e.time_ms == 10_000
+    assert e.source_agent_id == 99
+    assert e.x == 123.5
+    assert e.y == -456.25
+    assert coordinate_bytes_as_agent not in {agent.id for agent in fight.agents}
 
 
 def test_parse_events_dispatch_unmapped_statechange_yields_no_event() -> None:
