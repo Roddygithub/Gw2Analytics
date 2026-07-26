@@ -693,6 +693,39 @@ def test_parse_events_2025_is_buff_uses_condition_damage() -> None:
     assert e.skill_id == 101
 
 
+def test_parse_events_2025_friendly_is_buff_applies_boon() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        skills=[(1187, "Quickness")],
+        events=[
+            _build_event_record_2025(
+                time_ms=10_000,
+                src_agent=1,
+                dst_agent=1,
+                value=3_000,
+                skill_id=1187,
+                iff=0,
+                buff=1,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert events == [
+        BoonApplyEvent(
+            time_ms=10_000,
+            source_agent_id=1,
+            target_agent_id=1,
+            skill_id=1187,
+            duration_ms=3_000,
+            stacks=1,
+            kind="apply",
+        )
+    ]
+
+
 # ---------------------------------------------------------------------------
 # F1 Byte-mapping lock: byte 49 IS arcdps's ev.buff field
 # ---------------------------------------------------------------------------

@@ -777,6 +777,10 @@ class BuffApplyEvent(BaseEvent):
     source_agent_id: int = Field(..., ge=0)
     target_agent_id: int = Field(..., ge=0)
     skill_id: int = Field(..., ge=0)
+    duration_ms: int = Field(default=0, ge=0)
+    original_duration_ms: int = Field(default=0, ge=0)
+    stacks: int = Field(default=1, ge=1)
+    initial: bool = True
 
 
 class PositionEvent(BaseEvent):

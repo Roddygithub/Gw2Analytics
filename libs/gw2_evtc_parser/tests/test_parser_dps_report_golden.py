@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from gw2_core import BlockEvent, BuffRemovalEvent, DamageEvent, HealingEvent, StunBreakEvent
+from gw2_core import (
+    BlockEvent,
+    BoonApplyEvent,
+    BuffApplyEvent,
+    BuffRemovalEvent,
+    DamageEvent,
+    HealingEvent,
+    StunBreakEvent,
+)
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
 _DEFAULT_LOG = Path(
@@ -85,5 +93,26 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
     ei_player_ids = {2_000, 45_822, 45_859, 45_946, 45_947}
     assert not any(
         isinstance(event, StunBreakEvent) and event.source_agent_id in ei_player_ids
+        for event in events
+    )
+
+    demandred_quickness = [
+        event
+        for event in events
+        if isinstance(event, BoonApplyEvent)
+        and event.target_agent_id == 45_947
+        and event.skill_id == 1_187
+        and event.kind == "apply"
+    ]
+    assert [(event.time_ms - 42_047_693, event.duration_ms) for event in demandred_quickness] == [
+        (5_647, 3_000),
+        (8_645, 3_000),
+        (11_640, 3_000),
+    ]
+    assert any(
+        isinstance(event, BuffApplyEvent)
+        and event.target_agent_id == 45_822
+        and event.skill_id == 743
+        and event.initial
         for event in events
     )

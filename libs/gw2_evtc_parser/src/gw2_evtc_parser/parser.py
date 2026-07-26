@@ -620,11 +620,17 @@ class PythonEvtcParser:
             # is uniform. The F1 byte-alignment lock pins is_statechange
             # to byte 48 (struct slot 12).
             if is_statechange == 18:
+                duration = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                original_duration = (
+                    0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
+                )
                 yield BuffApplyEvent(
                     time_ms=time_ms,
                     source_agent_id=src_agent,
                     target_agent_id=dst_agent,
                     skill_id=skill_id,
+                    duration_ms=duration,
+                    original_duration_ms=original_duration or duration,
                 )
                 continue
             if is_statechange != 0:
@@ -866,6 +872,17 @@ class PythonEvtcParser:
                 # use buff_dmg. Crowd-control and activation records carry
                 # values but are not health damage.
                 if _iff != 1:
+                    duration = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                    if _ev_buff and duration and dst_agent:
+                        yield BoonApplyEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                            duration_ms=duration,
+                            stacks=1,
+                            kind="apply",
+                        )
                     continue
                 if _ev_buff:
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
