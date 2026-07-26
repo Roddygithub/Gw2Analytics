@@ -248,7 +248,7 @@ _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 #: positions are identical to the legacy 22-field struct above;
 #: this variant avoids allocating / assigning 12 unused values
 #: per event in the hot loop.
-_EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct("<QQQii 4x I 7x bbb 2x b 11x")
+_EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct("<QQQii 4x I 7x bbb b x b 11x")
 
 #: Standard arcdps cbtevent struct for EVTC2025+ builds.  arcdps
 #: reverted to the documented ``arcdps.h`` layout for 2025+ logs:
@@ -582,6 +582,9 @@ class PythonEvtcParser:
                     # unchanged so the existing damage / heal / strip
                     # / REMOVE-emit logic is unaffected.
                     _ev_buff,
+                    # byte 50 = arcdps ``result`` enum (CBTR_BLOCK=3,
+                    # CBTR_EVADE=4, CBTR_INTERRUPT=5).
+                    _result,
                     # v0.10.6+ Phase 9 step 2: bytes 52-53 of the arcdps
                     # ``cbtevent`` record are the ``is_buffremove`` byte
                     # (the arcdps ``cbtbuffremove`` enum: 0=NONE in this
@@ -593,11 +596,6 @@ class PythonEvtcParser:
                     # logic is unaffected.
                     is_buffremove,
                 ) = _unpack_event(data, cursor)
-                # Phase B: extract result byte (offset 50) for
-                # block/dodge/interrupt detection. The byte position
-                # matches the arcdps cbtevent layout verified by the
-                # F1 calibration pilot (byte 50 = arcdps result enum).
-                _result = struct.unpack_from("<b", data, cursor + 50)[0]
             # NOTE: ``is_buffremove`` is consumed below by
             # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``) AND
             # by Step 3 APPLY-BRANCH (predicate ``_ev_buff != 0 AND
@@ -1588,7 +1586,7 @@ def _complete_agents(
     known_ids = frozenset(a.id for a in agents)
     event_cursor = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
     end = len(data)
-    event_struct = _EVENT_STRUCT_2025 if is_evtc_2025 else _EVENT_STRUCT
+    event_struct = _EVENT_STRUCT_EVENTS_2025 if is_evtc_2025 else _EVENT_STRUCT_EVENTS
     max_time_ms = 86_400_000
     missing_ids: set[int] = set()
 
