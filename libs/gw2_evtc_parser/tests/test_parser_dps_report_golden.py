@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from gw2_analytics.buff_state import BuffStateTracker
+from gw2_analytics.down_contribution import DownContributionAggregator
 from gw2_analytics.rotation import build_skill_rotation
 from gw2_core import (
     ActivationType,
@@ -15,6 +16,8 @@ from gw2_core import (
     BuffRemovalEvent,
     CCEvent,
     DamageEvent,
+    DeathEvent,
+    DownEvent,
     HealingEvent,
     SkillActivationEvent,
     StunBreakEvent,
@@ -196,3 +199,12 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: 
     ]
     assert len(criticals) == 12
     assert sum(event.damage for event in criticals) == 21_908
+
+    down_rows = DownContributionAggregator().aggregate(
+        [event for event in events if isinstance(event, DamageEvent)],
+        [event for event in events if isinstance(event, DownEvent)],
+        [event for event in events if isinstance(event, DeathEvent)],
+        duration_s=11.789,
+    )
+    demandred_down = next(row for row in down_rows if row.source_agent_id == 45_947)
+    assert demandred_down.down_contribution_dps * 11.789 == pytest.approx(2_637)
