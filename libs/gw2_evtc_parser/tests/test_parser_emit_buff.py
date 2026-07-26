@@ -44,6 +44,7 @@ import pytest
 
 from gw2_core import (
     ActivationType,
+    BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
     CCEvent,
@@ -83,6 +84,7 @@ def _build_event_record_2025(
     iff: int = 1,
     buff: int = 0,
     is_activation: int = 0,
+    is_offcycle: int = 0,
 ) -> bytes:
     """Build one 64-byte EVTC2025+ cbtevent record (local copy)."""
     flags = bytearray(16)
@@ -91,6 +93,7 @@ def _build_event_record_2025(
     flags[2] = result
     flags[3] = is_activation
     flags[8] = is_statechange
+    flags[11] = is_offcycle
     return struct.pack(
         "<QQQiiIIHHHH16B",
         time_ms,
@@ -444,6 +447,7 @@ def test_parse_events_emit_buff_remove_single_yields_boon_apply_event() -> None:
     boon = events[0]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_single"
+    assert boon.stacks == 1
     assert boon.time_ms == 42_500
     assert boon.skill_id == 101
 
@@ -475,6 +479,7 @@ def test_parse_events_emit_buff_remove_manual_collapses_to_remove_single() -> No
     boon = events[0]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_single"  # CBTB_MANUAL collapses to SINGLE
+    assert boon.stacks == 1
 
 
 @pytest.mark.parametrize("is_buffremove_value", [4, 5, 127, -128])
@@ -821,6 +826,85 @@ def test_parse_events_2025_is_buff_uses_condition_damage() -> None:
     assert e.damage == 500
     assert e.buff_dmg == 500
     assert e.skill_id == 101
+
+
+def test_parse_events_2025_marks_life_leech_from_buff_cycle() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        skills=[(30285, "Vampiric Aura")],
+        events=[
+            _build_event_record_2025(
+                time_ms=10_000,
+                src_agent=1,
+                dst_agent=2,
+                value=0,
+                buff_dmg=500,
+                skill_id=30285,
+                iff=1,
+                buff=1,
+                is_offcycle=3,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert len(events) == 1
+    assert isinstance(events[0], DamageEvent)
+    assert events[0].is_life_leech is True
+
+
+def test_parse_events_2025_keeps_blocked_damage_attempt() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        skills=[(101, "Attack")],
+        events=[
+            _build_event_record_2025(
+                time_ms=10_000,
+                src_agent=1,
+                dst_agent=2,
+                value=0,
+                skill_id=101,
+                iff=1,
+                result=3,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert len(events) == 2
+    assert isinstance(events[0], BlockEvent)
+    assert isinstance(events[1], DamageEvent)
+    assert events[1].damage == 0
+    assert events[1].result == 3
+
+
+def test_parse_events_2025_keeps_unknown_iff_damage() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        skills=[(101, "Attack")],
+        events=[
+            _build_event_record_2025(
+                time_ms=10_000,
+                src_agent=1,
+                dst_agent=2,
+                value=500,
+                skill_id=101,
+                iff=2,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert len(events) == 1
+    assert isinstance(events[0], DamageEvent)
+    assert events[0].damage == 500
+    assert events[0].iff == 2
 
 
 def test_parse_events_2025_friendly_is_buff_applies_boon() -> None:

@@ -72,7 +72,7 @@ def _damage_stats(
 ) -> dict[str, int]:
     connected = [event for event in damage if event.damage > 0]
     direct = [event for event in connected if event.buff_dmg == 0]
-    condition = [event for event in connected if event.buff_dmg > 0]
+    condition = [event for event in connected if event.buff_dmg > 0 and not event.is_life_leech]
     critical = [event for event in direct if event.result == 1]
     return {
         "totalDamageCount": len(damage),
@@ -99,6 +99,10 @@ def _damage_stats(
         "appliedCrowdControl": len(crowd_control),
         "appliedCrowdControlDuration": sum(event.cc_value for event in crowd_control),
     }
+
+
+def _condition_damage(event: DamageEvent) -> int:
+    return 0 if event.is_life_leech else min(event.damage, event.buff_dmg)
 
 
 def _skill_stats(events: list[DamageEvent]) -> dict[int, dict[str, int]]:
@@ -189,12 +193,13 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         }
         _compare_fields(prefix, player, values, differences)
         source_damage = [event for event in damage_events if event.source_agent_id == agent.id]
+        actor_damage = [event for event in source_damage if event.src_master_instid == 0]
         source_cc = [event for event in cc_events if event.source_agent_id == agent.id]
 
         dps_all = player.get("dpsAll")
         if isinstance(dps_all, list) and dps_all and isinstance(dps_all[0], dict):
             damage = sum(event.damage for event in source_damage)
-            condition = sum(event.buff_dmg for event in source_damage)
+            condition = sum(_condition_damage(event) for event in source_damage)
             dps_values = {
                 "damage": damage,
                 "condiDamage": condition,
@@ -214,8 +219,8 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             defense_values = {
                 "damageTaken": sum(event.damage for event in taken),
                 "damageTakenCount": sum(event.damage > 0 for event in taken),
-                "conditionDamageTaken": sum(event.buff_dmg for event in taken),
-                "powerDamageTaken": sum(event.damage - event.buff_dmg for event in taken),
+                "conditionDamageTaken": sum(_condition_damage(event) for event in taken),
+                "powerDamageTaken": sum(event.damage - _condition_damage(event) for event in taken),
                 "blockedCount": sum(
                     isinstance(event, BlockEvent) and event.source_agent_id == agent.id
                     for event in event_list
@@ -236,7 +241,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
 
         stats_all = player.get("statsAll")
         if isinstance(stats_all, list) and stats_all and isinstance(stats_all[0], dict):
-            stats_values = _damage_stats(source_damage, source_cc, down_by_source.get(agent.id))
+            stats_values = _damage_stats(actor_damage, source_cc, down_by_source.get(agent.id))
             values["statsAll"] = stats_values
             _compare_fields(
                 prefix + ".statsAll", stats_all[0], stats_values, differences, _STAT_FIELDS
@@ -339,6 +344,9 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     for event in source_damage
                     if target_agent is not None and event.target_agent_id == target_agent.id
                 ]
+                actor_target_damage = [
+                    event for event in target_damage if event.src_master_instid == 0
+                ]
                 target_cc = [
                     event
                     for event in source_cc
@@ -346,7 +354,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 ]
                 target_id = target_agent.id if target_agent is not None else 0
                 target_down_rows = DownContributionAggregator().aggregate(
-                    target_damage,
+                    actor_target_damage,
                     [
                         event
                         for event in event_list
@@ -374,12 +382,14 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 )
                 target_down_by_source = {row.source_agent_id: row for row in target_down_rows}
                 target_stats = _damage_stats(
-                    target_damage, target_cc, target_down_by_source.get(agent.id)
+                    actor_target_damage, target_cc, target_down_by_source.get(agent.id)
                 )
                 target_values = {
                     "damage": sum(event.damage for event in target_damage),
-                    "condiDamage": sum(event.buff_dmg for event in target_damage),
-                    "powerDamage": sum(event.damage - event.buff_dmg for event in target_damage),
+                    "condiDamage": sum(_condition_damage(event) for event in target_damage),
+                    "powerDamage": sum(
+                        event.damage - _condition_damage(event) for event in target_damage
+                    ),
                 }
                 seconds = duration_ms / 1000
                 target_values.update(
@@ -420,7 +430,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
 
         damage_dist = player.get("totalDamageDist")
         if isinstance(damage_dist, list) and damage_dist and isinstance(damage_dist[0], list):
-            actual_skills = _skill_stats(source_damage)
+            actual_skills = _skill_stats(actor_damage)
             values["totalDamageDist"] = actual_skills
             for expected_skill in damage_dist[0]:
                 if not isinstance(expected_skill, dict) or not isinstance(

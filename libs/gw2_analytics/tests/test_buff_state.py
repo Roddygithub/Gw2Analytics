@@ -302,6 +302,50 @@ class TestBuffStateTracker:
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=5000)
         assert uptimes["might"] == pytest.approx(1.0, rel=0.01)
 
+    def test_buff_apply_snapshots_preserve_all_initial_stacks(self) -> None:
+        tracker = BuffStateTracker()
+        for duration_ms in (2_000, 3_000):
+            tracker.process(
+                BuffApplyEvent(
+                    time_ms=0,
+                    source_agent_id=0,
+                    target_agent_id=1,
+                    skill_id=TRACKED_BUFFS["fury"],
+                    duration_ms=duration_ms,
+                )
+            )
+
+        assert tracker.compute_player_uptimes(1, 10_000)["fury"] == pytest.approx(50.0)
+
+    def test_manual_expiry_marker_does_not_remove_next_stack(self) -> None:
+        tracker = BuffStateTracker()
+        tracker.process(_boon_apply(skill_id=TRACKED_BUFFS["fury"], duration_ms=5_000))
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["fury"],
+                time_ms=5_000,
+                kind="remove_single",
+                stacks=1,
+            )
+        )
+        tracker.process(_boon_apply(skill_id=TRACKED_BUFFS["fury"], time_ms=5_000))
+
+        assert tracker.compute_player_uptimes(1, 10_000)["fury"] == pytest.approx(100.0)
+
+    def test_early_manual_removal_still_clears_active_stack(self) -> None:
+        tracker = BuffStateTracker()
+        tracker.process(_boon_apply(skill_id=TRACKED_BUFFS["fury"], duration_ms=10_000))
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["fury"],
+                time_ms=5_000,
+                kind="remove_single",
+                stacks=1,
+            )
+        )
+
+        assert tracker.compute_player_uptimes(1, 10_000)["fury"] == pytest.approx(50.0)
+
     def test_buff_apply_event_then_remove_all(self) -> None:
         """BuffApplyEvent at t=0 followed by remove_all at t=5000 -> 50%."""
         fury_id = TRACKED_BUFFS["fury"]

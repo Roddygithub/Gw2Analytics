@@ -950,7 +950,7 @@ class PythonEvtcParser:
                 # magnitude field: direct hits use value, condition ticks
                 # use buff_dmg. Crowd-control and activation records carry
                 # values but are not health damage.
-                if _iff != 1:
+                if _iff == 0:
                     duration = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
                     if _ev_buff and dst_agent:
                         yield BoonApplyEvent(
@@ -963,11 +963,14 @@ class PythonEvtcParser:
                             kind="apply",
                         )
                     continue
+                if _iff not in {1, 2}:
+                    continue
                 if _ev_buff:
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                     condition_damage = magnitude
                     is_attempt = magnitude > 0
                     against_downed = bool(pad1)
+                    is_life_leech = is_offcycle in {3, 5}
                 else:
                     if _result in (8, 9):
                         yield CombatOutcomeEvent(
@@ -1013,8 +1016,9 @@ class PythonEvtcParser:
                         continue
                     magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
                     condition_damage = 0
-                    is_attempt = magnitude > 0 or _result in {6, 9}
+                    is_attempt = magnitude > 0 or _result in {3, 4, 6, 7, 9, 13}
                     against_downed = bool(is_offcycle)
+                    is_life_leech = False
                 if is_attempt:
                     yield DamageEvent(
                         time_ms=time_ms,
@@ -1025,6 +1029,7 @@ class PythonEvtcParser:
                         buff_dmg=condition_damage,
                         result=_result,
                         against_downed=against_downed,
+                        is_life_leech=is_life_leech,
                         iff=_iff,
                         src_master_instid=src_master_inst,
                         dst_master_instid=dst_master_inst,

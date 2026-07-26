@@ -374,8 +374,9 @@ class DamageEvent(BaseEvent):
     buff_dmg: int = Field(default=0, ge=0)
     result: int = Field(default=0, ge=0, le=255, description="arcdps combat result byte")
     against_downed: bool = False
+    is_life_leech: bool = False
     iff: int = Field(
-        default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=SELF"
+        default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=UNKNOWN"
     )
     src_master_instid: int = Field(
         default=0, ge=0, le=0xFFFF, description="arcdps src_master_instid from cbtevent"
