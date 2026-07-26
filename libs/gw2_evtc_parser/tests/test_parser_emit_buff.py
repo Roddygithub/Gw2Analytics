@@ -48,9 +48,14 @@ from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
     CCEvent,
+    CombatOutcomeEvent,
     DamageEvent,
+    DownEvent,
     EffectEvent,
+    Event,
+    InterruptEvent,
     SkillActivationEvent,
+    UpEvent,
     WeaponSwapEvent,
 )
 from gw2_core.models import _EVENT_MAP, EventType
@@ -85,6 +90,8 @@ def _build_event_record_2025(
     buff: int = 0,
     is_activation: int = 0,
     is_offcycle: int = 0,
+    src_instid: int = 0,
+    src_master_instid: int = 0,
 ) -> bytes:
     """Build one 64-byte EVTC2025+ cbtevent record (local copy)."""
     flags = bytearray(16)
@@ -103,9 +110,9 @@ def _build_event_record_2025(
         buff_dmg,
         0,
         skill_id,
+        src_instid,
         0,
-        0,
-        0,
+        src_master_instid,
         0,
         *flags,
     )
@@ -882,6 +889,39 @@ def test_parse_events_2025_keeps_blocked_damage_attempt() -> None:
     assert events[1].result == 3
 
 
+@pytest.mark.parametrize(
+    ("result", "outcome_type"),
+    [(5, InterruptEvent), (8, CombatOutcomeEvent)],
+)
+def test_parse_events_2025_keeps_interrupt_and_killing_blow_damage(
+    result: int, outcome_type: type[Event]
+) -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        skills=[(101, "Attack")],
+        events=[
+            _build_event_record_2025(
+                time_ms=10_000,
+                src_agent=1,
+                dst_agent=2,
+                value=500,
+                skill_id=101,
+                iff=1,
+                result=result,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert len(events) == 2
+    assert isinstance(events[0], outcome_type)
+    assert isinstance(events[1], DamageEvent)
+    assert events[1].damage == 500
+    assert events[1].result == result
+
+
 def test_parse_events_2025_keeps_unknown_iff_damage() -> None:
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
@@ -905,6 +945,38 @@ def test_parse_events_2025_keeps_unknown_iff_damage() -> None:
     assert isinstance(events[0], DamageEvent)
     assert events[0].damage == 500
     assert events[0].iff == 2
+
+
+def test_parse_events_2025_keeps_statechange_on_minion_actor() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Owner", True), (2, 1, 1, "Minion", False)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=0,
+                value=0,
+                is_statechange=3,
+                src_instid=10,
+            ),
+            _build_event_record_2025(
+                time_ms=2_000,
+                src_agent=2,
+                dst_agent=0,
+                value=0,
+                is_statechange=5,
+                src_master_instid=10,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert isinstance(events[0], UpEvent)
+    assert events[0].source_agent_id == 1
+    assert isinstance(events[1], DownEvent)
+    assert events[1].source_agent_id == 2
 
 
 def test_parse_events_2025_friendly_is_buff_applies_boon() -> None:
