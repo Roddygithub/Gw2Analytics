@@ -762,6 +762,9 @@ def test_evtc2025_parse_does_not_complete_unknown_event_agents() -> None:
 
 def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
     """EVTC2025 metadata statechanges can precede combat events without known agents."""
+    arc_src, arc_dst, arc_value, arc_buff_dmg = struct.unpack(
+        "<QQii", b"20250925.162433-572-x64\x00"[:24]
+    )
     metadata = [
         _build_event_record_2025(
             time_ms=42_047_693,
@@ -771,14 +774,41 @@ def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
             skill_id=0,
             is_statechange=statechange,
         )
-        for statechange in (9, 13, 14, 54)
+        for statechange in (9, 13, 14)
     ]
+    metadata.append(
+        _build_event_record_2025(
+            time_ms=42_047_693,
+            src_agent=arc_src,
+            dst_agent=arc_dst,
+            value=arc_value,
+            buff_dmg=arc_buff_dmg,
+            skill_id=0,
+            is_statechange=54,
+        )
+    )
     evtc = _build_minimal_evtc(
         [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
         build="20250925",
         skills=[(101, "Whirlwind")],
         events=[
             *metadata,
+            _build_event_record_2025(
+                time_ms=42_047_693,
+                src_agent=188_004,
+                dst_agent=0,
+                value=0,
+                skill_id=0,
+                is_statechange=15,
+            ),
+            _build_event_record_2025(
+                time_ms=42_047_693,
+                src_agent=96,
+                dst_agent=0,
+                value=0,
+                skill_id=0,
+                is_statechange=25,
+            ),
             _build_event_record_2025(
                 time_ms=42_048_000,
                 src_agent=1,
@@ -793,6 +823,9 @@ def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
     events = list(PythonEvtcParser().parse_events(evtc))
 
     assert [(skill.id, skill.name) for skill in fight.skills] == [(101, "Whirlwind")]
+    assert fight.header.gw2_build == 188_004
+    assert fight.header.map_id == 96
+    assert fight.header.arc_revision == 162_433
     assert len(events) == 1
     assert isinstance(events[0], DamageEvent)
     assert events[0].damage == 200

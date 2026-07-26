@@ -30,6 +30,7 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
     assert fight.header.encounter_id == 1
     assert fight.header.gw2_build == 188004
     assert fight.header.map_id == 96
+    assert fight.header.arc_revision == 162433
     assert len(fight.agents) == 13
     accounts = {a.account_name.lstrip(":") for a in fight.agents if a.is_player and a.account_name}
     assert accounts == {

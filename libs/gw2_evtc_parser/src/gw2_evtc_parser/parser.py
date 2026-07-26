@@ -1273,6 +1273,7 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
         agent_count=agent_count,
         gw2_build=metadata.get("gw2_build"),
         map_id=metadata.get("map_id"),
+        arc_revision=metadata.get("arc_revision"),
     )
 
     fight_id = hashlib.sha256(data).hexdigest()
@@ -1514,6 +1515,13 @@ def _extract_evtc2025_metadata(data: bytes) -> dict[str, int]:
             out["gw2_build"] = int(ev[1])
         elif statechange == 25:
             out["map_id"] = int(ev[1])
+        elif statechange == 54:
+            payload = struct.pack("<QQii", ev[1], ev[2], ev[3], ev[4]).split(b"\x00", 1)[0]
+            arc_build = payload.decode("ascii", errors="ignore")
+            if "." in arc_build:
+                revision = arc_build.split(".", 1)[1].split("-", 1)[0]
+                if revision.isdecimal():
+                    out["arc_revision"] = int(revision)
         elif statechange not in {9, 13, 14, 16, 18, 29, 42, 54}:
             break
         if "gw2_build" in out and "map_id" in out:

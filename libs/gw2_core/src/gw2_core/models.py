@@ -167,6 +167,7 @@ class EvtcHeader(BaseModel):
     skill_count: int = Field(default=0, ge=0, le=100_000)
     gw2_build: int | None = Field(default=None, ge=0)
     map_id: int | None = Field(default=None, ge=0)
+    arc_revision: int | None = Field(default=None, ge=0)
 
 
 class Agent(BaseModel):
