@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from gw2_core import Agent, DamageEvent, EvtcHeader, Fight
+from gw2_core import Agent, BlockEvent, DamageEvent, EvtcHeader, Fight
 from gw2_evtc_parser.__main__ import _build_parser, _compare_ei_metadata
 
 
@@ -47,6 +47,18 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
                 "instanceID": 10,
                 "teamID": 20,
                 "dpsAll": [{"damage": 100, "condiDamage": 30, "powerDamage": 70}],
+                "defenses": [
+                    {
+                        "damageTaken": 50,
+                        "damageTakenCount": 1,
+                        "conditionDamageTaken": 0,
+                        "powerDamageTaken": 50,
+                        "blockedCount": 1,
+                        "evadedCount": 0,
+                        "downCount": 0,
+                        "deadCount": 0,
+                    }
+                ],
             }
         ],
     }
@@ -62,7 +74,20 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
                 skill_id=3,
                 damage=100,
                 buff_dmg=30,
-            )
+            ),
+            DamageEvent(
+                time_ms=2,
+                source_agent_id=2,
+                target_agent_id=1,
+                skill_id=4,
+                damage=50,
+            ),
+            BlockEvent(
+                time_ms=3,
+                source_agent_id=1,
+                target_agent_id=0,
+                skill_id=0,
+            ),
         ],
     )
 

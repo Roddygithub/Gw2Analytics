@@ -19,7 +19,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-from gw2_core import DamageEvent, Fight
+from gw2_core import BlockEvent, DamageEvent, DeathEvent, DodgeEvent, DownEvent, Fight
 from gw2_evtc_parser.exceptions import EvtcParseError, UnsupportedVersionError
 from gw2_evtc_parser.parser import PythonEvtcParser, read_zevtc_archive
 
@@ -119,7 +119,7 @@ def cmd_inspect_zip(args: argparse.Namespace) -> int:
     return 0
 
 
-def _compare_ei_metadata(
+def _compare_ei_metadata(  # noqa: PLR0912, PLR0915
     fight: Fight, expected: dict[str, object], events: list[object] | None = None
 ) -> dict[str, object]:
     header = fight.header
@@ -141,6 +141,7 @@ def _compare_ei_metadata(
     expected_players = expected.get("players")
     if isinstance(expected_players, list):
         damage_by_agent: dict[int, tuple[int, int]] = {}
+        defense_by_agent: dict[int, dict[str, int]] = {}
         for event in events or []:
             if isinstance(event, DamageEvent):
                 damage, condition = damage_by_agent.get(event.source_agent_id, (0, 0))
@@ -148,6 +149,27 @@ def _compare_ei_metadata(
                     damage + event.damage,
                     condition + event.buff_dmg,
                 )
+                defense = defense_by_agent.setdefault(event.target_agent_id, {})
+                defense["damageTaken"] = defense.get("damageTaken", 0) + event.damage
+                defense["damageTakenCount"] = defense.get("damageTakenCount", 0) + 1
+                defense["conditionDamageTaken"] = (
+                    defense.get("conditionDamageTaken", 0) + event.buff_dmg
+                )
+                defense["powerDamageTaken"] = defense.get("powerDamageTaken", 0) + (
+                    event.damage - event.buff_dmg
+                )
+            elif isinstance(event, BlockEvent):
+                defense = defense_by_agent.setdefault(event.source_agent_id, {})
+                defense["blockedCount"] = defense.get("blockedCount", 0) + 1
+            elif isinstance(event, DodgeEvent):
+                defense = defense_by_agent.setdefault(event.source_agent_id, {})
+                defense["evadedCount"] = defense.get("evadedCount", 0) + 1
+            elif isinstance(event, DownEvent):
+                defense = defense_by_agent.setdefault(event.source_agent_id, {})
+                defense["downCount"] = defense.get("downCount", 0) + 1
+            elif isinstance(event, DeathEvent):
+                defense = defense_by_agent.setdefault(event.source_agent_id, {})
+                defense["deadCount"] = defense.get("deadCount", 0) + 1
         agents_by_account = {
             agent.account_name.lstrip(":"): agent
             for agent in fight.agents
@@ -192,6 +214,32 @@ def _compare_ei_metadata(
                     if dps_all[0].get(field) != value:
                         differences[f"players[{account}].dpsAll.{field}"] = {
                             "expected": dps_all[0].get(field),
+                            "actual": value,
+                        }
+            expected_defenses = player.get("defenses")
+            if (
+                isinstance(expected_defenses, list)
+                and expected_defenses
+                and isinstance(expected_defenses[0], dict)
+            ):
+                defense_values = {
+                    field: defense_by_agent.get(agent.id, {}).get(field, 0)
+                    for field in (
+                        "damageTaken",
+                        "damageTakenCount",
+                        "conditionDamageTaken",
+                        "powerDamageTaken",
+                        "blockedCount",
+                        "evadedCount",
+                        "downCount",
+                        "deadCount",
+                    )
+                }
+                values["defenses"] = defense_values
+                for field, value in defense_values.items():
+                    if expected_defenses[0].get(field) != value:
+                        differences[f"players[{account}].defenses.{field}"] = {
+                            "expected": expected_defenses[0].get(field),
                             "actual": value,
                         }
         actual["players"] = compared_players
