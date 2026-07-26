@@ -174,7 +174,7 @@ class BuffStateTracker:
                 (expiry for expiry in stack.expirations if expiry is not None),
                 default=None,
             )
-            if next_expiry is None or next_expiry > new_time_ms:
+            if next_expiry is None or next_expiry >= new_time_ms:
                 break
             stack.cumulative_stack_ms += len(stack.expirations) * (next_expiry - stack.last_time_ms)
             stack.last_time_ms = next_expiry
@@ -222,7 +222,7 @@ class BuffStateTracker:
                 )
                 target_tracker.expirations = [max(time_ms, current_expiry) + event.duration_ms]
         elif event.kind == "remove_single":
-            if target_tracker.expirations:
+            if event.stacks and target_tracker.expirations:
                 finite = [expiry for expiry in target_tracker.expirations if expiry is not None]
                 target_tracker.expirations.remove(min(finite) if finite else None)
         elif event.kind == "remove_all":
@@ -253,7 +253,17 @@ class BuffStateTracker:
         time_ms = self._relative_time(event.time_ms)
         self._advance(target_tracker, time_ms)
         expiry = time_ms + event.duration_ms if event.duration_ms > 0 else None
-        target_tracker.expirations = [expiry] * event.stacks
+        if _max_stacks_for(buff_name) > 1:
+            target_tracker.expirations.extend([expiry] * event.stacks)
+            del target_tracker.expirations[_max_stacks_for(buff_name) :]
+        elif expiry is None:
+            target_tracker.expirations = [None]
+        else:
+            current_expiry = max(
+                (value for value in target_tracker.expirations if value is not None),
+                default=time_ms,
+            )
+            target_tracker.expirations = [max(time_ms, current_expiry) + event.duration_ms]
 
     def compute_player_uptimes(self, agent_id: int, duration_ms: int) -> dict[str, float]:
         """Compute boon uptime for one player after processing all events.

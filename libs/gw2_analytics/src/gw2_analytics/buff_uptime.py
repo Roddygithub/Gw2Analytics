@@ -233,7 +233,7 @@ def accumulate_buff_events(
         if kind == "apply":
             new_stacks = current_stacks + event.stacks
         elif kind == "remove_single":
-            new_stacks = max(0, current_stacks - 1)
+            new_stacks = max(0, current_stacks - event.stacks)
         elif kind == "remove_all":
             new_stacks = 0
         else:
