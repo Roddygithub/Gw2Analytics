@@ -165,6 +165,8 @@ class EvtcHeader(BaseModel):
     encounter_id: int = Field(default=0, ge=0, le=0xFFFF)
     agent_count: int = Field(..., ge=0, le=10_000)
     skill_count: int = Field(default=0, ge=0, le=100_000)
+    gw2_build: int | None = Field(default=None, ge=0)
+    map_id: int | None = Field(default=None, ge=0)
 
 
 class Agent(BaseModel):
@@ -214,7 +216,8 @@ class Agent(BaseModel):
         description="arcdps subgroup string (e.g. 'Subgroup 1' or empty). None for NPCs.",
     )
     team_id: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Squad/team identifier from the agent record subgroup field. 0 for NPCs.",
     )
 
@@ -347,9 +350,15 @@ class DamageEvent(BaseEvent):
     event_type: Literal[EventType.DAMAGE] = EventType.DAMAGE
     damage: int = Field(..., ge=0)
     buff_dmg: int = Field(default=0, ge=0)
-    iff: int = Field(default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=SELF")
-    src_master_instid: int = Field(default=0, ge=0, le=0xFFFF, description="arcdps src_master_instid from cbtevent")
-    dst_master_instid: int = Field(default=0, ge=0, le=0xFFFF, description="arcdps dst_master_instid from cbtevent")
+    iff: int = Field(
+        default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=SELF"
+    )
+    src_master_instid: int = Field(
+        default=0, ge=0, le=0xFFFF, description="arcdps src_master_instid from cbtevent"
+    )
+    dst_master_instid: int = Field(
+        default=0, ge=0, le=0xFFFF, description="arcdps dst_master_instid from cbtevent"
+    )
 
 
 class HealingEvent(BaseEvent):
@@ -368,9 +377,15 @@ class HealingEvent(BaseEvent):
     event_type: Literal[EventType.HEALING] = EventType.HEALING
     healing: int = Field(..., ge=0)
     barrier: int = Field(default=0, ge=0)
-    iff: int = Field(default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=SELF")
-    src_master_instid: int = Field(default=0, ge=0, le=0xFFFF, description="arcdps src_master_instid from cbtevent")
-    dst_master_instid: int = Field(default=0, ge=0, le=0xFFFF, description="arcdps dst_master_instid from cbtevent")
+    iff: int = Field(
+        default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=SELF"
+    )
+    src_master_instid: int = Field(
+        default=0, ge=0, le=0xFFFF, description="arcdps src_master_instid from cbtevent"
+    )
+    dst_master_instid: int = Field(
+        default=0, ge=0, le=0xFFFF, description="arcdps dst_master_instid from cbtevent"
+    )
 
 
 class BuffRemovalEvent(BaseEvent):

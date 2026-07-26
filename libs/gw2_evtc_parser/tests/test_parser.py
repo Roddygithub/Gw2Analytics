@@ -760,6 +760,44 @@ def test_evtc2025_parse_does_not_complete_unknown_event_agents() -> None:
     assert [agent.id for agent in fight.agents] == [1]
 
 
+def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
+    """EVTC2025 metadata statechanges can precede combat events without known agents."""
+    metadata = [
+        _build_event_record_2025(
+            time_ms=42_047_693,
+            src_agent=6_517_345,
+            dst_agent=3,
+            value=0,
+            skill_id=0,
+            is_statechange=statechange,
+        )
+        for statechange in (9, 13, 14, 54)
+    ]
+    evtc = _build_minimal_evtc(
+        [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
+        build="20250925",
+        skills=[(101, "Whirlwind")],
+        events=[
+            *metadata,
+            _build_event_record_2025(
+                time_ms=42_048_000,
+                src_agent=1,
+                dst_agent=1,
+                value=200,
+                skill_id=101,
+            ),
+        ],
+    )
+
+    fight = next(iter(PythonEvtcParser().parse(evtc)))
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert [(skill.id, skill.name) for skill in fight.skills] == [(101, "Whirlwind")]
+    assert len(events) == 1
+    assert isinstance(events[0], DamageEvent)
+    assert events[0].damage == 200
+
+
 def test_synthetic_player_agent_2025_has_account_and_is_player() -> None:
     evtc = _build_minimal_evtc(
         [(123456, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Test Guardian", True)],

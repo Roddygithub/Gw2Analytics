@@ -1158,6 +1158,9 @@ def _detect_skill_format(
     if skill_offset + 4 > len(data):
         return True, 0, skill_offset
 
+    if is_evtc_2025:
+        return False, MAX_SKILLS, skill_offset
+
     # Fast path: if the bytes right after the agent table already look
     # like the event stream, there is no skill table at all. This covers
     # the EVTC2025+ empty-skill case (and legacy empty-skill too, since
@@ -1261,12 +1264,15 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     # entities that arcdps may omit from the agent table.
     if not is_evtc_2025:
         agents = _complete_agents(data, agents, is_evtc_2025=is_evtc_2025)
+    metadata = _extract_evtc2025_metadata(data) if is_evtc_2025 else {}
 
     header = EvtcHeader(
         build_version=build_str,
         encounter_id=encounter_id,
         skill_count=actual_skill_count,
         agent_count=agent_count,
+        gw2_build=metadata.get("gw2_build"),
+        map_id=metadata.get("map_id"),
     )
 
     fight_id = hashlib.sha256(data).hexdigest()
@@ -1340,6 +1346,13 @@ def _iter_skill_records(
         # event stream, not a skill record. This is the most reliable
         # way to know we've walked past the skill table in the no-count
         # EVTC2025+ format.
+        if use_heuristic and is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, cursor):
+            logger.debug(
+                "Skill table ends at skill %d: offset %d looks like EVTC2025 metadata events",
+                skill_index,
+                cursor,
+            )
+            return
         if use_heuristic and _validate_event_candidate(
             data, cursor, known_agents, is_evtc_2025=is_evtc_2025
         ):
@@ -1461,7 +1474,55 @@ def _validate_event_candidate(
     return saw_agent
 
 
-def _compute_post_skills_offset(  # noqa: PLR0912
+def _validate_evtc2025_metadata_candidate(data: bytes, offset: int) -> bool:
+    """Return True when ``offset`` points at the EVTC2025 metadata event prelude."""
+    if offset + EVENT_SIZE * 4 > len(data):
+        return False
+    first_time = None
+    # EVTC2025 WvW logs can start with metadata statechanges before any
+    # combatant agent appears. Those rows share one sane timestamp and use
+    # non-combat statechange IDs, so the normal known-agent boundary check
+    # rejects the real event start.
+    metadata_statechanges = {9, 13, 14, 15, 16, 25, 54}
+    for i in range(4):
+        ev = _EVENT_STRUCT_2025.unpack_from(data, offset + i * EVENT_SIZE)
+        time_ms = ev[0]
+        statechange = ev[19]
+        if not (0 < time_ms < 86_400_000):
+            return False
+        if first_time is None:
+            first_time = time_ms
+        elif time_ms != first_time:
+            return False
+        if statechange not in metadata_statechanges:
+            return False
+    return True
+
+
+def _extract_evtc2025_metadata(data: bytes) -> dict[str, int]:
+    """Extract EI-visible metadata from EVTC2025 pre-combat statechanges."""
+    offset = _compute_post_skills_offset(data, is_evtc_2025=True)
+    if not _validate_evtc2025_metadata_candidate(data, offset):
+        return {}
+    out: dict[str, int] = {}
+    cursor = offset
+    end = len(data)
+    while cursor + EVENT_SIZE <= end:
+        ev = _EVENT_STRUCT_2025.unpack_from(data, cursor)
+        statechange = ev[19]
+        if statechange == 15:
+            out["gw2_build"] = int(ev[1])
+        elif statechange == 25:
+            out["map_id"] = int(ev[1])
+        elif statechange not in {9, 13, 14, 16, 18, 29, 42, 54}:
+            break
+        if "gw2_build" in out and "map_id" in out:
+            break
+        cursor += EVENT_SIZE
+    return out
+
+
+def _compute_post_skills_offset(  # noqa: PLR0911, PLR0912
     data: bytes,
     *,
     is_evtc_2025: bool | None = None,
@@ -1505,6 +1566,8 @@ def _compute_post_skills_offset(  # noqa: PLR0912
     known_agents_frozen = frozenset(known_agents)
 
     # Quick check: if no skills, events start right here.
+    if is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, skill_offset):
+        return skill_offset
     if _validate_event_candidate(
         data, skill_offset, known_agents_frozen, is_evtc_2025=is_evtc_2025
     ):
@@ -1541,6 +1604,9 @@ def _compute_post_skills_offset(  # noqa: PLR0912
     ):
         cursor += SKILL_RECORD_SIZE
 
+    if is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, cursor):
+        return cursor
+
     if _validate_event_candidate(data, cursor, known_agents_frozen, is_evtc_2025=is_evtc_2025):
         return cursor
 
@@ -1556,6 +1622,8 @@ def _compute_post_skills_offset(  # noqa: PLR0912
     aligned = (cursor + EVENT_SIZE - 1) & ~(EVENT_SIZE - 1)
     max_forward = min(len(data) - EVENT_SIZE * 4, skill_offset + MAX_SKILLS * SKILL_RECORD_SIZE)
     for candidate in range(aligned, max_forward, EVENT_SIZE):
+        if is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, candidate):
+            return candidate
         if _validate_event_candidate(
             data, candidate, known_agents_frozen, is_evtc_2025=is_evtc_2025
         ):

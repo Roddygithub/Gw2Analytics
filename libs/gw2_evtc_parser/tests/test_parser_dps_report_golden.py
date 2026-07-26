@@ -28,6 +28,8 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
     assert fight.header is not None
     assert fight.header.build_version == "20250925"
     assert fight.header.encounter_id == 1
+    assert fight.header.gw2_build == 188004
+    assert fight.header.map_id == 96
     assert len(fight.agents) == 13
     assert len([a for a in fight.agents if a.is_player and a.account_name]) == 9
-    assert len(fight.skills) == 296
+    assert len(fight.skills) == 168
