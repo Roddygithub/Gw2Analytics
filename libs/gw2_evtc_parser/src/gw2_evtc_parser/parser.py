@@ -1274,6 +1274,7 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
         gw2_build=metadata.get("gw2_build"),
         map_id=metadata.get("map_id"),
         arc_revision=metadata.get("arc_revision"),
+        duration_ms=metadata.get("duration_ms"),
     )
 
     fight_id = hashlib.sha256(data).hexdigest()
@@ -1500,18 +1501,21 @@ def _validate_evtc2025_metadata_candidate(data: bytes, offset: int) -> bool:
     return True
 
 
-def _extract_evtc2025_metadata(data: bytes) -> dict[str, int]:
+def _extract_evtc2025_metadata(data: bytes) -> dict[str, int]:  # noqa: PLR0912
     """Extract EI-visible metadata from EVTC2025 pre-combat statechanges."""
     offset = _compute_post_skills_offset(data, is_evtc_2025=True)
     if not _validate_evtc2025_metadata_candidate(data, offset):
         return {}
     out: dict[str, int] = {}
+    start_time_ms: int | None = None
     cursor = offset
     end = len(data)
     while cursor + EVENT_SIZE <= end:
         ev = _EVENT_STRUCT_2025.unpack_from(data, cursor)
         statechange = ev[19]
-        if statechange == 15:
+        if statechange == 9:
+            start_time_ms = int(ev[0])
+        elif statechange == 15:
             out["gw2_build"] = int(ev[1])
         elif statechange == 25:
             out["map_id"] = int(ev[1])
@@ -1527,6 +1531,13 @@ def _extract_evtc2025_metadata(data: bytes) -> dict[str, int]:
         if "gw2_build" in out and "map_id" in out:
             break
         cursor += EVENT_SIZE
+    if start_time_ms is not None:
+        last_event_offset = offset + ((end - offset) // EVENT_SIZE - 1) * EVENT_SIZE
+        for cursor in range(last_event_offset, offset - 1, -EVENT_SIZE):
+            ev = _EVENT_STRUCT_2025.unpack_from(data, cursor)
+            if ev[19] == 10 and ev[0] >= start_time_ms:
+                out["duration_ms"] = int(ev[0]) - start_time_ms
+                break
     return out
 
 

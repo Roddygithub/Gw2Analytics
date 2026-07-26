@@ -816,6 +816,14 @@ def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
                 value=200,
                 skill_id=101,
             ),
+            _build_event_record_2025(
+                time_ms=42_049_482,
+                src_agent=6_517_345,
+                dst_agent=1,
+                value=0,
+                skill_id=0,
+                is_statechange=10,
+            ),
         ],
     )
 
@@ -826,6 +834,7 @@ def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
     assert fight.header.gw2_build == 188_004
     assert fight.header.map_id == 96
     assert fight.header.arc_revision == 162_433
+    assert fight.header.duration_ms == 1_789
     assert len(events) == 1
     assert isinstance(events[0], DamageEvent)
     assert events[0].damage == 200

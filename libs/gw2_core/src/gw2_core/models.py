@@ -168,6 +168,7 @@ class EvtcHeader(BaseModel):
     gw2_build: int | None = Field(default=None, ge=0)
     map_id: int | None = Field(default=None, ge=0)
     arc_revision: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
 
 
 class Agent(BaseModel):
