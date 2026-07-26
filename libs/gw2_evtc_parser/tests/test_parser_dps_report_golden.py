@@ -35,16 +35,18 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
     assert fight.success is True
     assert fight.ei_encounter_id == 459520
     assert len(fight.agents) == 13
-    accounts = {a.account_name.lstrip(":") for a in fight.agents if a.is_player and a.account_name}
-    assert accounts == {
-        "Demandred.9035",
-        "EstaticFear.7692",
-        "Fabzzz.1439",
-        "Kurupt.6378",
-        "LuiStheGamers.5132",
-        "Lullupa.5768",
-        "esskape.5047",
-        "krill le faucheur.1679",
-        "talon.6751",
+    accounts_by_agent = {
+        a.id: a.account_name.lstrip(":") for a in fight.agents if a.is_player and a.account_name
+    }
+    assert accounts_by_agent == {
+        2_000: "esskape.5047",
+        45_822: "krill le faucheur.1679",
+        45_830: "LuiStheGamers.5132",
+        45_859: "Lullupa.5768",
+        45_874: "talon.6751",
+        45_944: "Kurupt.6378",
+        45_945: "Fabzzz.1439",
+        45_946: "EstaticFear.7692",
+        45_947: "Demandred.9035",
     }
     assert len(fight.skills) == 168

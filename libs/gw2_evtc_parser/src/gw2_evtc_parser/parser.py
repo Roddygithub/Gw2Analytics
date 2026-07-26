@@ -2,10 +2,9 @@
 
 This implementation reads:
 
-* the 24-byte file header (``EVTC`` magic + ``yyyymmdd`` build date +
-  revision byte + combat_id + unused + ``agent_count`` u32 +
-  ``map_id`` u32) for rev>=1, or the 24-byte extended rev0 header
-  (``skill_count`` at bytes 20-23),
+* the 20-byte base file header (``EVTC`` magic + ``yyyymmdd`` build date +
+  revision byte + combat_id + unused + ``agent_count`` u32). Legacy
+  fixtures may append a 4-byte extension before the agent table,
 * ``agent_count`` **fixed-size** agent records of 96 bytes each,
   matching the C ``struct ag`` in ``arcdps.h`` exactly:
 
@@ -32,12 +31,13 @@ This implementation reads:
     |  4  | 64s    | name (null-padded UTF-8 buffer)            |
     +-----+--------+--------------------------------------------+
 
-  The skill table is stored in one of two wire formats:
+  The skill table can be stored in one of two wire formats:
 
   * **Legacy** (pre-2025): a 4-byte ``skill_count`` prefix followed by
     ``skill_count`` consecutive 68-byte records.
-  * **EVTC2025+**: no count prefix; consecutive 68-byte records run
+  * **Alternative**: no count prefix; consecutive 68-byte records run
     until the parser's heuristic detects the start of the event stream.
+    Current EVTC2025 logs use the count-prefixed format.
 
   The name buffer is a fixed 64-byte null-padded UTF-8 string. Any
   bytes after the first null terminator are ignored, so embedded nulls
@@ -104,18 +104,15 @@ logger = logging.getLogger(__name__)
 # Binary layout constants
 # ---------------------------------------------------------------------------
 
-#: Total size of the EVTC file header in bytes for rev>=1.
-#: Layout (per ``arcdps.h`` ``evtc_header``): magic(4) + build(8) +
-#: rev(1) + combat_id(2) + unused(1) + agent_count(4) + map_id(4)
-#: = 24 bytes.  For rev>=1 some builds append a ``skill_count(4)``
-#: extension making the header 28 bytes total; this parser only reads
-#: the first 24 bytes and derives the agent table start from there.
+#: Legacy extended header size retained for pre-2025 fixtures.
 HEADER_SIZE: Final[int] = 24
+_HEADER_BASE_SIZE: Final[int] = 20
 
 #: ``struct`` format for the 24-byte file header (rev>=1).
 #: Fields: magic(4s) + build(8s) + rev(B) + combat_id(H) + unused(B)
 #: + agent_count(I) + map_id(I).
 _HEADER_STRUCT: Final[struct.Struct] = struct.Struct("<4s8sBHBI I")
+_HEADER_BASE_STRUCT: Final[struct.Struct] = struct.Struct("<4s8sBHBI")
 
 #: Byte offset of the agent_count field inside the header.
 AGENT_COUNT_OFFSET: Final[int] = 16
@@ -126,9 +123,9 @@ BUILD_OFFSET: Final[int] = 4
 #: Byte offset of the skill_count field inside the header (bytes 20-23).
 SKILL_COUNT_OFFSET: Final[int] = 20
 
-#: Byte offset where agent records start (right after the 24-byte
-#: header). For rev>=1 agents begin immediately after the header.
+#: Byte offset where agent records start in legacy extended fixtures.
 AGENTS_OFFSET: Final[int] = HEADER_SIZE
+_AGENTS_OFFSET_2025: Final[int] = _HEADER_BASE_SIZE
 
 #: Total size of one agent record on disk (the C ``struct ag`` size).
 AGENT_SIZE: Final[int] = 96
@@ -145,14 +142,10 @@ AGENT_NAME_SIZE: Final[int] = AGENT_SIZE - AGENT_PREFIX_SIZE
 #: 72-byte name buffer.
 _AGENT_STRUCT: Final[struct.Struct] = struct.Struct(f"<QIIhhhh{AGENT_NAME_SIZE}s")
 
-#: Size of the 64-byte name buffer inside an EVTC2025+ agent record.
-#: The 2025 layout is: iid_low(u32) + prof(u32) + is_elite(u32) +
-#: toughness(u32) + healing(u32) + concentration(u32) + name(64s) +
-#: subgroup(u32) + addr(u32) = 96 bytes.
-AGENT_NAME_SIZE_2025: Final[int] = 64
-
-#: ``struct`` format for the EVTC2025+ 96-byte agent record.
-_AGENT_STRUCT_2025: Final[struct.Struct] = struct.Struct(f"<IIIIII{AGENT_NAME_SIZE_2025}sII")
+#: EVTC2025+ agent: address(u64), profession(u32), elite(u32), six
+#: uint16 stats/hitbox fields, then the 68-byte combo-name buffer.
+AGENT_NAME_SIZE_2025: Final[int] = 68
+_AGENT_STRUCT_2025: Final[struct.Struct] = struct.Struct(f"<QII6H{AGENT_NAME_SIZE_2025}s")
 
 #: Size of one fixed-size skill record: skill_id(u32) + name(64B).
 #: arcdps writes skill names as a fixed 64-byte null-padded buffer
@@ -1122,8 +1115,11 @@ def _detect_skill_format_nonzero(
     legacy_boundary = skill_offset + 4 + capped_count * SKILL_RECORD_SIZE
     if legacy_boundary == len(data) or (
         legacy_boundary <= len(data)
-        and _validate_event_candidate(
-            data, legacy_boundary, known_agents, is_evtc_2025=is_evtc_2025
+        and (
+            _validate_event_candidate(
+                data, legacy_boundary, known_agents, is_evtc_2025=is_evtc_2025
+            )
+            or (is_evtc_2025 and _validate_evtc2025_metadata_candidate(data, legacy_boundary))
         )
     ):
         return True, capped_count, skill_offset + 4
@@ -1168,9 +1164,6 @@ def _detect_skill_format(
     """
     if skill_offset + 4 > len(data):
         return True, 0, skill_offset
-
-    if is_evtc_2025:
-        return False, MAX_SKILLS, skill_offset
 
     # Fast path: if the bytes right after the agent table already look
     # like the event stream, there is no skill table at all. This covers
@@ -1226,11 +1219,13 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     environmental objects, and transient entities that arcdps may
     omit from the agent table.
     """
-    if len(data) < HEADER_SIZE:
-        raise EvtcParseError(f"EVTC blob is {len(data)} bytes, header needs {HEADER_SIZE}")
+    if len(data) < _HEADER_BASE_SIZE:
+        raise EvtcParseError(
+            f"EVTC blob is {len(data)} bytes, header needs {_HEADER_BASE_SIZE}"
+        )
 
-    magic, build, _rev, encounter_id, _unused, agent_count, _skill_count_hdr = (
-        _HEADER_STRUCT.unpack_from(data, 0)
+    magic, build, _rev, encounter_id, _unused, agent_count = _HEADER_BASE_STRUCT.unpack_from(
+        data, 0
     )
 
     if magic != b"EVTC":
@@ -1251,7 +1246,8 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
 
     # Walk the skill table.  Detect whether there's a count prefix (legacy)
     # or consecutive 68-byte records (EVTC2025+).
-    skill_offset = AGENTS_OFFSET + agent_count * AGENT_SIZE
+    agents_offset = _AGENTS_OFFSET_2025 if is_evtc_2025 else AGENTS_OFFSET
+    skill_offset = agents_offset + agent_count * AGENT_SIZE
     _has_count, skill_count, records_offset = _detect_skill_format(
         data, skill_offset, known_agents_frozen, is_evtc_2025=is_evtc_2025
     )
@@ -1307,7 +1303,7 @@ def _iter_agents(data: bytes, count: int, *, is_evtc_2025: bool = False) -> Iter
     """
     if count == 0:
         return
-    cursor = AGENTS_OFFSET
+    cursor = _AGENTS_OFFSET_2025 if is_evtc_2025 else AGENTS_OFFSET
     end = len(data)
     decoder = _decode_agent_2025 if is_evtc_2025 else _decode_agent
     for _ in range(count):
@@ -1574,27 +1570,23 @@ def _compute_post_skills_offset(  # noqa: PLR0911, PLR0912
     4. If the walker result doesn't validate as events, scan forward
        in EVENT_SIZE-aligned blocks.
     """
-    if len(data) < HEADER_SIZE:
+    if len(data) < _HEADER_BASE_SIZE:
         return len(data)
-    unpacked_header = _HEADER_STRUCT.unpack_from(data, 0)
+    unpacked_header = _HEADER_BASE_STRUCT.unpack_from(data, 0)
     agent_count = int(unpacked_header[5])
     if is_evtc_2025 is None:
         build_str = unpacked_header[1].decode("ascii", errors="replace")
         is_evtc_2025 = _build_version_from_build_str(build_str) >= 2025_00_00
-    skill_offset = AGENTS_OFFSET + agent_count * AGENT_SIZE
+    agents_offset = _AGENTS_OFFSET_2025 if is_evtc_2025 else AGENTS_OFFSET
+    skill_offset = agents_offset + agent_count * AGENT_SIZE
 
     # Build the set of known agent IDs for event-stream validation.
-    # EVTC2025+ stores the real event address at byte +92, not at the
-    # start of the record.
     known_agents: set[int] = set()
     for i in range(min(agent_count, MAX_AGENTS)):
-        aoff = AGENTS_OFFSET + i * AGENT_SIZE
+        aoff = agents_offset + i * AGENT_SIZE
         if aoff + AGENT_SIZE > len(data):
             break
-        if is_evtc_2025:
-            known_agents.add(int(struct.unpack_from("<I", data, aoff + 92)[0]))
-        else:
-            known_agents.add(int(struct.unpack_from("<Q", data, aoff)[0]))
+        known_agents.add(int(struct.unpack_from("<Q", data, aoff)[0]))
     known_agents_frozen = frozenset(known_agents)
 
     # Quick check: if no skills, events start right here.
@@ -1728,23 +1720,23 @@ def _complete_agents(
 def _decode_agent_2025(data: bytes, offset: int) -> Agent:
     """Decode a single 96-byte EVTC2025+ agent record at ``offset``.
 
-    The EVTC2025+ layout stores the agent's event address at byte +92
-    (``addr``), not at the start of the record. The leading u32 is an
-    instance-id low word that is not used for event matching.
+    The event address is the leading uint64, followed by profession,
+    elite, six uint16 stat/hitbox fields, and a 68-byte name buffer.
     """
     (
-        _iid_low,
+        addr,
         prof_raw,
         elite_raw,
         _tough,
-        _heal,
         _conc,
+        _heal,
+        _width,
+        _condition,
+        _height,
         name_buf,
-        _subgroup,
-        addr,
     ) = _AGENT_STRUCT_2025.unpack_from(data, offset)
 
-    # The 64-byte name buffer uses the same combo-string convention as
+    # The 68-byte name buffer uses the same combo-string convention as
     # the legacy layout: ``char\0account\0subgroup\0``.
     parts = name_buf.split(b"\x00")
 
@@ -1790,7 +1782,6 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
         is_gadget=is_gadget,
         account_name=account_name,
         subgroup=subgroup,
-        team_id=_subgroup,
     )
 
 

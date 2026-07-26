@@ -192,10 +192,8 @@ def _build_agent_record_2025(
 ) -> bytes:
     """Build one 96-byte EVTC2025+ agent record.
 
-    Layout (per ``arcdps.h`` 2025+):
-    ``<IIIIII64sII`` -- iid_low, profession, is_elite, toughness,
-    healing, concentration, 64-byte name buffer, subgroup, addr.
-    The event address is stored in ``addr`` (offset +92).
+    Layout: ``<QII6H68s`` -- address, profession, elite, six uint16
+    stat/hitbox fields, and the 68-byte combo-name buffer.
     """
     if account_name is None:
         raw = name.encode("utf-8") + b"\x00"
@@ -205,21 +203,22 @@ def _build_agent_record_2025(
             raw += subgroup.encode("utf-8") + b"\x00"
         else:
             raw += b"\x00"
-    if len(raw) > 64:
-        msg = f"name region {len(raw)} bytes exceeds 64"
+    if len(raw) > 68:
+        msg = f"name region {len(raw)} bytes exceeds 68"
         raise ValueError(msg)
-    name_buf = raw + b"\x00" * (64 - len(raw))
+    name_buf = raw + b"\x00" * (68 - len(raw))
     return struct.pack(
-        "<IIIIII64sII",
-        0,  # iid_low (unused)
+        "<QII6H68s",
+        agent_id,
         prof,
         elite,
         0,  # toughness
-        0,  # healing
         0,  # concentration
+        0,  # healing
+        0,  # hitbox width
+        0,  # condition
+        0,  # hitbox height
         name_buf,
-        0,  # subgroup struct field (parser reads subgroup from name buffer)
-        agent_id,  # addr (event-matching id)
     )
 
 
@@ -294,16 +293,16 @@ def _build_minimal_evtc(
         events = []
     is_2025 = int(build[:4]) >= 2025
     header = struct.pack(
-        "<4s8sBHBI I",
+        "<4s8sBHBI" if is_2025 else "<4s8sBHBI I",
         b"EVTC",
         build.encode("ascii"),
         0,
         encounter_id,
         0,
         len(agents),
-        len(skills),
+        *(() if is_2025 else (len(skills),)),
     )
-    assert len(header) == HEADER_SIZE
+    assert len(header) == (20 if is_2025 else HEADER_SIZE)
     body = bytearray()
     for aid, prof, elite, name, is_player in agents:
         if is_2025:
@@ -328,10 +327,7 @@ def _build_minimal_evtc(
         else:
             rec = _build_agent_record(aid, prof, elite, name)
         body += rec
-    # Legacy (<2025) skill table has a count prefix before fixed-size records.
-    build_version = int(build[:4])
-    if build_version < 2025:
-        body += struct.pack("<I", len(skills))
+    body += struct.pack("<I", len(skills))
     for skill_id, skill_name in skills:
         body += _build_skill_record(skill_id, skill_name)
     for ev in events:
@@ -443,7 +439,7 @@ def test_synthetic_mixed_players_and_npcs() -> None:
 
 def test_synthetic_truncated_blob_raises() -> None:
     short = b"EVTC" + b"\x00" * 10
-    with pytest.raises(EvtcParseError, match="header needs 24"):
+    with pytest.raises(EvtcParseError, match="header needs 20"):
         list(PythonEvtcParser().parse(short))
 
 
