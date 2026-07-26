@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from gw2_core import Agent, BlockEvent, DamageEvent, EvtcHeader, Fight
+from gw2_core import (
+    Agent,
+    BlockEvent,
+    CombatOutcomeEvent,
+    DamageEvent,
+    DownEvent,
+    EvtcHeader,
+    Fight,
+    HealthUpdateEvent,
+)
 from gw2_evtc_parser.__main__ import _build_parser, _compare_ei_metadata
 
 
@@ -18,7 +27,9 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
                 subgroup="1",
                 instance_id=10,
                 team_id=20,
-            )
+            ),
+            Agent(id=2, name="Target", instance_id=20),
+            Agent(id=3, name="Other target", instance_id=30),
         ],
         header=EvtcHeader(
             build_version="20250925",
@@ -59,8 +70,13 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
                         "deadCount": 0,
                     }
                 ],
+                "statsTargets": [
+                    [{"totalDmg": 100, "downContribution": 100, "downed": 1}],
+                    [{"totalDmg": 0, "downContribution": 0, "downed": 0}],
+                ],
             }
         ],
+        "targets": [{"instanceID": 20}, {"instanceID": 30}],
     }
 
     result = _compare_ei_metadata(
@@ -68,7 +84,7 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
         expected,
         [
             DamageEvent(
-                time_ms=1,
+                time_ms=150,
                 source_agent_id=1,
                 target_agent_id=2,
                 skill_id=3,
@@ -87,6 +103,26 @@ def test_compare_ei_metadata_reports_exact_differences() -> None:
                 source_agent_id=1,
                 target_agent_id=0,
                 skill_id=0,
+            ),
+            HealthUpdateEvent(
+                time_ms=100,
+                source_agent_id=2,
+                target_agent_id=0,
+                skill_id=0,
+                health_percent=89,
+            ),
+            DownEvent(
+                time_ms=200,
+                source_agent_id=2,
+                target_agent_id=0,
+                skill_id=0,
+            ),
+            CombatOutcomeEvent(
+                time_ms=200,
+                source_agent_id=1,
+                target_agent_id=2,
+                skill_id=3,
+                outcome="downed",
             ),
         ],
     )

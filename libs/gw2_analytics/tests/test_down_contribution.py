@@ -8,7 +8,14 @@ Damage table.
 from __future__ import annotations
 
 from gw2_analytics.down_contribution import DownContributionAggregator, DownContributionRow
-from gw2_core import DamageEvent, DeathEvent, DownEvent
+from gw2_core import (
+    CCEvent,
+    CombatOutcomeEvent,
+    DamageEvent,
+    DeathEvent,
+    DownEvent,
+    HealthUpdateEvent,
+)
 
 
 def _damage(
@@ -83,6 +90,58 @@ class TestDownContributionAggregator:
             duration_s=10.0,
         )
         assert rows == []
+
+    def test_modern_pre_down_and_against_downed_are_separate(self) -> None:
+        rows = DownContributionAggregator().aggregate(
+            [
+                _damage(source=1, target=2, damage=100, time_ms=150),
+                DamageEvent(
+                    time_ms=250,
+                    source_agent_id=1,
+                    target_agent_id=2,
+                    skill_id=43,
+                    damage=50,
+                    against_downed=True,
+                ),
+            ],
+            [_down(agent=2, time_ms=200)],
+            [],
+            duration_s=1.0,
+            health_events=[
+                HealthUpdateEvent(
+                    time_ms=100,
+                    source_agent_id=2,
+                    target_agent_id=0,
+                    skill_id=0,
+                    health_percent=89.0,
+                )
+            ],
+            outcome_events=[
+                CombatOutcomeEvent(
+                    time_ms=200,
+                    source_agent_id=1,
+                    target_agent_id=2,
+                    skill_id=42,
+                    outcome="downed",
+                )
+            ],
+            cc_events=[
+                CCEvent(
+                    time_ms=175,
+                    source_agent_id=1,
+                    target_agent_id=2,
+                    skill_id=44,
+                    cc_value=1_000,
+                )
+            ],
+        )
+        row = rows[0]
+        assert row.down_contribution_damage == 100
+        assert row.against_downed_damage == 50
+        assert row.against_downed_count == 1
+        assert row.downs == 1
+        assert row.down_contribution_cc_count == 1
+        assert row.down_contribution_cc_duration_ms == 1_000
 
     def test_kill_attribution(self) -> None:
         """DeathEvent with killed_by_agent_id attributes a kill."""

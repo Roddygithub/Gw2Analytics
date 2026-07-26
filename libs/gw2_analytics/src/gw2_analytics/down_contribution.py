@@ -42,7 +42,15 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict, Field
 
 from gw2_analytics._boon_ids import BOON_SKILL_IDS
-from gw2_core import DamageEvent, DeathEvent, DownEvent
+from gw2_core import (
+    CCEvent,
+    CombatOutcomeEvent,
+    DamageEvent,
+    DeathEvent,
+    DownEvent,
+    HealthUpdateEvent,
+    UpEvent,
+)
 
 
 class DownContributionRow(BaseModel):
@@ -57,8 +65,14 @@ class DownContributionRow(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     source_agent_id: int = Field(..., ge=0)
+    down_contribution_damage: int = Field(default=0, ge=0)
     down_contribution_dps: float = Field(default=0.0, ge=0.0)
+    against_downed_damage: int = Field(default=0, ge=0)
+    against_downed_count: int = Field(default=0, ge=0)
+    downs: int = Field(default=0, ge=0)
     kills: int = Field(default=0, ge=0)
+    down_contribution_cc_count: int = Field(default=0, ge=0)
+    down_contribution_cc_duration_ms: int = Field(default=0, ge=0)
 
 
 @dataclass(slots=True)
@@ -66,7 +80,12 @@ class _DownAccumulator:
     """Mutable accumulator for one source agent's down-contribution stats."""
 
     damage_to_down: int = 0
+    against_downed_damage: int = 0
+    against_downed_count: int = 0
+    downs: int = 0
     kills: int = 0
+    down_contribution_cc_count: int = 0
+    down_contribution_cc_duration_ms: int = 0
 
 
 class DownContributionAggregator:
@@ -75,12 +94,17 @@ class DownContributionAggregator:
     Instantiate once and reuse — the class holds no state.
     """
 
-    def aggregate(
+    def aggregate(  # noqa: PLR0912
         self,
         damage_events: list[DamageEvent],
         down_events: list[DownEvent],
         death_events: list[DeathEvent],
         duration_s: float,
+        *,
+        health_events: list[HealthUpdateEvent] | None = None,
+        up_events: list[UpEvent] | None = None,
+        outcome_events: list[CombatOutcomeEvent] | None = None,
+        cc_events: list[CCEvent] | None = None,
     ) -> list[DownContributionRow]:
         """Compute per-player down-contribution DPS + kill attribution.
 
@@ -101,44 +125,126 @@ class DownContributionAggregator:
 
         Empty input yields ``[]``.
         """
-        if not damage_events and not down_events and not death_events:
+        if not damage_events and not down_events and not death_events and not outcome_events:
             return []
+
+        stats: dict[int, _DownAccumulator] = defaultdict(_DownAccumulator)
+        if health_events:
+            windows = self._pre_down_windows(health_events, down_events)
+            for damage in damage_events:
+                acc = stats[damage.source_agent_id]
+                if damage.against_downed and damage.damage > 0:
+                    acc.against_downed_count += 1
+                    acc.against_downed_damage += damage.damage
+                if damage.damage > 0 and self._in_windows(
+                    damage.target_agent_id, damage.time_ms, windows
+                ):
+                    acc.damage_to_down += damage.damage
+            for crowd_control in cc_events or []:
+                if self._in_windows(crowd_control.target_agent_id, crowd_control.time_ms, windows):
+                    acc = stats[crowd_control.source_agent_id]
+                    acc.down_contribution_cc_count += 1
+                    acc.down_contribution_cc_duration_ms += crowd_control.cc_value
+        else:
+            self._accumulate_legacy_against_downed(
+                damage_events,
+                down_events,
+                death_events,
+                up_events or [],
+                stats,
+            )
+
+        for outcome in outcome_events or []:
+            acc = stats[outcome.source_agent_id]
+            if outcome.outcome == "downed":
+                acc.downs += 1
+            else:
+                acc.kills += 1
+        for death in death_events:
+            if death.killed_by_agent_id is not None:
+                stats[death.killed_by_agent_id].kills += 1
+
+        return self._rows(stats, duration_s)
+
+    @staticmethod
+    def _pre_down_windows(
+        health_events: list[HealthUpdateEvent], down_events: list[DownEvent]
+    ) -> dict[int, list[tuple[int, int]]]:
+        health_by_target: dict[int, list[HealthUpdateEvent]] = defaultdict(list)
+        for event in health_events:
+            health_by_target[event.source_agent_id].append(event)
+        windows: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for down in down_events:
+            start: int | None = None
+            for health in health_by_target.get(down.source_agent_id, []):
+                if health.time_ms >= down.time_ms:
+                    break
+                if health.health_percent > 90.0:
+                    start = None
+                elif start is None:
+                    start = health.time_ms
+            if start is not None:
+                windows[down.source_agent_id].append((start, down.time_ms))
+        return windows
+
+    @staticmethod
+    def _in_windows(
+        target_agent_id: int,
+        time_ms: int,
+        windows: dict[int, list[tuple[int, int]]],
+    ) -> bool:
+        return any(start <= time_ms < end for start, end in windows.get(target_agent_id, []))
+
+    @staticmethod
+    def _accumulate_legacy_against_downed(
+        damage_events: list[DamageEvent],
+        down_events: list[DownEvent],
+        death_events: list[DeathEvent],
+        up_events: list[UpEvent],
+        stats: dict[int, _DownAccumulator],
+    ) -> None:
 
         # Chronological processing: build a unified timeline of all
         # 3 event types, sorted by (time_ms, type_priority).
         # Combat impacts resolve before state transitions on the same tick,
         # matching Elite Insights' against-downed attribution.
-        timeline: list[tuple[int, int, DownEvent | DeathEvent | DamageEvent]] = []
+        timeline: list[tuple[int, int, DownEvent | DeathEvent | UpEvent | DamageEvent]] = []
         for de in down_events:
             timeline.append((de.time_ms, 1, de))
         for death in death_events:
             timeline.append((death.time_ms, 2, death))
+        for up in up_events:
+            timeline.append((up.time_ms, 2, up))
         for dmg in damage_events:
             timeline.append((dmg.time_ms, 0, dmg))
         timeline.sort(key=lambda x: (x[0], x[1]))
 
         # Track which agent_ids are currently in the downed state.
         downed_targets: set[int] = set()
-        stats: dict[int, _DownAccumulator] = defaultdict(_DownAccumulator)
-
         for _time_ms, _prio, event in timeline:
             if isinstance(event, DownEvent):
                 downed_targets.add(event.source_agent_id)
-            elif isinstance(event, DeathEvent):
+            elif isinstance(event, (DeathEvent, UpEvent)):
                 downed_targets.discard(event.source_agent_id)
-                if event.killed_by_agent_id is not None:
-                    stats[event.killed_by_agent_id].kills += 1
             elif isinstance(event, DamageEvent) and event.target_agent_id in downed_targets:
                 if event.skill_id in BOON_SKILL_IDS:
                     continue
                 stats[event.source_agent_id].damage_to_down += event.damage
 
+    @staticmethod
+    def _rows(stats: dict[int, _DownAccumulator], duration_s: float) -> list[DownContributionRow]:
         dps_factor = 1.0 / duration_s if duration_s > 0 else 0.0
         rows = [
             DownContributionRow(
                 source_agent_id=source,
+                down_contribution_damage=acc.damage_to_down,
                 down_contribution_dps=acc.damage_to_down * dps_factor,
+                against_downed_damage=acc.against_downed_damage,
+                against_downed_count=acc.against_downed_count,
+                downs=acc.downs,
                 kills=acc.kills,
+                down_contribution_cc_count=acc.down_contribution_cc_count,
+                down_contribution_cc_duration_ms=acc.down_contribution_cc_duration_ms,
             )
             for source, acc in stats.items()
         ]

@@ -912,12 +912,14 @@ name = "gw2-evtc-parser"
 version = "0.10.25"
 source = { editable = "libs/gw2_evtc_parser" }
 dependencies = [
+    { name = "gw2-analytics" },
     { name = "gw2-core" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "gw2-analytics", editable = "libs/gw2_analytics" },
     { name = "gw2-core", editable = "libs/gw2_core" },
     { name = "pydantic", specifier = ">=2.9" },
 ]

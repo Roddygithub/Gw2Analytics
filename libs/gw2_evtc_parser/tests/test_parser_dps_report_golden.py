@@ -15,10 +15,12 @@ from gw2_core import (
     BuffApplyEvent,
     BuffRemovalEvent,
     CCEvent,
+    CombatOutcomeEvent,
     DamageEvent,
     DeathEvent,
     DownEvent,
     HealingEvent,
+    HealthUpdateEvent,
     SkillActivationEvent,
     StunBreakEvent,
 )
@@ -201,6 +203,32 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: 
         [event for event in events if isinstance(event, DownEvent)],
         [event for event in events if isinstance(event, DeathEvent)],
         duration_s=11.789,
+        health_events=[event for event in events if isinstance(event, HealthUpdateEvent)],
+        outcome_events=[event for event in events if isinstance(event, CombatOutcomeEvent)],
+        cc_events=[event for event in events if isinstance(event, CCEvent)],
     )
     demandred_down = next(row for row in down_rows if row.source_agent_id == 45_947)
-    assert demandred_down.down_contribution_dps * 11.789 == pytest.approx(2_637)
+    assert demandred_down.down_contribution_damage == 15_586
+    assert demandred_down.down_contribution_dps == pytest.approx(15_586 / 11.789)
+    assert demandred_down.against_downed_count == 1
+    assert demandred_down.against_downed_damage == 2_637
+    assert demandred_down.downs == 1
+    assert demandred_down.kills == 0
+    assert demandred_down.down_contribution_cc_count == 1
+    assert demandred_down.down_contribution_cc_duration_ms == 1_000
+
+    harbinger_down = next(
+        event
+        for event in events
+        if isinstance(event, DownEvent) and event.source_agent_id == 53_411
+    )
+    assert harbinger_down.downtime_ms == 1_862
+    health = [
+        event
+        for event in events
+        if isinstance(event, HealthUpdateEvent) and event.source_agent_id == 53_411
+    ]
+    assert any(
+        event.time_ms - 42_047_693 == 6_043 and event.health_percent == 89.92 for event in health
+    )
+    assert sum(event.against_downed and event.damage > 0 for event in demandred_attempts) == 1

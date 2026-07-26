@@ -34,6 +34,7 @@ from gw2_core import (
     BoonApplyEvent,
     BuffRemovalEvent,
     CCEvent,
+    CombatOutcomeEvent,
     DamageEvent,
     DeathEvent,
     DodgeEvent,
@@ -41,9 +42,11 @@ from gw2_core import (
     EliteSpec,
     Event,
     HealingEvent,
+    HealthUpdateEvent,
     InterruptEvent,
     PositionEvent,
     StunBreakEvent,
+    UpEvent,
     is_condition,
 )
 from gw2analytics_api.routes.fights.mappers import AgentIdentity
@@ -493,6 +496,10 @@ def aggregate_combat_readout(
         down_events,
         death_events,
         duration_s,
+        health_events=[e for e in events if isinstance(e, HealthUpdateEvent)],
+        up_events=[e for e in events if isinstance(e, UpEvent)],
+        outcome_events=[e for e in events if isinstance(e, CombatOutcomeEvent)],
+        cc_events=cc_events,
     )
     down_contrib_by_id: dict[int, tuple[float, int]] = {
         r.source_agent_id: (r.down_contribution_dps, r.kills) for r in down_contribution_rows

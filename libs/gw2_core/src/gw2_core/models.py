@@ -326,6 +326,9 @@ class EventType(StrEnum):
     SKILL_ACTIVATION = "SKILL_ACTIVATION"
     WEAPON_SWAP = "WEAPON_SWAP"
     EFFECT = "EFFECT"
+    HEALTH_UPDATE = "HEALTH_UPDATE"
+    UP = "UP"
+    COMBAT_OUTCOME = "COMBAT_OUTCOME"
 
 
 class ActivationType(IntEnum):
@@ -370,6 +373,7 @@ class DamageEvent(BaseEvent):
     damage: int = Field(..., ge=0)
     buff_dmg: int = Field(default=0, ge=0)
     result: int = Field(default=0, ge=0, le=255, description="arcdps combat result byte")
+    against_downed: bool = False
     iff: int = Field(
         default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=SELF"
     )
@@ -614,6 +618,26 @@ class DeathEvent(BaseEvent):
     )
 
 
+class UpEvent(BaseEvent):
+    """One ``ChangeUp`` rally transition for an actor."""
+
+    event_type: Literal[EventType.UP] = EventType.UP
+
+
+class HealthUpdateEvent(BaseEvent):
+    """One actor health percentage update."""
+
+    event_type: Literal[EventType.HEALTH_UPDATE] = EventType.HEALTH_UPDATE
+    health_percent: float = Field(..., ge=0.0, le=100.0)
+
+
+class CombatOutcomeEvent(BaseEvent):
+    """One offensive down or killing-blow result marker."""
+
+    event_type: Literal[EventType.COMBAT_OUTCOME] = EventType.COMBAT_OUTCOME
+    outcome: Literal["downed", "killed"]
+
+
 class StunBreakEvent(BaseEvent):
     """One ``is_statechange == 56`` (StunBreak) statechange event.
 
@@ -853,6 +877,9 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.SKILL_ACTIVATION: SkillActivationEvent,
     EventType.WEAPON_SWAP: WeaponSwapEvent,
     EventType.EFFECT: EffectEvent,
+    EventType.HEALTH_UPDATE: HealthUpdateEvent,
+    EventType.UP: UpEvent,
+    EventType.COMBAT_OUTCOME: CombatOutcomeEvent,
 }
 
 
