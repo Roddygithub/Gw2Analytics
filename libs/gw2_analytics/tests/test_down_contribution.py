@@ -15,7 +15,7 @@ def _damage(
     source: int,
     target: int,
     damage: int,
-    time_ms: int = 0,
+    time_ms: int = 1,
 ) -> DamageEvent:
     return DamageEvent(
         time_ms=time_ms,
@@ -35,7 +35,7 @@ def _down(agent: int, time_ms: int = 0) -> DownEvent:
     )
 
 
-def _death(agent: int, killed_by: int | None = None, time_ms: int = 0) -> DeathEvent:
+def _death(agent: int, killed_by: int | None = None, time_ms: int = 2) -> DeathEvent:
     return DeathEvent(
         time_ms=time_ms,
         source_agent_id=agent,
@@ -74,6 +74,15 @@ class TestDownContributionAggregator:
         assert rows[0].source_agent_id == 1
         assert rows[0].down_contribution_dps == 10.0  # 100 / 10
         assert rows[0].kills == 0
+
+    def test_damage_on_down_tick_resolves_before_down(self) -> None:
+        rows = DownContributionAggregator().aggregate(
+            [_damage(source=1, target=2, damage=100, time_ms=50)],
+            [_down(agent=2, time_ms=50)],
+            [],
+            duration_s=10.0,
+        )
+        assert rows == []
 
     def test_kill_attribution(self) -> None:
         """DeathEvent with killed_by_agent_id attributes a kill."""

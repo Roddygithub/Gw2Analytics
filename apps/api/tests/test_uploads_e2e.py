@@ -111,7 +111,7 @@ def test_uploads_e2e_happy_path() -> None:
     ev = events_resp.json()
     assert len(ev["target_dps"]) == 1
     assert len(ev["target_healing"]) == 1
-    assert ev["duration_s"] > 2.0
+    assert ev["duration_s"] > 1.0
     assert len(ev["event_windows"]) >= 1
 
 

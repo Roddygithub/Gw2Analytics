@@ -70,7 +70,7 @@ class EliteSpec(IntEnum):
     BASE = 0  # No elite spec active
     # Warrior elites
     BERSERKER = 18
-    SPELLBREAKER = 64
+    SPELLBREAKER = 61
     # Guardian elites
     DRAGONHUNTER = 27
     FIREBRAND = 62
@@ -78,51 +78,50 @@ class EliteSpec(IntEnum):
     # Revenant elites
     HERALD = 52
     RENEGADE = 63
-    VINDICATOR = 68
+    VINDICATOR = 69
     # Thief elites
     DAREDEVIL = 55
-    DEADEYE = 71
-    SPECTER = 72
+    SPECTER = 71
+    DEADEYE = 72
     # Engineer elites
     SCRAPPER = 43
     HOLOSMITH = 57
     MECHANIST = 70
     # Ranger elites
     DRUID = 5
-    SOULBEAST = 55  # collides with Daredevil pre-2018
-    UNTAMED = 73  # shared with Troubadour (Mesmer)
+    SOULBEAST = 55  # collides with Daredevil
+    UNTAMED = 72
     # Elementalist elites
     TEMPEST = 48
-    WEAVER = 63  # collides with Renegade historically
+    WEAVER = 63  # collides with Renegade
     CATALYST = 75  # shared with Amalgam (Engineer)
     # Mesmer elites
     CHRONOMANCER = 40
     MIRAGE = 59
-    VIRTUOSO = 74  # shared with Paragon (Warrior)
+    VIRTUOSO = 66
     # Necromancer elites
     REAPER = 34
     SCOURGE = 60
-    HARBINGER = 77  # shared with Antiquary (Thief)
+    HARBINGER = 64
     RITUALIST = 76
 
     # Visions of Eternity — new specs sharing IDs where the profession
-    # disambiguates (same pattern as 55=Soulbeast/Daredevil, 63=Weaver/Renegade):
-    # 73=Untamed/Troubadour, 74=Virtuoso/Paragon, 75=Catalyst/Amalgam,
-    # 77=Harbinger/Antiquary.
+    # disambiguates (same pattern as 55=Soulbeast/Daredevil, 63=Weaver/Renegade,
+    # 75=Catalyst/Amalgam):
     # Guardian
     LUMINARY = 81
     # Warrior
-    PARAGON = 74  # alias: same ID as Virtuoso (Mesmer)
+    PARAGON = 74
     # Engineer
-    AMALGAM = 75  # alias: same ID as Catalyst (Ele)
+    AMALGAM = 75  # shared with Catalyst (Ele)
     # Ranger
     GALESHOT = 78
     # Thief
-    ANTIQUARY = 77  # alias: same ID as Harbinger (Necro)
+    ANTIQUARY = 77
     # Elementalist
     EVOKER = 80
     # Mesmer
-    TROUBADOUR = 73  # alias: same ID as Untamed (Ranger)
+    TROUBADOUR = 73
     # Revenant
     CONDUIT = 79
 
@@ -166,6 +165,10 @@ class EvtcHeader(BaseModel):
     encounter_id: int = Field(default=0, ge=0, le=0xFFFF)
     agent_count: int = Field(..., ge=0, le=10_000)
     skill_count: int = Field(default=0, ge=0, le=100_000)
+    gw2_build: int | None = Field(default=None, ge=0)
+    map_id: int | None = Field(default=None, ge=0)
+    arc_revision: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
 
 
 class Agent(BaseModel):
@@ -180,12 +183,28 @@ class Agent(BaseModel):
     elite_raw: int = Field(
         default=0, ge=0, le=0xFFFFFFFF, description="Raw elite byte for forensics."
     )
+    species_id: int | None = Field(
+        default=None,
+        ge=0,
+        le=0xFFFF,
+        description=(
+            "arcdps species ID for NPC/gadget agents (lower 16 bits of "
+            "prof_raw when elite_raw == 0xFFFFFFFF). None for player agents."
+        ),
+    )
     is_player: bool = Field(
         default=False,
         description=(
             "True for player agents (name is a combo string "
             "'char_name\\0account_name\\0subgroup\\0' in arcdps EVTC). "
             "False for NPCs and gadgets (name is a single null-terminated string)."
+        ),
+    )
+    is_gadget: bool = Field(
+        default=False,
+        description=(
+            "True for gadget agents (elite_raw == 0xFFFFFFFF and "
+            "prof_raw >> 16 == 0xFFFF). Gadgets are objects, not NPCs."
         ),
     )
     account_name: str | None = Field(
@@ -197,6 +216,12 @@ class Agent(BaseModel):
         default=None,
         max_length=128,
         description="arcdps subgroup string (e.g. 'Subgroup 1' or empty). None for NPCs.",
+    )
+    instance_id: int = Field(default=0, ge=0, le=0xFFFF)
+    team_id: int = Field(
+        default=0,
+        ge=0,
+        description="Latest team identifier from TeamChange events. 0 when unavailable.",
     )
 
 
@@ -234,6 +259,8 @@ class Fight(BaseModel):
         ),
     )
     game_type: GameType = Field(default=GameType.WVW)
+    success: bool | None = None
+    ei_encounter_id: int | None = Field(default=None, ge=0)
 
     # Parser-driven payload (V0)
     header: EvtcHeader | None = None
@@ -296,6 +323,20 @@ class EventType(StrEnum):
     BARRIER = "BARRIER"
     BUFF_APPLY = "BUFF_APPLY"
     POSITION = "POSITION"
+    SKILL_ACTIVATION = "SKILL_ACTIVATION"
+    WEAPON_SWAP = "WEAPON_SWAP"
+    EFFECT = "EFFECT"
+
+
+class ActivationType(IntEnum):
+    """arcdps ``is_activation`` byte values."""
+
+    NORMAL = 1
+    QUICKNESS = 2
+    MINIMUM = 3
+    CANCEL = 4
+    RESET = 5
+    NO_DATA = 6
 
 
 class BaseEvent(BaseModel):
@@ -327,10 +368,17 @@ class DamageEvent(BaseEvent):
 
     event_type: Literal[EventType.DAMAGE] = EventType.DAMAGE
     damage: int = Field(..., ge=0)
-    #: arcdps ``buff_dmg`` from the raw cbtevent record — the condi
-    #: portion of this hit for builds >= 20240501.  Default 0 for
-    #:    backward-compat with legacy (pre-v0.12.1) streams.
     buff_dmg: int = Field(default=0, ge=0)
+    result: int = Field(default=0, ge=0, le=255, description="arcdps combat result byte")
+    iff: int = Field(
+        default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=SELF"
+    )
+    src_master_instid: int = Field(
+        default=0, ge=0, le=0xFFFF, description="arcdps src_master_instid from cbtevent"
+    )
+    dst_master_instid: int = Field(
+        default=0, ge=0, le=0xFFFF, description="arcdps dst_master_instid from cbtevent"
+    )
 
 
 class HealingEvent(BaseEvent):
@@ -348,10 +396,16 @@ class HealingEvent(BaseEvent):
 
     event_type: Literal[EventType.HEALING] = EventType.HEALING
     healing: int = Field(..., ge=0)
-    #: arcdps ``buff_dmg`` from the raw cbtevent record for heal-class
-    #: events — the barrier (shield) portion of this heal hit.
-    #: Default 0 for    backward-compat with legacy (pre-v0.12.1) streams.
     barrier: int = Field(default=0, ge=0)
+    iff: int = Field(
+        default=0, ge=0, le=255, description="arcdps iff byte: 0=FRIEND, 1=FOE, 2=SELF"
+    )
+    src_master_instid: int = Field(
+        default=0, ge=0, le=0xFFFF, description="arcdps src_master_instid from cbtevent"
+    )
+    dst_master_instid: int = Field(
+        default=0, ge=0, le=0xFFFF, description="arcdps dst_master_instid from cbtevent"
+    )
 
 
 class BuffRemovalEvent(BaseEvent):
@@ -449,9 +503,7 @@ class CCEvent(BaseEvent):
     table ``CC appliqués`` column. ``cc_value`` is the magnitude of
     the crowd-control effect (defiance-bar damage or duration in
     milliseconds — exact semantics TBD during parser integration).
-    Emitted from arcdps defiance-bar / breakbar statechange records
-    once the parser is extended; until then this model exists only
-    for API/aggregator design.
+    Emitted from combat records whose result byte is CBT_RESULT=12.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -738,6 +790,10 @@ class BuffApplyEvent(BaseEvent):
     source_agent_id: int = Field(..., ge=0)
     target_agent_id: int = Field(..., ge=0)
     skill_id: int = Field(..., ge=0)
+    duration_ms: int = Field(default=0, ge=0)
+    original_duration_ms: int = Field(default=0, ge=0)
+    stacks: int = Field(default=1, ge=1)
+    initial: bool = True
 
 
 class PositionEvent(BaseEvent):
@@ -752,6 +808,30 @@ class PositionEvent(BaseEvent):
     skill_id: int = Field(..., ge=0)
     x: float
     y: float
+
+
+class SkillActivationEvent(BaseEvent):
+    """One raw arcdps skill activation start or stop marker."""
+
+    event_type: Literal[EventType.SKILL_ACTIVATION] = EventType.SKILL_ACTIVATION
+    activation: ActivationType
+    duration_ms: int = Field(..., ge=0)
+    expected_duration_ms: int = Field(..., ge=0)
+
+
+class WeaponSwapEvent(BaseEvent):
+    """One arcdps weapon-set transition."""
+
+    event_type: Literal[EventType.WEAPON_SWAP] = EventType.WEAPON_SWAP
+    swapped_from: int = Field(..., ge=0)
+    swapped_to: int = Field(..., ge=0)
+
+
+class EffectEvent(BaseEvent):
+    """One effect creation resolved through an arcdps ID-to-GUID record."""
+
+    event_type: Literal[EventType.EFFECT] = EventType.EFFECT
+    guid: str = Field(..., min_length=32, max_length=32)
 
 
 _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
@@ -770,6 +850,9 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.INTERRUPT: InterruptEvent,
     EventType.BUFF_APPLY: BuffApplyEvent,
     EventType.POSITION: PositionEvent,
+    EventType.SKILL_ACTIVATION: SkillActivationEvent,
+    EventType.WEAPON_SWAP: WeaponSwapEvent,
+    EventType.EFFECT: EffectEvent,
 }
 
 

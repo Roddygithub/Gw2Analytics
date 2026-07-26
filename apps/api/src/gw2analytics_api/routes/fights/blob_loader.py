@@ -58,6 +58,21 @@ logger = logging.getLogger(__name__)
 
 
 def _duration_s_from_events(events: list[Event]) -> float:
+    if not events:
+        return 0.0
+    # WvW sessions span hours but actual combat is seconds.
+    # Find the time range of meaningful combat events (damage/healing hits).
+    first_combat = 0
+    last_combat = 0
+    for e in events:
+        dmg = getattr(e, "damage", 0) or 0
+        heal = getattr(e, "healing", 0) or 0
+        if dmg > 0 or heal > 0:
+            if first_combat == 0:
+                first_combat = e.time_ms
+            last_combat = e.time_ms
+    if last_combat > first_combat:
+        return (last_combat - first_combat) / 1000.0
     return max(e.time_ms for e in events) / 1000.0
 
 

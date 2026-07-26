@@ -106,17 +106,15 @@ class DownContributionAggregator:
 
         # Chronological processing: build a unified timeline of all
         # 3 event types, sorted by (time_ms, type_priority).
-        # type_priority ensures deterministic ordering when events
-        # share the same time_ms: 0=DownEvent, 1=DeathEvent, 2=DamageEvent.
-        # DownEvents come first so the downed state is set before
-        # DamageEvents at the same timestamp check it.
+        # Combat impacts resolve before state transitions on the same tick,
+        # matching Elite Insights' against-downed attribution.
         timeline: list[tuple[int, int, DownEvent | DeathEvent | DamageEvent]] = []
         for de in down_events:
-            timeline.append((de.time_ms, 0, de))
+            timeline.append((de.time_ms, 1, de))
         for death in death_events:
-            timeline.append((death.time_ms, 1, death))
+            timeline.append((death.time_ms, 2, death))
         for dmg in damage_events:
-            timeline.append((dmg.time_ms, 2, dmg))
+            timeline.append((dmg.time_ms, 0, dmg))
         timeline.sort(key=lambda x: (x[0], x[1]))
 
         # Track which agent_ids are currently in the downed state.

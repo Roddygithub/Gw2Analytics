@@ -116,6 +116,15 @@ def backfill_role_detection(
             total_buff_removal=row.total_buff_removal,
             profession_int=row.profession,
             elite_spec_int=row.elite_spec,
+            power_damage=row.power_damage,
+            condi_damage=row.condi_damage,
+            outgoing_quickness=row.outgoing_quickness,
+            outgoing_alacrity=row.outgoing_alacrity,
+            outgoing_stability=row.outgoing_stability,
+            outgoing_resistance=row.outgoing_resistance,
+            outgoing_aegis=row.outgoing_aegis,
+            outgoing_protection=row.outgoing_protection,
+            outgoing_might=row.outgoing_might,
         )
         row.detected_role = role
         row.detected_tags = tags

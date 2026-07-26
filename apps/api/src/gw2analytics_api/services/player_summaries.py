@@ -284,19 +284,28 @@ def _write_summary_and_boon_rows(
                 account_name,
             )
             continue
-        detected_role, detected_tags = detect_role_lite(
-            total_damage=bucket.damage,
-            total_healing=bucket.healing,
-            total_buff_removal=bucket.strip,
-            profession_int=bucket.prof,
-            elite_spec_int=bucket.elite,
-        )
         boon_kwargs = _boon_fields_for_account(
             account_name,
             bucket,
             account_to_agent_ids,
             uptimes_by_agent,
             outgoing_by_agent,
+        )
+        detected_role, detected_tags = detect_role_lite(
+            total_damage=bucket.damage,
+            total_healing=bucket.healing,
+            total_buff_removal=bucket.strip,
+            profession_int=bucket.prof,
+            elite_spec_int=bucket.elite,
+            power_damage=bucket.power,
+            condi_damage=bucket.condi,
+            outgoing_quickness=boon_kwargs.get("outgoing_quickness"),
+            outgoing_alacrity=boon_kwargs.get("outgoing_alacrity"),
+            outgoing_stability=boon_kwargs.get("outgoing_stability"),
+            outgoing_resistance=boon_kwargs.get("outgoing_resistance"),
+            outgoing_aegis=boon_kwargs.get("outgoing_aegis"),
+            outgoing_protection=boon_kwargs.get("outgoing_protection"),
+            outgoing_might=boon_kwargs.get("outgoing_might"),
         )
         summary_rows.append(
             {
@@ -381,7 +390,8 @@ def _persist_player_summaries(
         [a for a in orm_fight.agents if a.is_player and a.account_name],
     )
     skill_name_map: dict[int, str | None] = {int(s.skill_id): s.name for s in orm_fight.skills}
-    buff_tracker = BuffStateTracker()
+    first_time_ms = min((e.time_ms for e in events), default=0)
+    buff_tracker = BuffStateTracker(start_time_ms=first_time_ms)
 
     per_account = _process_events_to_buckets(
         events,
@@ -392,7 +402,7 @@ def _persist_player_summaries(
 
     if events:
         last_time_ms = max((e.time_ms for e in events), default=0)
-        duration_s = last_time_ms / 1000.0
+        duration_s = (last_time_ms - first_time_ms) / 1000.0
     else:
         duration_s = 0.0
 

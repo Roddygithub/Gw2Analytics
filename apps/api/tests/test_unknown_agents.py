@@ -322,7 +322,7 @@ def test_unknown_agents_large_scale_500_entries() -> None:
     )
     assert events_resp.status_code == 200, events_resp.text
     summary = events_resp.json()
-    assert summary["duration_s"] == pytest.approx((1_000 + (n_unknown - 1) * 10) / 1000, rel=0.1)
+    assert summary["duration_s"] == pytest.approx(n_unknown * 10 / 1000, rel=0.1)
     # target_dps has 500 rows (capped at 100 by the rollup cap)
     assert len(summary["target_dps"]) == 100, (
         f"target_dps should be capped at 100 rows, got {len(summary['target_dps'])}"

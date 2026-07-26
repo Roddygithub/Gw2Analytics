@@ -73,7 +73,7 @@ from sqlalchemy.orm import Session
 
 from gw2analytics_api.models import OrmFight, OrmFightAgent, OrmFightSkill
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession
-from gw2analytics_api.schemas import AgentOut, FightOut, SkillOut
+from gw2analytics_api.schemas import AgentOut, FightOut
 
 
 def agent_id_to_name(db: Session, fight_id: str) -> dict[int, str | None]:
@@ -141,7 +141,10 @@ def skill_id_to_name(db: Session, fight_id: str) -> dict[int, str]:
     }
 
 
-def _to_fight_out(fight: OrmFight) -> FightOut:
+def _to_fight_out(
+    fight: OrmFight,
+    agents: list[OrmFightAgent] | None = None,
+) -> FightOut:
     return FightOut(
         id=fight.id,
         build_version=fight.build_version,
@@ -159,15 +162,26 @@ def _to_fight_out(fight: OrmFight) -> FightOut:
                 account_name=a.account_name,
                 subgroup=a.subgroup,
             )
-            for a in fight.agents
+            for a in (agents or fight.agents)
         ],
-        skills=[SkillOut(id=s.skill_id, name=s.name) for s in fight.skills],
+    )
+
+
+def _to_fight_out_list(fight: OrmFight) -> FightOut:
+    return FightOut(
+        id=fight.id,
+        build_version=fight.build_version,
+        encounter_id=fight.encounter_id,
+        agent_count=fight.agent_count,
+        started_at=fight.started_at,
+        game_type=fight.game_type,
     )
 
 
 __all__ = [
     "AgentIdentity",
     "_to_fight_out",
+    "_to_fight_out_list",
     "agent_id_to_identity",
     "agent_id_to_name",
     "agent_id_to_subgroup",

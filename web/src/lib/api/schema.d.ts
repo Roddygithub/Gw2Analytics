@@ -39,16 +39,6 @@ export interface paths {
         /**
          * List Fights
          * @description Return up to ``limit`` fights (skipping the first ``offset``).
-         *
-         *     v0.10.12 PR 3.2: the pre-PR-3.2 response shape was a naked
-         *     ``list[FightOut]`` which carried no pagination cursor on the
-         *     wire. The wrapper :class:`FightsPageOut` carries both the
-         *     trimmed page (the ``fights`` list) AND the cursor (``limit``
-         *     + ``offset``) so a future frontend pagination UX can render
-         *     "Showing X-Y of N" without a second round-trip. See the
-         *     schema docstring for the cursor-vs-total-count design
-         *     trade-off (we deliberately omit ``total_count`` to avoid
-         *     forcing a per-request ``COUNT(*)`` query).
          */
         get: operations["list_fights_api_v1_fights_get"];
         put?: never;

@@ -5,17 +5,16 @@ boon columns in ``OrmFightPlayerSummary`` (plan 172 Phase B).
 
 Algorithm
 =========
-1. Maintain per-agent per-buff stack count + last-update timestamp.
+1. Maintain per-agent per-buff stack expirations + last-update timestamp.
 2. Process ``BoonApplyEvent`` stream chronologically (events are assumed
    to be in ascending ``time_ms`` order per the parser emit contract).
 3. Before each state change, compute the elapsed time since the last
    event for that (agent, buff) pair and accumulate stack-time:
    ``cumulative_stack_ms += current_stacks * delta_time_ms``.
-4. After processing all events, compute the tail period from the last
-   event timestamp to the fight duration.
-5. Uptime = ``cumulative_stack_ms / (duration_ms * max_stacks)`` where
-   ``max_stacks`` is the maximum number of stacks a buff can have
-   (1 for most boons, 25 for might).
+4. Expire stacks at the duration encoded by arcdps, even when no explicit
+   removal event follows.
+5. Duration boons report percentage uptime; intensity boons report their
+   average stack count, matching Elite Insights.
 6. Outgoing: on ``BoonApplyEvent`` where ``source != target``, accumulate
    ``duration_ms * stacks`` applied to others.
 
@@ -57,9 +56,10 @@ TRACKED_BUFFS: dict[str, int] = {
 #: Reverse lookup: skill_id → buff name.
 BUFF_NAME_BY_ID: dict[int, str] = {v: k for k, v in TRACKED_BUFFS.items()}
 
-#: Maximum stacks per buff. Most boons cap at 1; might caps at 25.
+#: Maximum stacks per buff. Most boons cap at 1; intensity boons cap at 25.
 MAX_STACKS: dict[str, int] = {
     "might": 25,
+    "stability": 25,
 }
 # All other boons default to 1 stack max (handled in compute logic).
 
@@ -74,7 +74,7 @@ class PlayerBuffUptimeOut(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     agent_id: int
-    # Uptime percentages [0.0, 100.0] for each tracked buff.
+    # Duration boons use percentages; intensity boons use average stacks.
     might_uptime: float | None = None
     fury_uptime: float | None = None
     quickness_uptime: float | None = None
@@ -120,7 +120,7 @@ class _BuffStack:
     """Mutable per-(agent, buff) stack tracking state."""
 
     def __init__(self, name: str) -> None:
-        self.stacks: int = 0
+        self.expirations: list[int | None] = []
         self.last_time_ms: int = 0
         self.cumulative_stack_ms: int = 0
         self.name: str = name
@@ -149,7 +149,7 @@ class BuffStateTracker:
     Events MUST be in chronological order (ascending ``time_ms``).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, start_time_ms: int = 0) -> None:
         # Per-agent per-buff stack state.
         # {agent_id: {buff_name: _BuffStack}}
         self._agent_buffs: dict[int, dict[str, _BuffStack]] = defaultdict(dict)
@@ -157,6 +157,7 @@ class BuffStateTracker:
         self._outgoing: dict[int, dict[str, _OutgoingAccumulator]] = defaultdict(
             lambda: defaultdict(_OutgoingAccumulator),
         )
+        self._start_time_ms = start_time_ms
 
     def _get_stack(self, agent_id: int, buff_name: str) -> _BuffStack:
         """Get or create the stack tracker for (agent, buff)."""
@@ -165,11 +166,28 @@ class BuffStateTracker:
             agent[buff_name] = _BuffStack(buff_name)
         return agent[buff_name]
 
-    def _accumulate_uptime(self, stack: _BuffStack, new_time_ms: int) -> None:
-        """Accumulate stack-time for the period ``[stack.last_time_ms, new_time_ms)``."""
-        if stack.last_time_ms < new_time_ms and stack.stacks > 0:
-            delta = new_time_ms - stack.last_time_ms
-            stack.cumulative_stack_ms += stack.stacks * delta
+    @staticmethod
+    def _advance(stack: _BuffStack, new_time_ms: int) -> None:
+        """Accumulate stack-time through expirations up to ``new_time_ms``."""
+        while True:
+            next_expiry = min(
+                (expiry for expiry in stack.expirations if expiry is not None),
+                default=None,
+            )
+            if next_expiry is None or next_expiry > new_time_ms:
+                break
+            stack.cumulative_stack_ms += len(stack.expirations) * (
+                next_expiry - stack.last_time_ms
+            )
+            stack.last_time_ms = next_expiry
+            stack.expirations.remove(next_expiry)
+        stack.cumulative_stack_ms += len(stack.expirations) * (
+            new_time_ms - stack.last_time_ms
+        )
+        stack.last_time_ms = new_time_ms
+
+    def _relative_time(self, time_ms: int) -> int:
+        return max(0, time_ms - self._start_time_ms)
 
     def process(self, event: BoonApplyEvent | BuffApplyEvent) -> None:
         """Process one ``BoonApplyEvent`` or ``BuffApplyEvent`` and update state.
@@ -194,16 +212,26 @@ class BuffStateTracker:
 
         # --- Self-uptime tracking (target-side) ---
         target_tracker = self._get_stack(event.target_agent_id, buff_name)
-        self._accumulate_uptime(target_tracker, event.time_ms)
+        time_ms = self._relative_time(event.time_ms)
+        self._advance(target_tracker, time_ms)
 
         if event.kind == "apply":
-            target_tracker.stacks += event.stacks
+            if _max_stacks_for(buff_name) > 1:
+                target_tracker.expirations.extend(
+                    [time_ms + event.duration_ms] * event.stacks
+                )
+                del target_tracker.expirations[_max_stacks_for(buff_name) :]
+            elif event.duration_ms > 0 and None not in target_tracker.expirations:
+                current_expiry = max(target_tracker.expirations, default=time_ms)
+                target_tracker.expirations = [
+                    max(time_ms, current_expiry) + event.duration_ms
+                ]
         elif event.kind == "remove_single":
-            target_tracker.stacks = max(0, target_tracker.stacks - 1)
+            if target_tracker.expirations:
+                finite = [expiry for expiry in target_tracker.expirations if expiry is not None]
+                target_tracker.expirations.remove(min(finite) if finite else None)
         elif event.kind == "remove_all":
-            target_tracker.stacks = 0
-
-        target_tracker.last_time_ms = event.time_ms
+            target_tracker.expirations.clear()
 
         # --- Outgoing boon tracking (source-side) ---
         if event.source_agent_id != event.target_agent_id:
@@ -215,9 +243,7 @@ class BuffStateTracker:
         """Process a ``BuffApplyEvent`` (CBTS_BUFFAPPLY statechange).
 
         These are initial-stack snapshots: ``skill_id`` is the buff ID,
-        and the event marks the target as having the buff active. Treat
-        this as setting the stack count to 1 (arcdps doesn't encode the
-        stack count on BUFFAPPLY statechanges).
+        and the event includes the active stack count and remaining duration.
 
         Outgoing generation is intentionally NOT tracked here. The
         statechange snapshot only records the presence of a buff on the
@@ -229,16 +255,15 @@ class BuffStateTracker:
             return
 
         target_tracker = self._get_stack(event.target_agent_id, buff_name)
-        self._accumulate_uptime(target_tracker, event.time_ms)
-
-        target_tracker.stacks = max(1, target_tracker.stacks)
-
-        target_tracker.last_time_ms = event.time_ms
+        time_ms = self._relative_time(event.time_ms)
+        self._advance(target_tracker, time_ms)
+        expiry = time_ms + event.duration_ms if event.duration_ms > 0 else None
+        target_tracker.expirations = [expiry] * event.stacks
 
     def compute_player_uptimes(self, agent_id: int, duration_ms: int) -> dict[str, float]:
-        """Compute uptime percentages for one player after processing all events.
+        """Compute boon uptime for one player after processing all events.
 
-        Returns a dict mapping buff_name → uptime_pct [0.0, 100.0].
+        Duration boons return percentages; intensity boons return average stacks.
         Buffs not present for this player return 0.0.
         """
         if duration_ms <= 0:
@@ -251,17 +276,19 @@ class BuffStateTracker:
             if stack is None:
                 result[name] = 0.0
                 continue
-            # Add tail using a local copy so repeated calls remain idempotent.
-            total_cumulative_ms = stack.cumulative_stack_ms
-            if stack.last_time_ms < duration_ms and stack.stacks > 0:
-                tail_delta = duration_ms - stack.last_time_ms
-                total_cumulative_ms += stack.stacks * tail_delta
-            max_st = _max_stacks_for(name)
-            max_possible = duration_ms * max_st
-            if max_possible > 0:
-                result[name] = min(100.0, (total_cumulative_ms / max_possible) * 100.0)
+            # Advance a copy so repeated computations remain idempotent.
+            snapshot = _BuffStack(name)
+            snapshot.expirations = stack.expirations.copy()
+            snapshot.last_time_ms = stack.last_time_ms
+            snapshot.cumulative_stack_ms = stack.cumulative_stack_ms
+            self._advance(snapshot, duration_ms)
+            if _max_stacks_for(name) > 1:
+                result[name] = snapshot.cumulative_stack_ms / duration_ms
             else:
-                result[name] = 0.0
+                result[name] = min(
+                    100.0,
+                    (snapshot.cumulative_stack_ms / duration_ms) * 100.0,
+                )
         return result
 
     def compute_all_uptimes(self, duration_s: float) -> dict[int, dict[str, float]]:
