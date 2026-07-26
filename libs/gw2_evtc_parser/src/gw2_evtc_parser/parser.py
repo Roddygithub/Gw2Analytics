@@ -260,12 +260,16 @@ _EVENT_STRUCT_2025: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHH16B")
 #: Optimized event struct for EVTC2025+ builds.  Reads the fields
 #: consumed by :meth:`PythonEvtcParser.parse_events` using the
 #: standard flag byte positions:
+#:   byte 40-41 = src_instid
+#:   byte 42-43 = dst_instid
+#:   byte 44-45 = src_master_instid
+#:   byte 46-47 = dst_master_instid
 #:   byte 48 = iff
 #:   byte 49 = ev.buff
 #:   byte 50 = result
 #:   byte 52 = is_buffremove
 #:   byte 56 = is_statechange
-_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct("<QQQii 4x I 8x bbbx b 3x b 7x")
+_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct("<QQQii 4x I HHHH bbbx b 3x b 7x")
 
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
 #: byte values 1, 2, 3 ↔ ``BoonApplyEvent.kind: Literal["remove_all",
@@ -357,14 +361,14 @@ ACCOUNT_NAME_PREFIX: Final[bytes] = b":"
 #: 75, 77) resolve via the profession check.
 _VALID_ELITE_BY_PROFESSION: Final[dict[int, set[int]]] = {
     1: {27, 62, 65, 81},  # Guardian
-    2: {18, 64, 74},  # Warrior
+    2: {18, 61, 74},  # Warrior — Berserker, Spellbreaker, Paragon
     3: {43, 57, 70, 75},  # Engineer
-    4: {5, 55, 73, 78},  # Ranger
-    5: {55, 71, 72, 77},  # Thief
+    4: {5, 55, 72, 78},  # Ranger — Druid, Soulbeast, Untamed, Galeshot
+    5: {55, 71, 72, 77},  # Thief — Daredevil, Specter, Deadeye, Antiquary
     6: {48, 63, 75, 80},  # Elementalist
-    7: {40, 59, 74, 73},  # Mesmer
-    8: {34, 60, 77, 76},  # Necromancer
-    9: {52, 63, 68, 79},  # Revenant
+    7: {40, 59, 66, 73},  # Mesmer — Chronomancer, Mirage, Virtuoso, Troubadour
+    8: {34, 60, 64, 76},  # Necromancer — Reaper, Scourge, Harbinger, Ritualist
+    9: {52, 63, 69, 79},  # Revenant — Herald, Renegade, Vindicator, Conduit
 }
 
 
@@ -505,6 +509,20 @@ class PythonEvtcParser:
         # Populated by ChangeDown (byte 5), consumed by ChangeUp (byte 6)
         # and ChangeDead (byte 4).
         down_start: dict[int, int] = {}
+        # First pass: build instance_id -> agent_id mapping from event stream.
+        # Used to attribute minion/NPC damage to the owning player via
+        # src_master_instid.
+        inst_to_agent: dict[int, int] = {}
+        if is_evtc_2025:
+            scan_cursor = offset
+            while scan_cursor + EVENT_SIZE <= end:
+                (_stime, s_src, s_dst, _sv, _sbd, _ssid,
+                 s_src_inst, s_dst_inst, _ssmi, _sdmi, *_srest) = _unpack_event(data, scan_cursor)
+                if s_src != 0 and s_src_inst != 0:
+                    inst_to_agent.setdefault(s_src_inst, s_src)
+                if s_dst != 0 and s_dst_inst != 0:
+                    inst_to_agent.setdefault(s_dst_inst, s_dst)
+                scan_cursor += EVENT_SIZE
         while cursor + EVENT_SIZE <= end:
             if is_evtc_2025:
                 (
@@ -514,6 +532,15 @@ class PythonEvtcParser:
                     value,
                     buff_dmg,
                     skill_id,
+                    # bytes 40-41: src_instid
+                    # bytes 42-43: dst_instid
+                    # bytes 44-45: src_master_instid
+                    # bytes 46-47: dst_master_instid
+                    _src_inst,
+                    _dst_inst,
+                    src_master_inst,
+                    dst_master_inst,
+                    # byte 48 = arcdps ``iff``
                     _iff,
                     # byte 49 = arcdps ``ev.buff`` field -- the buff ID for
                     # mid-combat APPLY records per F1 byte mapping.
@@ -526,8 +553,17 @@ class PythonEvtcParser:
                     # byte 56 = arcdps ``is_statechange`` byte.
                     is_statechange,
                 ) = _unpack_event(data, cursor)
-                # arcdps result enum: 13 = CBTR_HEAL, 14 = CBTR_BUFFHEAL.
-                is_nondamage = 1 if _result in (13, 14) else 0
+                # Resolve master-instance attribution: when src_master_instid
+                # is non-zero the event comes from a minion/pet/gadget owned
+                # by the agent whose instance_id matches.
+                if src_master_inst:
+                    resolved = inst_to_agent.get(src_master_inst)
+                    if resolved is not None:
+                        src_agent = resolved
+                # 2025+: iff=0 (FRIEND) = healing, iff!=0 (FOE) = damage.
+                # The result byte no longer carries heal/damage discrimination;
+                # values 13/14 are CBTR_INVERT / CBTR_BUFF_DAMAGECYCLE (damage).
+                is_nondamage = 1 if _iff == 0 else 0
             else:
                 (
                     time_ms,
@@ -838,27 +874,25 @@ class PythonEvtcParser:
                 # was written), which is exactly an APPLY for that
                 # ``skill_id`` buff.
                 #
-                # Real EVTC2025+ logs carry ``value`` / ``buff_dmg`` on
-                # many buff-interaction records (condition ticks,
-                # heal-and-apply combos, etc.). Those records are still
-                # buff applies at the ``ev.buff`` level; downstream
-                # ``BuffStateTracker`` ignores untracked skill_ids, so
-                # condition ticks are safely no-ops. Keep the dedicated
-                # ``continue`` here so the same record does NOT also
-                # emit a DamageEvent/HealingEvent from the ``value``
-                # field, which carries buff metadata rather than real
-                # damage/heal for these interaction records.
-                #
-                # Conservative default ``duration_ms=0``: cbtevent does
-                # not carry a duration field; the buff duration lives
-                # in the project skills DB (loaded in Phase 10 by the
-                # upstream buff_uptime.accumulate_buff_events aggregator).
-                # Conservative default ``stacks=1``: cbtevent does not
-                # carry a stacks field; mid-combat apply events in
-                # arcdps represent a single stack magnitude delta (a
-                # future arcdps revision could emit multi-stack applies
-                # -- locked in Phase 10 once the aggregator surfaces
-                # the stack-count delta).
+                # In 2025+, healing events (iff=0) also carry buff=1
+                # because arcdps records them as buff-interaction records.
+                # Yield the healing component before the BoonApplyEvent
+                # so healing is not lost.
+                if is_nondamage:
+                    heal_magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                    barrier = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
+                    if heal_magnitude > 0 or barrier > 0:
+                        yield HealingEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                            healing=heal_magnitude,
+                            barrier=barrier,
+                    iff=_iff & 0xFF if is_evtc_2025 else 0,
+                    src_master_instid=src_master_inst if is_evtc_2025 else 0,
+                    dst_master_instid=dst_master_inst if is_evtc_2025 else 0,
+                )
                 yield BoonApplyEvent(
                     time_ms=time_ms,
                     source_agent_id=src_agent,
@@ -868,10 +902,6 @@ class PythonEvtcParser:
                     stacks=1,
                     kind="apply",
                 )
-                # Same rationale as the REMOVE branch above: the
-                # cbtevent ``value`` field carries buff metadata,
-                # not damage.  Prevent fall-through to the damage /
-                # heal path below.
                 continue
             # v0.11.0 hotfix: sanity cap on damage/heal values.
             # Real GW2 damage per individual hit fits easily within
@@ -937,6 +967,9 @@ class PythonEvtcParser:
                     # of the hit; the aggregator-tier DpsSplitGetter
                     # decides how to use it based on build date.
                     buff_dmg=buff_strip,
+                    iff=_iff & 0xFF if is_evtc_2025 else 0,
+                    src_master_instid=src_master_inst if is_evtc_2025 else 0,
+                    dst_master_instid=dst_master_inst if is_evtc_2025 else 0,
                 )
             else:
                 # ``is_nondamage > 0`` is the healing-class signal. We
@@ -955,6 +988,9 @@ class PythonEvtcParser:
                         # records.  On heal records arcdps encodes the
                         # barrier/shield portion in buff_dmg.
                         barrier=buff_strip,
+                        iff=_iff & 0xFF if is_evtc_2025 else 0,
+                        src_master_instid=src_master_inst if is_evtc_2025 else 0,
+                        dst_master_instid=dst_master_inst if is_evtc_2025 else 0,
                     )
                 # Phase 8 buff-strip emission. Yields a SEPARATE
                 # ``BuffRemovalEvent`` event alongside the heal (or
@@ -1631,15 +1667,39 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
     # EVTC2025+ logs use official GW2 v2 API IDs natively.
     elite = _validate_elite_for_profession(prof_raw, elite_raw)
 
+    # NPC/Gadget detection via elite_raw == 0xFFFFFFFF.
+    # This is the definitive arcdps signal: players always have
+    # a valid elite spec ID (0 for core), while NPCs/gadgets
+    # set the field to uint32 max.
+    species_id: int | None = None
+    is_gadget = False
+    if elite_raw == 0xFFFFFFFF:
+        is_player = False
+        species_id = prof_raw & 0xFFFF
+        is_gadget = (prof_raw >> 16) == 0xFFFF
+
+    # Enemy players in 2025+ format have prof_raw in [1,9] and
+    # elite_raw != 0xFFFFFFFF but no combo string (no account_name,
+    # no subgroup). Classify them as players too.
+    # The _subgroup field discriminates: player agents have non-zero
+    # subgroup (squad/party assignment), NPCs have subgroup=0.
+    if not is_player and _subgroup != 0 and 1 <= prof_raw <= 9 and elite_raw != 0xFFFFFFFF and char_name:
+        is_player = True
+        if not subgroup:
+            subgroup = str(_subgroup)
+
     return Agent(
         id=addr,
         name=char_name,
         profession=profession,
         elite=elite,
         elite_raw=elite_raw,
+        species_id=species_id,
         is_player=is_player,
+        is_gadget=is_gadget,
         account_name=account_name,
         subgroup=subgroup,
+        team_id=_subgroup,
     )
 
 
@@ -1700,13 +1760,23 @@ def _decode_agent(data: bytes, offset: int) -> Agent:
     # collision IDs 55, 63, 73, 74, 75, 77).
     elite = _validate_elite_for_profession(prof_raw, elite_raw)
 
+    # NPC/Gadget detection via elite_raw == 0xFFFFFFFF.
+    species_id: int | None = None
+    is_gadget = False
+    if elite_raw == 0xFFFFFFFF:
+        is_player = False
+        species_id = prof_raw & 0xFFFF
+        is_gadget = (prof_raw >> 16) == 0xFFFF
+
     return Agent(
         id=aid,
         name=char_name,
         profession=profession,
         elite=elite,
         elite_raw=elite_raw,
+        species_id=species_id,
         is_player=is_player,
+        is_gadget=is_gadget,
         account_name=account_name,
         subgroup=subgroup,
     )

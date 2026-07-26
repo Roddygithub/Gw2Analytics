@@ -284,19 +284,28 @@ def _write_summary_and_boon_rows(
                 account_name,
             )
             continue
-        detected_role, detected_tags = detect_role_lite(
-            total_damage=bucket.damage,
-            total_healing=bucket.healing,
-            total_buff_removal=bucket.strip,
-            profession_int=bucket.prof,
-            elite_spec_int=bucket.elite,
-        )
         boon_kwargs = _boon_fields_for_account(
             account_name,
             bucket,
             account_to_agent_ids,
             uptimes_by_agent,
             outgoing_by_agent,
+        )
+        detected_role, detected_tags = detect_role_lite(
+            total_damage=bucket.damage,
+            total_healing=bucket.healing,
+            total_buff_removal=bucket.strip,
+            profession_int=bucket.prof,
+            elite_spec_int=bucket.elite,
+            power_damage=bucket.power,
+            condi_damage=bucket.condi,
+            outgoing_quickness=boon_kwargs.get("outgoing_quickness"),
+            outgoing_alacrity=boon_kwargs.get("outgoing_alacrity"),
+            outgoing_stability=boon_kwargs.get("outgoing_stability"),
+            outgoing_resistance=boon_kwargs.get("outgoing_resistance"),
+            outgoing_aegis=boon_kwargs.get("outgoing_aegis"),
+            outgoing_protection=boon_kwargs.get("outgoing_protection"),
+            outgoing_might=boon_kwargs.get("outgoing_might"),
         )
         summary_rows.append(
             {

@@ -245,8 +245,25 @@ _HINT_MIN_FRACTION: Final[float] = 0.30
 # healing) as HEAL despite minimal actual heal output. The
 # new threshold requires at least 30 % of the weighted effort
 # to come from healing before the override kicks in.
-_R_HEAL_OVERRIDE: Final[float] = 0.30
+_R_HEAL_OVERRIDE: Final[float] = 0.20
 
+# Boon output sensitivity weights (mirrors WvW_Analytics's
+# BOON_SENSITIVITY). Multiplies each boon's outgoing total to compute
+# a weighted boon score for BOON role detection.
+_BOON_SENSITIVITY: Final[dict[str, float]] = {
+    "quickness": 1.5,
+    "alacrity": 1.5,
+    "stability": 1.0,
+    "resistance": 1.0,
+    "aegis": 0.5,
+    "protection": 0.5,
+    "might": 0.2,
+}
+
+# Minimum weighted boon output to consider a player as having
+# meaningful boon contribution. Calibrated: a moderate boon support
+# outputs ~150k+ weighted boon; a pure DPS outputs < 50k.
+_BOON_WEIGHTED_MIN: Final[float] = 150_000.0
 
 # ---------------------------------------------------------------------------
 # Internal helpers (extracted from ``detect_role_lite`` to keep the
@@ -273,6 +290,40 @@ def _compute_weighted_effort(
     score_heal = max(0, total_healing) * _WEIGHT_HEAL
     score_strip = max(0, total_buff_removal) * _WEIGHT_STRIP
     return score_dmg, score_heal, score_strip, score_dmg + score_heal + score_strip
+
+
+def _compute_boon_weighted(
+    outgoing_quickness: int | None = None,
+    outgoing_alacrity: int | None = None,
+    outgoing_stability: int | None = None,
+    outgoing_resistance: int | None = None,
+    outgoing_aegis: int | None = None,
+    outgoing_protection: int | None = None,
+    outgoing_might: int | None = None,
+) -> float:
+    """Return the weighted boon total from outgoing boon parameters.
+
+    Uses the same sensitivity weights as the WvW_Analytics project's
+    ``BOON_SENSITIVITY``. Returns 0.0 when no boon data is supplied
+    (all params are None), enabling callers without boon data to
+    skip BOON detection entirely.
+    """
+    total = 0.0
+    if outgoing_quickness is not None:
+        total += outgoing_quickness * _BOON_SENSITIVITY["quickness"]
+    if outgoing_alacrity is not None:
+        total += outgoing_alacrity * _BOON_SENSITIVITY["alacrity"]
+    if outgoing_stability is not None:
+        total += outgoing_stability * _BOON_SENSITIVITY["stability"]
+    if outgoing_resistance is not None:
+        total += outgoing_resistance * _BOON_SENSITIVITY["resistance"]
+    if outgoing_aegis is not None:
+        total += outgoing_aegis * _BOON_SENSITIVITY["aegis"]
+    if outgoing_protection is not None:
+        total += outgoing_protection * _BOON_SENSITIVITY["protection"]
+    if outgoing_might is not None:
+        total += outgoing_might * _BOON_SENSITIVITY["might"]
+    return total
 
 
 def _resolve_spec_hint(spec_name: str, prof_name: str) -> str | None:
@@ -433,8 +484,18 @@ def detect_role_lite(
     total_buff_removal: int,
     profession_int: int,
     elite_spec_int: int,
+    *,
+    power_damage: int | None = None,
+    condi_damage: int | None = None,
+    outgoing_quickness: int | None = None,
+    outgoing_alacrity: int | None = None,
+    outgoing_stability: int | None = None,
+    outgoing_resistance: int | None = None,
+    outgoing_aegis: int | None = None,
+    outgoing_protection: int | None = None,
+    outgoing_might: int | None = None,
 ) -> tuple[str, list[str]]:
-    """Classify a player's role from the 3 per-fight totals.
+    """Classify a player's role from per-fight totals + optional boon data.
 
     Pure function: no I/O, no logging, no DB. Same inputs always
     produce the same output. The 2 return values are:
@@ -445,8 +506,21 @@ def detect_role_lite(
       ORM column.
     * ``detected_tags`` (list[str]): downstream-UX signals
       (e.g. ``"high_dps"``, ``"off_meta"``,
-      ``"foreign_badges:HEAL"``). Serialised as JSON on the
-      ORM side.
+      ``"foreign_badges:HEAL"``, ``"high_power"``).
+      Serialised as JSON on the ORM side.
+
+    Parameters
+    ----------
+    ``total_damage``, ``total_healing``, ``total_buff_removal``,
+    ``profession_int``, ``elite_spec_int``: see v1 docstring.
+    ``power_damage``, ``condi_damage``: optional per-fight damage-type
+       breakdown. When supplied, a ``high_power`` or ``high_condi``
+       tag is emitted if one type dominates (>= 80 % of typed damage).
+    ``outgoing_*``: optional per-fight boon output totals (ms for
+       duration boons, stacks for might). When supplied, enables
+       BOON role detection via the weighted boon score. A player
+       whose weighted boon output exceeds ``_BOON_WEIGHTED_MIN``
+       and whose spec supports BOON gets the BOON badge.
 
     Algorithm
     ---------
@@ -460,6 +534,13 @@ def detect_role_lite(
     4. Pick the **primary role** by crossing per-axis pure
        thresholds (``r_dmg >= 0.65`` -> DPS, ``r_heal >= 0.50``
        -> HEAL, ``r_strip >= 0.35`` -> STRIP).
+    4a. Healer-spec override: a healer spec (Druid, Tempest,
+        Scourge, Specter) with ``r_heal >= 0.20`` gets HEAL
+        promoted ahead of DPS.
+    4b. Boon detection: when outgoing boon data is supplied and
+        the spec supports BOON, a weighted boon score is computed.
+        If it exceeds ``_BOON_WEIGHTED_MIN``, the BOON badge is
+        added (primary if boon effort dominates the main axes).
     5. If NO axis crosses its threshold, fall back to the
        spec-level hint (or profession-level hint if no
        spec hint). The hint is only granted if the
@@ -473,7 +554,9 @@ def detect_role_lite(
        AND no foreign badges).
     8. Compute the ``high_<axis>`` tags (per-axis ratio
        crossed the "high" tier).
-    9. Add the ``zero_output`` tag if all 3 magnitudes are 0.
+    9. Compute the ``high_power`` / ``high_condi`` tags from
+       power/condi damage breakdown (when supplied).
+    10. Add the ``zero_output`` tag if all 3 magnitudes are 0.
 
     The function never raises on legitimate input (including
     0/0/0 + unknown profession + unknown spec); the worst
@@ -515,10 +598,40 @@ def detect_role_lite(
         and "HEAL" not in badges
     ):
         badges.insert(0, "HEAL")
+    # 4b. Compute boon score + caps for subsequent steps.
+    boon_weighted = _compute_boon_weighted(
+        outgoing_quickness=outgoing_quickness,
+        outgoing_alacrity=outgoing_alacrity,
+        outgoing_stability=outgoing_stability,
+        outgoing_resistance=outgoing_resistance,
+        outgoing_aegis=outgoing_aegis,
+        outgoing_protection=outgoing_protection,
+        outgoing_might=outgoing_might,
+    )
+    caps = ROLE_CAPABILITIES.get(spec_name, frozenset())
+    _any_boon_data = any(
+        x is not None
+        for x in (
+            outgoing_quickness,
+            outgoing_alacrity,
+            outgoing_stability,
+            outgoing_resistance,
+            outgoing_aegis,
+            outgoing_protection,
+            outgoing_might,
+        )
+    )
+    boon_active = (
+        _any_boon_data
+        and boon_weighted >= _BOON_WEIGHTED_MIN
+        and "BOON" in caps
+    )
     # 5. Fallback to spec / profession hint (only when no axis crossed;
     # the helper returns the input unchanged when ``badges`` is non-empty,
     # so the call is a no-op when the per-axis check already populated
-    # badges).
+    # badges). Runs BEFORE boon badge insertion so a non-BOON spec
+    # (e.g. Druid hint=HEAL) can get its primary role from the hint
+    # fallback, and BOON is only added as a secondary badge.
     if not badges:
         badges = _apply_spec_hint_fallback(
             badges,
@@ -528,7 +641,16 @@ def detect_role_lite(
             r_heal,
             r_strip,
         )
-    # 6. Final fallback: MIXED or UNKNOWN. Single conditional expression
+    # 6. Apply boon badge (after fallback so it doesn't block it).
+    # BOON becomes the primary role for BOON-hint specs (Firebrand,
+    # Herald, Chronomancer) with confirmed boon output. For other
+    # specs, BOON is a secondary badge.
+    if boon_active and "BOON" not in badges:
+        if expected_hint == "BOON" and not (badges and badges[0] == "HEAL"):
+            badges.insert(0, "BOON")
+        else:
+            badges.append("BOON")
+    # 7. Final fallback: MIXED or UNKNOWN. Single conditional expression
     # (avoids ruff SIM102 nested-if + SIM114 combine-branches). The
     # "no data" path returns UNKNOWN + zero_output; the ambiguous-magnitudes
     # path returns MIXED with no tags. The tags computation below handles
@@ -537,8 +659,16 @@ def detect_role_lite(
         return ("UNKNOWN", ["zero_output"]) if total_effort == 0 else ("MIXED", [])
     primary_role = badges[0]
     # 7-9. Compute the secondary tags.
-    caps = ROLE_CAPABILITIES.get(spec_name, frozenset())
     tags = _compute_tags(primary_role, badges, r_dmg, r_heal, r_strip, expected_hint, caps)
+    # 10. Power / condi tags (from optional power_damage / condi_damage).
+    if power_damage is not None and condi_damage is not None:
+        total_type_damage = power_damage + condi_damage
+        if total_type_damage > 0:
+            r_power = power_damage / total_type_damage
+            if r_power >= 0.80:
+                tags.append("high_power")
+            elif r_power <= 0.20:
+                tags.append("high_condi")
     return primary_role, tags
 
 

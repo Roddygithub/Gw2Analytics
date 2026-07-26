@@ -82,6 +82,8 @@ def make_cbtevent(
     """
     if is_evtc2025:
         flags = bytearray(16)
+        # byte 48 (index 0) = iff. 0=FRIEND (heal), 1=FOE (damage), 2=SELF.
+        flags[0] = 0 if is_nondamage > 0 else 1
         # byte 50 (index 2) = result. 13 = CBTR_HEAL, 14 = CBTR_BUFFHEAL.
         flags[2] = 13 if is_nondamage > 0 else 0
         # byte 56 (index 8) = is_statechange.

@@ -33,7 +33,8 @@ from __future__ import annotations
 import uuid as _uuid
 from urllib.parse import quote
 
-from _fixtures import build_2025_string, make_cbtevent, make_minimal_zevtc
+from _fixtures import build_2025_string, make_cbtevent as make_legacy_cbtevent, make_minimal_zevtc
+from routes._evtc_builder import make_cbtevent as make_evtc2025_cbtevent
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from test_uploads_helpers import _post_minimal_fight as post_minimal_fight
@@ -84,14 +85,14 @@ def test_slow_path_detail_after_summary_deleted() -> None:
     base_skill_a = 1_000_000 + (int(suffix[:4], 16) if len(suffix) >= 4 else 0)
 
     events = [
-        make_cbtevent(
+        make_legacy_cbtevent(
             time_ms=1_500,
             src=base_id_a,
             dst=base_id_b,
             value=1_234,
             skill_id=base_skill_a,
         ),
-        make_cbtevent(
+        make_legacy_cbtevent(
             time_ms=2_500,
             src=base_id_a,
             dst=base_id_b,
@@ -148,7 +149,7 @@ def test_slow_path_timeline_after_summary_deleted() -> None:
 
     # Fight 1 (earlier time → older started_at).
     events_1 = [
-        make_cbtevent(
+        make_legacy_cbtevent(
             time_ms=1_000,
             src=base_id_a,
             dst=base_id_b,
@@ -161,12 +162,13 @@ def test_slow_path_timeline_after_summary_deleted() -> None:
     # Fight 2 (later time → more recent started_at). Inline POST so it
     # shares the same agent IDs and therefore the same account_name.
     events_2 = [
-        make_cbtevent(
+        make_evtc2025_cbtevent(
             time_ms=2_000,
             src=base_id_a,
             dst=base_id_b,
             value=2_000,
             skill_id=base_skill_a,
+            is_evtc2025=True,
         ),
     ]
     blob_2 = make_minimal_zevtc(

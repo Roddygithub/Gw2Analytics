@@ -65,6 +65,33 @@ _AGENT_NAME_SIZE: Final[int] = 72
 _SKILL_NAME_SIZE: Final[int] = 64
 
 
+def _build_event_record_2025(
+    time_ms: int,
+    src_agent: int,
+    dst_agent: int,
+    value: int,
+    skill_id: int = 42,
+    *,
+    is_statechange: int = 0,
+    buff_dmg: int = 0,
+    result: int = 0,
+    iff: int = 0xFF,
+    buff: int = 0,
+) -> bytes:
+    """Build one 64-byte EVTC2025+ cbtevent record (local copy)."""
+    flags = bytearray(16)
+    flags[0] = iff
+    flags[1] = buff
+    flags[8] = is_statechange
+    return struct.pack(
+        "<QQQiiIIHHHH16B",
+        time_ms, src_agent, dst_agent, value, buff_dmg,
+        0, skill_id,
+        0, 0, 0, 0,
+        *flags,
+    )
+
+
 def _build_event_record(
     time_ms: int,
     src_agent: int,
@@ -658,14 +685,15 @@ def test_parse_events_emit_apply_2025_with_damage_and_strip_yields_boon_only() -
         build="20250925",
         skills=[(101, "Quickness")],
         events=[
-            _build_event_record(
+            _build_event_record_2025(
                 time_ms=10_000,
                 src_agent=1,
                 dst_agent=2,
-                value=1_000,  # non-zero in EVTC2025+ apply record
-                buff_dmg=500,  # non-zero in EVTC2025+ apply record
+                value=1_000,
+                buff_dmg=500,
                 skill_id=101,
-                ev_buff=101,
+                iff=0xFF,
+                buff=101,
             ),
         ],
     )

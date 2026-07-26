@@ -231,23 +231,26 @@ def _build_event_record_2025(
     skill_id: int = 42,
     *,
     is_statechange: int = 0,
-    is_nondamage: int = 0,
     buff_dmg: int = 0,
     result: int = 0,
+    iff: int = 0xFF,
+    buff: int = 0,
 ) -> bytes:
     """Build one 64-byte EVTC2025+ cbtevent record.
 
     Layout (per ``arcdps.h`` 2025+):
     ``<QQQiiIIHHHH16B`` -- time, src, dst, value, buff_dmg,
     overstack, skillid, 4x instids, 16 flag bytes.
-    Byte 50 (flags index 2) is the ``result`` enum (13/14 = heal);
+    Byte 48 (flags index 0) is ``iff`` (0=FRIEND=heal, !=0=FOE=damage);
+    byte 49 (flags index 1) is ``buff`` (arcdps ev.buff ID);
     byte 56 (flags index 8) is ``is_statechange``.
+    Default ``iff=0xFF`` (damage) for backward-compat test data.
+    Pass ``iff=0`` for healing events.
+    Pass ``buff=<skill_id>`` to trigger APPLY-branch in the parser.
     """
     flags = bytearray(16)
-    if result:
-        flags[2] = result
-    else:
-        flags[2] = 13 if is_nondamage > 0 else 0  # result
+    flags[0] = iff
+    flags[1] = buff
     flags[8] = is_statechange
     return struct.pack(
         "<QQQiiIIHHHH16B",
@@ -850,11 +853,9 @@ def test_parse_events_2025_single_event_with_known_agent_is_accepted() -> None:
     assert events[0].damage == 1_337
 
 
-@pytest.mark.parametrize("result_value", [13, 14])
-def test_parse_events_2025_yields_healing_event_on_nondamage(result_value: int) -> None:
+def test_parse_events_2025_yields_healing_event_on_nondamage() -> None:
     # Include two events so the EVTC2025+ boundary validator can
-    # locate the event stream. Both result=13 (CBTR_HEAL) and
-    # result=14 (CBTR_BUFFHEAL) should be interpreted as healing.
+    # locate the event stream. iff=0 (FRIEND) = healing.
     evtc = _build_minimal_evtc(
         [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
         build="20250925",
@@ -866,7 +867,7 @@ def test_parse_events_2025_yields_healing_event_on_nondamage(result_value: int) 
                 dst_agent=2,
                 value=8_500,
                 skill_id=101,
-                result=result_value,
+                iff=0,
             ),
             _build_event_record_2025(
                 time_ms=43_500,
@@ -874,7 +875,7 @@ def test_parse_events_2025_yields_healing_event_on_nondamage(result_value: int) 
                 dst_agent=2,
                 value=9_000,
                 skill_id=101,
-                result=result_value,
+                iff=0,
             ),
         ],
     )
