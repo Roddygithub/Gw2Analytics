@@ -7,6 +7,7 @@ license = { text = "MIT" }
 authors = [{ name = "GW2Analytics team" }]
 dependencies = [
     "pydantic>=2.9",
+    "gw2_analytics",
     "gw2_core",
 ]
 

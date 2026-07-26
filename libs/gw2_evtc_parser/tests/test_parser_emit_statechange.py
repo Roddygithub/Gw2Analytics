@@ -55,6 +55,7 @@ from gw2_core import (
     InterruptEvent,
     PositionEvent,
     StunBreakEvent,
+    UpEvent,
 )
 from gw2_evtc_parser import PythonEvtcParser
 from gw2_evtc_parser.parser import _EVENT_STRUCT
@@ -397,8 +398,26 @@ def test_parse_events_dispatch_position_reads_current_record_coordinates() -> No
     assert coordinate_bytes_as_agent not in {agent.id for agent in fight.agents}
 
 
+def test_parse_events_dispatch_change_up_yields_up_event() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=0,
+                value=0,
+                is_statechange=3,
+            ),
+        ],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert len(events) == 1
+    assert isinstance(events[0], UpEvent)
+
+
 def test_parse_events_dispatch_unmapped_statechange_yields_no_event() -> None:
-    """Unmapped statechange bytes (e.g. byte 3 = ChangeUp) yield ZERO events.
+    """Unmapped statechange bytes (e.g. byte 6 = Spawn) yield ZERO events.
 
     Locks the A.4 dispatch boundary for the arcdps kinds not yet
     modelled in the dispatch table. The upstream filter continues to
@@ -417,7 +436,7 @@ def test_parse_events_dispatch_unmapped_statechange_yields_no_event() -> None:
                 src_agent=1,
                 dst_agent=2,
                 value=100,
-                is_statechange=3,  # CBTS_CHANGEUP (unmapped in A.4.1)
+                is_statechange=6,  # CBTS_SPAWN
             ),
         ],
     )

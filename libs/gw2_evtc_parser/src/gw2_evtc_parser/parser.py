@@ -80,6 +80,7 @@ from gw2_core import (
     BuffApplyEvent,
     BuffRemovalEvent,
     CCEvent,
+    CombatOutcomeEvent,
     DamageEvent,
     DeathEvent,
     DodgeEvent,
@@ -90,11 +91,13 @@ from gw2_core import (
     EvtcHeader,
     Fight,
     HealingEvent,
+    HealthUpdateEvent,
     InterruptEvent,
     PositionEvent,
     Profession,
     Skill,
     SkillActivationEvent,
+    UpEvent,
     WeaponSwapEvent,
 )
 from gw2_evtc_parser.exceptions import EvtcParseError
@@ -279,7 +282,11 @@ _EVENT_STRUCT_2025: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHH16B")
 #:   byte 51 = is_activation
 #:   byte 52 = is_buffremove
 #:   byte 56 = is_statechange
-_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct("<QQQii 4x I HHHH bbbb b 3x b 7x")
+#:   byte 59 = is_offcycle (direct damage against downed)
+#:   byte 60 = pad1 (condition damage against downed)
+_EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct(
+    "<QQQii 4x I HHHH bbbb b 3x b 2x bb 3x"
+)
 
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
 #: byte values 1, 2, 3 ↔ ``BoonApplyEvent.kind: Literal["remove_all",
@@ -514,17 +521,15 @@ class PythonEvtcParser:
         # hot loop pays local-variable lookup cost instead of
         # global lookup cost.
         _cbtbufremove_kinds = _CBTBUFREMOVE_KINDS
-        # v0.12.2: Phase 6 v2 Step 4 — per-agent down-state lifecycle
-        # tracking.  Maps agent_id -> time_ms when the agent went down.
-        # Populated by ChangeDown (byte 5), consumed by ChangeUp (byte 6)
-        # and ChangeDead (byte 4).
-        down_start: dict[int, int] = {}
+        down_durations: dict[tuple[int, int], int] = {}
         effect_guids: dict[int, str] = {}
         # First pass: build instance_id -> agent_id mapping from event stream.
         # Used to attribute minion/NPC damage to the owning player via
         # src_master_instid.
         inst_to_agent: dict[int, int] = {}
         if is_evtc_2025:
+            last_aware: dict[int, int] = {}
+            lifecycle: list[tuple[int, int, int]] = []
             scan_cursor = offset
             while scan_cursor + EVENT_SIZE <= end:
                 (
@@ -544,11 +549,28 @@ class PythonEvtcParser:
                     inst_to_agent.setdefault(s_src_inst, s_src)
                 if s_dst != 0 and s_dst_inst != 0:
                     inst_to_agent.setdefault(s_dst_inst, s_dst)
-                if _srest[-1] == 46:
+                statechange = _srest[5]
+                if _stime > 0:
+                    if s_src:
+                        last_aware[s_src] = max(last_aware.get(s_src, 0), _stime)
+                    if s_dst:
+                        last_aware[s_dst] = max(last_aware.get(s_dst, 0), _stime)
+                if statechange in (3, 4, 5):
+                    lifecycle.append((_stime, s_src, statechange))
+                if statechange == 46:
                     effect_guids[_ssid] = (
                         (s_src.to_bytes(8, "little") + s_dst.to_bytes(8, "little")).hex().upper()
                     )
                 scan_cursor += EVENT_SIZE
+            open_downs: dict[int, int] = {}
+            for transition_time, actor, statechange in lifecycle:
+                if statechange == 5:
+                    open_downs[actor] = transition_time
+                elif statechange in (3, 4) and actor in open_downs:
+                    started = open_downs.pop(actor)
+                    down_durations[actor, started] = transition_time - started
+            for actor, started in open_downs.items():
+                down_durations[actor, started] = max(0, last_aware.get(actor, started) - started)
         while cursor + EVENT_SIZE <= end:
             if is_evtc_2025:
                 (
@@ -580,6 +602,9 @@ class PythonEvtcParser:
                     is_buffremove,
                     # byte 56 = arcdps ``is_statechange`` byte.
                     is_statechange,
+                    # bytes 59/60 identify damage against a downed target.
+                    is_offcycle,
+                    pad1,
                 ) = _unpack_event(data, cursor)
                 # Resolve master-instance attribution: when src_master_instid
                 # is non-zero the event comes from a minion/pet/gadget owned
@@ -626,6 +651,8 @@ class PythonEvtcParser:
                     # logic is unaffected.
                     is_buffremove,
                 ) = _unpack_event(data, cursor)
+                is_offcycle = 0
+                pad1 = 0
             # NOTE: ``is_buffremove`` is consumed below by
             # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``) AND
             # by Step 3 APPLY-BRANCH (predicate ``_ev_buff != 0 AND
@@ -706,47 +733,38 @@ class PythonEvtcParser:
                             y=y,
                         )
                     continue
-                # v0.12.2: Phase 6 v2 Step 4 — down-state lifecycle.
-                # Handle ChangeUp (byte 6), ChangeDown (byte 5), and
-                # ChangeDead (byte 4) inline with per-agent downtime
-                # computation.  These are intercepted BEFORE the
-                # statechange dispatch call so the down_start dict
-                # is available for computing downtime_ms.
-                if is_statechange == 6:  # ChangeUp
-                    if src_agent in down_start:
-                        downtime = time_ms - down_start.pop(src_agent)
-                        yield DownEvent(
-                            time_ms=time_ms,
-                            source_agent_id=src_agent,
-                            target_agent_id=0,
-                            skill_id=0,
-                            downtime_ms=downtime,
-                        )
-                    continue
-                if is_statechange == 5:  # ChangeDown
-                    down_start[src_agent] = time_ms
-                    yield DownEvent(
+                if is_statechange == 3:  # ChangeUp
+                    yield UpEvent(
                         time_ms=time_ms,
                         source_agent_id=src_agent,
                         target_agent_id=0,
                         skill_id=0,
                     )
                     continue
+                if is_statechange == 5:  # ChangeDown
+                    yield DownEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=0,
+                        skill_id=0,
+                        downtime_ms=down_durations.get((src_agent, time_ms), 0),
+                    )
+                    continue
                 if is_statechange == 4:  # ChangeDead
-                    if src_agent in down_start:
-                        downtime = time_ms - down_start.pop(src_agent)
-                        yield DownEvent(
-                            time_ms=time_ms,
-                            source_agent_id=src_agent,
-                            target_agent_id=0,
-                            skill_id=0,
-                            downtime_ms=downtime,
-                        )
                     yield DeathEvent(
                         time_ms=time_ms,
                         source_agent_id=src_agent,
                         target_agent_id=0,
                         skill_id=0,
+                    )
+                    continue
+                if is_statechange == 8:
+                    yield HealthUpdateEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=0,
+                        skill_id=0,
+                        health_percent=min(100.0, max(0.0, dst_agent / 100.0)),
                     )
                     continue
                 # WAVE-8 v0.11.0 Blocker A.4.1 (see
@@ -949,7 +967,18 @@ class PythonEvtcParser:
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                     condition_damage = magnitude
                     is_attempt = magnitude > 0
+                    against_downed = bool(pad1)
                 else:
+                    if _result in (8, 9):
+                        yield CombatOutcomeEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                            outcome="killed" if _result == 8 else "downed",
+                        )
+                        if _result == 8:
+                            continue
                     if _result == 12:
                         yield CCEvent(
                             time_ms=time_ms,
@@ -985,6 +1014,7 @@ class PythonEvtcParser:
                     magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
                     condition_damage = 0
                     is_attempt = magnitude > 0 or _result in {6, 9}
+                    against_downed = bool(is_offcycle)
                 if is_attempt:
                     yield DamageEvent(
                         time_ms=time_ms,
@@ -994,6 +1024,7 @@ class PythonEvtcParser:
                         damage=magnitude,
                         buff_dmg=condition_damage,
                         result=_result,
+                        against_downed=against_downed,
                         iff=_iff,
                         src_master_instid=src_master_inst,
                         dst_master_instid=dst_master_inst,
