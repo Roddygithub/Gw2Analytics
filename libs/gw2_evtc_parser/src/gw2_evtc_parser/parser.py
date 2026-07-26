@@ -559,7 +559,7 @@ class PythonEvtcParser:
                 scan_cursor += EVENT_SIZE
             open_downs: dict[int, int] = {}
             for transition_time, actor, statechange in lifecycle:
-                if statechange == 5:
+                if statechange == 5 and actor not in open_downs:
                     open_downs[actor] = transition_time
                 elif statechange in (3, 4) and actor in open_downs:
                     started = open_downs.pop(actor)
@@ -743,6 +743,8 @@ class PythonEvtcParser:
                     )
                     continue
                 if is_statechange == 5:  # ChangeDown
+                    if is_evtc_2025 and (event_src_agent, time_ms) not in down_durations:
+                        continue
                     yield DownEvent(
                         time_ms=time_ms,
                         source_agent_id=event_src_agent,

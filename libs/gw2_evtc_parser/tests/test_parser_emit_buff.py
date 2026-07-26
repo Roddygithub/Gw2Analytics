@@ -1004,6 +1004,25 @@ def test_parse_events_2025_resolves_reused_master_instance_at_event_time() -> No
     assert [event.damage for event in damage] == [100, 200]
 
 
+def test_parse_events_2025_deduplicates_down_before_death() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Player", True)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(1_000, 1, 0, 0, is_statechange=5),
+            _build_event_record_2025(1_500, 1, 0, 0, is_statechange=5),
+            _build_event_record_2025(3_000, 1, 0, 0, is_statechange=4),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    downs = [event for event in events if isinstance(event, DownEvent)]
+    assert len(downs) == 1
+    assert downs[0].time_ms == 1_000
+    assert downs[0].downtime_ms == 2_000
+
+
 def test_parse_events_2025_friendly_is_buff_applies_boon() -> None:
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
