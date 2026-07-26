@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from gw2_core import BlockEvent, DamageEvent
+from gw2_core import BlockEvent, BuffRemovalEvent, DamageEvent, HealingEvent, StunBreakEvent
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
 _DEFAULT_LOG = Path(
@@ -80,3 +80,10 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
     assert sum(
         isinstance(event, BlockEvent) and event.source_agent_id == 45_822 for event in events
     ) == 1
+    assert not any(isinstance(event, HealingEvent) for event in events)
+    assert not any(isinstance(event, BuffRemovalEvent) for event in events)
+    ei_player_ids = {2_000, 45_822, 45_859, 45_946, 45_947}
+    assert not any(
+        isinstance(event, StunBreakEvent) and event.source_agent_id in ei_player_ids
+        for event in events
+    )
