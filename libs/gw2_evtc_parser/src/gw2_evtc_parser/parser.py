@@ -523,9 +523,8 @@ class PythonEvtcParser:
         _cbtbufremove_kinds = _CBTBUFREMOVE_KINDS
         down_durations: dict[tuple[int, int], int] = {}
         effect_guids: dict[int, str] = {}
-        # First pass: build instance_id -> agent_id mapping from event stream.
-        # Used to attribute minion/NPC damage to the owning player via
-        # src_master_instid.
+        # Updated chronologically during the second pass so reused instance
+        # IDs resolve to the owner active at the event time.
         inst_to_agent: dict[int, int] = {}
         if is_evtc_2025:
             last_aware: dict[int, int] = {}
@@ -539,16 +538,12 @@ class PythonEvtcParser:
                     _sv,
                     _sbd,
                     _ssid,
-                    s_src_inst,
-                    s_dst_inst,
+                    _s_src_inst,
+                    _s_dst_inst,
                     _ssmi,
                     _sdmi,
                     *_srest,
                 ) = _unpack_event(data, scan_cursor)
-                if s_src != 0 and s_src_inst != 0:
-                    inst_to_agent.setdefault(s_src_inst, s_src)
-                if s_dst != 0 and s_dst_inst != 0:
-                    inst_to_agent.setdefault(s_dst_inst, s_dst)
                 statechange = _srest[5]
                 if _stime > 0:
                     if s_src:
@@ -607,6 +602,10 @@ class PythonEvtcParser:
                     pad1,
                 ) = _unpack_event(data, cursor)
                 event_src_agent = src_agent
+                if src_agent and _src_inst:
+                    inst_to_agent[_src_inst] = src_agent
+                if dst_agent and _dst_inst:
+                    inst_to_agent[_dst_inst] = dst_agent
                 # Resolve master-instance attribution: when src_master_instid
                 # is non-zero the event comes from a minion/pet/gadget owned
                 # by the agent whose instance_id matches.

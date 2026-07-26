@@ -979,6 +979,31 @@ def test_parse_events_2025_keeps_statechange_on_minion_actor() -> None:
     assert events[1].source_agent_id == 2
 
 
+def test_parse_events_2025_resolves_reused_master_instance_at_event_time() -> None:
+    evtc = _build_minimal_evtc(
+        [
+            (1, 1, 1, "First owner", True),
+            (2, 1, 1, "Minion", False),
+            (3, 1, 1, "Second owner", True),
+        ],
+        build="20250925",
+        skills=[(101, "Attack")],
+        events=[
+            _build_event_record_2025(1_000, 1, 0, 0, src_instid=10),
+            _build_event_record_2025(2_000, 2, 99, 100, 101, src_master_instid=10),
+            _build_event_record_2025(3_000, 3, 0, 0, src_instid=10),
+            _build_event_record_2025(4_000, 2, 99, 200, 101, src_master_instid=10),
+        ],
+    )
+
+    damage = [
+        event for event in PythonEvtcParser().parse_events(evtc) if isinstance(event, DamageEvent)
+    ]
+
+    assert [event.source_agent_id for event in damage] == [1, 3]
+    assert [event.damage for event in damage] == [100, 200]
+
+
 def test_parse_events_2025_friendly_is_buff_applies_boon() -> None:
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
