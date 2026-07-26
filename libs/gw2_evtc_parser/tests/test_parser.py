@@ -838,6 +838,7 @@ def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
     events = list(PythonEvtcParser().parse_events(evtc))
 
     assert [(skill.id, skill.name) for skill in fight.skills] == [(101, "Whirlwind")]
+    assert fight.header is not None
     assert fight.header.gw2_build == 188_004
     assert fight.header.map_id == 96
     assert fight.header.arc_revision == 162_433

@@ -92,12 +92,12 @@ def build_skill_rotation(  # noqa: PLR0912
                     )
                 )
         elif isinstance(event, EffectEvent):
-            skill_id = _INSTANT_CASTS_BY_EFFECT.get(event.guid)
-            if skill_id is not None:
+            effect_skill_id = _INSTANT_CASTS_BY_EFFECT.get(event.guid)
+            if effect_skill_id is not None:
                 casts.append(
                     SkillCast(
                         source_agent_id=event.source_agent_id,
-                        skill_id=skill_id,
+                        skill_id=effect_skill_id,
                         time_ms=event.time_ms - origin,
                         duration_ms=0,
                     )

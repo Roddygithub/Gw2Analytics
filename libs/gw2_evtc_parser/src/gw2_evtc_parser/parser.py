@@ -1426,13 +1426,16 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     )
 
     fight_id = hashlib.sha256(data).hexdigest()
+    ei_encounter_id = (
+        _WVW_EI_ENCOUNTER_IDS.get(header.map_id) if header.map_id is not None else None
+    )
     yield Fight(
         id=fight_id,
         header=header,
         agents=agents,
         skills=skills,
         success=True if header.map_id in _WVW_EI_ENCOUNTER_IDS else None,
-        ei_encounter_id=_WVW_EI_ENCOUNTER_IDS.get(header.map_id),
+        ei_encounter_id=ei_encounter_id,
     )
 
 

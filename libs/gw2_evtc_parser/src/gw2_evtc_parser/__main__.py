@@ -17,6 +17,7 @@ import argparse
 import json
 import sys
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from gw2_core import BlockEvent, DamageEvent, DeathEvent, DodgeEvent, DownEvent, Fight
@@ -120,7 +121,7 @@ def cmd_inspect_zip(args: argparse.Namespace) -> int:
 
 
 def _compare_ei_metadata(  # noqa: PLR0912, PLR0915
-    fight: Fight, expected: dict[str, object], events: list[object] | None = None
+    fight: Fight, expected: dict[str, object], events: Sequence[object] | None = None
 ) -> dict[str, object]:
     header = fight.header
     actual: dict[str, object] = {
@@ -179,20 +180,17 @@ def _compare_ei_metadata(  # noqa: PLR0912, PLR0915
                 continue
             account = player["account"]
             agent = agents_by_account.get(account)
-            values = (
-                {
-                    "name": agent.name,
-                    "group": int(agent.subgroup or 0),
-                    "instanceID": agent.instance_id,
-                    "teamID": agent.team_id,
-                }
-                if agent
-                else None
-            )
-            compared_players[account] = values
-            if values is None:
+            if agent is None:
+                compared_players[account] = None
                 differences[f"players[{account}]"] = {"expected": "present", "actual": None}
                 continue
+            values = {
+                "name": agent.name,
+                "group": int(agent.subgroup or 0),
+                "instanceID": agent.instance_id,
+                "teamID": agent.team_id,
+            }
+            compared_players[account] = values
             for field, value in values.items():
                 if player.get(field) != value:
                     differences[f"players[{account}].{field}"] = {

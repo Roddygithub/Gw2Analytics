@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import cast
 
 from sqlalchemy.orm import Session
 
@@ -299,13 +300,13 @@ def _write_summary_and_boon_rows(
             elite_spec_int=bucket.elite,
             power_damage=bucket.power,
             condi_damage=bucket.condi,
-            outgoing_quickness=boon_kwargs.get("outgoing_quickness"),
-            outgoing_alacrity=boon_kwargs.get("outgoing_alacrity"),
-            outgoing_stability=boon_kwargs.get("outgoing_stability"),
-            outgoing_resistance=boon_kwargs.get("outgoing_resistance"),
-            outgoing_aegis=boon_kwargs.get("outgoing_aegis"),
-            outgoing_protection=boon_kwargs.get("outgoing_protection"),
-            outgoing_might=boon_kwargs.get("outgoing_might"),
+            outgoing_quickness=cast(int | None, boon_kwargs.get("outgoing_quickness")),
+            outgoing_alacrity=cast(int | None, boon_kwargs.get("outgoing_alacrity")),
+            outgoing_stability=cast(int | None, boon_kwargs.get("outgoing_stability")),
+            outgoing_resistance=cast(int | None, boon_kwargs.get("outgoing_resistance")),
+            outgoing_aegis=cast(int | None, boon_kwargs.get("outgoing_aegis")),
+            outgoing_protection=cast(int | None, boon_kwargs.get("outgoing_protection")),
+            outgoing_might=cast(int | None, boon_kwargs.get("outgoing_might")),
         )
         summary_rows.append(
             {

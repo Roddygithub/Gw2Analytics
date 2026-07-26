@@ -216,7 +216,10 @@ class BuffStateTracker:
                 target_tracker.expirations.extend([time_ms + event.duration_ms] * event.stacks)
                 del target_tracker.expirations[_max_stacks_for(buff_name) :]
             elif event.duration_ms > 0 and None not in target_tracker.expirations:
-                current_expiry = max(target_tracker.expirations, default=time_ms)
+                current_expiry = max(
+                    (expiry for expiry in target_tracker.expirations if expiry is not None),
+                    default=time_ms,
+                )
                 target_tracker.expirations = [max(time_ms, current_expiry) + event.duration_ms]
         elif event.kind == "remove_single":
             if target_tracker.expirations:
