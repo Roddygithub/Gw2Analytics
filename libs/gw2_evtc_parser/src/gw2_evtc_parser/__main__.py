@@ -121,7 +121,7 @@ def cmd_inspect_zip(args: argparse.Namespace) -> int:
 
 def _compare_ei_metadata(fight: Fight, expected: dict[str, object]) -> dict[str, object]:
     header = fight.header
-    actual = {
+    actual: dict[str, object] = {
         "arcVersion": f"EVTC{header.build_version}" if header else None,
         "triggerID": header.encounter_id if header else None,
         "gW2Build": header.gw2_build if header else None,
@@ -136,6 +136,40 @@ def _compare_ei_metadata(fight: Fight, expected: dict[str, object]) -> dict[str,
         for field, value in actual.items()
         if expected.get(field) != value
     }
+    expected_players = expected.get("players")
+    if isinstance(expected_players, list):
+        agents_by_account = {
+            agent.account_name.lstrip(":"): agent
+            for agent in fight.agents
+            if agent.account_name
+        }
+        compared_players: dict[str, object] = {}
+        for player in expected_players:
+            if not isinstance(player, dict) or not isinstance(player.get("account"), str):
+                continue
+            account = player["account"]
+            agent = agents_by_account.get(account)
+            values = (
+                {
+                    "name": agent.name,
+                    "group": int(agent.subgroup or 0),
+                    "instanceID": agent.instance_id,
+                    "teamID": agent.team_id,
+                }
+                if agent
+                else None
+            )
+            compared_players[account] = values
+            if values is None:
+                differences[f"players[{account}]"] = {"expected": "present", "actual": None}
+                continue
+            for field, value in values.items():
+                if player.get(field) != value:
+                    differences[f"players[{account}].{field}"] = {
+                        "expected": player.get(field),
+                        "actual": value,
+                    }
+        actual["players"] = compared_players
     return {"matches": not differences, "compared": actual, "differences": differences}
 
 

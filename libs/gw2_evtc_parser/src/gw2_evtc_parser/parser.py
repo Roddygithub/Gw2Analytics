@@ -1262,6 +1262,9 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
         )
     )
     actual_skill_count = len(skills)
+    if is_evtc_2025:
+        event_offset = records_offset + actual_skill_count * SKILL_RECORD_SIZE
+        agents = _enrich_evtc2025_agents(data, agents, event_offset)
 
     # v0.11.0: CompleteAgents step (matching GW2EI's CompleteAgents()).
     # Scan the event stream for agent IDs referenced in src_agent or
@@ -1314,6 +1317,31 @@ def _iter_agents(data: bytes, count: int, *, is_evtc_2025: bool = False) -> Iter
             )
         yield decoder(data, cursor)
         cursor += AGENT_SIZE
+
+
+def _enrich_evtc2025_agents(data: bytes, agents: list[Agent], event_offset: int) -> list[Agent]:
+    by_id = {agent.id: agent for agent in agents}
+    instance_ids: dict[int, int] = {}
+    team_ids: dict[int, int] = {}
+    for cursor in range(event_offset, len(data) - EVENT_SIZE + 1, EVENT_SIZE):
+        event = _EVENT_STRUCT_2025.unpack_from(data, cursor)
+        src_agent, dst_agent = int(event[1]), int(event[2])
+        src_inst, dst_inst, statechange = int(event[7]), int(event[8]), int(event[19])
+        if src_agent in by_id and src_inst:
+            instance_ids.setdefault(src_agent, src_inst)
+        if dst_agent in by_id and dst_inst:
+            instance_ids.setdefault(dst_agent, dst_inst)
+        if statechange == 22 and src_agent in by_id:
+            team_ids[src_agent] = int(event[3])
+    return [
+        agent.model_copy(
+            update={
+                "instance_id": instance_ids.get(agent.id, 0),
+                "team_id": team_ids.get(agent.id, 0),
+            }
+        )
+        for agent in agents
+    ]
 
 
 def _iter_skill_records(

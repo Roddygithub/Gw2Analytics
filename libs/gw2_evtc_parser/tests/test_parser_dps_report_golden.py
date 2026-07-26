@@ -49,4 +49,14 @@ def test_dps_report_20250928_230925_metadata_matches_parser() -> None:
         45_946: "EstaticFear.7692",
         45_947: "Demandred.9035",
     }
+    players_by_account = {
+        a.account_name.lstrip(":"): (a.instance_id, a.team_id)
+        for a in fight.agents
+        if a.account_name
+    }
+    assert players_by_account["esskape.5047"] == (2_924, 2_763)
+    assert players_by_account["Lullupa.5768"] == (3_201, 2_763)
+    assert players_by_account["krill le faucheur.1679"] == (2_356, 2_763)
+    assert players_by_account["EstaticFear.7692"] == (4_240, 2_763)
+    assert players_by_account["Demandred.9035"] == (4_882, 2_763)
     assert len(fight.skills) == 168

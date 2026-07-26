@@ -217,10 +217,11 @@ class Agent(BaseModel):
         max_length=128,
         description="arcdps subgroup string (e.g. 'Subgroup 1' or empty). None for NPCs.",
     )
+    instance_id: int = Field(default=0, ge=0, le=0xFFFF)
     team_id: int = Field(
         default=0,
         ge=0,
-        description="Squad/team identifier from the agent record subgroup field. 0 for NPCs.",
+        description="Latest team identifier from TeamChange events. 0 when unavailable.",
     )
 
 

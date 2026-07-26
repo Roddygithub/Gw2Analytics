@@ -234,6 +234,8 @@ def _build_event_record_2025(
     result: int = 0,
     iff: int = 0xFF,
     buff: int = 0,
+    src_inst: int = 0,
+    dst_inst: int = 0,
 ) -> bytes:
     """Build one 64-byte EVTC2025+ cbtevent record.
 
@@ -260,8 +262,8 @@ def _build_event_record_2025(
         buff_dmg,
         0,  # overstack_value
         skill_id,
-        0,  # src_instid
-        0,  # dst_instid
+        src_inst,
+        dst_inst,
         0,  # src_master_instid
         0,  # dst_master_instid
         *flags,
@@ -813,6 +815,15 @@ def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
                 skill_id=101,
             ),
             _build_event_record_2025(
+                time_ms=42_049_000,
+                src_agent=1,
+                dst_agent=0,
+                value=2_763,
+                skill_id=0,
+                is_statechange=22,
+                src_inst=123,
+            ),
+            _build_event_record_2025(
                 time_ms=42_049_482,
                 src_agent=6_517_345,
                 dst_agent=1,
@@ -833,6 +844,8 @@ def test_evtc2025_metadata_prelude_stops_skill_table() -> None:
     assert fight.header.duration_ms == 1_789
     assert fight.success is True
     assert fight.ei_encounter_id == 459_520
+    assert fight.agents[0].instance_id == 123
+    assert fight.agents[0].team_id == 2_763
     assert len(events) == 1
     assert isinstance(events[0], DamageEvent)
     assert events[0].damage == 200
