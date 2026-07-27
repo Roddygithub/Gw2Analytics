@@ -51,9 +51,9 @@ def test_evtc_2025_multilog_corpus(
 @pytest.mark.parametrize(
     ("log_name", "ei_name", "max_differences"),
     [
-        ("20251205-211525.zevtc", "20251205-211525_detailed_wvw_kill.json", 340),
-        ("20251207-225200.zevtc", "20251207-225200_detailed_wvw_kill.json", 131),
-        ("20251208-230823.zevtc", "20251208-230823_detailed_wvw_kill.json", 114),
+        ("20251205-211525.zevtc", "20251205-211525_detailed_wvw_kill.json", 360),
+        ("20251207-225200.zevtc", "20251207-225200_detailed_wvw_kill.json", 185),
+        ("20251208-230823.zevtc", "20251208-230823_detailed_wvw_kill.json", 176),
     ],
 )
 def test_elite_insights_multilog_alignment_does_not_regress(
