@@ -1657,7 +1657,11 @@ def _validate_event_candidate(
       read.  This is the strongest rejection: random data in skill
       name regions rarely produces values that match real agent IDs.
     """
-    max_time_ms = 86_400_000
+    # EVTC2025+ builds after the ResultEnumRework cutoff (build >= 20260501)
+    # use raw GetTickCount64 timestamps that can exceed 24h. Use a higher cap
+    # (uint32 max, ~49.7 days) to accept raw timestamps while still rejecting
+    # random bytes.
+    max_time_ms = 4_294_967_295
     saw_agent = False
     prev_time = -1
     matched_agents = 0
@@ -1705,7 +1709,10 @@ def _validate_evtc2025_metadata_candidate(data: bytes, offset: int) -> bool:
         ev = _EVENT_STRUCT_2025.unpack_from(data, offset + i * EVENT_SIZE)
         time_ms = ev[0]
         statechange = ev[19]
-        if not (0 < time_ms < 86_400_000):
+        # ResultEnumRework builds (>= 20260501) use raw GetTickCount64
+        # timestamps that can exceed 24h. Use uint32 max (~49.7 days) as
+        # the upper bound.
+        if not (0 < time_ms < 4_294_967_295):
             return False
         if first_time is None:
             first_time = time_ms
