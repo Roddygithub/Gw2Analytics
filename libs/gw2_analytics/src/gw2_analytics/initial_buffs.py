@@ -6,7 +6,7 @@ from collections.abc import Iterable, Set
 
 from pydantic import BaseModel, ConfigDict
 
-from gw2_core import BuffApplyEvent, Event
+from gw2_core import BoonApplyEvent, BuffApplyEvent, Event
 
 
 class InitialBuff(BaseModel):
@@ -34,8 +34,10 @@ def extract_initial_buffs(
             stacks=event.stacks,
         )
         for event in events
-        if isinstance(event, BuffApplyEvent)
-        and event.initial
+        if (
+            (isinstance(event, BuffApplyEvent) and event.initial)
+            or (isinstance(event, BoonApplyEvent) and event.kind == "apply")
+        )
         and (skill_ids is None or event.skill_id in skill_ids)
     ]
 

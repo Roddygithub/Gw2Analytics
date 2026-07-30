@@ -236,6 +236,9 @@ def _build_event_record_2025(
     buff: int = 0,
     src_inst: int = 0,
     dst_inst: int = 0,
+    is_shields: int = 0,
+    is_offcycle: int = 0,
+    pad: int = 0,
 ) -> bytes:
     """Build one 64-byte EVTC2025+ cbtevent record.
 
@@ -253,6 +256,9 @@ def _build_event_record_2025(
     flags[0] = iff
     flags[1] = buff
     flags[8] = is_statechange
+    flags[10] = is_shields
+    flags[11] = is_offcycle
+    flags[12:16] = pad.to_bytes(4, "little")
     return struct.pack(
         "<QQQiiIIHHHH16B",
         time_ms,
@@ -883,7 +889,7 @@ def test_synthetic_npc_agent_2025_has_no_account() -> None:
     assert a.subgroup is None
 
 
-def test_evtc2025_profession_agent_without_account_is_not_player() -> None:
+def test_evtc2025_profession_agent_without_account_is_player() -> None:
     evtc = _build_minimal_evtc(
         [(789012, Profession.NECROMANCER.value, EliteSpec.HARBINGER.value, "Harbinger", False)],
         build="20250925",
@@ -894,7 +900,7 @@ def test_evtc2025_profession_agent_without_account_is_not_player() -> None:
     assert a.name == "Harbinger"
     assert a.profession == Profession.NECROMANCER
     assert a.elite == EliteSpec.HARBINGER
-    assert a.is_player is False
+    assert a.is_player is True
     assert a.account_name is None
 
 
@@ -990,8 +996,6 @@ def test_parse_events_2025_single_event_with_known_agent_is_accepted() -> None:
 
 
 def test_parse_events_2025_does_not_treat_friendly_events_as_healing() -> None:
-    # Base EVTC has no healing magnitude. iff=FRIEND alone identifies
-    # allegiance and must not reinterpret value as healing.
     evtc = _build_minimal_evtc(
         [(1, Profession.GUARDIAN.value, EliteSpec.DRAGONHUNTER.value, "Src", True)],
         build="20250925",
@@ -1017,6 +1021,45 @@ def test_parse_events_2025_does_not_treat_friendly_events_as_healing() -> None:
     )
     events = list(PythonEvtcParser().parse_events(evtc))
     assert events == []
+
+
+def test_parse_events_2025_healing_extension_combat_round_trips() -> None:
+    evtc = _build_minimal_evtc(
+        [
+            (1, Profession.RANGER.value, EliteSpec.DRUID.value, "Src", True),
+            (2, Profession.GUARDIAN.value, EliteSpec.FIREBRAND.value, "Dst", True),
+        ],
+        build="20250925",
+        skills=[(13980, "Windborne Notes"), (72115, "Relic of the Flock")],
+        events=[
+            _build_event_record_2025(
+                42_500,
+                1,
+                2,
+                -1_337,
+                13980,
+                is_statechange=49,
+                pad=0x9C9B3C99,
+            ),
+            _build_event_record_2025(
+                43_500,
+                1,
+                2,
+                -2_000,
+                72115,
+                is_statechange=49,
+                is_shields=1,
+                pad=0x9C9B3C99,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert [(event.skill_id, event.healing, event.barrier) for event in events] == [  # type: ignore[attr-defined]
+        (13980, 1_337, 0),
+        (72115, 0, 2_000),
+    ]
 
 
 # ---------------------------------------------------------------------------

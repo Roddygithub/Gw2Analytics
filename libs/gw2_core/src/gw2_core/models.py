@@ -218,6 +218,7 @@ class Agent(BaseModel):
         description="arcdps subgroup string (e.g. 'Subgroup 1' or empty). None for NPCs.",
     )
     instance_id: int = Field(default=0, ge=0, le=0xFFFF)
+    healing: int = Field(default=0, ge=0, le=0xFFFF)
     team_id: int = Field(
         default=0,
         ge=0,
@@ -322,10 +323,14 @@ class EventType(StrEnum):
     # symmetry-consistent with the post-Tour-6 event vocabulary.
     BARRIER = "BARRIER"
     BUFF_APPLY = "BUFF_APPLY"
+    BUFF_STACK_ACTIVE = "BUFF_STACK_ACTIVE"
     POSITION = "POSITION"
     SKILL_ACTIVATION = "SKILL_ACTIVATION"
     WEAPON_SWAP = "WEAPON_SWAP"
     EFFECT = "EFFECT"
+    SPAWN = "SPAWN"
+    MISSILE = "MISSILE"
+    DESPAWN = "DESPAWN"
     HEALTH_UPDATE = "HEALTH_UPDATE"
     UP = "UP"
     COMBAT_OUTCOME = "COMBAT_OUTCOME"
@@ -485,15 +490,16 @@ class BoonApplyEvent(BaseEvent):
         ..., ge=0, description="Total duration of the applied boon stack in milliseconds."
     )
     stacks: int = Field(..., ge=0, description="Magnitude of the state change.")
-    kind: Literal["apply", "remove_single", "remove_all"] = Field(
+    stack_id: int = Field(default=0, ge=0, le=0xFFFFFFFF)
+    kind: Literal["apply", "remove_single", "remove_all", "remove_manual"] = Field(
         default="apply",
         description=(
             "arcdps 2025+ ``cbtbuffremove`` byte decoded: ``0`` = NONE "
             "(interpreted as apply in the buff-emit context), "
             "``1`` = ALL (all-stack remove), ``2`` = SINGLE (single-stack "
-            "remove), ``3`` = MANUAL (auto-remove on all-stack or "
-            "out-of-combat; collapses to remove_single per arcdps's "
-            "'use for in/out volume' guidance). Mapping verified against "
+            "remove), ``3`` = MANUAL (retained for volume accounting but "
+            "excluded from uptime simulation, matching Elite Insights). "
+            "Mapping verified against "
             "the arcdps.h cbtbuffremove enum + ship via Phase 9 step 4. "
             "Defaults to ``'apply'`` for forward-compat with pre-Phase-9 "
             "wire payloads that omit the field."
@@ -818,7 +824,16 @@ class BuffApplyEvent(BaseEvent):
     duration_ms: int = Field(default=0, ge=0)
     original_duration_ms: int = Field(default=0, ge=0)
     stacks: int = Field(default=1, ge=1)
+    stack_id: int = Field(default=0, ge=0, le=0xFFFFFFFF)
+    added_active: bool = False
     initial: bool = True
+
+
+class BuffStackActiveEvent(BaseEvent):
+    """Select the active stack for queue/regeneration buffs."""
+
+    event_type: Literal[EventType.BUFF_STACK_ACTIVE] = EventType.BUFF_STACK_ACTIVE
+    stack_id: int = Field(..., ge=0, le=0xFFFFFFFF)
 
 
 class PositionEvent(BaseEvent):
@@ -857,6 +872,27 @@ class EffectEvent(BaseEvent):
 
     event_type: Literal[EventType.EFFECT] = EventType.EFFECT
     guid: str = Field(..., min_length=32, max_length=32)
+    is_around_dst: bool = False
+    duration_ms: int = Field(default=0, ge=0)
+    dynamic_end_time_ms: int | None = Field(default=None, ge=0)
+
+
+class SpawnEvent(BaseEvent):
+    """One agent spawn; source is the resolved owner and target is the spawned agent."""
+
+    event_type: Literal[EventType.SPAWN] = EventType.SPAWN
+
+
+class MissileEvent(BaseEvent):
+    """One missile creation event."""
+
+    event_type: Literal[EventType.MISSILE] = EventType.MISSILE
+
+
+class DespawnEvent(BaseEvent):
+    """One agent despawn event."""
+
+    event_type: Literal[EventType.DESPAWN] = EventType.DESPAWN
 
 
 _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
@@ -874,10 +910,14 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.BLOCK: BlockEvent,
     EventType.INTERRUPT: InterruptEvent,
     EventType.BUFF_APPLY: BuffApplyEvent,
+    EventType.BUFF_STACK_ACTIVE: BuffStackActiveEvent,
     EventType.POSITION: PositionEvent,
     EventType.SKILL_ACTIVATION: SkillActivationEvent,
     EventType.WEAPON_SWAP: WeaponSwapEvent,
     EventType.EFFECT: EffectEvent,
+    EventType.SPAWN: SpawnEvent,
+    EventType.MISSILE: MissileEvent,
+    EventType.DESPAWN: DespawnEvent,
     EventType.HEALTH_UPDATE: HealthUpdateEvent,
     EventType.UP: UpEvent,
     EventType.COMBAT_OUTCOME: CombatOutcomeEvent,

@@ -159,8 +159,9 @@ def test_readout_200_default_empty_players_when_no_player_agents(client: TestCli
     sk = 3_400_000 + int(suffix[:4], 16)
 
     # ``make_minimal_zevtc`` writes ``account = b""`` for NPC agents.
+    # arcdps NPC encoded with elite_raw=0xFFFFFFFF (uint32 max).
     blob = make_minimal_zevtc(
-        [(npc_a, 2, 18, f"NPC {suffix}", False)],
+        [(npc_a, 2, 0xFFFFFFFF, f"NPC {suffix}", False)],
         build=build_2025_string(suffix),
         skills=[(sk, "Dmg")],
         events=[make_cbtevent(1_000, src=npc_a, dst=0, value=42, skill_id=sk)],

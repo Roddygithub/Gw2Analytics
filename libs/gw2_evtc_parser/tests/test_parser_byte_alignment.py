@@ -347,7 +347,7 @@ def test_cbtbuffremove_kinds_tuple_shape_locked() -> None:
         _CBTBUFREMOVE_KINDS = (
             "remove_all",      # byte 1: CBTB_ALL
             "remove_single",   # byte 2: CBTB_SINGLE
-            "remove_single",   # byte 3: CBTB_MANUAL (collapsed per arcdps)
+            "remove_manual",   # byte 3: CBTB_MANUAL (not simulated by EI)
         )
 
     Indexed by ``is_buffremove - 1`` at the emit site in
@@ -358,7 +358,7 @@ def test_cbtbuffremove_kinds_tuple_shape_locked() -> None:
     # a separate ``len()`` assert would be redundant -- Python
     # ``==`` on tuples compares both arity AND element-wise
     # contents, so a single assert covers both drift modes.
-    expected = ("remove_all", "remove_single", "remove_single")
+    expected = ("remove_all", "remove_single", "remove_manual")
     assert expected == _CBTBUFREMOVE_KINDS, (
         f"_CBTBUFREMOVE_KINDS shape drifted: expected {expected!r} "
         f"(3 entries indexed by [byte-1] for the arcdps REMOVE "

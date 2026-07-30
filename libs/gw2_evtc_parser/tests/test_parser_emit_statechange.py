@@ -436,7 +436,7 @@ def test_parse_events_dispatch_unmapped_statechange_yields_no_event() -> None:
                 src_agent=1,
                 dst_agent=2,
                 value=100,
-                is_statechange=6,  # CBTS_SPAWN
+                is_statechange=1,  # Unmapped CBTS kind
             ),
         ],
     )

@@ -28,11 +28,12 @@ skill_id. ``max_stacks`` is per the GW2 wiki:
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 
 from pydantic import BaseModel, ConfigDict
 
-from gw2_core import BoonApplyEvent, BuffApplyEvent
+from gw2_core import BoonApplyEvent, BuffApplyEvent, BuffStackActiveEvent
 
 #: The 14 tracked boons: name → arcdps skill_id.
 #: Source: WvW_Analytics TRACKED_BUFFS mapping.
@@ -60,6 +61,19 @@ BUFF_NAME_BY_ID: dict[int, str] = {v: k for k, v in TRACKED_BUFFS.items()}
 MAX_STACKS: dict[str, int] = {
     "might": 25,
     "stability": 25,
+}
+_CAPACITIES = {
+    "might": 25,
+    "stability": 25,
+    "regeneration": 5,
+    "stealth": 5,
+    "fury": 99,
+    "quickness": 99,
+    "protection": 99,
+    "vigor": 99,
+    "swiftness": 99,
+    "resistance": 99,
+    "resolution": 99,
 }
 # All other boons default to 1 stack max (handled in compute logic).
 
@@ -116,11 +130,18 @@ def _max_stacks_for(name: str) -> int:
     return MAX_STACKS.get(name, 1)
 
 
+def _capacity_for(name: str) -> int:
+    return _CAPACITIES.get(name, 9)
+
+
 class _BuffStack:
     """Mutable per-(agent, buff) stack tracking state."""
 
     def __init__(self, name: str) -> None:
         self.expirations: list[int | None] = []
+        self.stack_ids: list[int] = []
+        self.healing_scores: list[int] = []
+        self.no_sort = False
         self.last_time_ms: int = 0
         self.cumulative_stack_ms: int = 0
         self.name: str = name
@@ -149,7 +170,9 @@ class BuffStateTracker:
     Events MUST be in chronological order (ascending ``time_ms``).
     """
 
-    def __init__(self, start_time_ms: int = 0) -> None:
+    def __init__(
+        self, start_time_ms: int = 0, healing_by_agent: dict[int, int] | None = None
+    ) -> None:
         # Per-agent per-buff stack state.
         # {agent_id: {buff_name: _BuffStack}}
         self._agent_buffs: dict[int, dict[str, _BuffStack]] = defaultdict(dict)
@@ -158,6 +181,7 @@ class BuffStateTracker:
             lambda: defaultdict(_OutgoingAccumulator),
         )
         self._start_time_ms = start_time_ms
+        self._healing_by_agent = healing_by_agent or {}
 
     def _get_stack(self, agent_id: int, buff_name: str) -> _BuffStack:
         """Get or create the stack tracker for (agent, buff)."""
@@ -169,6 +193,25 @@ class BuffStateTracker:
     @staticmethod
     def _advance(stack: _BuffStack, new_time_ms: int) -> None:
         """Accumulate stack-time through expirations up to ``new_time_ms``."""
+        if _max_stacks_for(stack.name) == 1:
+            elapsed = new_time_ms - stack.last_time_ms
+            while elapsed > 0 and stack.expirations:
+                remaining = stack.expirations[0]
+                if remaining is None:
+                    stack.cumulative_stack_ms += elapsed
+                    break
+                active = min(elapsed, remaining)
+                stack.cumulative_stack_ms += active
+                elapsed -= active
+                remaining -= active
+                if remaining == 0:
+                    stack.expirations.pop(0)
+                    stack.stack_ids.pop(0)
+                    stack.healing_scores.pop(0)
+                else:
+                    stack.expirations[0] = remaining
+            stack.last_time_ms = new_time_ms
+            return
         while True:
             next_expiry = min(
                 (expiry for expiry in stack.expirations if expiry is not None),
@@ -178,14 +221,27 @@ class BuffStateTracker:
                 break
             stack.cumulative_stack_ms += len(stack.expirations) * (next_expiry - stack.last_time_ms)
             stack.last_time_ms = next_expiry
-            stack.expirations.remove(next_expiry)
+            index = stack.expirations.index(next_expiry)
+            stack.expirations.pop(index)
+            stack.stack_ids.pop(index)
+            stack.healing_scores.pop(index)
         stack.cumulative_stack_ms += len(stack.expirations) * (new_time_ms - stack.last_time_ms)
         stack.last_time_ms = new_time_ms
 
     def _relative_time(self, time_ms: int) -> int:
         return max(0, time_ms - self._start_time_ms)
 
-    def process(self, event: BoonApplyEvent | BuffApplyEvent) -> None:
+    def end_agent(self, agent_id: int, time_ms: int) -> None:
+        """Advance and clear every tracked buff when an agent despawns."""
+        for stack in self._agent_buffs.get(agent_id, {}).values():
+            self._advance(stack, self._relative_time(time_ms))
+            stack.expirations.clear()
+            stack.stack_ids.clear()
+            stack.healing_scores.clear()
+
+    def process(  # noqa: PLR0912, PLR0915
+        self, event: BoonApplyEvent | BuffApplyEvent | BuffStackActiveEvent
+    ) -> None:
         """Process one ``BoonApplyEvent`` or ``BuffApplyEvent`` and update state.
 
         Events MUST be in chronological order (ascending ``time_ms``).
@@ -194,6 +250,27 @@ class BuffStateTracker:
         Raises:
             TypeError: if ``event`` is not a ``BoonApplyEvent`` or ``BuffApplyEvent``.
         """
+        if isinstance(event, BuffStackActiveEvent):
+            buff_name = _get_buff_name(event.skill_id)
+            if buff_name != "regeneration":
+                return
+            stack = self._get_stack(event.target_agent_id, buff_name)
+            self._advance(stack, self._relative_time(event.time_ms))
+            if event.stack_id in stack.stack_ids:
+                index = stack.stack_ids.index(event.stack_id)
+                expiry = stack.expirations.pop(index)
+                stack_id = stack.stack_ids.pop(index)
+                healing = stack.healing_scores.pop(index)
+                if stack.expirations and (stack.expirations[0] or 0) < 50:
+                    stack.expirations[0] = expiry
+                    stack.stack_ids[0] = stack_id
+                    stack.healing_scores[0] = healing
+                else:
+                    stack.expirations.insert(0, expiry)
+                    stack.stack_ids.insert(0, stack_id)
+                    stack.healing_scores.insert(0, healing)
+                stack.no_sort = True
+            return
         if isinstance(event, BuffApplyEvent):
             self._process_buff_apply(event)
             return
@@ -214,22 +291,87 @@ class BuffStateTracker:
         if event.kind == "apply":
             if _max_stacks_for(buff_name) > 1:
                 target_tracker.expirations.extend([time_ms + event.duration_ms] * event.stacks)
-                del target_tracker.expirations[_max_stacks_for(buff_name) :]
-            elif event.duration_ms > 0 and None not in target_tracker.expirations:
-                current_expiry = max(
-                    (expiry for expiry in target_tracker.expirations if expiry is not None),
-                    default=time_ms,
+                target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
+                target_tracker.healing_scores.extend(
+                    [self._healing_by_agent.get(event.source_agent_id, 0)] * event.stacks
                 )
-                target_tracker.expirations = [max(time_ms, current_expiry) + event.duration_ms]
+                pairs = sorted(
+                    zip(
+                        target_tracker.expirations,
+                        target_tracker.stack_ids,
+                        target_tracker.healing_scores,
+                        strict=True,
+                    )
+                )
+                pairs = pairs[-_capacity_for(buff_name) :]
+                target_tracker.expirations = [expiry for expiry, _, _ in pairs]
+                target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs]
+                target_tracker.healing_scores = [healing for _, _, healing in pairs]
+            else:
+                target_tracker.expirations.append(event.duration_ms or None)
+                target_tracker.stack_ids.append(event.stack_id)
+                target_tracker.healing_scores.append(
+                    self._healing_by_agent.get(event.source_agent_id, 0)
+                )
+                if buff_name == "regeneration" and not target_tracker.no_sort:
+                    pairs = sorted(
+                        zip(
+                            target_tracker.expirations,
+                            target_tracker.stack_ids,
+                            target_tracker.healing_scores,
+                            strict=True,
+                        ),
+                        key=lambda pair: pair[2],
+                        reverse=True,
+                    )
+                    target_tracker.expirations = [expiry for expiry, _, _ in pairs]
+                    target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs]
+                    target_tracker.healing_scores = [healing for _, _, healing in pairs]
+                del target_tracker.expirations[_capacity_for(buff_name) :]
+                del target_tracker.stack_ids[_capacity_for(buff_name) :]
+                del target_tracker.healing_scores[_capacity_for(buff_name) :]
         elif event.kind == "remove_single":
-            if event.stacks and target_tracker.expirations:
-                finite = [expiry for expiry in target_tracker.expirations if expiry is not None]
-                target_tracker.expirations.remove(min(finite) if finite else None)
+            if _max_stacks_for(buff_name) == 1 and target_tracker.expirations:
+                stack_index = next(
+                    (
+                        i
+                        for i, stack_id in enumerate(target_tracker.stack_ids)
+                        if event.stack_id and stack_id == event.stack_id
+                    ),
+                    None,
+                )
+                if stack_index is None:
+                    stack_index = next(
+                        (
+                            i
+                            for i, duration in enumerate(target_tracker.expirations)
+                            if duration is not None and abs(duration - event.duration_ms) < 15
+                        ),
+                        None,
+                    )
+                if stack_index is not None:
+                    target_tracker.expirations.pop(stack_index)
+                    target_tracker.stack_ids.pop(stack_index)
+                    target_tracker.healing_scores.pop(stack_index)
+            elif event.stacks and target_tracker.expirations:
+                index = next(
+                    (
+                        i
+                        for i, stack_id in enumerate(target_tracker.stack_ids)
+                        if event.stack_id and stack_id == event.stack_id
+                    ),
+                    0,
+                )
+                target_tracker.expirations.pop(index)
+                target_tracker.stack_ids.pop(index)
+                target_tracker.healing_scores.pop(index)
         elif event.kind == "remove_all":
             target_tracker.expirations.clear()
+            target_tracker.stack_ids.clear()
+            target_tracker.healing_scores.clear()
 
         # --- Outgoing boon tracking (source-side) ---
-        if event.source_agent_id != event.target_agent_id:
+        if event.kind == "apply" and event.source_agent_id != event.target_agent_id:
             self._outgoing[event.source_agent_id][buff_name].total_ms += (
                 event.duration_ms * event.stacks
             )
@@ -255,17 +397,31 @@ class BuffStateTracker:
         expiry = time_ms + event.duration_ms if event.duration_ms > 0 else None
         if _max_stacks_for(buff_name) > 1:
             target_tracker.expirations.extend([expiry] * event.stacks)
-            del target_tracker.expirations[_max_stacks_for(buff_name) :]
-        elif expiry is None:
-            target_tracker.expirations = [None]
+            target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
+            target_tracker.healing_scores.extend([0] * event.stacks)
+            pairs = sorted(
+                zip(
+                    target_tracker.expirations,
+                    target_tracker.stack_ids,
+                    target_tracker.healing_scores,
+                    strict=True,
+                ),
+                key=lambda pair: pair[0] if pair[0] is not None else math.inf,
+            )[-_capacity_for(buff_name) :]
+            target_tracker.expirations = [value for value, _, _ in pairs]
+            target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs]
+            target_tracker.healing_scores = [healing for _, _, healing in pairs]
         else:
-            current_expiry = max(
-                (value for value in target_tracker.expirations if value is not None),
-                default=time_ms,
-            )
-            target_tracker.expirations = [max(time_ms, current_expiry) + event.duration_ms]
+            target_tracker.expirations.append(event.duration_ms or None)
+            target_tracker.stack_ids.append(event.stack_id)
+            target_tracker.healing_scores.append(0)
+            del target_tracker.expirations[_capacity_for(buff_name) :]
+            del target_tracker.stack_ids[_capacity_for(buff_name) :]
+            del target_tracker.healing_scores[_capacity_for(buff_name) :]
 
-    def compute_player_uptimes(self, agent_id: int, duration_ms: int) -> dict[str, float]:
+    def compute_player_uptimes(
+        self, agent_id: int, duration_ms: int, active_duration_ms: int | None = None
+    ) -> dict[str, float]:
         """Compute boon uptime for one player after processing all events.
 
         Duration boons return percentages; intensity boons return average stacks.
@@ -284,9 +440,12 @@ class BuffStateTracker:
             # Advance a copy so repeated computations remain idempotent.
             snapshot = _BuffStack(name)
             snapshot.expirations = stack.expirations.copy()
+            snapshot.stack_ids = stack.stack_ids.copy()
+            snapshot.healing_scores = stack.healing_scores.copy()
+            snapshot.no_sort = stack.no_sort
             snapshot.last_time_ms = stack.last_time_ms
             snapshot.cumulative_stack_ms = stack.cumulative_stack_ms
-            self._advance(snapshot, duration_ms)
+            self._advance(snapshot, min(duration_ms, active_duration_ms or duration_ms))
             if _max_stacks_for(name) > 1:
                 result[name] = snapshot.cumulative_stack_ms / duration_ms
             else:
