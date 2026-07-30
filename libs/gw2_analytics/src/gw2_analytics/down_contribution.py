@@ -130,7 +130,7 @@ class DownContributionAggregator:
 
         stats: dict[int, _DownAccumulator] = defaultdict(_DownAccumulator)
         if health_events:
-            windows = self._pre_down_windows(health_events, down_events)
+            windows = self._pre_down_windows(health_events, down_events, up_events or [])
             for damage in damage_events:
                 acc = stats[damage.source_agent_id]
                 if damage.against_downed and damage.damage > 0:
@@ -168,7 +168,9 @@ class DownContributionAggregator:
 
     @staticmethod
     def _pre_down_windows(
-        health_events: list[HealthUpdateEvent], down_events: list[DownEvent]
+        health_events: list[HealthUpdateEvent],
+        down_events: list[DownEvent],
+        up_events: list[UpEvent],
     ) -> dict[int, list[tuple[int, int]]]:
         health_by_target: dict[int, list[HealthUpdateEvent]] = defaultdict(list)
         for event in health_events:
@@ -176,7 +178,17 @@ class DownContributionAggregator:
         windows: dict[int, list[tuple[int, int]]] = defaultdict(list)
         for down in down_events:
             start: int | None = None
+            last_up = max(
+                (
+                    up.time_ms
+                    for up in up_events
+                    if up.source_agent_id == down.source_agent_id and up.time_ms < down.time_ms
+                ),
+                default=-1,
+            )
             for health in health_by_target.get(down.source_agent_id, []):
+                if health.time_ms <= last_up:
+                    continue
                 if health.time_ms >= down.time_ms:
                     break
                 if health.health_percent > 90.0:

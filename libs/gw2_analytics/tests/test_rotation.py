@@ -3,6 +3,7 @@ from gw2_core import (
     ActivationType,
     BoonApplyEvent,
     EffectEvent,
+    HealingEvent,
     SkillActivationEvent,
     WeaponSwapEvent,
 )
@@ -33,6 +34,13 @@ def test_build_skill_rotation_pairs_and_infers_casts() -> None:
             guid="C4E8DD3234E0C647993857940ED79AC1",
             **base,
         ),
+        HealingEvent(
+            time_ms=origin + 150,
+            skill_id=13980,
+            healing=1_000,
+            barrier=0,
+            **base,
+        ),
         SkillActivationEvent(
             time_ms=origin + 200,
             skill_id=123,
@@ -58,5 +66,6 @@ def test_build_skill_rotation_pairs_and_infers_casts() -> None:
         (30792, 99, 0),
         (-2, 100, 0),
         (29560, 100, 0),
+        (13980, 150, 0),
         (123, 200, 300),
     ]

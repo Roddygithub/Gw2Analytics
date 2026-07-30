@@ -324,6 +324,7 @@ class TestBuffStateTracker:
             _boon_apply(
                 skill_id=TRACKED_BUFFS["fury"],
                 time_ms=5_000,
+                duration_ms=5_000,
                 kind="remove_single",
                 stacks=1,
             )
@@ -339,6 +340,7 @@ class TestBuffStateTracker:
             _boon_apply(
                 skill_id=TRACKED_BUFFS["fury"],
                 time_ms=5_000,
+                duration_ms=5_000,
                 kind="remove_single",
                 stacks=1,
             )

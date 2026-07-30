@@ -420,10 +420,10 @@ def test_parse_events_emit_buff_remove_all_yields_boon_apply_event() -> None:
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_all"
     assert boon.time_ms == 1_000
-    assert boon.source_agent_id == 1
-    assert boon.target_agent_id == 2
+    assert boon.source_agent_id == 2
+    assert boon.target_agent_id == 1
     assert boon.skill_id == 42
-    assert boon.duration_ms == 0
+    assert boon.duration_ms == 100
     assert boon.stacks == 1
 
 
@@ -461,14 +461,11 @@ def test_parse_events_emit_buff_remove_single_yields_boon_apply_event() -> None:
     assert boon.skill_id == 101
 
 
-def test_parse_events_emit_buff_remove_manual_collapses_to_remove_single() -> None:
-    """``is_buffremove == 3`` (CBTB_MANUAL) yields BoonApplyEvent with kind="remove_single".
+def test_parse_events_emit_buff_remove_manual_is_not_simulated_as_single() -> None:
+    """``is_buffremove == 3`` (CBTB_MANUAL) stays distinct from remove-single.
 
-    The 4th arcdps ``cbtbuffremove`` enum value (CBTB_MANUAL) collapses
-    onto ``remove_single`` per arcdps's documented guidance: "use for
-    in/out volume". The parser's inline mapping treats bytes 2 and 3
-    identically -- both yield ``kind="remove_single"``. After yielding
-    the marker the parser continues; no damage event is emitted.
+    EI retains manual removals for volume accounting but excludes them
+    from buff simulation, so byte 3 must not collapse onto byte 2.
     """
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
@@ -479,7 +476,7 @@ def test_parse_events_emit_buff_remove_manual_collapses_to_remove_single() -> No
                 src_agent=1,
                 dst_agent=2,
                 value=100,
-                is_buffremove=3,  # CBTB_MANUAL -> collapses to remove_single
+                is_buffremove=3,
             ),
         ],
     )
@@ -487,7 +484,7 @@ def test_parse_events_emit_buff_remove_manual_collapses_to_remove_single() -> No
     assert len(events) == 1
     boon = events[0]
     assert isinstance(boon, BoonApplyEvent)
-    assert boon.kind == "remove_single"  # CBTB_MANUAL collapses to SINGLE
+    assert boon.kind == "remove_manual"
     assert boon.stacks == 1
 
 

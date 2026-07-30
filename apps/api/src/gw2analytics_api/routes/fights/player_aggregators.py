@@ -368,7 +368,7 @@ def _compute_presence(
     }
 
 
-def _detect_agent_roles(
+def _detect_agent_roles(  # noqa: PLR0912
     agent_id: int,
     identity: AgentIdentity,
     damage_by_id: dict[int, PlayerDamageRow],
@@ -376,6 +376,7 @@ def _detect_agent_roles(
     strips_counter: Counter[int],
     cleanses_counter: Counter[int],
     cc_counter: Counter[int],
+    boon_uptimes_by_account: dict[str, dict[str, float]] | None = None,
 ) -> list[str]:
     """Detect combat roles for a single agent."""
     prof_str = identity.profession
@@ -402,12 +403,30 @@ def _detect_agent_roles(
 
     hr = heal_lookup.get(agent_id)
     dr = damage_by_id.get(agent_id)
+
+    outgoing_kwargs: dict[str, int] = {}
+    if boon_uptimes_by_account and identity.account_name:
+        acct_uptimes = boon_uptimes_by_account.get(identity.account_name, {})
+        for boon in (
+            "quickness",
+            "alacrity",
+            "stability",
+            "resistance",
+            "aegis",
+            "protection",
+            "might",
+        ):
+            val = acct_uptimes.get(f"outgoing_{boon}")
+            if val is not None:
+                outgoing_kwargs[f"outgoing_{boon}"] = int(val)
+
     primary_role, _tags = detect_role_lite(
         total_damage=dr.total_damage if dr else 0,
         total_healing=hr.total_healing if hr else 0,
         total_buff_removal=strips_counter.get(agent_id, 0),
         profession_int=prof_int,
         elite_spec_int=elite_int,
+        **outgoing_kwargs,
     )
     roles: list[str] = []
     if primary_role in _DETECTED_ROLE_LABELS:
@@ -515,6 +534,7 @@ def aggregate_combat_readout(
             counters.strips,
             counters.cleanses,
             counters.cc,
+            boon_uptimes_by_account=boon_uptimes_by_account,
         )
         for agent_id in identity_map
     }

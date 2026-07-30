@@ -15,9 +15,9 @@ _EI_CORPUS = os.environ.get("GW2ANALYTICS_EI_CORPUS")
 @pytest.mark.parametrize(
     ("name", "duration_ms", "agents", "events", "downs", "ups", "outcomes"),
     [
-        ("20251205-211525.zevtc", 69_097, 119, 52_428, 1, 1, 2),
-        ("20251207-225200.zevtc", 151_791, 323, 113_633, 47, 34, 19),
-        ("20251208-230823.zevtc", 74_837, 115, 22_932, 12, 5, 17),
+        ("20251205-211525.zevtc", 69_097, 119, 46_846, 1, 1, 2),
+        ("20251207-225200.zevtc", 151_791, 323, 112_909, 47, 34, 19),
+        ("20251208-230823.zevtc", 74_837, 115, 21_245, 12, 5, 17),
     ],
 )
 def test_evtc_2025_multilog_corpus(
@@ -51,9 +51,9 @@ def test_evtc_2025_multilog_corpus(
 @pytest.mark.parametrize(
     ("log_name", "ei_name", "max_differences"),
     [
-        ("20251205-211525.zevtc", "20251205-211525_detailed_wvw_kill.json", 360),
-        ("20251207-225200.zevtc", "20251207-225200_detailed_wvw_kill.json", 185),
-        ("20251208-230823.zevtc", "20251208-230823_detailed_wvw_kill.json", 176),
+        ("20251205-211525.zevtc", "20251205-211525_detailed_wvw_kill.json", 17),
+        ("20251207-225200.zevtc", "20251207-225200_detailed_wvw_kill.json", 9),
+        ("20251208-230823.zevtc", "20251208-230823_detailed_wvw_kill.json", 7),
     ],
 )
 def test_elite_insights_multilog_alignment_does_not_regress(

@@ -79,10 +79,12 @@ from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
     BuffRemovalEvent,
+    BuffStackActiveEvent,
     CCEvent,
     CombatOutcomeEvent,
     DamageEvent,
     DeathEvent,
+    DespawnEvent,
     DodgeEvent,
     DownEvent,
     EffectEvent,
@@ -93,10 +95,12 @@ from gw2_core import (
     HealingEvent,
     HealthUpdateEvent,
     InterruptEvent,
+    MissileEvent,
     PositionEvent,
     Profession,
     Skill,
     SkillActivationEvent,
+    SpawnEvent,
     UpEvent,
     WeaponSwapEvent,
 )
@@ -283,9 +287,9 @@ _EVENT_STRUCT_2025: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHH16B")
 #:   byte 52 = is_buffremove
 #:   byte 56 = is_statechange
 #:   byte 59 = is_offcycle (direct damage against downed)
-#:   byte 60 = pad1 (condition damage against downed)
+#:   bytes 60-63 = pad/stack ID (low byte marks condition damage against downed)
 _EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct(
-    "<QQQii 4x I HHHH bbbb b 3x b 2x bb 3x"
+    "<QQQii 4x I HHHH bbbb b 3x b x bb I"
 )
 
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
@@ -327,13 +331,12 @@ _EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct(
 #:       boundary crisp: this constant maps ONLY the bytes the
 #:       parser actually consumes.
 #:
-#: CBTB_MANUAL (byte 3) collapses onto ``remove_single`` per
-#: arcdps's documented "use for in/out volume" guidance (also
-#: reflected in :func:`gw2_analytics.buff_dispatch.decode_buff_change`).
+#: CBTB_MANUAL remains distinct because Elite Insights excludes it from
+#: buff simulation while retaining it for volume accounting.
 _CBTBUFREMOVE_KINDS: Final[tuple[str, str, str]] = (
     "remove_all",  # byte 1: CBTB_ALL -> remove_all
     "remove_single",  # byte 2: CBTB_SINGLE -> remove_single
-    "remove_single",  # byte 3: CBTB_MANUAL collapsed to remove_single per arcdps
+    "remove_manual",  # byte 3: CBTB_MANUAL
 )
 
 #: Sanity bound on agent_count to defend against pathological sources.
@@ -523,6 +526,9 @@ class PythonEvtcParser:
         _cbtbufremove_kinds = _CBTBUFREMOVE_KINDS
         down_durations: dict[tuple[int, int], int] = {}
         effect_guids: dict[int, str] = {}
+        buff_remove_all: set[tuple[int, int, int]] = set()
+        all_inst_to_agent: dict[int, int] = {}
+        owner_by_agent: dict[int, int] = {}
         # Updated chronologically during the second pass so reused instance
         # IDs resolve to the owner active at the event time.
         inst_to_agent: dict[int, int] = {}
@@ -545,6 +551,12 @@ class PythonEvtcParser:
                     *_srest,
                 ) = _unpack_event(data, scan_cursor)
                 statechange = _srest[5]
+                if s_src and _s_src_inst:
+                    all_inst_to_agent[_s_src_inst] = s_src
+                if s_dst and _s_dst_inst:
+                    all_inst_to_agent[_s_dst_inst] = s_dst
+                if s_src and _ssmi and _ssmi in all_inst_to_agent:
+                    owner_by_agent[s_src] = all_inst_to_agent[_ssmi]
                 if _stime > 0:
                     if s_src:
                         last_aware[s_src] = max(last_aware.get(s_src, 0), _stime)
@@ -552,6 +564,8 @@ class PythonEvtcParser:
                         last_aware[s_dst] = max(last_aware.get(s_dst, 0), _stime)
                 if statechange in (3, 4, 5):
                     lifecycle.append((_stime, s_src, statechange))
+                if _srest[4] == 1:
+                    buff_remove_all.add((_stime, s_src, _ssid))
                 if statechange == 46:
                     effect_guids[_ssid] = (
                         (s_src.to_bytes(8, "little") + s_dst.to_bytes(8, "little")).hex().upper()
@@ -598,8 +612,9 @@ class PythonEvtcParser:
                     # byte 56 = arcdps ``is_statechange`` byte.
                     is_statechange,
                     # bytes 59/60 identify damage against a downed target.
+                    is_shields,
                     is_offcycle,
-                    pad1,
+                    pad,
                 ) = _unpack_event(data, cursor)
                 event_src_agent = src_agent
                 if src_agent and _src_inst:
@@ -653,7 +668,8 @@ class PythonEvtcParser:
                 ) = _unpack_event(data, cursor)
                 event_src_agent = src_agent
                 is_offcycle = 0
-                pad1 = 0
+                is_shields = 0
+                pad = 0
             # NOTE: ``is_buffremove`` is consumed below by
             # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``) AND
             # by Step 3 APPLY-BRANCH (predicate ``_ev_buff != 0 AND
@@ -683,6 +699,63 @@ class PythonEvtcParser:
                     skill_id=skill_id,
                     duration_ms=duration,
                     original_duration_ms=original_duration or duration,
+                    stack_id=pad,
+                    added_active=bool(is_shields),
+                )
+                continue
+            if is_statechange == 27:
+                yield BuffStackActiveEvent(
+                    time_ms=time_ms,
+                    source_agent_id=event_src_agent,
+                    target_agent_id=event_src_agent,
+                    skill_id=skill_id,
+                    stack_id=dst_agent,
+                )
+                continue
+            if is_statechange == 49 and pad == 0x9C9B3C99:
+                magnitude = (
+                    -value
+                    if _ev_buff == 0 and value < 0
+                    else -buff_dmg
+                    if _ev_buff != 0 and value == 0 and buff_dmg < 0
+                    else 0
+                )
+                src_is_peer = bool(is_offcycle & 0x80) or not bool(is_offcycle & 0xC0)
+                if magnitude > 0 and src_is_peer:
+                    yield HealingEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=dst_agent,
+                        skill_id=skill_id,
+                        healing=0 if is_shields else magnitude,
+                        barrier=magnitude if is_shields else 0,
+                        iff=_iff & 0xFF,
+                        src_master_instid=src_master_inst,
+                        dst_master_instid=dst_master_inst,
+                    )
+                continue
+            if is_statechange == 6:
+                yield SpawnEvent(
+                    time_ms=time_ms,
+                    source_agent_id=owner_by_agent.get(event_src_agent, 0),
+                    target_agent_id=event_src_agent,
+                    skill_id=0,
+                )
+                continue
+            if is_statechange == 7:
+                yield DespawnEvent(
+                    time_ms=time_ms,
+                    source_agent_id=event_src_agent,
+                    target_agent_id=0,
+                    skill_id=0,
+                )
+                continue
+            if is_statechange == 57:
+                yield MissileEvent(
+                    time_ms=time_ms,
+                    source_agent_id=owner_by_agent.get(event_src_agent, src_agent),
+                    target_agent_id=dst_agent,
+                    skill_id=skill_id,
                 )
                 continue
             if is_statechange == 46:
@@ -703,12 +776,22 @@ class PythonEvtcParser:
                 )
                 continue
             if is_statechange in (45, 51, 60, 62) and skill_id in effect_guids:
+                effect_duration = (
+                    (_iff & 0xFF)
+                    | ((_ev_buff & 0xFF) << 8)
+                    | ((_result & 0xFF) << 16)
+                    | ((is_activation & 0xFF) << 24)
+                    if is_statechange == 51
+                    else 0
+                )
                 yield EffectEvent(
                     time_ms=time_ms,
-                    source_agent_id=event_src_agent or dst_agent,
-                    target_agent_id=0,
+                    source_agent_id=owner_by_agent.get(event_src_agent, event_src_agent),
+                    target_agent_id=dst_agent,
                     skill_id=skill_id,
                     guid=effect_guids[skill_id],
+                    is_around_dst=bool(dst_agent),
+                    duration_ms=effect_duration,
                 )
                 continue
             if is_statechange != 0:
@@ -905,6 +988,12 @@ class PythonEvtcParser:
             # predicate and the tuple length form a 3-line contract
             # -- keep them in sync.
             if is_buffremove in (1, 2, 3):
+                # Elite Insights excludes uncredited natural/overstack endings
+                # from buff simulation; explicit remove-all records still apply.
+                if is_evtc_2025 and is_buffremove != 1 and _iff == 2 and dst_agent == 0:
+                    continue
+                if is_buffremove != 1 and (time_ms, src_agent, skill_id) in buff_remove_all:
+                    continue
                 # Defensive invariant: the predicate filters to {1, 2, 3}
                 # and the emit tuple is a 3-tuple indexed by ``byte - 1``,
                 # so ``byte - 1`` MUST land in [0, 3). If a future
@@ -927,11 +1016,12 @@ class PythonEvtcParser:
                 )
                 yield BoonApplyEvent(
                     time_ms=time_ms,
-                    source_agent_id=src_agent,
-                    target_agent_id=dst_agent,
+                    source_agent_id=dst_agent,
+                    target_agent_id=event_src_agent,
                     skill_id=skill_id,
-                    duration_ms=0,
-                    stacks=1,
+                    duration_ms=(0 if value >= _DAMAGE_SANITY_CAP else max(0, value)),
+                    stacks=max(1, _result) if is_buffremove == 1 else 1,
+                    stack_id=pad,
                     # Index by ``byte - 1`` so the 3-tuple aligns with
                     # the REMOVE byte range [1, 2, 3] (byte 0 is the
                     # CBTB_NONE sentinel excluded by the predicate).
@@ -953,26 +1043,28 @@ class PythonEvtcParser:
                 # magnitude field: direct hits use value, condition ticks
                 # use buff_dmg. Crowd-control and activation records carry
                 # values but are not health damage.
+                if _ev_buff and buff_dmg == 0 and value > 0 and is_activation == 0:
+                    yield BoonApplyEvent(
+                        time_ms=time_ms,
+                        source_agent_id=src_agent,
+                        target_agent_id=dst_agent,
+                        skill_id=skill_id,
+                        duration_ms=value,
+                        stacks=1,
+                        stack_id=pad,
+                        kind="apply",
+                    )
+                    continue
                 if _iff == 0:
-                    duration = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
-                    if _ev_buff and dst_agent:
-                        yield BoonApplyEvent(
-                            time_ms=time_ms,
-                            source_agent_id=src_agent,
-                            target_agent_id=dst_agent,
-                            skill_id=skill_id,
-                            duration_ms=duration,
-                            stacks=1,
-                            kind="apply",
-                        )
                     continue
                 if _iff not in {1, 2}:
                     continue
                 if _ev_buff:
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                     condition_damage = magnitude
-                    is_attempt = True
-                    against_downed = bool(pad1)
+                    is_attempt = magnitude > 0 or _result != 0
+                    damage_result = 13 if magnitude == 0 else _result
+                    against_downed = bool(pad & 0xFF)
                     is_life_leech = is_offcycle in {3, 5}
                 else:
                     if _result in (8, 9):
@@ -1013,11 +1105,16 @@ class PythonEvtcParser:
                             target_agent_id=dst_agent,
                             skill_id=skill_id,
                         )
-                    if _result in {5, 8, 9, 10, 11}:
+                    if _result in {5, 8, 9, 11}:
                         continue
-                    magnitude = 0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                    magnitude = 0 if value >= _DAMAGE_SANITY_CAP or _result == 10 else max(0, value)
                     condition_damage = 0
-                    is_attempt = magnitude > 0 or _result in {3, 4, 6, 7, 13}
+                    is_attempt = magnitude > 0 or (
+                        dst_agent != 0
+                        and skill_id != 0
+                        and _result in {0, 1, 2, 3, 4, 6, 7, 8, 10, 13}
+                    )
+                    damage_result = _result
                     against_downed = bool(is_offcycle)
                     is_life_leech = False
                 if is_attempt:
@@ -1028,7 +1125,7 @@ class PythonEvtcParser:
                         skill_id=skill_id,
                         damage=magnitude,
                         buff_dmg=condition_damage,
-                        result=_result,
+                        result=damage_result,
                         against_downed=against_downed,
                         is_life_leech=is_life_leech,
                         iff=_iff,
@@ -1942,7 +2039,7 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
         elite_raw,
         _tough,
         _conc,
-        _heal,
+        healing,
         _width,
         _condition,
         _height,
@@ -1968,6 +2065,7 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
         profession = Profession(prof_raw)
     except ValueError:
         profession = Profession.UNKNOWN
+    is_player = is_player or (profession != Profession.UNKNOWN and elite_raw != 0xFFFFFFFF)
 
     # v0.16.3-api: cross-validate elite spec against profession.
     # EVTC2025+ logs use official GW2 v2 API IDs natively.
@@ -1995,6 +2093,7 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
         is_gadget=is_gadget,
         account_name=account_name,
         subgroup=subgroup,
+        healing=healing,
     )
 
 
@@ -2006,7 +2105,7 @@ def _decode_agent(data: bytes, offset: int) -> Agent:
     IDs (55, 63, 73, 74, 75, 77) by profession membership.  Falls
     back to ``EliteSpec.BASE`` if validation fails.
     """
-    aid, prof_raw, elite_raw, _tough, _conc, _heal, _width, name_buf = _AGENT_STRUCT.unpack_from(
+    aid, prof_raw, elite_raw, _tough, _conc, healing, _width, name_buf = _AGENT_STRUCT.unpack_from(
         data, offset
     )
 
@@ -2074,6 +2173,7 @@ def _decode_agent(data: bytes, offset: int) -> Agent:
         is_gadget=is_gadget,
         account_name=account_name,
         subgroup=subgroup,
+        healing=max(0, healing),
     )
 
 
