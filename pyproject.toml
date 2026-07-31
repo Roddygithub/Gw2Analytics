@@ -77,7 +77,7 @@ dev = [
 
     "arq>=0.25,<1",
     "redis>=5.0,<8",
-    "prometheus_client>=0.20,<1",
+    "prometheus_client>=0.26.0,<1",
 ]
 
 [tool.uv.workspace]

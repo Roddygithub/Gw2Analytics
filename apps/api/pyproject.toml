@@ -71,7 +71,7 @@ dependencies = [
     # When OTel instrumentation moves to ``importlib.metadata``
     # (>0.48b0), this dep can be dropped entirely.
     "setuptools>=70.0.0,<80",
-    "prometheus_client>=0.20",  # v0.10.12 plan 017: Arq worker metrics + /metrics endpoint
+    "prometheus_client>=0.26.0",  # v0.10.12 plan 017: Arq worker metrics + /metrics endpoint
     "gw2_core",
     "gw2_evtc_parser",
     "gw2_analytics",
