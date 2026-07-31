@@ -42,7 +42,7 @@
     "eslint": "^10.7.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
-    "jest-axe": "^10.0.0",
+    "jest-axe": "^11.0.0",
     "jsdom": "^25",
     "openapi-typescript": "^7.13.0",
     "pixelmatch": "^7.1.0",
