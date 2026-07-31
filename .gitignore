@@ -126,3 +126,11 @@ web/screenshots/
 /real_fight.zevtc
 /.playwright-mcp/
 web/.pnpm-store/
+
+# ---------------------------------------------------------------------------
+# Local EI-alignment workbench (v0.16.x parser/EI parity work).
+# Never commit: raw combat logs (~19 GB), the vendored Elite Insights CLI,
+# and the multi-GB EI reference JSON exports generated from them.
+# ---------------------------------------------------------------------------
+/zevtc files/
+/.tooling/
