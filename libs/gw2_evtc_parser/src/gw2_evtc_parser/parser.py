@@ -276,6 +276,8 @@ _EVENT_STRUCT_2025: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHH16B")
 #: Optimized event struct for EVTC2025+ builds.  Reads the fields
 #: consumed by :meth:`PythonEvtcParser.parse_events` using the
 #: standard flag byte positions:
+#:   bytes 32-35 = overstack_value (barrier absorption on damage records)
+#:   byte 36-39 = skillid
 #:   byte 40-41 = src_instid
 #:   byte 42-43 = dst_instid
 #:   byte 44-45 = src_master_instid
@@ -288,8 +290,13 @@ _EVENT_STRUCT_2025: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHH16B")
 #:   byte 56 = is_statechange
 #:   byte 59 = is_offcycle (direct damage against downed)
 #:   bytes 60-63 = pad/stack ID (low byte marks condition damage against downed)
+#:
+#: v0.16.4: ``overstack_value`` was previously skipped (``4x``). On a
+#: damage record it is the portion of the hit absorbed by barrier,
+#: which EI reports as ``shieldDamage``; reading it also lets the
+#: barrier-absorbed condition ticks be told apart from mitigated ones.
 _EVENT_STRUCT_EVENTS_2025: Final[struct.Struct] = struct.Struct(
-    "<QQQii 4x I HHHH bbbb b 3x b x bb I"
+    "<QQQii I I HHHH bbbb b 3x b x bb I"
 )
 
 #: Phase 9 step 2-EMIT-BRANCH: arcdps's REMOVE-class ``cbtbuffremove``
@@ -339,6 +346,51 @@ _CBTBUFREMOVE_KINDS: Final[tuple[str, str, str]] = (
     "remove_manual",  # byte 3: CBTB_MANUAL
 )
 
+#: arcdps writes two different enums into the cbtevent ``result`` byte;
+#: the ``ev.buff`` byte says which one applies.
+#:
+#: Direct hits use ``cbtresult`` (0 Normal, 1 Crit, 2 Glance, 3 Block,
+#: 4 Evade, 5 Interrupt, 6 Absorb, 7 Blind, 8 KillingBlow, 9 Downed,
+#: 10 Breakbar, 11 Activation, 12 CrowdControl). This has been stable
+#: across every build in the corpus.
+_DIRECT_HIT_RESULTS: Final[frozenset[int]] = frozenset({0, 1, 2, 8, 10})
+_DIRECT_ABSORB_RESULT: Final[int] = 6
+
+#: Condition ticks use ``cbtresult``'s condition counterpart, and arcdps
+#: renumbered it. Builds before 2026-05-07 write the classic
+#: ``ConditionResult`` (0 = the tick landed, 1-4 = the target was immune
+#: to it). Builds from 2026-05-07 onward write a second block starting at
+#: 13, alternating invulnerable / landed: 13 immune, 14 landed, 16
+#: landed, 18 landed. ``6`` (Absorb) is shared with the direct enum in
+#: both eras.
+#:
+#: Derived by reconciling every single-result (player, skill) entry in
+#: EI's ``totalDamageDist`` against its ``connectedHits`` / ``invulned``
+#: counters over the 35-log corpus -- 2 300+ observations, no
+#: disagreement. See ``docs/ei-parity-workbench.md``.
+_CONDITION_ENUM_REBASE_BUILD: Final[int] = 2026_05_07
+
+#: Buff apply / remove statechange codes introduced in the same
+#: 2026-05-07 arcdps change. See the fold-down in ``parse_events``.
+_BUFF_STATECHANGES_2026_05: Final[frozenset[int]] = frozenset({69, 71, 72})
+
+#: The same change also moved skill activation off the ``is_activation``
+#: byte of a plain record: 67 now starts a cast (with the byte left at 0)
+#: and 68 ends one (carrying the terminal ActivationType as before).
+_CAST_START_STATECHANGE_2026_05: Final[int] = 67
+_CAST_END_STATECHANGE_2026_05: Final[int] = 68
+
+
+def _condition_verdict(result: int, build_int: int) -> tuple[bool, bool]:
+    """Return ``(connected, absorbed)`` for a condition tick's result byte."""
+    if result == _DIRECT_ABSORB_RESULT:
+        return False, True
+    if build_int >= _CONDITION_ENUM_REBASE_BUILD:
+        # Second enum block: even values landed, odd values were immune.
+        return (result % 2 == 0, result % 2 == 1) if result >= 13 else (False, False)
+    return result == 0, result != 0
+
+
 #: Sanity bound on agent_count to defend against pathological sources.
 MAX_AGENTS: Final[int] = 10_000
 
@@ -377,15 +429,26 @@ ACCOUNT_NAME_PREFIX: Final[bytes] = b":"
 #: v0.16.3: per-profession set of valid elite-specialisation IDs.
 #: Used by :func:`_validate_elite_for_profession` and the legacy
 #: decode path to cross-validate the mapped (or raw) elite ID
-#: against the agent's profession.  Shared IDs (55, 63, 73, 74,
-#: 75, 77) resolve via the profession check.
+#: against the agent's profession.
+#:
+#: v0.16.4: re-derived from the GW2 v2 specialization catalogue (the
+#: same table Elite Insights ships as ``Content/SpecList.json``) after
+#: a 35-log WvW corpus showed every Thief and Elementalist elite being
+#: rejected here and downgraded to the core profession. Corrections:
+#: Thief was {55, 71, 72, 77} but 55/72 are Ranger specs — the real
+#: Thief IDs are 7 (Daredevil) and 58 (Deadeye); Elementalist was
+#: {48, 63, 75, 80} but 63 is Renegade and 75 is Amalgam — the real
+#: IDs are 56 (Weaver) and 67 (Catalyst); Warrior was missing 68
+#: (Bladesworn). Every ID in the catalogue is unique across
+#: professions, so this table is a validity check, not a
+#: disambiguator.
 _VALID_ELITE_BY_PROFESSION: Final[dict[int, set[int]]] = {
-    1: {27, 62, 65, 81},  # Guardian
-    2: {18, 61, 74},  # Warrior — Berserker, Spellbreaker, Paragon
-    3: {43, 57, 70, 75},  # Engineer
+    1: {27, 62, 65, 81},  # Guardian — Dragonhunter, Firebrand, Willbender, Luminary
+    2: {18, 61, 68, 74},  # Warrior — Berserker, Spellbreaker, Bladesworn, Paragon
+    3: {43, 57, 70, 75},  # Engineer — Scrapper, Holosmith, Mechanist, Amalgam
     4: {5, 55, 72, 78},  # Ranger — Druid, Soulbeast, Untamed, Galeshot
-    5: {55, 71, 72, 77},  # Thief — Daredevil, Specter, Deadeye, Antiquary
-    6: {48, 63, 75, 80},  # Elementalist
+    5: {7, 58, 71, 77},  # Thief — Daredevil, Deadeye, Specter, Antiquary
+    6: {48, 56, 67, 80},  # Elementalist — Tempest, Weaver, Catalyst, Evoker
     7: {40, 59, 66, 73},  # Mesmer — Chronomancer, Mirage, Virtuoso, Troubadour
     8: {34, 60, 64, 76},  # Necromancer — Reaper, Scourge, Harbinger, Ritualist
     9: {52, 63, 69, 79},  # Revenant — Herald, Renegade, Vindicator, Conduit
@@ -418,9 +481,10 @@ def _validate_elite_for_profession(prof_raw: int, elite_raw: int) -> EliteSpec:
     ``prof_raw``, or :attr:`EliteSpec.BASE` if the ID is not valid
     for that profession.
 
-    The per-profession valid set resolves shared IDs (55, 63, 73,
-    74, 75, 77) by profession membership: e.g. elite=55 on a Thief
-    is Daredevil, on a Ranger it is Soulbeast.
+    Elite IDs are globally unique in the GW2 specialization
+    catalogue, so the per-profession set is a *validity* check: it
+    rejects an ID that belongs to a different profession (a corrupt
+    or misaligned record) rather than disambiguating a shared ID.
     """
     valid_set = _VALID_ELITE_BY_PROFESSION.get(prof_raw)
     if valid_set and elite_raw in valid_set:
@@ -509,7 +573,8 @@ class PythonEvtcParser:
         # standard arcdps cbtevent layout; older builds keep the legacy
         # empirically-calibrated layout.
         build_str = data[BUILD_OFFSET : BUILD_OFFSET + 8].decode("ascii", errors="replace")
-        is_evtc_2025 = _build_version_from_build_str(build_str) >= 2025_00_00
+        build_int = _build_version_from_build_str(build_str)
+        is_evtc_2025 = build_int >= 2025_00_00
         offset = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
         end = len(data)
         cursor = offset
@@ -543,6 +608,7 @@ class PythonEvtcParser:
                     s_dst,
                     _sv,
                     _sbd,
+                    _sovers,
                     _ssid,
                     _s_src_inst,
                     _s_dst_inst,
@@ -588,6 +654,9 @@ class PythonEvtcParser:
                     dst_agent,
                     value,
                     buff_dmg,
+                    # bytes 32-35: overstack_value — barrier absorption
+                    # on damage records (EI's ``shieldDamage``).
+                    overstack,
                     skill_id,
                     # bytes 40-41: src_instid
                     # bytes 42-43: dst_instid
@@ -632,6 +701,35 @@ class PythonEvtcParser:
                 # The result byte no longer carries heal/damage discrimination;
                 # values 13/14 are CBTR_INVERT / CBTR_BUFF_DAMAGECYCLE (damage).
                 is_nondamage = 1 if _iff == 0 else 0
+                # v0.16.4: from build 2026-05-07 arcdps moved buff
+                # application and removal off the plain (is_statechange == 0,
+                # ev.buff != 0) channel onto dedicated statechange codes:
+                #   69 -> apply      (value = duration, as before)
+                #   71 -> remove     (is_buffremove 2 or 3)
+                #   72 -> remove all (is_buffremove 1)
+                # The record shape is otherwise unchanged, so folding them
+                # back onto statechange 0 lets the existing apply/remove
+                # branches run untouched. Until this landed, every buff event
+                # on a post-2026-05-07 log was dropped by the generic
+                # statechange filter and all boon uptimes read as ~0.
+                #
+                # Code 70 is deliberately NOT folded in: it is an apply that
+                # overstacked, carrying the wasted duration in
+                # overstack_value with value == 0, and it does not change
+                # the target's buff state.
+                if is_statechange in _BUFF_STATECHANGES_2026_05:
+                    is_statechange = 0
+                elif is_statechange == _CAST_START_STATECHANGE_2026_05:
+                    # Cast start. The old channel signalled this with
+                    # is_activation = NORMAL (or QUICKNESS, which no log in
+                    # the corpus uses); the new one leaves the byte at 0 and
+                    # carries the same value/buff_dmg duration pair.
+                    is_statechange = 0
+                    is_activation = ActivationType.NORMAL
+                elif is_statechange == _CAST_END_STATECHANGE_2026_05:
+                    # Cast end: is_activation still holds the terminal
+                    # ActivationType (MINIMUM / CANCEL / RESET / NO_DATA).
+                    is_statechange = 0
             else:
                 (
                     time_ms,
@@ -670,6 +768,7 @@ class PythonEvtcParser:
                 is_offcycle = 0
                 is_shields = 0
                 pad = 0
+                overstack = 0
             # NOTE: ``is_buffremove`` is consumed below by
             # Step 2-EMIT-BRANCH (REMOVE predicate ``in (1, 2, 3)``) AND
             # by Step 3 APPLY-BRANCH (predicate ``_ev_buff != 0 AND
@@ -1063,7 +1162,19 @@ class PythonEvtcParser:
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                     condition_damage = magnitude
                     is_attempt = magnitude > 0 or _result != 0
-                    damage_result = 13 if magnitude == 0 else _result
+                    # v0.16.4: the raw ``result`` byte is the ConditionResult
+                    # enum and is authoritative on its own. The previous
+                    # ``13 if magnitude == 0 else _result`` override assumed a
+                    # zero-magnitude tick meant "invulnerable", which
+                    # mislabelled every tick that connected for zero health
+                    # damage (fully mitigated, or entirely converted to
+                    # barrier). EI counts those as connected condition hits,
+                    # so the override cost one connectedDamageCount and one
+                    # connectedConditionCount per occurrence while inflating
+                    # ``invulned`` by the same amount.
+                    damage_result = _result
+                    is_condition = True
+                    connected, absorbed = _condition_verdict(_result, build_int)
                     against_downed = bool(pad & 0xFF)
                     is_life_leech = is_offcycle in {3, 5}
                 else:
@@ -1105,6 +1216,12 @@ class PythonEvtcParser:
                             target_agent_id=dst_agent,
                             skill_id=skill_id,
                         )
+                    # Interrupt (5), KillingBlow (8), Downed (9) and
+                    # Activation (11) are marker records: arcdps writes them
+                    # alongside the real damage record, with value 0. EI
+                    # counts the damage record and treats these as flags, so
+                    # emitting a DamageEvent for them would double-count the
+                    # hit. Verified on the 35-log corpus (v0.16.4).
                     if _result in {5, 8, 9, 11}:
                         continue
                     magnitude = 0 if value >= _DAMAGE_SANITY_CAP or _result == 10 else max(0, value)
@@ -1115,6 +1232,9 @@ class PythonEvtcParser:
                         and _result in {0, 1, 2, 3, 4, 6, 7, 8, 10, 13}
                     )
                     damage_result = _result
+                    is_condition = False
+                    connected = _result in _DIRECT_HIT_RESULTS
+                    absorbed = _result == _DIRECT_ABSORB_RESULT
                     against_downed = bool(is_offcycle)
                     is_life_leech = False
                 if is_attempt:
@@ -1126,6 +1246,10 @@ class PythonEvtcParser:
                         damage=magnitude,
                         buff_dmg=condition_damage,
                         result=damage_result,
+                        is_condition=is_condition,
+                        shield_damage=(0 if overstack >= _DAMAGE_SANITY_CAP else overstack),
+                        connected=connected,
+                        absorbed=absorbed,
                         against_downed=against_downed,
                         is_life_leech=is_life_leech,
                         iff=_iff,
@@ -1244,6 +1368,8 @@ class PythonEvtcParser:
                     # decides how to use it based on build date.
                     buff_dmg=buff_strip,
                     result=_result,
+                    connected=_result in _DIRECT_HIT_RESULTS,
+                    absorbed=_result == _DIRECT_ABSORB_RESULT,
                     iff=_iff & 0xFF if is_evtc_2025 else 0,
                     src_master_instid=src_master_inst if is_evtc_2025 else 0,
                     dst_master_instid=dst_master_inst if is_evtc_2025 else 0,
