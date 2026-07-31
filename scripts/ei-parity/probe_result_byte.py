@@ -77,6 +77,8 @@ for p in ei["players"]:
                 if k in entry
             )
         )
-        print(f"    ours: {len(mine)} events, connected={our_connected}, "
-              f"sumDamage={sum(e.damage for e in mine)}")
+        print(
+            f"    ours: {len(mine)} events, connected={our_connected}, "
+            f"sumDamage={sum(e.damage for e in mine)}"
+        )
         print(f"    (result, buffDmg>0, dmg>0) -> {dict(results)}")

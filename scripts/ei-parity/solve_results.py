@@ -66,13 +66,17 @@ for stem in stems:
             is_cond, result = next(iter(keys))
             k = (era, is_cond, result)
             connected_votes[k][
-                "all" if entry["connectedHits"] == len(mine)
-                else "none" if entry["connectedHits"] == 0
+                "all"
+                if entry["connectedHits"] == len(mine)
+                else "none"
+                if entry["connectedHits"] == 0
                 else "partial"
             ] += 1
             invulned_votes[k][
-                "all" if entry.get("invulned", 0) == len(mine)
-                else "none" if entry.get("invulned", 0) == 0
+                "all"
+                if entry.get("invulned", 0) == len(mine)
+                else "none"
+                if entry.get("invulned", 0) == 0
                 else "partial"
             ] += 1
 
