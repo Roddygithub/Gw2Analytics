@@ -35,8 +35,18 @@ profile: Counter[tuple] = Counter()
 rows = []
 while cursor + EVENT_SIZE <= len(raw):
     (
-        t, src, dst, value, buff_dmg, overstack, sid,
-        src_i, dst_i, src_mi, dst_mi, *flags,
+        t,
+        src,
+        dst,
+        value,
+        buff_dmg,
+        overstack,
+        sid,
+        src_i,
+        dst_i,
+        src_mi,
+        dst_mi,
+        *flags,
     ) = FULL.unpack_from(raw, cursor)
     cursor += EVENT_SIZE
     if sid != skill or src not in agent_ids:
@@ -49,8 +59,10 @@ while cursor + EVENT_SIZE <= len(raw):
     profile[(result, value, buff_dmg, overstack > 0, is_shields, is_offcycle, ev_buff)] += 1
     rows.append((t, result, value, buff_dmg, overstack, is_shields, is_offcycle, ev_buff))
 
-print(f"\n{'result':>7}{'value':>8}{'buffDmg':>9}{'overstk>0':>11}"
-      f"{'shields':>9}{'offcyc':>8}{'ev.buff':>9}  count")
+print(
+    f"\n{'result':>7}{'value':>8}{'buffDmg':>9}{'overstk>0':>11}"
+    f"{'shields':>9}{'offcyc':>8}{'ev.buff':>9}  count"
+)
 for key, n in sorted(profile.items(), key=lambda kv: -kv[1]):
     r, v, bd, ov, sh, oc, eb = key
     print(f"{r:>7}{v:>8}{bd:>9}{ov!s:>11}{sh:>9}{oc:>8}{eb:>9}  {n}")
