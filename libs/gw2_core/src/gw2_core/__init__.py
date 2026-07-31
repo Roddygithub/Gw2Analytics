@@ -59,6 +59,7 @@ from gw2_core.models import (
     _dispatch_event,
     classify_buff,
     is_condition,
+    spec_display_name,
 )
 
 __version__ = "0.6.0"
@@ -111,4 +112,5 @@ __all__ = [
     "_dispatch_event",
     "classify_buff",
     "is_condition",
+    "spec_display_name",
 ]

@@ -56,14 +56,22 @@ class Profession(IntEnum):
 class EliteSpec(IntEnum):
     """Elite specializations.
 
-    Integer values mirror ``arcdps`` bytes 12-15. Values are taken from the
-    Elite Insights / GW2 wiki mapping. The catalogue is intentionally
-    incomplete -- unknown values fall back to :attr:`UNKNOWN` at parse time.
+    Integer values mirror ``arcdps`` bytes 12-15, which carry the GW2 v2
+    API *specialization* ID verbatim. The catalogue below is the elite
+    subset of that table and is the same one Elite Insights ships in
+    ``Content/SpecList.json`` -- every ID is unique, so no profession
+    disambiguation is needed to name a spec.
 
-    NOTE: Some older ``arcdps`` revisions write legacy IDs that no longer
-    match the current catalogue (e.g. Druid = 5 reused for Soulbeast in
-    early 2017 releases). The parser preserves the raw byte value via
-    :attr:`Agent.elite_raw` for forensics; the enum mapping is best-effort.
+    Unknown values fall back to :attr:`BASE` at parse time; the parser
+    preserves the raw byte via :attr:`Agent.elite_raw` for forensics.
+
+    v0.16.4: IDs 7 / 56 / 58 / 67 and the missing Bladesworn were
+    corrected against ``SpecList.json`` and re-verified on a 35-log WvW
+    corpus. The previous table mapped Daredevil to 55 (Soulbeast),
+    Deadeye to 72 (Untamed), Weaver to 63 (Renegade) and Catalyst to 75
+    (Amalgam), so ``_validate_elite_for_profession`` rejected every real
+    Thief and Elementalist elite ID and silently downgraded those
+    players to their core profession.
     """
 
     UNKNOWN = 0
@@ -71,59 +79,62 @@ class EliteSpec(IntEnum):
     # Warrior elites
     BERSERKER = 18
     SPELLBREAKER = 61
+    BLADESWORN = 68
+    PARAGON = 74
     # Guardian elites
     DRAGONHUNTER = 27
     FIREBRAND = 62
     WILLBENDER = 65
+    LUMINARY = 81
     # Revenant elites
     HERALD = 52
     RENEGADE = 63
     VINDICATOR = 69
+    CONDUIT = 79
     # Thief elites
-    DAREDEVIL = 55
+    DAREDEVIL = 7
+    DEADEYE = 58
     SPECTER = 71
-    DEADEYE = 72
+    ANTIQUARY = 77
     # Engineer elites
     SCRAPPER = 43
     HOLOSMITH = 57
     MECHANIST = 70
+    AMALGAM = 75
     # Ranger elites
     DRUID = 5
-    SOULBEAST = 55  # collides with Daredevil
+    SOULBEAST = 55
     UNTAMED = 72
+    GALESHOT = 78
     # Elementalist elites
     TEMPEST = 48
-    WEAVER = 63  # collides with Renegade
-    CATALYST = 75  # shared with Amalgam (Engineer)
+    WEAVER = 56
+    CATALYST = 67
+    EVOKER = 80
     # Mesmer elites
     CHRONOMANCER = 40
     MIRAGE = 59
     VIRTUOSO = 66
+    TROUBADOUR = 73
     # Necromancer elites
     REAPER = 34
     SCOURGE = 60
     HARBINGER = 64
     RITUALIST = 76
 
-    # Visions of Eternity — new specs sharing IDs where the profession
-    # disambiguates (same pattern as 55=Soulbeast/Daredevil, 63=Weaver/Renegade,
-    # 75=Catalyst/Amalgam):
-    # Guardian
-    LUMINARY = 81
-    # Warrior
-    PARAGON = 74
-    # Engineer
-    AMALGAM = 75  # shared with Catalyst (Ele)
-    # Ranger
-    GALESHOT = 78
-    # Thief
-    ANTIQUARY = 77
-    # Elementalist
-    EVOKER = 80
-    # Mesmer
-    TROUBADOUR = 73
-    # Revenant
-    CONDUIT = 79
+
+def spec_display_name(profession: Profession, elite: EliteSpec) -> str:
+    """Return the English spec label Elite Insights writes as ``profession``.
+
+    EI names an actor by its elite specialization when it has one and by
+    its core profession otherwise -- always in English, regardless of the
+    log's client language. arcdps, by contrast, writes the *localized*
+    spec string into the agent name buffer for anonymized enemy players
+    (``"Cataclyste"`` on a French client where EI says ``"Tempest"``), so
+    any comparison against EI has to go through this table rather than
+    the raw name.
+    """
+    return (elite.name if elite != EliteSpec.BASE else profession.name).title()
 
 
 class GameType(IntEnum):
@@ -370,6 +381,19 @@ class DamageEvent(BaseEvent):
     The aggregator-tier DpsSplitGetter decides how to use it based
     on the fight's build date.  Defaults to 0 for backward-compat
     with legacy (pre-v0.12.1) streams.
+
+    ``is_condition`` records which arcdps channel the record came
+    from (the ``ev.buff`` byte), because ``buff_dmg > 0`` is not a
+    usable proxy: a condition tick that lands for zero health damage
+    -- fully mitigated, or converted to barrier -- still counts as a
+    connected condition hit for Elite Insights. ``result`` is then
+    read against the matching enum: ``PhysicalResult`` for direct
+    hits, ``ConditionResult`` for condition ticks.
+
+    ``shield_damage`` is the arcdps ``overstack_value`` on a damage
+    record: the portion of the hit absorbed by barrier. EI surfaces
+    it as ``shieldDamage`` and still counts the hit's full magnitude
+    in ``totalDamage``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -378,6 +402,18 @@ class DamageEvent(BaseEvent):
     damage: int = Field(..., ge=0)
     buff_dmg: int = Field(default=0, ge=0)
     result: int = Field(default=0, ge=0, le=255, description="arcdps combat result byte")
+    is_condition: bool = Field(
+        default=False, description="arcdps ev.buff byte was set: condition tick, not a direct hit"
+    )
+    shield_damage: int = Field(
+        default=0, ge=0, description="arcdps overstack_value: portion absorbed by barrier"
+    )
+    connected: bool = Field(
+        default=False, description="the hit landed (EI's connectedHits), resolved by the parser"
+    )
+    absorbed: bool = Field(
+        default=False, description="the target was invulnerable to it (EI's invulned)"
+    )
     against_downed: bool = False
     is_life_leech: bool = False
     iff: int = Field(
