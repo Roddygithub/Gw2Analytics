@@ -27,6 +27,7 @@ from gw2_core import (
     HealthUpdateEvent,
     Profession,
     UpEvent,
+    spec_display_name,
 )
 
 _STAT_FIELDS = (
@@ -78,16 +79,13 @@ def _damage_stats(
 ) -> dict[str, int]:
     counted = [event for event in damage if event.result != 10]
     connected = [event for event in counted if _connected(event)]
-    direct = [event for event in connected if event.buff_dmg == 0]
-    condition = [
-        event
-        for event in connected
-        if (
-            event.skill_id in condition_skill_ids
-            if condition_skill_ids is not None
-            else event.buff_dmg > 0
-        )
-    ]
+    # Direct and condition do NOT partition ``connected``: EI counts a hit
+    # as direct when it came down the physical channel, and as condition
+    # when the buff behind it is classified as one. Life-steal effects
+    # travel the buff-damage channel without being conditions, so they
+    # land in neither counter -- while still contributing to connectedDmg.
+    condition = [event for event in connected if _is_condition(event, condition_skill_ids)]
+    direct = [event for event in connected if not event.is_condition]
     critable = [event for event in direct if event.skill_id not in noncritable_skill_ids]
     critical = [event for event in critable if event.result in {1, 8}]
     return {
@@ -102,7 +100,7 @@ def _damage_stats(
         "critableDirectDamageCount": len(critable),
         "criticalRate": len(critical),
         "criticalDmg": sum(event.damage for event in critical),
-        "invulned": sum(event.result in {6, 13} for event in counted),
+        "invulned": sum(_invulned(event) for event in counted),
         "killed": getattr(down_row, "kills", 0),
         "downed": getattr(down_row, "downs", 0),
         "againstDownedCount": getattr(down_row, "against_downed_count", 0),
@@ -117,19 +115,59 @@ def _damage_stats(
     }
 
 
+#: Direct-hit ``cbtresult`` values EI counts as landed. Only used as a
+#: fallback for DamageEvents built by hand rather than by the parser
+#: (tests, fixtures, synthetic streams), which leave ``connected`` unset.
+#: The parser resolves the flag itself because the condition enum was
+#: renumbered in 2026-05 and reading it needs the build version.
+_DIRECT_HIT_RESULTS = frozenset({0, 1, 2, 8, 10})
+_DIRECT_ABSORB_RESULT = 6
+
+
 def _connected(event: DamageEvent) -> bool:
+    """Whether EI would count this record as a landed hit.
+
+    A condition tick that lands for zero health damage -- fully mitigated,
+    or entirely converted to barrier -- still counts, so the magnitude is
+    not a usable stand-in for the result byte.
+    """
+    if event.is_condition:
+        return event.connected
+    if event.connected:
+        return True
     if event.buff_dmg > 0:
         return event.damage > 0
-    return event.result in {0, 1, 2, 8}
+    return event.result in _DIRECT_HIT_RESULTS
+
+
+def _invulned(event: DamageEvent) -> bool:
+    if event.is_condition:
+        return event.absorbed
+    return event.absorbed or event.result == _DIRECT_ABSORB_RESULT
+
+
+def _is_condition(event: DamageEvent, condition_skill_ids: set[int] | None) -> bool:
+    """Whether EI books this record under condition rather than power damage.
+
+    This is *not* the same question as ``DamageEvent.is_condition``, which
+    records the arcdps channel the record arrived on (and so decides which
+    enum the ``result`` byte belongs to). EI splits condi from power by the
+    buff's ``classification`` in its own buff catalogue, so life-steal
+    effects that arcdps sends down the buff-damage channel -- Vampiric
+    Strikes, Battle Scars, Fulgor -- count as *power* damage there.
+
+    ``condition_skill_ids`` is that catalogue, read from the EI export.
+    Without it the arcdps channel is the best available approximation.
+    """
+    if condition_skill_ids is not None:
+        return event.skill_id in condition_skill_ids
+    return event.is_condition or event.buff_dmg > 0
 
 
 def _condition_damage(event: DamageEvent, condition_skill_ids: set[int] | None) -> int:
-    is_condition = (
-        event.skill_id in condition_skill_ids
-        if condition_skill_ids is not None
-        else event.buff_dmg > 0
-    )
-    return min(event.damage, event.buff_dmg) if is_condition and not event.is_life_leech else 0
+    if not _is_condition(event, condition_skill_ids) or event.is_life_leech:
+        return 0
+    return min(event.damage, event.buff_dmg)
 
 
 def _skill_stats(events: list[DamageEvent]) -> dict[int, dict[str, int]]:
@@ -269,8 +307,17 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         prefix = f"players[{account}]"
         anonymous = agent.account_name is None
         agent_ids = agent_ids_by_instance.get(agent.instance_id, {agent.id})
+        # An anonymized enemy player carries no account name, and arcdps
+        # has replaced their character name with the *localized* spec
+        # string. EI labels them "<English spec> pl-<instanceID>", so the
+        # label has to be rebuilt from the profession/elite IDs rather
+        # than echoed from the name buffer.
         values: dict[str, object] = {
-            "name": f"{agent.name} pl-{agent.instance_id}" if anonymous else agent.name,
+            "name": (
+                f"{spec_display_name(agent.profession, agent.elite)} pl-{agent.instance_id}"
+                if anonymous
+                else agent.name
+            ),
             "group": 51 if anonymous else int(agent.subgroup or 0),
             "instanceID": agent.instance_id,
             "teamID": agent.team_id,
@@ -468,49 +515,53 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 if not isinstance(target, dict) or not isinstance(target.get("instanceID"), int):
                     continue
                 target_agent = agents_by_instance.get(target["instanceID"])
+                # An EI target is an instance, and arcdps hands the same
+                # instance ID to every agent record that instance produced
+                # over the fight (a player who dies and respawns, a minion
+                # re-summoned). Matching on one agent ID drops the damage
+                # dealt to the others, which is why per-target totals came
+                # up short while the whole-fight totals matched.
+                target_ids = (
+                    agent_ids_by_instance.get(target["instanceID"], {target_agent.id})
+                    if target_agent is not None
+                    else set()
+                )
                 target_damage = [
-                    event
-                    for event in source_damage
-                    if target_agent is not None and event.target_agent_id == target_agent.id
+                    event for event in source_damage if event.target_agent_id in target_ids
                 ]
                 actor_target_damage = [
                     event for event in target_damage if event.src_master_instid == 0
                 ]
-                target_cc = [
-                    event
-                    for event in source_cc
-                    if target_agent is not None and event.target_agent_id == target_agent.id
-                ]
-                target_id = target_agent.id if target_agent is not None else 0
+                target_cc = [event for event in source_cc if event.target_agent_id in target_ids]
                 target_down_rows = DownContributionAggregator().aggregate(
                     actor_target_damage,
                     [
                         event
                         for event in event_list
-                        if isinstance(event, DownEvent) and event.source_agent_id == target_id
+                        if isinstance(event, DownEvent) and event.source_agent_id in target_ids
                     ],
                     [
                         event
                         for event in event_list
-                        if isinstance(event, DeathEvent) and event.source_agent_id == target_id
+                        if isinstance(event, DeathEvent) and event.source_agent_id in target_ids
                     ],
                     duration_ms / 1000,
                     health_events=[
                         event
                         for event in event_list
                         if isinstance(event, HealthUpdateEvent)
-                        and event.source_agent_id == target_id
+                        and event.source_agent_id in target_ids
                     ],
                     up_events=[
                         event
                         for event in event_list
-                        if isinstance(event, UpEvent) and event.source_agent_id == target_id
+                        if isinstance(event, UpEvent) and event.source_agent_id in target_ids
                     ],
                     outcome_events=[
                         event
                         for event in event_list
                         if isinstance(event, CombatOutcomeEvent)
-                        and event.target_agent_id == target_id
+                        and event.target_agent_id in target_ids
                     ],
                     cc_events=target_cc,
                 )
