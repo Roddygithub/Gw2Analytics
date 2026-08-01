@@ -680,7 +680,8 @@ class PythonEvtcParser:
                     is_buffremove,
                     # byte 56 = arcdps ``is_statechange`` byte.
                     is_statechange,
-                    # bytes 59/60 identify damage against a downed target.
+                    # Against-downed condition ticks moved from pad low byte to byte 59
+                    # with the 2026-05-07 arcdps damage-channel reshuffle.
                     is_shields,
                     is_offcycle,
                     pad,
@@ -1188,7 +1189,7 @@ class PythonEvtcParser:
                     damage_result = _result
                     is_condition = True
                     connected, absorbed = _condition_verdict(_result, build_int)
-                    against_downed = bool(pad & 0xFF)
+                    against_downed = bool(is_offcycle if build_int >= 2026_05_07 else pad & 0xFF)
                     is_life_leech = is_offcycle in {3, 5}
                 else:
                     if _result in (8, 9):
