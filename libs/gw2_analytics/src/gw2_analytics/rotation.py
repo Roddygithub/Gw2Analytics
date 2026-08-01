@@ -25,7 +25,8 @@ _WEAPON_ACTIVATIONS = {23284, 23285}
 _ENGINEER_KIT_BUNDLES = {
     5802: {58090, 30521, 29547, 49045, 49082, 58104, 50444},
     5933: {5934, 5935, 5965, 5936, 6102, 5937},
-    5927: {5928, 5929, 5930, 5931},
+    5927: {5928, 5929, 5930, 5931, 76493},
+    30800: {30371, 30885, 30307, 30121, 30032},
 }
 _INSTANT_CASTS_BY_BUFF = {
     29446: (30792, True),  # Reaper's Shroud, immediately before its weapon swap
@@ -400,17 +401,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             agent_activations = activations_by_agent.get(event.source_agent_id, [])
             activation_times = [activation.time_ms for activation in agent_activations]
             for kit_skill, bundle_skills in _ENGINEER_KIT_BUNDLES.items():
-                if (
-                    sum(
-                        other.skill_id in bundle_skills
-                        for other in agent_activations[
-                            bisect_left(activation_times, event.time_ms + 10) : bisect_left(
-                                activation_times,
-                                next_swap_time,
-                            )
-                        ]
-                    )
-                    >= 2
+                if event.swapped_to == 2 and any(
+                    other.skill_id in bundle_skills
+                    for other in agent_activations[
+                        bisect_left(activation_times, event.time_ms + 10) : bisect_left(
+                            activation_times,
+                            next_swap_time,
+                        )
+                    ]
                 ):
                     add_instant(event.source_agent_id, kit_skill, event.time_ms - 1)
                     break
