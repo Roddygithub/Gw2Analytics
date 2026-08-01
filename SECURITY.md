@@ -4,8 +4,9 @@
 
 | Version | Supported          |
 |---------|-------------------|
-| v0.13.x | ✅ Active          |
-| < v0.13 | ❌ No longer supported |
+| `main` | Active development |
+| Latest tagged release | Security fixes when practical |
+| Older tags | No guaranteed support |
 
 ## Reporting a vulnerability
 
@@ -16,7 +17,7 @@ See the Disclosure policy below for the full process.
 
 ---
 
-## Security posture (v0.13.3)
+## Security posture
 
 ### ✅ In place
 
