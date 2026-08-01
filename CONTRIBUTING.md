@@ -286,24 +286,16 @@ Rulesets → New branch ruleset):
 | Target branches                                  | `main` only                          |
 | Restrict creations                               | Enable (only via PR)                 |
 | Restrict updates                                 | Enable (PR or admin bypass only)     |
-| Required status checks                           | 6 checks: Lint Python, Test Python, Lint Web, Playwright (chromium), ARQ worker integration, DCO check |
+| Required status checks                           | Lint Python, Test Python, Lint Web, Playwright (chromium), ARQ worker integration, DCO check, Build API image, Build Web image, Trivy filesystem scan |
 | Require linear history                           | Yes (no merge commits)               |
 | Require deployments before merging               | No (no deploys from `main` directly) |
 | Block force pushes                               | **Yes** (admin included)             |
 | Block branch deletion                            | **Yes**                              |
 
-Until the spending-limit unblock lands (tracked as an open item
-in `docs/ROADMAP.md` §3 "Strategic items (v1.0+)"), the CI
-workflow at `.github/workflows/ci.yml` is **not** triggered by
-``push`` or ``pull_request`` events -- its only trigger is
-``workflow_dispatch``, which means CI must be invoked manually via
-the Actions tab or ``gh workflow run ci.yml --ref main`` for the
-6 jobs (``lint-python``, ``test-python``, ``lint-web``,
-``playwright-chromium``, ``playwright-visual-regression``,
-``arq-integration``) to execute. The "Required status checks" row
-below should be filled in once the auto-trigger is restored; until
-then, leave it empty (or pick ``None`` in the ruleset UI) so PRs
-aren't blocked by an absent gate.
+CI runs automatically on pushes to `main` and PRs targeting `main`.
+The required checks are intentionally limited to deterministic merge
+gates. Visual regression still runs on PRs but is not required while
+the screenshot baselines remain under refresh.
 
 ## Pre-commit / CI mirror
 
@@ -485,7 +477,7 @@ discoverability.
 1. Branch off `main`.
 2. Make atomic commits (one logical change per commit).
 3. Push and open a PR.
-4. `lint-and-test` must pass before review.
+4. Required checks must pass before merge.
 5. Squash-merge once approved -- linear history.
 
 When pushing, ``pre-commit`` runs trim-trailing-whitespace, ruff, and
