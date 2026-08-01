@@ -334,6 +334,7 @@ class EventType(StrEnum):
     # symmetry-consistent with the post-Tour-6 event vocabulary.
     BARRIER = "BARRIER"
     BUFF_APPLY = "BUFF_APPLY"
+    BUFF_EXTENSION = "BUFF_EXTENSION"
     BUFF_STACK_ACTIVE = "BUFF_STACK_ACTIVE"
     POSITION = "POSITION"
     SKILL_ACTIVATION = "SKILL_ACTIVATION"
@@ -865,6 +866,19 @@ class BuffApplyEvent(BaseEvent):
     initial: bool = True
 
 
+class BuffExtensionEvent(BaseEvent):
+    """CBTS_BUFFCHANGE=70 event extending an existing buff stack."""
+
+    event_type: Literal[EventType.BUFF_EXTENSION] = EventType.BUFF_EXTENSION
+    time_ms: int = Field(..., ge=0)
+    source_agent_id: int = Field(..., ge=0)
+    target_agent_id: int = Field(..., ge=0)
+    skill_id: int = Field(..., ge=0)
+    extended_duration_ms: int = Field(default=0, ge=0)
+    new_duration_ms: int = Field(default=0, ge=0)
+    stack_id: int = Field(default=0, ge=0, le=0xFFFFFFFF)
+
+
 class BuffStackActiveEvent(BaseEvent):
     """Select the active stack for queue/regeneration buffs."""
 
@@ -946,6 +960,7 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.BLOCK: BlockEvent,
     EventType.INTERRUPT: InterruptEvent,
     EventType.BUFF_APPLY: BuffApplyEvent,
+    EventType.BUFF_EXTENSION: BuffExtensionEvent,
     EventType.BUFF_STACK_ACTIVE: BuffStackActiveEvent,
     EventType.POSITION: PositionEvent,
     EventType.SKILL_ACTIVATION: SkillActivationEvent,
