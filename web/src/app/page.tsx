@@ -95,7 +95,7 @@ export default function Home() {
       <section className={styles.hero}>
         <div className={styles.heroCopy}>
           <span className={styles.brand}>Guild Wars 2 · WvW Combat OS</span>
-          <h1 className={styles.title}>
+          <h1 className={styles.title} aria-label="GW2Analytics">
             WvW logs, parsed like a command center.
           </h1>
           <p className={styles.tagline}>
