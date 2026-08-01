@@ -20,6 +20,11 @@ from gw2_core import (
 )
 
 _WEAPON_ACTIVATIONS = {23284, 23285}
+_ENGINEER_KIT_BUNDLES = {
+    5802: {58090, 30521, 29547, 49045, 49082, 58104, 50444},
+    5933: {5934, 5935, 5965, 5936, 6102, 5937},
+    5927: {5928, 5929, 5930, 5931},
+}
 _INSTANT_CASTS_BY_BUFF = {
     29446: (30792, True),  # Reaper's Shroud, immediately before its weapon swap
     30129: (29958, False),  # Infusing Terror
@@ -28,9 +33,21 @@ _INSTANT_CASTS_BY_BUFF = {
 }
 _BUFF_GAIN_CASTS = {
     883: 42470,
+    9441: 9441,
+    12536: 12537,
     40408: -17,
     5575: 5494,
     5585: 5492,
+    27376: 26644,
+    27581: 27107,
+    27732: 28085,
+    27890: 28134,
+    27928: 28494,
+    27983: 27760,
+    28036: 28379,
+    28243: 27014,
+    73955: 73955,
+    76559: 77371,
     77142: 77073,
     76958: 77238,
     41493: 41780,
@@ -49,6 +66,8 @@ _BUFF_GAIN_CASTS = {
     73071: 73037,
 }
 _BUFF_LOSS_CASTS = {
+    27581: 28382,
+    73955: -40,
     69855: -32,
     77142: 76616,
     76958: 76933,
@@ -63,13 +82,22 @@ _BUFF_LOSS_CASTS = {
 }
 _BUFF_GIVE_CASTS = {41815: 45789}
 _DAMAGE_CASTS = {
+    5561: 50,
+    9292: 500,
+    9428: 500,
+    9433: 500,
     9101: 50,
     9284: 500,
     13906: 50,
     26261: 50,
     29414: 50,
     38767: 50,
+    46843: 50,
+    46856: 50,
+    46857: 50,
     45449: 50,
+    59591: 50,
+    77021: 50,
 }
 _HEALING_CASTS = {12542, 12631, 12825, 12836, 13980, 70001, 71356, 72115}
 _BEFORE_SWAP_BUFFS = {31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291}
@@ -125,6 +153,12 @@ _INSTANT_CASTS_BY_EFFECT = {
     "DC1C8A043ADCD24B9458688A792B04BA": 56928,
     "AB2E22E7EE74DA4C87DA777C62E475EA": 56873,
     "C1F1E386CC1E0B448435269DBBFB34D7": 76787,
+    "25908EB455863D43AE70FB3F4A22D6E4": -39,
+    "40C9F5FE5BD3BD449B5E48DF1E5FD348": 73149,
+    "0DBE4F7115EADC4889F1E00232B2398B": 29739,
+    "86DC533FBB84BC43BBA03EC3B3E13034": 29739,
+    "3CF1D1228CBC3740AA33EDA357EABED4": 12494,
+    "28346F32FD199C4B8F9B15438F27A434": 31749,
 }
 _EFFECT_CASTS_BY_DST = {
     "122BA55CCDF2B643929F6C4A97226DC9": 9153,
@@ -134,6 +168,7 @@ _EFFECT_CASTS_BY_DST = {
     "D7DCD4ABF9E4A749950AF0175E02EA06": 63256,
     "02154B72900B5740A73CD0ADECED27BF": 10234,
     "9242D10B4F04274EB6E9EBCDB2262181": 77213,
+    "B02D3D0FF0A4FC47B23B1478D8E770AE": -29,
 }
 _SECONDARY_EFFECTS = {
     "FB78801BB31CAF488B55F2F57EF9B070": ("7535B4CB815232418B69092F3390A7AB",),
@@ -151,6 +186,7 @@ _SECONDARY_EFFECTS = {
     "C035166E3E4C414ABE640F47797D9B4A": ("4C7A5E148F7FD642B34EE4996DDCBBAB",),
     "DC1C8A043ADCD24B9458688A792B04BA": ("4C7A5E148F7FD642B34EE4996DDCBBAB",),
     "AB2E22E7EE74DA4C87DA777C62E475EA": ("4C7A5E148F7FD642B34EE4996DDCBBAB",),
+    "40C9F5FE5BD3BD449B5E48DF1E5FD348": ("1B3ACEE36F61DE42AB1C24BD33B5B5AD",),
 }
 _BASE_SKILL_BY_ENHANCED_EFFECT = {
     "71B04F91F9B3DF4A8954059FCFAD630E": 42949,
@@ -194,6 +230,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     active: dict[tuple[int, int], SkillActivationEvent] = {}
     casts: list[SkillCast] = []
     last_instant: dict[tuple[int, int], int] = {}
+    active_buff_until: dict[tuple[int, int], int] = {}
 
     def add_instant(source: int, skill_id: int, time_ms: int, icd: int = 50) -> None:
         key = (source, skill_id)
@@ -235,24 +272,28 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     )
                 )
         elif isinstance(event, WeaponSwapEvent):
-            if event.swapped_to == 2:
-                next_swap_time = next(
-                    (
-                        swap.time_ms
-                        for swap in swaps
-                        if swap.source_agent_id == event.source_agent_id
-                        and swap.time_ms > event.time_ms + 10
-                    ),
-                    1 << 63,
-                )
-                if any(
-                    isinstance(other, SkillActivationEvent)
-                    and other.source_agent_id == event.source_agent_id
-                    and event.time_ms + 10 <= other.time_ms < next_swap_time
-                    and other.skill_id in {5928, 5929, 5930, 5931}
-                    for other in event_list
+            next_swap_time = next(
+                (
+                    swap.time_ms
+                    for swap in swaps
+                    if swap.source_agent_id == event.source_agent_id
+                    and swap.time_ms > event.time_ms + 10
+                ),
+                1 << 63,
+            )
+            for kit_skill, bundle_skills in _ENGINEER_KIT_BUNDLES.items():
+                if (
+                    sum(
+                        isinstance(other, SkillActivationEvent)
+                        and other.source_agent_id == event.source_agent_id
+                        and event.time_ms + 10 <= other.time_ms < next_swap_time
+                        and other.skill_id in bundle_skills
+                        for other in event_list
+                    )
+                    >= 2
                 ):
-                    add_instant(event.source_agent_id, 5927, event.time_ms - 1)
+                    add_instant(event.source_agent_id, kit_skill, event.time_ms - 1)
+                    break
             casts.append(
                 SkillCast(
                     source_agent_id=event.source_agent_id,
@@ -262,6 +303,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 )
             )
         elif isinstance(event, BoonApplyEvent):
+            buff_key = (event.target_agent_id, event.skill_id)
+            already_active = active_buff_until.get(buff_key, -1) > event.time_ms
             instant = _INSTANT_CASTS_BY_BUFF.get(event.skill_id) if event.kind == "apply" else None
             if instant is not None:
                 skill_id, before_swap = instant
@@ -278,6 +321,11 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 if event.kind == "apply"
                 else _BUFF_LOSS_CASTS.get(event.skill_id)
             )
+            if mapped is not None and (
+                (event.skill_id == 73955 and event.kind == "apply" and already_active)
+                or (event.skill_id in {27581, 73955} and event.kind not in {"apply", "remove_all"})
+            ):
+                mapped = None
             if mapped is not None:
                 mapped_time = event.time_ms
                 nearby_swap = next(
@@ -294,6 +342,12 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 elif nearby_swap is not None and event.skill_id in _AFTER_SWAP_BUFFS:
                     mapped_time = max(mapped_time, nearby_swap.time_ms + 1)
                 add_instant(event.target_agent_id, mapped, mapped_time)
+            if event.kind == "apply":
+                active_buff_until[buff_key] = max(
+                    active_buff_until.get(buff_key, -1), event.time_ms + event.duration_ms
+                )
+            else:
+                active_buff_until[buff_key] = 0
             given = _BUFF_GIVE_CASTS.get(event.skill_id) if event.kind == "apply" else None
             if given is not None:
                 add_instant(event.source_agent_id, given, event.time_ms)
@@ -348,6 +402,15 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 effect_skill_id = (
                     68273
                     if caster in virtuoso_agent_ids
+                    else 10192
+                    if any(
+                        isinstance(other, BoonApplyEvent)
+                        and other.kind == "apply"
+                        and other.skill_id == 10243
+                        and other.target_agent_id == caster
+                        and abs(other.time_ms - event.time_ms) < 10
+                        for other in event_list
+                    )
                     else 10191
                     if caster in mesmer_agent_ids
                     else None
@@ -431,7 +494,9 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     }
     result: list[SkillCast] = []
     last_swap: dict[int, int] = {}
-    for cast in sorted(unique.values(), key=lambda item: item.time_ms):
+    for cast in sorted(
+        unique.values(), key=lambda item: (item.time_ms, item.skill_id, item.duration_ms == 0)
+    ):
         previous = last_swap.get(cast.source_agent_id)
         if (
             cast.skill_id == -2

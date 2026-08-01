@@ -177,15 +177,16 @@ def _skill_stats(events: list[DamageEvent]) -> dict[int, dict[str, int]]:
     result: dict[int, dict[str, int]] = {}
     for skill_id, skill_events in by_skill.items():
         connected = sum(_connected(event) for event in skill_events)
+        direct_crits = [
+            event
+            for event in skill_events
+            if not event.is_condition and event.result in {1, 8} and event.buff_dmg == 0
+        ]
         result[skill_id] = {
             "totalDamage": sum(event.damage for event in skill_events),
             "connectedHits": connected or sum(event.result == 10 for event in skill_events),
-            "crit": sum(event.result in {1, 8} and event.buff_dmg == 0 for event in skill_events),
-            "critDamage": sum(
-                event.damage
-                for event in skill_events
-                if event.result in {1, 8} and event.buff_dmg == 0
-            ),
+            "crit": len(direct_crits),
+            "critDamage": sum(event.damage for event in direct_crits),
         }
     return result
 
@@ -323,7 +324,19 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             "teamID": agent.team_id,
         }
         _compare_fields(prefix, player, values, differences)
-        source_damage = [event for event in damage_events if event.source_agent_id in agent_ids]
+        # v0.17.0: exclude self-inflicted damage (src == dst) from the
+        # DEALT side. A self-condition tick (e.g. skill 19426 on
+        # wvw-large-fight) is recorded by arcdps with src == dst == the
+        # player; EI counts it as damage TAKEN (defenses.damageBarrier /
+        # damageTaken) but NOT as damage dealt (dpsAll / statsAll /
+        # totalDamageDist stay unchanged by it). The ``taken`` aggregate
+        # below still includes it because it filters ``damage_events`` on
+        # target only.
+        source_damage = [
+            event
+            for event in damage_events
+            if event.source_agent_id in agent_ids and event.source_agent_id != event.target_agent_id
+        ]
         actor_damage = [event for event in source_damage if event.src_master_instid == 0]
         source_cc = [event for event in cc_events if event.source_agent_id in agent_ids]
 
@@ -445,7 +458,10 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     continue
                 compared_buffs[buff_id] = round(by_id[buff_id], 3)
                 expected_uptime = buff_data[0].get("uptime")
-                if expected_uptime != compared_buffs[buff_id]:
+                if (
+                    not isinstance(expected_uptime, int | float)
+                    or abs(expected_uptime - compared_buffs[buff_id]) > 0.005
+                ):
                     differences[f"{prefix}.buffUptimes[{buff_id}].uptime"] = {
                         "expected": expected_uptime,
                         "actual": compared_buffs[buff_id],
