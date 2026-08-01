@@ -6,7 +6,8 @@
  */
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { uploadLog, formatApiError, type UploadCreatedRow } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
@@ -91,18 +92,55 @@ export default function Home() {
 
   return (
     <div className={styles.page}>
-      {/* Hero */}
       <section className={styles.hero}>
-        <span className={styles.brand}>Guild Wars 2 · WvW Analytics</span>
-        <h1 className={styles.title}>GW2<span className={styles.accentText}>Analytics</span></h1>
-        <p className={styles.tagline}>
-          Analysez vos combats WvW en profondeur. Déposez vos logs{" "}
-          <code>.zevtc</code> et obtenez instantanément un tableau de bord
-          complet : dégâts, soins, boons, défense, positions et timeline.
-        </p>
+        <div className={styles.heroCopy}>
+          <span className={styles.brand}>Guild Wars 2 · WvW Combat OS</span>
+          <h1 className={styles.title}>
+            WvW logs, parsed like a command center.
+          </h1>
+          <p className={styles.tagline}>
+            Analysez vos combats WvW: déposez vos logs <code>.zevtc</code> et
+            obtenez une lecture claire des dégâts, soins, boons, défenses,
+            positions et timelines.
+          </p>
+          <div className={styles.heroActions}>
+            <button
+              className={styles.primaryCta}
+              type="button"
+              onClick={() => inputRef.current?.click()}
+            >
+              Analyser un log
+            </button>
+            <Link className={styles.secondaryCta} href="/fights">
+              Voir les combats
+            </Link>
+          </div>
+        </div>
+        <div className={styles.heroPanel} aria-hidden="true">
+          <div className={styles.panelTopbar}>
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className={styles.panelMetric}>
+            <span>Squad DPS</span>
+            <strong>4.82M</strong>
+          </div>
+          <div className={styles.panelBars}>
+            <i style={{ "--w": "92%" } as CSSProperties} />
+            <i style={{ "--w": "76%" } as CSSProperties} />
+            <i style={{ "--w": "61%" } as CSSProperties} />
+            <i style={{ "--w": "44%" } as CSSProperties} />
+          </div>
+          <div className={styles.panelGrid}>
+            <span>Boons 89%</span>
+            <span>Strips 412</span>
+            <span>Downs 37</span>
+            <span>Heals 2.1M</span>
+          </div>
+        </div>
       </section>
 
-      {/* Upload zone */}
       <section className={styles.uploadSection}>
         <div
           className={`${styles.dropZone} ${dragOver ? styles.dropZoneActive : ""} ${
@@ -172,7 +210,7 @@ export default function Home() {
             </div>
           ) : (
             <div className={styles.dropZonePlaceholder}>
-              <span className={styles.dropIcon}>📂</span>
+              <span className={styles.dropIcon}>◆</span>
               <p className={styles.dropText}>
                 {dragOver
                   ? "Déposez votre fichier ici"
@@ -197,7 +235,6 @@ export default function Home() {
         )}
       </section>
 
-      {/* Quick links */}
       {/*
        * ``data-testid="home-nav-*"`` attrs are stable selectors for the
        * Playwright e2e suite. They intentionally bypass the visible
@@ -209,7 +246,7 @@ export default function Home() {
        */}
       <nav className={styles.cards}>
         <Link className={styles.card} href="/fights" data-testid="home-nav-fights">
-          <span className={styles.cardIcon}>⚔️</span>
+          <span className={styles.cardIcon}>01</span>
           <span className={styles.cardTitle}>Combats</span>
           <span className={styles.cardBody}>
             Parcourez les combats parsés, inspectez les joueurs, les skills,
@@ -218,7 +255,7 @@ export default function Home() {
           <span className={styles.cardArrow}>Explorer &rarr;</span>
         </Link>
         <Link className={styles.card} href="/players" data-testid="home-nav-players">
-          <span className={styles.cardIcon}>👥</span>
+          <span className={styles.cardIcon}>02</span>
           <span className={styles.cardTitle}>Joueurs</span>
           <span className={styles.cardBody}>
             Statistiques cross-combat de chaque compte : dégâts, soins,
@@ -227,7 +264,7 @@ export default function Home() {
           <span className={styles.cardArrow}>Voir &rarr;</span>
         </Link>
         <Link className={styles.card} href="/players/compare" data-testid="home-nav-compare">
-          <span className={styles.cardIcon}>📊</span>
+          <span className={styles.cardIcon}>03</span>
           <span className={styles.cardTitle}>Comparer</span>
           <span className={styles.cardBody}>
             Comparez les performances de deux joueurs côte à côte sur
@@ -236,7 +273,7 @@ export default function Home() {
           <span className={styles.cardArrow}>Comparer &rarr;</span>
         </Link>
         <Link className={styles.card} href="/upload" data-testid="home-nav-upload">
-          <span className={styles.cardIcon}>📤</span>
+          <span className={styles.cardIcon}>04</span>
           <span className={styles.cardTitle}>Upload avancé</span>
           <span className={styles.cardBody}>
             Assistant d&apos;import complet avec suivi du parsing,
@@ -246,7 +283,6 @@ export default function Home() {
         </Link>
       </nav>
 
-      {/* Stats / features row */}
       <section className={styles.features}>
         <div className={styles.feature}>
           <span className={styles.featureValue}>Parser local</span>
