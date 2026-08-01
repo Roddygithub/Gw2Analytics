@@ -33,7 +33,7 @@ from collections import defaultdict
 
 from pydantic import BaseModel, ConfigDict
 
-from gw2_core import BoonApplyEvent, BuffApplyEvent, BuffStackActiveEvent
+from gw2_core import BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent, BuffStackActiveEvent
 
 #: The 14 tracked boons: name → arcdps skill_id.
 #: Source: WvW_Analytics TRACKED_BUFFS mapping.
@@ -240,7 +240,8 @@ class BuffStateTracker:
             stack.healing_scores.clear()
 
     def process(  # noqa: PLR0912, PLR0915
-        self, event: BoonApplyEvent | BuffApplyEvent | BuffStackActiveEvent
+        self,
+        event: BoonApplyEvent | BuffApplyEvent | BuffExtensionEvent | BuffStackActiveEvent,
     ) -> None:
         """Process one ``BoonApplyEvent`` or ``BuffApplyEvent`` and update state.
 
@@ -273,6 +274,9 @@ class BuffStateTracker:
             return
         if isinstance(event, BuffApplyEvent):
             self._process_buff_apply(event)
+            return
+        if isinstance(event, BuffExtensionEvent):
+            self._process_buff_extension(event)
             return
         if not isinstance(event, BoonApplyEvent):
             raise TypeError(
@@ -418,6 +422,28 @@ class BuffStateTracker:
             del target_tracker.expirations[_capacity_for(buff_name) :]
             del target_tracker.stack_ids[_capacity_for(buff_name) :]
             del target_tracker.healing_scores[_capacity_for(buff_name) :]
+
+    def _process_buff_extension(self, event: BuffExtensionEvent) -> None:
+        buff_name = _get_buff_name(event.skill_id)
+        if buff_name is None or event.extended_duration_ms < 1:
+            return
+
+        target_tracker = self._get_stack(event.target_agent_id, buff_name)
+        time_ms = self._relative_time(event.time_ms)
+        self._advance(target_tracker, time_ms)
+        old_duration = event.new_duration_ms - event.extended_duration_ms
+        if target_tracker.expirations and (
+            old_duration > 0 or len(target_tracker.expirations) >= _capacity_for(buff_name)
+        ):
+            if target_tracker.expirations[0] is not None:
+                target_tracker.expirations[0] += event.extended_duration_ms
+            return
+        target_tracker.expirations.append(event.new_duration_ms)
+        target_tracker.stack_ids.append(event.stack_id)
+        target_tracker.healing_scores.append(self._healing_by_agent.get(event.source_agent_id, 0))
+        del target_tracker.expirations[_capacity_for(buff_name) :]
+        del target_tracker.stack_ids[_capacity_for(buff_name) :]
+        del target_tracker.healing_scores[_capacity_for(buff_name) :]
 
     def compute_player_uptimes(
         self, agent_id: int, duration_ms: int, active_duration_ms: int | None = None

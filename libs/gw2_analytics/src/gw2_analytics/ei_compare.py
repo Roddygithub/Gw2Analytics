@@ -15,6 +15,7 @@ from gw2_core import (
     BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
+    BuffExtensionEvent,
     CCEvent,
     CombatOutcomeEvent,
     DamageEvent,
@@ -312,7 +313,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         healing_by_agent={agent.id: agent.healing for agent in fight.agents},
     )
     for tracked_event in event_list:
-        if isinstance(tracked_event, (BoonApplyEvent, BuffApplyEvent)):
+        if isinstance(tracked_event, (BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent)):
             tracker.process(tracked_event)
         elif isinstance(tracked_event, DespawnEvent):
             tracker.end_agent(tracked_event.source_agent_id, tracked_event.time_ms + 10)

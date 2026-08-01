@@ -78,6 +78,7 @@ from gw2_core import (
     BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
+    BuffExtensionEvent,
     BuffRemovalEvent,
     BuffStackActiveEvent,
     CCEvent,
@@ -810,6 +811,17 @@ class PythonEvtcParser:
                     target_agent_id=event_src_agent,
                     skill_id=skill_id,
                     stack_id=dst_agent,
+                )
+                continue
+            if is_statechange == 70:
+                yield BuffExtensionEvent(
+                    time_ms=time_ms,
+                    source_agent_id=event_src_agent,
+                    target_agent_id=dst_agent,
+                    skill_id=skill_id,
+                    extended_duration_ms=max(0, value),
+                    new_duration_ms=max(0, overstack),
+                    stack_id=pad,
                 )
                 continue
             if is_statechange == 49 and pad == 0x9C9B3C99:

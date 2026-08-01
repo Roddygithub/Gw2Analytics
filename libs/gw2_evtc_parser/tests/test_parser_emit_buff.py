@@ -47,6 +47,7 @@ from gw2_core import (
     BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
+    BuffExtensionEvent,
     CCEvent,
     CombatOutcomeEvent,
     DamageEvent,
@@ -85,6 +86,7 @@ def _build_event_record_2025(
     *,
     is_statechange: int = 0,
     buff_dmg: int = 0,
+    overstack: int = 0,
     result: int = 0,
     iff: int = 1,
     buff: int = 0,
@@ -110,7 +112,7 @@ def _build_event_record_2025(
         dst_agent,
         value,
         buff_dmg,
-        0,
+        overstack,
         skill_id,
         src_instid,
         0,
@@ -736,6 +738,38 @@ def test_parse_events_emit_apply_excludes_remove_class() -> None:
     boon = events[0]
     assert isinstance(boon, BoonApplyEvent)
     assert boon.kind == "remove_single"
+
+
+def test_parse_events_emit_buff_extension_2025() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True), (2, 1, 1, "Dst", True)],
+        build="20260702",
+        skills=[(717, "Protection")],
+        events=[
+            _build_event_record_2025(
+                time_ms=10_000,
+                src_agent=1,
+                dst_agent=2,
+                value=1_500,
+                overstack=6_000,
+                skill_id=717,
+                is_statechange=70,
+                pad=123,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert len(events) == 1
+    event = events[0]
+    assert isinstance(event, BuffExtensionEvent)
+    assert event.source_agent_id == 1
+    assert event.target_agent_id == 2
+    assert event.skill_id == 717
+    assert event.extended_duration_ms == 1_500
+    assert event.new_duration_ms == 6_000
+    assert event.stack_id == 123
 
 
 def test_parse_events_emit_apply_zero_ev_buff_does_not_emit() -> None:

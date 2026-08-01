@@ -12,7 +12,7 @@ from gw2_analytics.buff_state import (
     TRACKED_BUFFS,
     BuffStateTracker,
 )
-from gw2_core import BoonApplyEvent, BuffApplyEvent
+from gw2_core import BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent
 
 
 def _boon_apply(
@@ -387,3 +387,20 @@ class TestBuffStateTracker:
             )
         )
         assert tracker.compute_player_uptimes(1, 10_000)["fury"] == pytest.approx(50.0)
+
+    def test_buff_extension_extends_active_duration_stack(self) -> None:
+        protection_id = TRACKED_BUFFS["protection"]
+        tracker = BuffStateTracker()
+        tracker.process(_boon_apply(skill_id=protection_id, duration_ms=2_000))
+        tracker.process(
+            BuffExtensionEvent(
+                time_ms=1_000,
+                source_agent_id=1,
+                target_agent_id=1,
+                skill_id=protection_id,
+                extended_duration_ms=3_000,
+                new_duration_ms=4_000,
+            )
+        )
+
+        assert tracker.compute_player_uptimes(1, 10_000)["protection"] == pytest.approx(50.0)
