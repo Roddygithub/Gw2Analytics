@@ -165,3 +165,45 @@ def test_build_skill_rotation_marks_french_ranger_pet_spawn() -> None:
             ranger_pet_agent_ids={99},
         )
     ] == [(-28, 10, 0)]
+
+
+def test_build_skill_rotation_infers_engineer_kits_from_one_bundle_cast() -> None:
+    origin = 42_000_000
+    base = {"target_agent_id": 0, "source_agent_id": 7}
+    events = [
+        WeaponSwapEvent(
+            time_ms=origin + 10,
+            skill_id=0,
+            swapped_from=3,
+            swapped_to=2,
+            **base,
+        ),
+        SkillActivationEvent(
+            time_ms=origin + 20,
+            skill_id=76493,
+            activation=ActivationType.RESET,
+            duration_ms=0,
+            expected_duration_ms=0,
+            **base,
+        ),
+        WeaponSwapEvent(
+            time_ms=origin + 30,
+            skill_id=0,
+            swapped_from=3,
+            swapped_to=2,
+            **base,
+        ),
+        SkillActivationEvent(
+            time_ms=origin + 40,
+            skill_id=30371,
+            activation=ActivationType.RESET,
+            duration_ms=0,
+            expected_duration_ms=0,
+            **base,
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+    ] == [(5927, 9, 0), (-2, 10, 0), (30800, 29, 0), (-2, 30, 0)]
