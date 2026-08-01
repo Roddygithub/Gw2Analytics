@@ -223,14 +223,19 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     damage_events = [event for event in event_list if isinstance(event, DamageEvent)]
     actor_damage_events = [event for event in damage_events if event.src_master_instid == 0]
     cc_events = [event for event in event_list if isinstance(event, CCEvent)]
+    down_events = [event for event in event_list if isinstance(event, DownEvent)]
+    death_events = [event for event in event_list if isinstance(event, DeathEvent)]
+    health_events = [event for event in event_list if isinstance(event, HealthUpdateEvent)]
+    up_events = [event for event in event_list if isinstance(event, UpEvent)]
+    outcome_events = [event for event in event_list if isinstance(event, CombatOutcomeEvent)]
     down_rows = DownContributionAggregator().aggregate(
         actor_damage_events,
-        [event for event in event_list if isinstance(event, DownEvent)],
-        [event for event in event_list if isinstance(event, DeathEvent)],
+        down_events,
+        death_events,
         duration_ms / 1000,
-        health_events=[event for event in event_list if isinstance(event, HealthUpdateEvent)],
-        up_events=[event for event in event_list if isinstance(event, UpEvent)],
-        outcome_events=[event for event in event_list if isinstance(event, CombatOutcomeEvent)],
+        health_events=health_events,
+        up_events=up_events,
+        outcome_events=outcome_events,
         cc_events=cc_events,
     )
     down_by_source = {row.source_agent_id: row for row in down_rows}
@@ -245,6 +250,41 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     for fight_agent in fight.agents:
         if fight_agent.instance_id:
             agent_ids_by_instance[fight_agent.instance_id].add(fight_agent.id)
+    down_events_by_source: dict[int, list[DownEvent]] = defaultdict(list)
+    death_events_by_source: dict[int, list[DeathEvent]] = defaultdict(list)
+    health_events_by_source: dict[int, list[HealthUpdateEvent]] = defaultdict(list)
+    up_events_by_source: dict[int, list[UpEvent]] = defaultdict(list)
+    outcome_events_by_target: dict[int, list[CombatOutcomeEvent]] = defaultdict(list)
+    block_count_by_source: dict[int, int] = defaultdict(int)
+    dodge_count_by_source: dict[int, int] = defaultdict(int)
+    downed_buff_times_by_target: dict[int, set[int]] = defaultdict(set)
+    for down_event in down_events:
+        down_events_by_source[down_event.source_agent_id].append(down_event)
+    for death_event in death_events:
+        death_events_by_source[death_event.source_agent_id].append(death_event)
+    for health_event in health_events:
+        health_events_by_source[health_event.source_agent_id].append(health_event)
+    for up_event in up_events:
+        up_events_by_source[up_event.source_agent_id].append(up_event)
+    for outcome_event in outcome_events:
+        outcome_events_by_target[outcome_event.target_agent_id].append(outcome_event)
+    for indexed_event in event_list:
+        if isinstance(indexed_event, BlockEvent):
+            block_count_by_source[indexed_event.source_agent_id] += 1
+        elif isinstance(indexed_event, DodgeEvent):
+            dodge_count_by_source[indexed_event.source_agent_id] += 1
+        elif (
+            isinstance(indexed_event, BoonApplyEvent)
+            and indexed_event.kind == "apply"
+            and indexed_event.skill_id == 770
+        ):
+            downed_buff_times_by_target[indexed_event.target_agent_id].add(indexed_event.time_ms)
+
+    def indexed_events(index: dict[int, list[Any]], agent_ids: set[int]) -> list[Any]:
+        return [
+            indexed_event for agent_id in agent_ids for indexed_event in index.get(agent_id, [])
+        ]
+
     targets = expected.get("targets") if isinstance(expected.get("targets"), list) else []
     buff_map = expected.get("buffMap")
     condition_skill_ids: set[int] | None = (
@@ -271,11 +311,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         start_time_ms=origin,
         healing_by_agent={agent.id: agent.healing for agent in fight.agents},
     )
-    for event in event_list:
-        if isinstance(event, (BoonApplyEvent, BuffApplyEvent)):
-            tracker.process(event)
-        elif isinstance(event, DespawnEvent):
-            tracker.end_agent(event.source_agent_id, event.time_ms + 10)
+    for tracked_event in event_list:
+        if isinstance(tracked_event, (BoonApplyEvent, BuffApplyEvent)):
+            tracker.process(tracked_event)
+        elif isinstance(tracked_event, DespawnEvent):
+            tracker.end_agent(tracked_event.source_agent_id, tracked_event.time_ms + 10)
     rotation = build_skill_rotation(
         event_list,
         duration_ms,
@@ -361,17 +401,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         defenses = player.get("defenses")
         if isinstance(defenses, list) and defenses and isinstance(defenses[0], dict):
             taken = [event for event in damage_events if event.target_agent_id in agent_ids]
-            downed = [
-                event
-                for event in event_list
-                if isinstance(event, DownEvent) and event.source_agent_id in agent_ids
-            ]
+            downed = indexed_events(down_events_by_source, agent_ids)
             outcome_downs = {
                 event.time_ms
-                for event in event_list
-                if isinstance(event, CombatOutcomeEvent)
-                and event.outcome == "downed"
-                and event.target_agent_id in agent_ids
+                for event in indexed_events(outcome_events_by_target, agent_ids)
+                if event.outcome == "downed"
             }
             defense_values = {
                 "damageTaken": sum(event.damage for event in taken),
@@ -382,26 +416,15 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 "powerDamageTaken": sum(
                     event.damage - _condition_damage(event, condition_skill_ids) for event in taken
                 ),
-                "blockedCount": sum(
-                    isinstance(event, BlockEvent) and event.source_agent_id == agent.id
-                    for event in event_list
-                ),
-                "evadedCount": sum(
-                    isinstance(event, DodgeEvent) and event.source_agent_id == agent.id
-                    for event in event_list
-                ),
+                "blockedCount": block_count_by_source[agent.id],
+                "evadedCount": dodge_count_by_source[agent.id],
                 "downCount": (
                     len(outcome_downs)
                     if outcome_downs and not anonymous
                     else len(
-                        {
-                            event.time_ms
-                            for event in event_list
-                            if isinstance(event, BoonApplyEvent)
-                            and event.kind == "apply"
-                            and event.skill_id == 770
-                            and event.target_agent_id in agent_ids
-                        }
+                        set().union(
+                            *(downed_buff_times_by_target[agent_id] for agent_id in agent_ids)
+                        )
                     )
                 )
                 or (
@@ -412,10 +435,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     else 0
                 ),
                 "downDuration": sum(event.downtime_ms for event in downed),
-                "deadCount": sum(
-                    isinstance(event, DeathEvent) and event.source_agent_id in agent_ids
-                    for event in event_list
-                ),
+                "deadCount": len(indexed_events(death_events_by_source, agent_ids)),
             }
             values["defenses"] = defense_values
             _compare_fields(f"{prefix}.defenses", defenses[0], defense_values, differences)
@@ -556,34 +576,12 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 target_cc = [event for event in source_cc if event.target_agent_id in target_ids]
                 target_down_rows = DownContributionAggregator().aggregate(
                     actor_target_damage,
-                    [
-                        event
-                        for event in event_list
-                        if isinstance(event, DownEvent) and event.source_agent_id in target_ids
-                    ],
-                    [
-                        event
-                        for event in event_list
-                        if isinstance(event, DeathEvent) and event.source_agent_id in target_ids
-                    ],
+                    indexed_events(down_events_by_source, target_ids),
+                    indexed_events(death_events_by_source, target_ids),
                     duration_ms / 1000,
-                    health_events=[
-                        event
-                        for event in event_list
-                        if isinstance(event, HealthUpdateEvent)
-                        and event.source_agent_id in target_ids
-                    ],
-                    up_events=[
-                        event
-                        for event in event_list
-                        if isinstance(event, UpEvent) and event.source_agent_id in target_ids
-                    ],
-                    outcome_events=[
-                        event
-                        for event in event_list
-                        if isinstance(event, CombatOutcomeEvent)
-                        and event.target_agent_id in target_ids
-                    ],
+                    health_events=indexed_events(health_events_by_source, target_ids),
+                    up_events=indexed_events(up_events_by_source, target_ids),
+                    outcome_events=indexed_events(outcome_events_by_target, target_ids),
                     cc_events=target_cc,
                 )
                 target_down_by_source = {row.source_agent_id: row for row in target_down_rows}

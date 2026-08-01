@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
+from collections import defaultdict
 from collections.abc import Collection, Iterable
 
 from pydantic import BaseModel, ConfigDict
@@ -226,11 +228,54 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     if not event_list:
         return []
     origin = start_time_ms if start_time_ms is not None else min(e.time_ms for e in event_list)
-    swaps = [e for e in event_list if isinstance(e, WeaponSwapEvent)]
+    event_times = [event.time_ms for event in event_list]
+    swaps_by_agent: dict[int, list[WeaponSwapEvent]] = defaultdict(list)
+    activations_by_agent: dict[int, list[SkillActivationEvent]] = defaultdict(list)
+    spawn_owner_by_target: dict[int, int] = {}
+    for indexed_event in event_list:
+        if isinstance(indexed_event, WeaponSwapEvent):
+            swaps_by_agent[indexed_event.source_agent_id].append(indexed_event)
+        elif isinstance(indexed_event, SkillActivationEvent):
+            activations_by_agent[indexed_event.source_agent_id].append(indexed_event)
+        elif isinstance(indexed_event, SpawnEvent):
+            spawn_owner_by_target.setdefault(
+                indexed_event.target_agent_id,
+                indexed_event.source_agent_id,
+            )
+    swap_times_by_agent = {
+        agent_id: [swap.time_ms for swap in agent_swaps]
+        for agent_id, agent_swaps in swaps_by_agent.items()
+    }
     active: dict[tuple[int, int], SkillActivationEvent] = {}
     casts: list[SkillCast] = []
     last_instant: dict[tuple[int, int], int] = {}
     active_buff_until: dict[tuple[int, int], int] = {}
+
+    def nearby_events(time_ms: int, radius_ms: int) -> list[Event]:
+        return event_list[
+            bisect_left(event_times, time_ms - radius_ms) : bisect_right(
+                event_times,
+                time_ms + radius_ms,
+            )
+        ]
+
+    def nearby_swap(agent_id: int, time_ms: int, radius_ms: int = 5) -> WeaponSwapEvent | None:
+        agent_swaps = swaps_by_agent.get(agent_id, [])
+        agent_swap_times = swap_times_by_agent.get(agent_id, [])
+        for swap in agent_swaps[
+            bisect_left(agent_swap_times, time_ms - radius_ms) : bisect_right(
+                agent_swap_times,
+                time_ms + radius_ms,
+            )
+        ]:
+            if abs(swap.time_ms - time_ms) < radius_ms:
+                return swap
+        return None
+
+    def next_swap_time_after(agent_id: int, time_ms: int) -> int:
+        agent_swap_times = swap_times_by_agent.get(agent_id, [])
+        index = bisect_right(agent_swap_times, time_ms + 10)
+        return agent_swap_times[index] if index < len(agent_swap_times) else 1 << 63
 
     def add_instant(source: int, skill_id: int, time_ms: int, icd: int = 50) -> None:
         key = (source, skill_id)
@@ -272,23 +317,19 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     )
                 )
         elif isinstance(event, WeaponSwapEvent):
-            next_swap_time = next(
-                (
-                    swap.time_ms
-                    for swap in swaps
-                    if swap.source_agent_id == event.source_agent_id
-                    and swap.time_ms > event.time_ms + 10
-                ),
-                1 << 63,
-            )
+            next_swap_time = next_swap_time_after(event.source_agent_id, event.time_ms)
+            agent_activations = activations_by_agent.get(event.source_agent_id, [])
+            activation_times = [activation.time_ms for activation in agent_activations]
             for kit_skill, bundle_skills in _ENGINEER_KIT_BUNDLES.items():
                 if (
                     sum(
-                        isinstance(other, SkillActivationEvent)
-                        and other.source_agent_id == event.source_agent_id
-                        and event.time_ms + 10 <= other.time_ms < next_swap_time
-                        and other.skill_id in bundle_skills
-                        for other in event_list
+                        other.skill_id in bundle_skills
+                        for other in agent_activations[
+                            bisect_left(activation_times, event.time_ms + 10) : bisect_left(
+                                activation_times,
+                                next_swap_time,
+                            )
+                        ]
                     )
                     >= 2
                 ):
@@ -309,11 +350,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             if instant is not None:
                 skill_id, before_swap = instant
                 time_ms = event.time_ms
-                if before_swap and any(
-                    swap.source_agent_id == event.target_agent_id
-                    and abs(swap.time_ms - event.time_ms) < 5
-                    for swap in swaps
-                ):
+                if before_swap and nearby_swap(event.target_agent_id, event.time_ms):
                     time_ms -= 1
                 add_instant(event.target_agent_id, skill_id, time_ms)
             mapped = (
@@ -328,19 +365,11 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 mapped = None
             if mapped is not None:
                 mapped_time = event.time_ms
-                nearby_swap = next(
-                    (
-                        swap
-                        for swap in swaps
-                        if swap.source_agent_id == event.target_agent_id
-                        and abs(swap.time_ms - event.time_ms) < 5
-                    ),
-                    None,
-                )
-                if nearby_swap is not None and event.skill_id in _BEFORE_SWAP_BUFFS:
-                    mapped_time = nearby_swap.time_ms - 1
-                elif nearby_swap is not None and event.skill_id in _AFTER_SWAP_BUFFS:
-                    mapped_time = max(mapped_time, nearby_swap.time_ms + 1)
+                swap = nearby_swap(event.target_agent_id, event.time_ms)
+                if swap is not None and event.skill_id in _BEFORE_SWAP_BUFFS:
+                    mapped_time = swap.time_ms - 1
+                elif swap is not None and event.skill_id in _AFTER_SWAP_BUFFS:
+                    mapped_time = max(mapped_time, swap.time_ms + 1)
                 add_instant(event.target_agent_id, mapped, mapped_time)
             if event.kind == "apply":
                 active_buff_until[buff_key] = max(
@@ -356,15 +385,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 and event.skill_id == 59536
                 and event.target_agent_id in siege_turtle_agent_ids
             ):
-                owner = next(
-                    (
-                        spawn.source_agent_id
-                        for spawn in event_list
-                        if isinstance(spawn, SpawnEvent)
-                        and spawn.target_agent_id == event.target_agent_id
-                    ),
-                    0,
-                )
+                owner = spawn_owner_by_target.get(event.target_agent_id, 0)
                 if owner:
                     add_instant(owner, 65418, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
@@ -394,7 +415,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                         and other.source_agent_id == caster
                         and other.target_agent_id in clone_agent_ids
                         and abs(other.time_ms - event.time_ms) < 30
-                        for other in event_list
+                        for other in nearby_events(event.time_ms, 29)
                     )
                     else -27
                 )
@@ -409,7 +430,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                         and other.skill_id == 10243
                         and other.target_agent_id == caster
                         and abs(other.time_ms - event.time_ms) < 10
-                        for other in event_list
+                        for other in nearby_events(event.time_ms, 9)
                     )
                     else 10191
                     if caster in mesmer_agent_ids
@@ -428,11 +449,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     continue
                 needs_related = by_dst or event.guid in _SECONDARY_EFFECTS
                 needs_related = needs_related or event.guid in _MESMER_SHATTER_EFFECTS
-                related = (
-                    [other for other in event_list if abs(other.time_ms - event.time_ms) < 10]
-                    if needs_related
-                    else []
-                )
+                related = nearby_events(event.time_ms, 9) if needs_related else []
                 if (
                     event.guid == "122BA55CCDF2B643929F6C4A97226DC9"
                     and sum(
@@ -472,7 +489,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     and other.source_agent_id == caster
                     and other.skill_id == 38767
                     and abs(other.time_ms - event.time_ms) < 50
-                    for other in event_list
+                    for other in nearby_events(event.time_ms, 49)
                 ):
                     add_instant(caster, effect_skill_id, event.time_ms)
 
