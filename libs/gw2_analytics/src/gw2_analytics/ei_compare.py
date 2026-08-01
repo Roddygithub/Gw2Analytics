@@ -236,7 +236,10 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     agents_by_account = {
         agent.account_name.lstrip(":"): agent for agent in fight.agents if agent.account_name
     }
-    agents_by_instance = {agent.instance_id: agent for agent in fight.agents if agent.instance_id}
+    agents_by_instance = {}
+    for agent in fight.agents:
+        if agent.instance_id:
+            agents_by_instance.setdefault(agent.instance_id, agent)
     agent_ids_by_instance: dict[int, set[int]] = defaultdict(set)
     for fight_agent in fight.agents:
         if fight_agent.instance_id:
@@ -362,6 +365,13 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 for event in event_list
                 if isinstance(event, DownEvent) and event.source_agent_id in agent_ids
             ]
+            outcome_downs = {
+                event.time_ms
+                for event in event_list
+                if isinstance(event, CombatOutcomeEvent)
+                and event.outcome == "downed"
+                and event.target_agent_id in agent_ids
+            }
             defense_values = {
                 "damageTaken": sum(event.damage for event in taken),
                 "damageTakenCount": sum(_connected(event) for event in taken),
@@ -379,36 +389,30 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     isinstance(event, DodgeEvent) and event.source_agent_id == agent.id
                     for event in event_list
                 ),
-                "downCount": len(
-                    {
-                        event.time_ms
-                        for event in event_list
-                        if isinstance(event, BoonApplyEvent)
-                        and event.kind == "apply"
-                        and event.skill_id == 770
-                        and event.target_agent_id in agent_ids
-                    }
-                )
-                or (
-                    len(downed)
-                    if anonymous
+                "downCount": (
+                    len(outcome_downs)
+                    if outcome_downs and not anonymous
                     else len(
                         {
                             event.time_ms
                             for event in event_list
-                            if (
-                                isinstance(event, CombatOutcomeEvent)
-                                and event.outcome == "downed"
-                                and event.target_agent_id in agent_ids
-                            )
+                            if isinstance(event, BoonApplyEvent)
+                            and event.kind == "apply"
+                            and event.skill_id == 770
+                            and event.target_agent_id in agent_ids
                         }
                     )
+                )
+                or (
+                    len(downed)
+                    if anonymous
+                    else len(outcome_downs)
                     if not has_downed_buff_applies
                     else 0
                 ),
                 "downDuration": sum(event.downtime_ms for event in downed),
                 "deadCount": sum(
-                    isinstance(event, DeathEvent) and event.source_agent_id == agent.id
+                    isinstance(event, DeathEvent) and event.source_agent_id in agent_ids
                     for event in event_list
                 ),
             }
