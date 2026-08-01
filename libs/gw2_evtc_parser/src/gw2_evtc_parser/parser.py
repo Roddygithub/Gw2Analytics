@@ -1154,9 +1154,25 @@ class PythonEvtcParser:
                         kind="apply",
                     )
                     continue
-                if _iff == 0:
+                # v0.17.0: a self-inflicted condition tick (src == dst,
+                # value == 0, buff_dmg == the tick magnitude) is a FRIEND
+                # (iff == 0) record on the EVTC rev1 channel, but it is NOT
+                # a heal: there is no heal magnitude, only a condition tick.
+                # EI counts it as condition damage taken by the target. The
+                # generic ``iff == 0`` filter below (which exists to drop
+                # friend-sourced HEALING from the damage channel) must let
+                # this through, otherwise the damageTaken / damageTakenCount /
+                # conditionDamageTaken stats undercount by one self-tick per
+                # occurrence. Verified on wvw-large-fight (build 20251123).
+                is_self_condi_tick = (
+                    src_agent == dst_agent
+                    and _ev_buff
+                    and value == 0
+                    and buff_dmg > 0
+                )
+                if _iff == 0 and not is_self_condi_tick:
                     continue
-                if _iff not in {1, 2}:
+                if _iff not in {1, 2} and not is_self_condi_tick:
                     continue
                 if _ev_buff:
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
