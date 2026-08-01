@@ -329,11 +329,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             and agent.elite in {EliteSpec.UNKNOWN, EliteSpec.MIRAGE}
         },
         {agent.id for agent in fight.agents if agent.species_id == 8111},
-        {
-            agent.id
-            for agent in fight.agents
-            if agent.name.startswith(("Juvenile ", "Jeune "))
-        },
+        {agent.id for agent in fight.agents if agent.name.startswith(("Juvenile ", "Jeune "))},
         {agent.id for agent in fight.agents if agent.species_id == 24796},
     )
     has_downed_buff_applies = any(
