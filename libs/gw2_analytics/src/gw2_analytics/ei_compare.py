@@ -11,6 +11,7 @@ from gw2_analytics.down_contribution import DownContributionAggregator
 from gw2_analytics.initial_buffs import extract_initial_buffs
 from gw2_analytics.rotation import build_skill_rotation
 from gw2_core import (
+    Agent,
     BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
@@ -236,10 +237,10 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     agents_by_account = {
         agent.account_name.lstrip(":"): agent for agent in fight.agents if agent.account_name
     }
-    agents_by_instance = {}
-    for agent in fight.agents:
-        if agent.instance_id:
-            agents_by_instance.setdefault(agent.instance_id, agent)
+    agents_by_instance: dict[int, Agent] = {}
+    for fight_agent in fight.agents:
+        if fight_agent.instance_id:
+            agents_by_instance.setdefault(fight_agent.instance_id, fight_agent)
     agent_ids_by_instance: dict[int, set[int]] = defaultdict(set)
     for fight_agent in fight.agents:
         if fight_agent.instance_id:
@@ -301,7 +302,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             continue
         account = player["account"]
         instance_id = player.get("instanceID")
-        agent = agents_by_account.get(account)
+        agent: Agent | None = agents_by_account.get(account)
         if agent is None and isinstance(instance_id, int):
             agent = agents_by_instance.get(instance_id)
         if agent is None:

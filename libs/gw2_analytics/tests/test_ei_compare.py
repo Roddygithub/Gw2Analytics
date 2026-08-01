@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from gw2_analytics.ei_compare import compare_elite_insights
 from gw2_core import (
     Agent,
@@ -34,7 +36,7 @@ def test_compare_elite_insights_keeps_first_anonymous_agent_for_shared_instance(
             ),
         ],
     )
-    expected = {
+    expected: dict[str, Any] = {
         "players": [
             {
                 "account": "Non Squad Player 5",
@@ -69,7 +71,7 @@ def test_compare_elite_insights_prefers_outcome_downs_for_named_players() -> Non
             )
         ],
     )
-    expected = {
+    expected: dict[str, Any] = {
         "players": [
             {
                 "account": "Player.1234",
