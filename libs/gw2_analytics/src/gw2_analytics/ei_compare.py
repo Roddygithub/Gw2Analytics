@@ -606,7 +606,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             actual_consumables = sorted(
                 (buff.skill_id, buff.time_ms, buff.duration_ms, buff.stacks)
                 for buff in extract_initial_buffs(event_list, origin, ids)
-                if buff.agent_id == agent.id and slice_lo <= buff.time_ms + origin <= slice_hi
+                # Not sliced: consumables are pre-fight applications that EI
+                # repeats on every entry of a split account, and a player whose
+                # firstAware is later than the application would otherwise lose
+                # them entirely.
+                if buff.agent_id == agent.id
             )
             expected_consumables = sorted(
                 (item["id"], item["time"], item["duration"], item["stack"])
