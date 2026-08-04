@@ -1165,6 +1165,7 @@ class PythonEvtcParser:
                         stacks=1,
                         stack_id=pad,
                         kind="apply",
+                        added_active=bool(is_shields),
                     )
                     continue
                 # v0.17.0: a self-inflicted condition tick (src == dst,
