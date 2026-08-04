@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from typing import Any
 
@@ -193,6 +193,28 @@ def _skill_stats(events: list[DamageEvent]) -> dict[int, dict[str, int]]:
     return result
 
 
+def _slice_bounds(player: dict[str, Any], origin: int) -> tuple[int, int]:
+    """Absolute ms bounds of the fight slice one EI player entry covers.
+
+    Elite Insights does not emit one entry per player: it emits one per
+    *contiguous stretch of squad membership*. A player who leaves and
+    rejoins the squad -- or who is simply out of it before the recorder
+    picks them up -- appears several times under the same account and the
+    same instance ID, with adjacent, non-overlapping firstAware/lastAware
+    windows and a different ``group`` on each. Every counter on an entry
+    covers only that stretch.
+
+    arcdps has no such notion: one agent record spans the whole fight. So
+    each EI entry has to be compared against the matching slice of our
+    event stream rather than against the player's whole-fight totals.
+    """
+    first = player.get("firstAware")
+    last = player.get("lastAware")
+    if not isinstance(first, int) or not isinstance(last, int) or last < first:
+        return (-(1 << 62), 1 << 62)
+    return (origin + first, origin + last)
+
+
 def compare_elite_insights(  # noqa: PLR0912, PLR0915
     fight: Fight,
     expected: dict[str, object],
@@ -258,6 +280,8 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     outcome_events_by_target: dict[int, list[CombatOutcomeEvent]] = defaultdict(list)
     block_count_by_source: dict[int, int] = defaultdict(int)
     dodge_count_by_source: dict[int, int] = defaultdict(int)
+    block_events_by_source: dict[int, list[BlockEvent]] = defaultdict(list)
+    dodge_events_by_source: dict[int, list[DodgeEvent]] = defaultdict(list)
     downed_buff_times_by_target: dict[int, set[int]] = defaultdict(set)
     for down_event in down_events:
         down_events_by_source[down_event.source_agent_id].append(down_event)
@@ -272,8 +296,10 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     for indexed_event in event_list:
         if isinstance(indexed_event, BlockEvent):
             block_count_by_source[indexed_event.source_agent_id] += 1
+            block_events_by_source[indexed_event.source_agent_id].append(indexed_event)
         elif isinstance(indexed_event, DodgeEvent):
             dodge_count_by_source[indexed_event.source_agent_id] += 1
+            dodge_events_by_source[indexed_event.source_agent_id].append(indexed_event)
         elif (
             isinstance(indexed_event, BoonApplyEvent)
             and indexed_event.kind == "apply"
@@ -308,10 +334,8 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         else set()
     )
 
-    tracker = BuffStateTracker(
-        start_time_ms=origin,
-        healing_by_agent={agent.id: agent.healing for agent in fight.agents},
-    )
+    healing_by_agent = {agent.id: agent.healing for agent in fight.agents}
+    tracker = BuffStateTracker(start_time_ms=origin, healing_by_agent=healing_by_agent)
     for tracked_event in event_list:
         if isinstance(tracked_event, (BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent)):
             tracker.process(tracked_event)
@@ -336,6 +360,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         isinstance(event, BoonApplyEvent) and event.kind == "apply" and event.skill_id == 770
         for event in event_list
     )
+    account_entry_count: Counter[str] = Counter(
+        entry["account"]
+        for entry in expected_players
+        if isinstance(entry, dict) and isinstance(entry.get("account"), str)
+    )
     compared_players: dict[str, object] = {}
 
     for player in expected_players:
@@ -350,9 +379,22 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             compared_players[account] = None
             differences[f"players[{account}]"] = {"expected": "present", "actual": None}
             continue
-        prefix = f"players[{account}]"
+        slice_lo, slice_hi = _slice_bounds(player, origin)
+        # Several EI entries can share an account; key the report by the
+        # slice so their differences do not overwrite each other.
+        prefix = (
+            f"players[{account}]"
+            if account_entry_count[account] < 2
+            else f"players[{account}@{player.get('firstAware')}]"
+        )
         anonymous = agent.account_name is None
         agent_ids = agent_ids_by_instance.get(agent.instance_id, {agent.id})
+
+        whole_fight_slice = slice_lo <= origin and slice_hi >= origin + duration_ms
+
+        def in_slice(event: Event, _lo: int = slice_lo, _hi: int = slice_hi) -> bool:
+            return _lo <= event.time_ms <= _hi
+
         # An anonymized enemy player carries no account name, and arcdps
         # has replaced their character name with the *localized* spec
         # string. EI labels them "<English spec> pl-<instanceID>", so the
@@ -380,10 +422,14 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         source_damage = [
             event
             for event in damage_events
-            if event.source_agent_id in agent_ids and event.source_agent_id != event.target_agent_id
+            if event.source_agent_id in agent_ids
+            and event.source_agent_id != event.target_agent_id
+            and in_slice(event)
         ]
         actor_damage = [event for event in source_damage if event.src_master_instid == 0]
-        source_cc = [event for event in cc_events if event.source_agent_id in agent_ids]
+        source_cc = [
+            event for event in cc_events if event.source_agent_id in agent_ids and in_slice(event)
+        ]
 
         dps_all = player.get("dpsAll")
         if isinstance(dps_all, list) and dps_all and isinstance(dps_all[0], dict):
@@ -401,12 +447,20 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
 
         defenses = player.get("defenses")
         if isinstance(defenses, list) and defenses and isinstance(defenses[0], dict):
-            taken = [event for event in damage_events if event.target_agent_id in agent_ids]
-            downed = indexed_events(down_events_by_source, agent_ids)
+            taken = [
+                event
+                for event in damage_events
+                if event.target_agent_id in agent_ids and in_slice(event)
+            ]
+            downed = [
+                event
+                for event in indexed_events(down_events_by_source, agent_ids)
+                if in_slice(event)
+            ]
             outcome_downs = {
                 event.time_ms
                 for event in indexed_events(outcome_events_by_target, agent_ids)
-                if event.outcome == "downed"
+                if event.outcome == "downed" and in_slice(event)
             }
             defense_values = {
                 "damageTaken": sum(event.damage for event in taken),
@@ -417,15 +471,22 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 "powerDamageTaken": sum(
                     event.damage - _condition_damage(event, condition_skill_ids) for event in taken
                 ),
-                "blockedCount": block_count_by_source[agent.id],
-                "evadedCount": dodge_count_by_source[agent.id],
+                "blockedCount": block_count_by_source[agent.id]
+                if whole_fight_slice
+                else sum(1 for event in block_events_by_source[agent.id] if in_slice(event)),
+                "evadedCount": dodge_count_by_source[agent.id]
+                if whole_fight_slice
+                else sum(1 for event in dodge_events_by_source[agent.id] if in_slice(event)),
                 "downCount": (
                     len(outcome_downs)
                     if outcome_downs and not anonymous
                     else len(
-                        set().union(
-                            *(downed_buff_times_by_target[agent_id] for agent_id in agent_ids)
-                        )
+                        {
+                            time_ms
+                            for agent_id in agent_ids
+                            for time_ms in downed_buff_times_by_target[agent_id]
+                            if slice_lo <= time_ms <= slice_hi
+                        }
                     )
                 )
                 or (
@@ -436,7 +497,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     else 0
                 ),
                 "downDuration": sum(event.downtime_ms for event in downed),
-                "deadCount": len(indexed_events(death_events_by_source, agent_ids)),
+                "deadCount": sum(
+                    1
+                    for event in indexed_events(death_events_by_source, agent_ids)
+                    if in_slice(event)
+                ),
             }
             values["defenses"] = defense_values
             _compare_fields(f"{prefix}.defenses", defenses[0], defense_values, differences)
@@ -457,6 +522,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
 
         expected_buffs = player.get("buffUptimes")
         if isinstance(expected_buffs, list):
+            # Uptimes stay whole-fight even on a sliced entry: EI reports
+            # the same buffUptimes on every entry of a split account, so
+            # restricting them to the slice measurably diverges (verified on
+            # the corpus: windowing them takes buff differences from 225 to
+            # 913 across the four logs that have splits).
             uptime = dict.fromkeys(TRACKED_BUFFS, 0.0)
             for alias_id in agent_ids:
                 alias_uptime = tracker.compute_player_uptimes(alias_id, duration_ms)
@@ -515,6 +585,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     (cast.skill_id, cast.time_ms, cast.duration_ms)
                     for cast in rotation
                     if cast.source_agent_id == agent.id
+                    and slice_lo <= cast.time_ms + origin <= slice_hi
                 ),
                 key=lambda item: (item[1], item[0]),
             )
@@ -535,6 +606,10 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             actual_consumables = sorted(
                 (buff.skill_id, buff.time_ms, buff.duration_ms, buff.stacks)
                 for buff in extract_initial_buffs(event_list, origin, ids)
+                # Not sliced: consumables are pre-fight applications that EI
+                # repeats on every entry of a split account, and a player whose
+                # firstAware is later than the application would otherwise lose
+                # them entirely.
                 if buff.agent_id == agent.id
             )
             expected_consumables = sorted(
@@ -577,12 +652,32 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 target_cc = [event for event in source_cc if event.target_agent_id in target_ids]
                 target_down_rows = DownContributionAggregator().aggregate(
                     actor_target_damage,
-                    indexed_events(down_events_by_source, target_ids),
-                    indexed_events(death_events_by_source, target_ids),
+                    [
+                        event
+                        for event in indexed_events(down_events_by_source, target_ids)
+                        if in_slice(event)
+                    ],
+                    [
+                        event
+                        for event in indexed_events(death_events_by_source, target_ids)
+                        if in_slice(event)
+                    ],
                     duration_ms / 1000,
-                    health_events=indexed_events(health_events_by_source, target_ids),
-                    up_events=indexed_events(up_events_by_source, target_ids),
-                    outcome_events=indexed_events(outcome_events_by_target, target_ids),
+                    health_events=[
+                        event
+                        for event in indexed_events(health_events_by_source, target_ids)
+                        if in_slice(event)
+                    ],
+                    up_events=[
+                        event
+                        for event in indexed_events(up_events_by_source, target_ids)
+                        if in_slice(event)
+                    ],
+                    outcome_events=[
+                        event
+                        for event in indexed_events(outcome_events_by_target, target_ids)
+                        if in_slice(event)
+                    ],
                     cc_events=target_cc,
                 )
                 target_down_by_source = {row.source_agent_id: row for row in target_down_rows}
