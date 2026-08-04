@@ -334,10 +334,8 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         else set()
     )
 
-    tracker = BuffStateTracker(
-        start_time_ms=origin,
-        healing_by_agent={agent.id: agent.healing for agent in fight.agents},
-    )
+    healing_by_agent = {agent.id: agent.healing for agent in fight.agents}
+    tracker = BuffStateTracker(start_time_ms=origin, healing_by_agent=healing_by_agent)
     for tracked_event in event_list:
         if isinstance(tracked_event, (BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent)):
             tracker.process(tracked_event)
@@ -524,6 +522,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
 
         expected_buffs = player.get("buffUptimes")
         if isinstance(expected_buffs, list):
+            # Uptimes stay whole-fight even on a sliced entry: EI reports
+            # the same buffUptimes on every entry of a split account, so
+            # restricting them to the slice measurably diverges (verified on
+            # the corpus: windowing them takes buff differences from 225 to
+            # 913 across the four logs that have splits).
             uptime = dict.fromkeys(TRACKED_BUFFS, 0.0)
             for alias_id in agent_ids:
                 alias_uptime = tracker.compute_player_uptimes(alias_id, duration_ms)
