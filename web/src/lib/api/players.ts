@@ -14,12 +14,63 @@ export interface PlayerListRow {
   detected_tags: string[] | null;
 }
 
-export interface PerFightBreakdownRow {
+/** One of the 14 boons tracked per fight, both held and generated. */
+export type TrackedBoon =
+  | "might"
+  | "fury"
+  | "quickness"
+  | "alacrity"
+  | "protection"
+  | "regeneration"
+  | "vigor"
+  | "aegis"
+  | "stability"
+  | "swiftness"
+  | "resistance"
+  | "resolution"
+  | "superspeed"
+  | "stealth";
+
+export const TRACKED_BOONS: readonly TrackedBoon[] = [
+  "might",
+  "fury",
+  "quickness",
+  "alacrity",
+  "protection",
+  "regeneration",
+  "vigor",
+  "aegis",
+  "stability",
+  "swiftness",
+  "resistance",
+  "resolution",
+  "superspeed",
+  "stealth",
+] as const;
+
+/** `<boon>_uptime` — percentage for duration boons, average stacks for might and stability. */
+export type BoonUptimeFields = {
+  [K in TrackedBoon as `${K}_uptime`]?: number | null;
+};
+
+/** `outgoing_<boon>` — stack-milliseconds applied to other players. */
+export type OutgoingBoonFields = {
+  [K in TrackedBoon as `outgoing_${K}`]?: number | null;
+};
+
+export interface PerFightBreakdownRow
+  extends BoonUptimeFields,
+    OutgoingBoonFields {
   fight_id: string;
   started_at: string;
   total_damage: number;
   total_healing: number;
   total_buff_removal: number;
+  // Optional: absent on rows written before these columns landed.
+  boon_strips?: number | null;
+  condition_cleanses?: number | null;
+  detected_role?: string | null;
+  detected_tags?: string[] | null;
 }
 
 export interface PlayerProfile {
@@ -33,6 +84,9 @@ export interface PlayerProfile {
   total_buff_removal: number;
   detected_role: string | null;
   detected_tags: string[] | null;
+  // Nullable on rows written before the strips/cleanses columns landed.
+  boon_strips: number | null;
+  condition_cleanses: number | null;
   attended_fight_ids: string[];
   per_fight_breakdown: PerFightBreakdownRow[];
 }
