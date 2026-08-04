@@ -528,6 +528,17 @@ class BoonApplyEvent(BaseEvent):
     )
     stacks: int = Field(..., ge=0, description="Magnitude of the state change.")
     stack_id: int = Field(default=0, ge=0, le=0xFFFFFFFF)
+    added_active: bool = Field(
+        default=False,
+        description=(
+            "arcdps 2025+ ``is_shields`` byte of the raw buff-apply record: "
+            "1 marks the apply as the currently-active stack. Elite Insights "
+            "uses this to activate the newly added stack (move to front + "
+            "``noSort``), which is required for Regeneration parity. Only the "
+            "arcdps 2025+ wire carries this byte; legacy records default to "
+            "False."
+        ),
+    )
     kind: Literal["apply", "remove_single", "remove_all", "remove_manual"] = Field(
         default="apply",
         description=(
