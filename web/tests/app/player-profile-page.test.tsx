@@ -97,6 +97,8 @@ const POPULATED: PlayerProfile = {
   total_buff_removal: 300,
   detected_role: "DPS",
   detected_tags: null,
+  boon_strips: 42,
+  condition_cleanses: 17,
   attended_fight_ids: ["fight-a", "fight-b"],
   per_fight_breakdown: [
     {
@@ -137,6 +139,12 @@ describe("/players/[account_name] page", () => {
     expect(html).toContain("fight-a");
     expect(html).toContain("fight-b");
     expect(html).toContain("Fights attended");
+    // Strips and cleanses are computed per fight by the backend and were
+    // reaching the client without ever being rendered.
+    expect(html).toContain("Boon strips");
+    expect(html).toContain("42");
+    expect(html).toContain("Condition cleanses");
+    expect(html).toContain("17");
   });
 
   it("renders the empty breakdown panel when per_fight_breakdown is empty", async () => {

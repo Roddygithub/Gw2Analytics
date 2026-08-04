@@ -251,6 +251,18 @@ export default async function PlayerProfilePage({
           value={String(profile.total_buff_removal)}
         />
         <Stat
+          label="Boon strips"
+          value={profile.boon_strips != null ? String(profile.boon_strips) : "—"}
+        />
+        <Stat
+          label="Condition cleanses"
+          value={
+            profile.condition_cleanses != null
+              ? String(profile.condition_cleanses)
+              : "—"
+          }
+        />
+        <Stat
           label="Detected role"
           value={profile.detected_role ?? "—"}
         />
