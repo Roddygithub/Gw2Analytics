@@ -21,7 +21,6 @@ from gw2_core import (
     WeaponSwapEvent,
 )
 
-
 _ENGINEER_KIT_BUNDLES = {
     5802: {58090, 30521, 29547, 49045, 49082, 58104, 50444},
     5933: {5934, 5935, 5965, 5936, 6102, 5937},
