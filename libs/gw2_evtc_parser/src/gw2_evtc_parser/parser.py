@@ -1161,7 +1161,7 @@ class PythonEvtcParser:
                         source_agent_id=src_agent,
                         target_agent_id=dst_agent,
                         skill_id=skill_id,
-                        duration_ms=value,
+                        duration_ms=(0 if value >= _DAMAGE_SANITY_CAP else max(0, value)),
                         stacks=1,
                         stack_id=pad,
                         kind="apply",
