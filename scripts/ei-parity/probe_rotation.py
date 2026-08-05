@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Drill into rotation diffs: which skill_ids are expected/actual-only, mismatched counts."""
+
 from __future__ import annotations
 
 import json

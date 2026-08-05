@@ -5,6 +5,7 @@ Parses each corpus log once, then re-runs compare_elite_insights per candidate
 with the target table patched at runtime. Canonical = number of rotation buckets
 whose expected or actual list is non-empty.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,12 +23,12 @@ from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive  # noqa: E402
 
 # (table, key, value) — key is the buff/effect id, value the emitted skill id
 CANDIDATES = [
-    ("_BUFF_GAIN_CASTS", 32931, 31187),   # Dash <- UnhinderedCombatant
-    ("_BUFF_GAIN_CASTS", 62931, 62758),   # Flame Wheel
+    ("_BUFF_GAIN_CASTS", 32931, 31187),  # Dash <- UnhinderedCombatant
+    ("_BUFF_GAIN_CASTS", 62931, 62758),  # Flame Wheel
     ("_BUFF_GAIN_CASTS", 9422, 9422),
-    ("_BUFF_GAIN_CASTS", 29502, 30435),   # Berserk
-    ("_BUFF_GAIN_CASTS", 76507, 5635),    # Arcane Echo
-    ("_BUFF_GAIN_CASTS", 51664, 14410),   # Signet of Fury (known good)
+    ("_BUFF_GAIN_CASTS", 29502, 30435),  # Berserk
+    ("_BUFF_GAIN_CASTS", 76507, 5635),  # Arcane Echo
+    ("_BUFF_GAIN_CASTS", 51664, 14410),  # Signet of Fury (known good)
     ("_DAMAGE_CASTS", 76783, 75),
     ("_DAMAGE_CASTS", 24305, 50),
     ("_DAMAGE_CASTS", 13907, 50),
