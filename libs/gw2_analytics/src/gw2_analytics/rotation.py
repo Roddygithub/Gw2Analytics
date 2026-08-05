@@ -21,7 +21,7 @@ from gw2_core import (
     WeaponSwapEvent,
 )
 
-_WEAPON_ACTIVATIONS = {23284, 23285}
+
 _ENGINEER_KIT_BUNDLES = {
     5802: {58090, 30521, 29547, 49045, 49082, 58104, 50444},
     5933: {5934, 5935, 5965, 5936, 6102, 5937},
@@ -385,8 +385,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         if isinstance(event, SkillActivationEvent):
             key = (event.source_agent_id, event.skill_id)
             if event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
-                if event.skill_id not in _WEAPON_ACTIVATIONS:
-                    active[key] = event
+                active[event.source_agent_id, event.skill_id] = event
             elif start := active.pop(key, None):
                 cast_duration = event.time_ms - start.time_ms
                 if cast_duration > 1:
@@ -398,7 +397,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                             duration_ms=cast_duration,
                         )
                     )
-            elif event.skill_id not in _WEAPON_ACTIVATIONS and event.duration_ms > 1:
+            elif event.duration_ms > 1:
                 casts.append(
                     SkillCast(
                         source_agent_id=event.source_agent_id,
