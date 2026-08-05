@@ -241,7 +241,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         return {"matches": not differences, "compared": actual, "differences": differences}
 
     event_list = list(events)
-    origin = min((event.time_ms for event in event_list), default=0)
+    origin = (
+        header.start_time_ms
+        if header and header.start_time_ms is not None
+        else min((event.time_ms for event in event_list), default=0)
+    )
     duration_ms = header.duration_ms if header and header.duration_ms else 0
     damage_events = [event for event in event_list if isinstance(event, DamageEvent)]
     actor_damage_events = [event for event in damage_events if event.src_master_instid == 0]

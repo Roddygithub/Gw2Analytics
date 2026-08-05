@@ -1710,6 +1710,7 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
         map_id=metadata.get("map_id"),
         arc_revision=metadata.get("arc_revision"),
         duration_ms=metadata.get("duration_ms"),
+        start_time_ms=metadata.get("start_time_ms"),
     )
 
     fight_id = hashlib.sha256(data).hexdigest()
@@ -2004,6 +2005,7 @@ def _extract_evtc2025_metadata(data: bytes) -> dict[str, int]:  # noqa: PLR0912
             break
         cursor += EVENT_SIZE
     if start_time_ms is not None:
+        out["start_time_ms"] = int(start_time_ms)
         last_event_offset = offset + ((end - offset) // EVENT_SIZE - 1) * EVENT_SIZE
         for cursor in range(last_event_offset, offset - 1, -EVENT_SIZE):
             ev = _EVENT_STRUCT_2025.unpack_from(data, cursor)
