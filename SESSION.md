@@ -8,7 +8,7 @@ committed 35-log corpus). Setup: `docs/ei-parity-workbench.md`.
 
 ---
 
-## 2026-08-06 — 690 → 583
+## 2026-08-06 — 690 → 533
 
 Two passes, one decision: stop inferring the instant-cast rules and
 read them out of Elite Insights' sources. Nine finders transcribed, each
@@ -192,6 +192,36 @@ keeps the last one to drive `FindLowestValue`: an apply landing within 10
 ms of such a removal replaces the stack with that buff instance, or failing
 that the one whose duration is closest. That override is currently
 unimplementable here because the records never leave the parser.
+
+### Fifth pass: the displaced stack — 583 → 533
+
+The reverted experiment above asked the wrong question. Elite Insights
+*does* activate on an `added_active` apply, keeping the queue full; what it
+also does, and we could not, is evict the **right** stack.
+
+arcdps names it. When an application displaces a queued regeneration
+stack, the game emits an *uncredited* single-removal immediately before it
+— no remover, no target agent, which is how a natural end or an overstack
+is reported — carrying the displaced stack's remaining duration and its
+buff instance. `parse_events` drops those records, and correctly so: EI
+excludes them from the simulation as well. But EI keeps the last one as a
+*hint*, and that is the input we were missing.
+
+On `20260526-202841` the raw stream carries 594 of them, and **182 of the
+762 regeneration applies** are paired with one inside a server delay.
+
+`scan_regeneration_overstacks` recovers them without touching the emitted
+stream — the same split EI makes, from the same records, in the shape
+`scan_agent_awareness` already established. The tracker then reproduces
+`HealingLogic.FindLowestValue`: evict the stack whose buff instance arcdps
+named, else the one whose duration is closest to the removed one, else —
+with nothing to go on — the last.
+
+Regeneration goes **116 → 17** across the session, 11 of those under 0.1
+and only 2 above 2 points. `buffUptimes` 136 → 86, corpus 583 → 533.
+
+Might (740, 23 differences) is now the largest buff bucket, ahead of
+regeneration.
 
 ### Open, and deliberately left: 29560 Spiteful Spirit
 

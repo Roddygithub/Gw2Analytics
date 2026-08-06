@@ -295,6 +295,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     expected: dict[str, object],
     events: Sequence[Event],
     agent_awareness: dict[int, tuple[int, int]] | None = None,
+    regen_overstacks: dict[int, list[tuple[int, int, int]]] | None = None,
 ) -> dict[str, object]:
     """Return a JSON-serializable comparison report.
 
@@ -453,7 +454,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     )
 
     healing_by_agent = {agent.id: agent.healing for agent in fight.agents}
-    tracker = BuffStateTracker(start_time_ms=origin, healing_by_agent=healing_by_agent)
+    tracker = BuffStateTracker(
+        start_time_ms=origin,
+        healing_by_agent=healing_by_agent,
+        regen_overstacks=regen_overstacks,
+    )
     for tracked_event in event_list:
         if isinstance(
             tracked_event,

@@ -61,7 +61,7 @@ from gw2_core import (
 )
 from gw2_core.models import _EVENT_MAP, EventType
 from gw2_core.models import EventType as _EventType
-from gw2_evtc_parser import PythonEvtcParser
+from gw2_evtc_parser import PythonEvtcParser, scan_regeneration_overstacks
 from gw2_evtc_parser.parser import _EVENT_STRUCT
 
 # ---------------------------------------------------------------------------
@@ -91,6 +91,7 @@ def _build_event_record_2025(
     iff: int = 1,
     buff: int = 0,
     is_activation: int = 0,
+    is_buffremove: int = 0,
     is_offcycle: int = 0,
     pad: int = 0,
     src_instid: int = 0,
@@ -102,6 +103,7 @@ def _build_event_record_2025(
     flags[1] = buff
     flags[2] = result
     flags[3] = is_activation
+    flags[4] = is_buffremove
     flags[8] = is_statechange
     flags[11] = is_offcycle
     flags[12:16] = pad.to_bytes(4, "little")
@@ -1293,3 +1295,65 @@ def test_parse_events_emits_buffapply_via_cbts_statechange_18() -> None:
     assert ev.source_agent_id == 9_999
     assert ev.target_agent_id == 8_888
     assert ev.skill_id == 7_777
+
+
+def test_scan_regeneration_overstacks_reports_uncredited_removals() -> None:
+    """Uncredited regeneration removals are recovered as displacement hints.
+
+    ``parse_events`` deliberately drops these -- Elite Insights excludes
+    them from its buff simulation too -- but they are the only record of
+    *which* stack an application displaced, so the scan surfaces them
+    separately rather than putting them back in the stream.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        skills=[(718, "Regeneration")],
+        events=[
+            # Uncredited: iff UNKNOWN and no target agent.
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=0,
+                value=6_954,
+                skill_id=718,
+                is_statechange=71,
+                is_buffremove=2,
+                iff=2,
+                pad=22_804,
+            ),
+            # Credited by an actual remover, so not a displacement.
+            _build_event_record_2025(
+                time_ms=2_000,
+                src_agent=1,
+                dst_agent=2,
+                value=5_000,
+                skill_id=718,
+                is_statechange=71,
+                is_buffremove=2,
+                iff=2,
+                pad=1,
+            ),
+            # Too short to count, per BuffSimulatorDelayConstant.
+            _build_event_record_2025(
+                time_ms=3_000,
+                src_agent=1,
+                dst_agent=0,
+                value=10,
+                skill_id=718,
+                is_statechange=71,
+                is_buffremove=2,
+                iff=2,
+                pad=2,
+            ),
+        ],
+    )
+
+    assert scan_regeneration_overstacks(evtc) == {1: [(1_000, 6_954, 22_804)]}
+    # The uncredited ones stay out of the event stream; the credited
+    # removal is an ordinary strip and still belongs there.
+    assert [
+        event.time_ms
+        for event in PythonEvtcParser().parse_events(evtc)
+        if getattr(event, "kind", None) == "remove_single"
+    ] == [2_000]

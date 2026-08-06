@@ -170,7 +170,10 @@ class BuffStateTracker:
     """
 
     def __init__(
-        self, start_time_ms: int = 0, healing_by_agent: dict[int, int] | None = None
+        self,
+        start_time_ms: int = 0,
+        healing_by_agent: dict[int, int] | None = None,
+        regen_overstacks: dict[int, list[tuple[int, int, int]]] | None = None,
     ) -> None:
         # Per-agent per-buff stack state.
         # {agent_id: {buff_name: _BuffStack}}
@@ -188,6 +191,14 @@ class BuffStateTracker:
         # per player leaves regeneration sorted long after EI stopped, and
         # a differently ordered queue evicts a different stack on overflow.
         self._healing_no_sort = False
+        # ``{agent_id: [(time_ms, removed_duration_ms, buff_instance)]}`` from
+        # :func:`gw2_evtc_parser.scan_regeneration_overstacks`. arcdps names
+        # the regeneration stack an application displaced; without it the
+        # queue can only guess, and guessing evicts a long stack where the
+        # game dropped a spent one. ``_regen_hint_cursor`` walks each list
+        # once, since applications arrive in order.
+        self._regen_overstacks = regen_overstacks or {}
+        self._regen_hint_cursor: dict[int, int] = {}
 
     def _get_stack(self, agent_id: int, buff_name: str) -> _BuffStack:
         """Get or create the stack tracker for (agent, buff)."""
@@ -233,6 +244,43 @@ class BuffStateTracker:
             stack.healing_scores.pop(index)
         stack.cumulative_stack_ms += len(stack.expirations) * (new_time_ms - stack.last_time_ms)
         stack.last_time_ms = new_time_ms
+
+    def _regen_overstack_hint(self, agent_id: int, time_ms: int) -> tuple[int, int] | None:
+        """The displaced-stack hint arcdps recorded just before this apply."""
+        hints = self._regen_overstacks.get(agent_id)
+        if not hints:
+            return None
+        index = self._regen_hint_cursor.get(agent_id, 0)
+        while index < len(hints) and hints[index][0] <= time_ms:
+            index += 1
+        self._regen_hint_cursor[agent_id] = index
+        if index == 0:
+            return None
+        hint_time, removed_duration, buff_instance = hints[index - 1]
+        # Elite Insights only pairs a removal with the application that
+        # follows it inside one server delay.
+        if time_ms - hint_time >= 10:
+            return None
+        return removed_duration, buff_instance
+
+    def _regen_eviction_index(self, stack: _BuffStack, event: BoonApplyEvent) -> int:
+        """Which queued regeneration stack this application displaces.
+
+        Elite Insights' ``HealingLogic.FindLowestValue``: the stack whose
+        buff instance arcdps named, else the one whose duration is closest
+        to the removed one, else -- with nothing to go on -- the last.
+        """
+        hint = self._regen_overstack_hint(event.target_agent_id, event.time_ms)
+        if hint is not None:
+            removed_duration, buff_instance = hint
+            if buff_instance and buff_instance in stack.stack_ids:
+                return stack.stack_ids.index(buff_instance)
+            if removed_duration > 0:
+                return min(
+                    range(len(stack.expirations)),
+                    key=lambda i: abs((stack.expirations[i] or 0) - removed_duration),
+                )
+        return len(stack.expirations) - 1
 
     def _relative_time(self, time_ms: int) -> int:
         return max(0, time_ms - self._start_time_ms)
@@ -327,9 +375,10 @@ class BuffStateTracker:
                 new_duration = event.duration_ms or None
                 new_healing = self._healing_by_agent.get(event.source_agent_id, 0)
                 if len(target_tracker.expirations) >= _capacity_for(buff_name):
-                    target_tracker.expirations[-1] = new_duration
-                    target_tracker.stack_ids[-1] = event.stack_id
-                    target_tracker.healing_scores[-1] = new_healing
+                    victim = self._regen_eviction_index(target_tracker, event)
+                    target_tracker.expirations[victim] = new_duration
+                    target_tracker.stack_ids[victim] = event.stack_id
+                    target_tracker.healing_scores[victim] = new_healing
                 else:
                     target_tracker.expirations.append(new_duration)
                     target_tracker.stack_ids.append(event.stack_id)

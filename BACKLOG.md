@@ -4,11 +4,11 @@ Measured with `uv run python scripts/ei-parity/ei_diff.py` over the 35-log corpu
 Setup and probes: `docs/ei-parity-workbench.md`. Findings so far:
 `docs/parser-audit-2026-07-31.md`.
 
-**Scoreboard: 583 differences** over the 35-log corpus (2026-08-06).
+**Scoreboard: 533 differences** over the 35-log corpus (2026-08-06).
 Per-session history in `SESSION.md`.
 
 Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → 711 → 690 →
-644 → 635 → 632 → **583**.
+644 → 635 → 632 → 583 → **533**.
 
 `rotation` is reported twice: a bucket count of player *rows*, and the cast
 counts under the total. Judge any rotation change on the casts — a partial
@@ -79,6 +79,11 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       active stack, pin `noSort`); an `addedActive` apply just moves its
       stack to the front. `noSort` is now tracker-wide, matching EI's
       shared static `HealingLogic`.
+- [x] **Regeneration evicts the stack arcdps named** (`scan_regeneration_overstacks`
+      + `HealingLogic.FindLowestValue`). The uncredited removals that record
+      which stack an application displaced are dropped from the event stream
+      — as they are in EI — but recovered as a side input. Regeneration
+      116 → 17 over the session. 583 → 533.
 - [x] **Base attunement skills are no longer booked for a Weaver.** EI books
       weaver dual-attunement swaps as separate skills and never the base
       one; confirmed corpus-wide on all four elements. 36 spurious casts
@@ -128,23 +133,14 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       buffs a weaver holds (`WeaverHelper.GetLastAttunement`). We now drop
       the base-attunement casts for weavers rather than mislabel them, so
       these sit squarely in the missing column.
-- [ ] **`buffUptimes` (136)** — 67 are Regeneration, 24 of them under 0.1.
-      The queue model is confirmed correct (a plain FIFO replay of
-      `Ver.5187` on `20260526-202841` lands at 81.839 % against EI's
-      81.941 %); the residual is the **eviction victim** once `Activate`
-      reorders the queue — the same player through the tracker gives
-      66.668 %. Next step: instrument which stack each model evicts on that
-      player's three capacity-5 overflows. Blocked input, and a parser-level
-      gap: `parse_events` drops every uncredited regeneration remove-single
-      (`iff == 2 and dst_agent == 0`, 594 of them on that log). EI drops
-      them from the simulation too but keeps the last one to drive
-      `FindLowestValue` — an apply within 10 ms replaces the stack carrying
-      that buff instance, else the one with the closest duration. That
-      override cannot be written until the records reach the analytics
-      layer. The rest of the bucket: might 23, swiftness 13, stability 9.
-      **Do not simply drop the `added_active` activation** — it reproduces
-      EI on the four worst players and regresses the corpus 583 → 631; see
-      "Ruled out". The question is which applies activate, not whether.
+- [ ] **`buffUptimes` (86)** — **might (740) is now the head at 23**, then
+      regeneration 17, swiftness 13, stability 9, fury 7, aegis 6.
+      Regeneration is close to done: 11 of its 17 are under 0.1 and only 2
+      exceed 2 points. Might is an *intensity* buff — average stacks, not
+      uptime — so it runs through the other branch of `_advance` and the
+      `OverrideLogic` stacking rules rather than `HealingLogic`. Read
+      `EIData/Buffs/BuffSimulators/BuffSimulatorNoID/EffectStackingLogic/OverrideLogic.cs`
+      before touching it.
 - [ ] **Read buff capacities from the log, not a table.** EI overrides its
       hard-coded capacity with the `BuffInfo` record's `MaxStacks`
       (statechange 30, `SrcMasterInstid`). Our `_CAPACITIES` agrees with the

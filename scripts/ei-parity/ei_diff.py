@@ -21,7 +21,12 @@ EI_OUT = ROOT / ".tooling" / "ei-out"
 CORPUS = Path(__file__).resolve().parent / "corpus.txt"
 
 from gw2_analytics.ei_compare import compare_elite_insights  # noqa: E402
-from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive, scan_agent_awareness  # noqa: E402
+from gw2_evtc_parser import (  # noqa: E402
+    PythonEvtcParser,
+    read_zevtc_archive,
+    scan_agent_awareness,
+    scan_regeneration_overstacks,
+)
 
 _BRACKET = re.compile(r"\[[^\]]*\]")
 
@@ -48,7 +53,13 @@ def run_one(stem: str) -> dict[str, object]:
     parse_s = time.monotonic() - started
 
     expected = json.loads(ei_path.read_text())
-    result = compare_elite_insights(fight, expected, events, scan_agent_awareness(raw))
+    result = compare_elite_insights(
+        fight,
+        expected,
+        events,
+        scan_agent_awareness(raw),
+        scan_regeneration_overstacks(raw),
+    )
     diffs = result["differences"]
     if not isinstance(diffs, dict):  # pragma: no cover - contract of compare_elite_insights
         raise TypeError(f"expected a differences mapping, got {type(diffs).__name__}")
