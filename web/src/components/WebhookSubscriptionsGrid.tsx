@@ -22,7 +22,7 @@ import { revokeWebhook } from "@/lib/api";
 import { formatApiError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 
-import { appGridTheme } from "./ag-grid-setup";
+import { appGridOptions, appGridTheme } from "./ag-grid-setup";
 import styles from "./WebhookSubscriptionsGrid.module.css";
 
 const GRID_CONTAINER_STYLE = {
@@ -174,6 +174,7 @@ export function WebhookSubscriptionsGrid({
       <div style={GRID_CONTAINER_STYLE}>
         <AgGridReact<WebhookSubscriptionRow>
           theme={appGridTheme}
+          {...appGridOptions}
           rowData={rows}
           columnDefs={columnDefs}
           defaultColDef={defaultColDef}

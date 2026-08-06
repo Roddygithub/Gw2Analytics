@@ -41,7 +41,7 @@ import {
 // ``/fights/[id]`` page's TargetRollupsGrid to ship without
 // re-registering the module on its own -- the module graph
 // guarantees a single evaluation of the import side-effect.
-import { appGridTheme } from "./ag-grid-setup";
+import { appGridOptions, appGridTheme } from "./ag-grid-setup";
 
 export function FightsGrid({ rows }: { rows: FightRow[] }) {
   const columnDefs = useMemo<ColDef<FightRow>[]>(
@@ -144,6 +144,7 @@ export function FightsGrid({ rows }: { rows: FightRow[] }) {
     <div style={{ height: "min(600px, 70vh)", width: "100%" }}>
       <AgGridReact<FightRow>
         theme={appGridTheme}
+        {...appGridOptions}
         rowData={rows}
         columnDefs={columnDefs}
         defaultColDef={defaultColDef}

@@ -136,7 +136,7 @@ export default function RootLayout({
             padding: "16px 32px",
             background: "color-mix(in srgb, var(--background) 70%, transparent)",
             backdropFilter: "blur(12px)",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+            borderBottom: "1px solid var(--surface-elevated)",
             gap: 16,
             flexWrap: "wrap",
           }}

@@ -96,7 +96,7 @@ function DamageTable({ players }: { players: PlayerReadoutOut[] }) {
       </thead>
       <tbody>
         {sorted.map((p, i) => (
-          <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
+          <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "var(--row-stripe)" }}>
             <IdentityCells player={p} />
             <td style={TD_STYLE}><DpsBar power={p.damage.dps_power} condi={p.damage.dps_condi} total={p.damage.dps_total} /></td>
             <td style={TD_STYLE}>{p.damage.strips}</td>
@@ -136,7 +136,7 @@ function HealTable({ players }: { players: PlayerReadoutOut[] }) {
       </thead>
       <tbody>
         {sorted.map((p, i) => (
-          <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
+          <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "var(--row-stripe)" }}>
             <IdentityCells player={p} />
             <td style={TD_STYLE}><HealBar hps={p.heal.hps} bps={p.heal.barrier_ps} total={p.heal.heal_total ?? 0} /></td>
             <td style={TD_STYLE}>{p.heal.cleanses}</td>
@@ -196,7 +196,7 @@ function BoonsTable({ players }: { players: PlayerReadoutOut[] }) {
       </thead>
       <tbody>
         {sorted.map((p, i) => (
-          <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
+          <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "var(--row-stripe)" }}>
             <IdentityCells player={p} />
             {BOONS.map((b) => {
               const boons = p.boons as unknown as Record<string, number | null>;
@@ -249,7 +249,7 @@ function DefenseTable({ players }: { players: PlayerReadoutOut[] }) {
       </thead>
       <tbody>
         {sorted.map((p, i) => (
-          <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
+          <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "var(--row-stripe)" }}>
             <IdentityCells player={p} />
             <td style={TD_STYLE}>{p.defense.damage_taken.toLocaleString()}</td>
             <td style={TD_STYLE}>{p.defense.dodges}</td>

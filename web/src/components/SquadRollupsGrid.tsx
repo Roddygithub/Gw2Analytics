@@ -35,7 +35,7 @@ import {
   type ColDef,
   type ValueFormatterParams,
 } from "ag-grid-community";
-import { appGridTheme } from "./ag-grid-setup";
+import { appGridOptions, appGridTheme } from "./ag-grid-setup";
 import {
   EMPTY_STYLE,
   FLEX_COLUMN_STYLE,
@@ -116,6 +116,7 @@ export function SquadRollupsGrid<TRow extends { subgroup: string }>({
       <div style={GRID_CONTAINER_STYLE}>
         <AgGridReact<TRow>
           theme={appGridTheme}
+          {...appGridOptions}
           rowData={rows}
           columnDefs={colDefs}
           defaultColDef={defaultColDef}

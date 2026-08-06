@@ -33,7 +33,7 @@ import {
   type ValueFormatterParams,
   type ICellRendererParams,
 } from "ag-grid-community";
-import { appGridTheme } from "./ag-grid-setup";
+import { appGridOptions, appGridTheme } from "./ag-grid-setup";
 import type { PlayerListRow } from "@/lib/api";
 import {
   EMPTY_STYLE,
@@ -149,6 +149,7 @@ export function PlayersGrid({
       <div style={GRID_CONTAINER_STYLE}>
         <AgGridReact<PlayerListRow>
           theme={appGridTheme}
+          {...appGridOptions}
           rowData={rows}
           columnDefs={colDefs}
           defaultColDef={defaultColDef}

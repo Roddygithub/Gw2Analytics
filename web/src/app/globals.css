@@ -3,8 +3,21 @@
   --background: #050914;
   --foreground: #ffffff;
   --accent: #ff8c2a;
+  /* v0.10.30 UI harmonization: text colour on accent backgrounds
+     (CTA buttons, selected badges). Referenced in 7 components but
+     never defined -- every consumer fell back to a literal. */
+  --accent-foreground: #ffffff;
   --border: rgba(255, 255, 255, 0.1);
   --surface: #ffffff08;
+  /* v0.10.30 UI harmonization: previously referenced in
+     ``readoutTableParts.tsx`` + ``FightSummaryCards.tsx`` but never
+     defined here, so every consumer fell back to its own literal.
+     Define it once; consumers drop their fallbacks over time. */
+  --surface-elevated: rgba(255, 255, 255, 0.05);
+  /* v0.10.30 UI harmonization: zebra-stripe colour for native readout
+     tables (CompareReadoutTable + ReadoutTabClient), previously
+     hardcoded ``rgba(255,255,255,0.015)`` at 8 call sites. */
+  --row-stripe: rgba(255, 255, 255, 0.015);
   --button: #070b14;
   /* 2026-07-16 mobile+a11y audit F1: bumped from 0.38 (~3.6:1
      contrast on --background, fails WCAG AA 4.5:1 for normal
@@ -15,6 +28,10 @@
      unaffected. */
   --link: rgba(255, 255, 255, 0.52);
   --error: #ff6e6e;
+  /* v0.10.30 UI harmonization: amber warning text, previously
+     hardcoded ``#ffb86b`` in ``upload/page.module.css``. Distinct
+     from --error (a "give up and retry" hint, not a hard failure). */
+  --warning: #ffb86b;
   /* 2026-07-16 mobile+a11y audit X3: replaces the
      fragile ``opacity: 0.7`` muted-text pattern with a
      theme-aware token. ~4.6:1 contrast on --background

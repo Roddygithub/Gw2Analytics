@@ -44,7 +44,7 @@ function SubgroupBadge({ subgroup }: { subgroup: number }) {
         fontSize: 10,
         fontWeight: 600,
         lineHeight: "16px",
-        background: "var(--surface-elevated, rgba(255,255,255,0.06))",
+        background: "var(--surface-elevated)",
         border: "1px solid var(--border)",
         color: "var(--foreground)",
         opacity: 0.75,

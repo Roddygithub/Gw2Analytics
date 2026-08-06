@@ -133,7 +133,7 @@ export default function AccountPage() {
       ) : null}
 
       {error ? (
-        <p style={{ marginTop: 16, color: "#ff6e6e" }}>Error: {error}</p>
+        <p style={{ marginTop: 16, color: "var(--error)" }}>Error: {error}</p>
       ) : null}
     </main>
   );
