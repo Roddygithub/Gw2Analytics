@@ -4,10 +4,10 @@ Measured with `uv run python scripts/ei-parity/ei_diff.py` over the 35-log corpu
 Setup and probes: `docs/ei-parity-workbench.md`. Findings so far:
 `docs/parser-audit-2026-07-31.md`.
 
-**Scoreboard: 711 differences** over the 35-log corpus (2026-08-04).
+**Scoreboard: 690 differences** over the 35-log corpus (2026-08-04).
 Per-session history in `SESSION.md`.
 
-Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → **711**.
+Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → 711 → **690**.
 
 Note the "0 diffs corpus-wide" figure quoted in #117/#118 was measured over 20
 logs. The committed corpus is 35; always run the harness with no arguments.
@@ -42,6 +42,7 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       `web/pnpm-workspace.yaml` was itself what blocked Dependabot.
 - [x] Buff simulation stops at an actor's last-aware (#130). 798 → 779.
 - [x] Down-contribution row sliced per EI entry (#132). 779 → 711.
+- [x] `teamID` reported only on an account's last entry (#134). 711 → 690.
 - [x] Backend→frontend drift check (#121). `PlayerProfile` was missing
       `boon_strips` / `condition_cleanses`; `PerFightBreakdownRow` was missing
       28 more. `scripts/ei-parity/api_coverage.py` now guards both directions.
@@ -63,10 +64,13 @@ logs. The committed corpus is 35; always run the harness with no arguments.
 
 ## Next (2026-08-04, in impact order)
 
-- [ ] **`players.rotation` (366)** — untouched and by far the largest bucket.
-      `rotation.py` reimplements EI's `InstantCastFinder` set from GUID tables
-      and misses a long tail of sigil / rune / trait procs. Needs a systematic
-      extraction from the EI sources, not diff-by-diff additions.
+- [ ] **`players.rotation` (366)** — by far the largest bucket, now
+      characterised (see `SESSION.md`). 1 012 casts missing against 339 extra;
+      three `isInstantCast` skills carry 246 of the missing — **77370 Zap
+      (123)**, **9084 "Advance!" (68)**, **5535 Cleansing Fire (55)** — and
+      skill **30961 (Exit Reaper's Shroud)** is 45 missing + 45 extra, i.e. the
+      right cast 1-2 ms late (not a constant offset, so no blanket shift).
+      Start from the three finders, then the timing anchors.
 - [ ] **`buffUptimes` (185)** — 120 of the pre-session 204 were Regeneration.
       Note the brief's premise is wrong: EI is *lower* in 80 cases and higher in
       40, median |delta| 0.053, and only 32 of 204 exceed 2. Port EI's
@@ -78,12 +82,12 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       (22)** — the per-target rows already slice their inputs, so this is a
       different cause from the `statsAll` one fixed in #132. Dump the events we
       include that EI does not.
-- [ ] **`teamID` (22)** — mechanism identified, not implemented. EI reports
-      `teamID = 0` on every slice of a split account except the last, which
-      carries the real team. Verified on `20260424-204954`: empiria.8961,
-      Mikey.4982 and SharpSteel.3051 all follow it. Needs a per-time team
-      assignment from the arcdps team-change record rather than one static
-      `agent.team_id`.
+- [ ] **`statsTargets.downContribution` residual** — one narrow case found and
+      left: on `20260129-110256`, target inst 7121 (`Firebrand pl-7121`) has
+      `downCount=1` yet EI credits **zero** down-contribution to it from any
+      player, while we credit six. It is the only target in that log with
+      `downCount > 0` and no contribution, so it is an edge case rather than a
+      rule.
 - [ ] **`group` (7)**, **`consumables`**, float residuals — long tail.
 
 ## Still open from earlier passes
