@@ -50,6 +50,11 @@ REAPERS_SHROUD = 29446
 DESERT_SHROUD = 40052
 UNHOLY_BURST = 38767
 SPITEFUL_SPIRIT_EFFECT = "C4E8DD3234E0C647993857940ED79AC1"
+SYMBOL_OF_PROTECTION = 9161
+SYMBOL_OF_PROTECTION_EFFECTS = (
+    "8321373FA14B2B4B8761CDC6EEADB161",
+    "E10D2D0DF7803146A69BBB5BD47944FC",
+)
 
 #: ``MinionCastCastFinder(playerSkill, petSkill)`` from ``EvokerHelper``.
 EVOKER_FAMILIARS = {
@@ -117,24 +122,37 @@ class Log:
         self.desert_shroud_losses: list[int] = []
         self.unholy_burst_hits: list[DamageEvent] = []
         self.swaps_by_agent: dict[int, list[int]] = defaultdict(list)
+        self.symbol_activations: list[SkillActivationEvent] = []
         for event in self.events:
-            if isinstance(event, EffectEvent):
-                self.effects_by_guid[event.guid].append(event)
-            elif isinstance(event, BoonApplyEvent):
-                if event.kind == "apply" and event.skill_id == AEGIS:
-                    self.aegis_applies.append(event)
-                elif event.kind == "apply" and event.skill_id == STABILITY:
-                    self.stability_applies.append(event)
-                elif event.kind == "remove_all" and event.skill_id == REAPERS_SHROUD:
-                    self.shroud_losses.append(event)
-                elif event.kind == "remove_all" and event.skill_id == DESERT_SHROUD:
-                    self.desert_shroud_losses.append(event.time_ms)
-            elif isinstance(event, DamageEvent) and event.skill_id == UNHOLY_BURST:
-                self.unholy_burst_hits.append(event)
-            elif isinstance(event, SkillActivationEvent) and event.skill_id in EVOKER_FAMILIARS:
+            self._index(event)
+
+    def _index(self, event: object) -> None:
+        """File one event under every bucket a rule reads from."""
+        if isinstance(event, EffectEvent):
+            self.effects_by_guid[event.guid].append(event)
+        elif isinstance(event, BoonApplyEvent):
+            self._index_buff(event)
+        elif isinstance(event, DamageEvent) and event.skill_id == UNHOLY_BURST:
+            self.unholy_burst_hits.append(event)
+        elif isinstance(event, SkillActivationEvent):
+            if event.skill_id in EVOKER_FAMILIARS:
                 self.casts_by_skill[event.skill_id].append(event)
-            elif isinstance(event, WeaponSwapEvent):
-                self.swaps_by_agent[event.source_agent_id].append(event.time_ms)
+            elif event.skill_id == SYMBOL_OF_PROTECTION:
+                self.symbol_activations.append(event)
+        elif isinstance(event, WeaponSwapEvent):
+            self.swaps_by_agent[event.source_agent_id].append(event.time_ms)
+
+    def _index_buff(self, event: BoonApplyEvent) -> None:
+        if event.kind == "apply":
+            if event.skill_id == AEGIS:
+                self.aegis_applies.append(event)
+            elif event.skill_id == STABILITY:
+                self.stability_applies.append(event)
+        elif event.kind == "remove_all":
+            if event.skill_id == REAPERS_SHROUD:
+                self.shroud_losses.append(event)
+            elif event.skill_id == DESERT_SHROUD:
+                self.desert_shroud_losses.append(event.time_ms)
 
     def before_weapon_swap(self, agent: int, time: int) -> int:
         """EI's ``UsingBeforeWeaponSwap``: pull the cast just ahead of a swap.
@@ -294,7 +312,46 @@ def rule_spiteful_spirit(log: Log) -> list[tuple[int, int]]:
     return _apply_icd(hits)
 
 
+def _cast_windows(activations: list[SkillActivationEvent]) -> dict[int, list[tuple[int, int]]]:
+    """Rebuild ``(start, end)`` animated-cast windows per caster."""
+    open_cast: dict[int, int] = {}
+    windows: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for event in activations:
+        agent = event.source_agent_id
+        if event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
+            open_cast[agent] = event.time_ms
+        else:
+            start = open_cast.pop(agent, event.time_ms - event.duration_ms)
+            windows[agent].append((start, event.time_ms))
+    for agent, start in open_cast.items():
+        windows[agent].append((start, start))
+    return windows
+
+
+def rule_lesser_symbol_of_protection(log: Log) -> list[tuple[int, int]]:
+    """``EffectCastFinder(LesserSymbolOfProtection, ...).UsingNoAnimatedCastChecker``.
+
+    The trait version places the same symbol as the real skill, so an
+    effect that falls inside a 9161 cast window belongs to the skill and
+    must not be booked as the trait proc. EI's window test is inclusive of
+    a server delay on both ends.
+    """
+    windows = _cast_windows(log.symbol_activations)
+    hits = []
+    for guid in SYMBOL_OF_PROTECTION_EFFECTS:
+        for effect in log.effects_by_guid.get(guid, ()):
+            src = effect.source_agent_id
+            if any(
+                effect.time_ms >= start - SERVER_DELAY and end + SERVER_DELAY >= effect.time_ms
+                for start, end in windows.get(src, ())
+            ):
+                continue
+            hits.append((src, effect.time_ms))
+    return _apply_icd(hits)
+
+
 RULES = {
+    "lesser-symbol-of-protection": (13684, rule_lesser_symbol_of_protection),
     "spiteful-spirit": (29560, rule_spiteful_spirit),
     "exit-reaper-shroud": (30961, rule_exit_reaper_shroud),
     "advance": (9084, rule_advance),

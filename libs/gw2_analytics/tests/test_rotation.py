@@ -4,6 +4,7 @@ from gw2_core import (
     BoonApplyEvent,
     DamageEvent,
     EffectEvent,
+    EliteSpec,
     HealingEvent,
     MissileEvent,
     Profession,
@@ -430,3 +431,84 @@ def test_exit_reaper_shroud_needs_a_full_removal_and_lands_before_the_swap() -> 
     # rather than left on its own timestamp.
     swap_first = swap.model_copy(update={"time_ms": origin + 499})
     assert casts([_shroud_loss(origin, 500, "remove_all"), swap_first]) == [(30961, 498)]
+
+
+def _symbol(origin: int, offset: int, guid: str) -> EffectEvent:
+    return EffectEvent(
+        time_ms=origin + offset,
+        source_agent_id=7,
+        target_agent_id=7,
+        skill_id=0,
+        guid=guid,
+    )
+
+
+def _symbol_cast(origin: int, offset: int, activation: ActivationType) -> SkillActivationEvent:
+    return SkillActivationEvent(
+        time_ms=origin + offset,
+        source_agent_id=7,
+        target_agent_id=0,
+        skill_id=9161,
+        activation=activation,
+        duration_ms=0,
+        expected_duration_ms=0,
+    )
+
+
+def test_symbol_trait_is_not_booked_while_the_real_skill_is_being_cast() -> None:
+    """The trait places the same symbol, so a cast window rules the proc out.
+
+    The test is on the whole window rather than on a cast still open at that
+    instant: an effect landing just after the cast ends belongs to it too.
+    """
+    origin = 42_000_000
+    guid = "8321373FA14B2B4B8761CDC6EEADB161"
+
+    def casts(events: list) -> list[int]:
+        return [
+            cast.time_ms
+            for cast in build_skill_rotation(events, duration_ms=10_000, start_time_ms=origin)
+            if cast.skill_id == 13684
+        ]
+
+    cast_window = [
+        _symbol_cast(origin, 500, ActivationType.NORMAL),
+        _symbol_cast(origin, 900, ActivationType.RESET),
+    ]
+
+    # Inside the window, and within a server delay of either end.
+    assert casts([_symbol(origin, 700, guid), *cast_window]) == []
+    assert casts([_symbol(origin, 492, guid), *cast_window]) == []
+    assert casts([_symbol(origin, 908, guid), *cast_window]) == []
+    # Clear of it on both sides, and with no cast of 9161 at all.
+    assert casts([_symbol(origin, 400, guid), *cast_window]) == [400]
+    assert casts([_symbol(origin, 700, guid)]) == [700]
+
+
+def test_weaver_attunement_buff_is_not_booked_as_a_base_attunement() -> None:
+    """A Weaver swaps dual attunements, which Elite Insights books separately.
+
+    Reporting the base skill would be a cast the log never contained, so the
+    buff is dropped for a Weaver rather than attributed to the wrong skill.
+    """
+    origin = 42_000_000
+    fire_attunement = BoonApplyEvent(
+        time_ms=origin + 100,
+        source_agent_id=7,
+        target_agent_id=7,
+        skill_id=5585,
+        duration_ms=0,
+        stacks=1,
+    )
+
+    def casts(**kwargs: object) -> list[int]:
+        return [
+            cast.skill_id
+            for cast in build_skill_rotation(
+                [fire_attunement], duration_ms=1_000, start_time_ms=origin, **kwargs
+            )
+        ]
+
+    assert casts() == [5492]
+    assert casts(elite_specs={7: EliteSpec.TEMPEST}) == [5492]
+    assert casts(elite_specs={7: EliteSpec.WEAVER}) == []

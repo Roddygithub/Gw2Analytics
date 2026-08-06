@@ -4,11 +4,11 @@ Measured with `uv run python scripts/ei-parity/ei_diff.py` over the 35-log corpu
 Setup and probes: `docs/ei-parity-workbench.md`. Findings so far:
 `docs/parser-audit-2026-07-31.md`.
 
-**Scoreboard: 635 differences** over the 35-log corpus (2026-08-06).
+**Scoreboard: 632 differences** over the 35-log corpus (2026-08-06).
 Per-session history in `SESSION.md`.
 
 Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → 711 → 690 →
-644 → **635**.
+644 → 635 → **632**.
 
 `rotation` is reported twice: a bucket count of player *rows*, and the cast
 counts under the total. Judge any rotation change on the casts — a partial
@@ -68,6 +68,13 @@ logs. The committed corpus is 35; always run the harness with no arguments.
 - [x] **30961 Exit Reaper's Shroud** now fires only on a full removal and
       lands at `min(swap - 1, time)`, matching `BuffLossCastFinder` +
       `UsingBeforeWeaponSwap`. 45 fixed on each side. 641 → 635.
+- [x] **`UsingNoAnimatedCastChecker` ported properly** for the guardian
+      symbol traits (13684, 13677) — a cast-*window* test, not "a cast is
+      open right now". 19 spurious casts dropped.
+- [x] **Base attunement skills are no longer booked for a Weaver.** EI books
+      weaver dual-attunement swaps as separate skills and never the base
+      one; confirmed corpus-wide on all four elements. 36 spurious casts
+      dropped.
 
 ## Ruled out — do not retry
 
@@ -97,20 +104,22 @@ logs. The committed corpus is 35; always run the harness with no arguments.
 
 ## Next (2026-08-06, in impact order)
 
-- [ ] **`players.rotation` (311 rows / 668 casts missing, 289 extra)** — still
+- [ ] **`players.rotation` (308 rows / 668 casts missing, 215 extra)** — still
       the largest bucket, and the method is now settled: transcribe the finder
       from `.tooling/ei-src` (a shallow sparse clone of
       `baaron4/GW2-Elite-Insights-Parser`, MIT), then verify it with
       `scripts/ei-parity/probe_ei_finders.py` before wiring anything. Adding a
       rule to that probe is a few lines. Current heads of the distribution:
-      On the missing side **29560 Spiteful Spirit** (30) is the head and is
+      **29560 Spiteful Spirit** (30) is the head of the missing side and is
       **not** explained by either of its two declared finders — see
-      `SESSION.md`; it needs a path outside `NecromancerHelper`. On the extra
-      side, **5492 Fire Attunement** (32) and **13684 Lesser Symbol of
-      Protection** (18) are casts we invent: EI gates 13684 with
-      `UsingNoAnimatedCastChecker(SymbolOfProtection=9161)`, which is a
-      cast-window test, where we only check for a currently-open activation
-      of 9146/76708.
+      `SESSION.md`; it needs a path outside `NecromancerHelper`.
+- [ ] **Weaver dual-attunement swaps.** EI books sixteen of them as their own
+      skills: `DualFireAttunement` (43470) and its three siblings carry real
+      ids, the twelve mixed ones carry synthetic negative ids (-5 through
+      -20, see `SkillIDs.cs`). It derives them from the pair of attunement
+      buffs a weaver holds (`WeaverHelper.GetLastAttunement`). We now drop
+      the base-attunement casts for weavers rather than mislabel them, so
+      these sit squarely in the missing column.
 - [ ] **`buffUptimes` (185)** — 120 of the pre-session 204 were Regeneration.
       Note the brief's premise is wrong: EI is *lower* in 80 cases and higher in
       40, median |delta| 0.053, and only 32 of 204 exceed 2. Port EI's

@@ -8,10 +8,10 @@ committed 35-log corpus). Setup: `docs/ei-parity-workbench.md`.
 
 ---
 
-## 2026-08-06 — 690 → 635
+## 2026-08-06 — 690 → 632
 
 Two passes, one decision: stop inferring the instant-cast rules and
-read them out of Elite Insights' sources. Seven finders transcribed, each
+read them out of Elite Insights' sources. Nine finders transcribed, each
 verified on the corpus before a line of production code was touched.
 
 ### Why the previous approach could not work
@@ -94,6 +94,32 @@ Same method, run again on the new heads of the distribution.
 The before-swap expression was corrected to EI's `min(swap - 1, time)` for
 every buff on that path, not just the new one; the corpus confirms none of
 the existing entries relied on the unconditional `swap - 1`.
+
+### Third pass: two over-firing finders — 635 → 632
+
+Both of these produced casts EI does not report, which the row count barely
+registers: 55 spurious casts came off with the bucket moving by 3.
+
+- **13684 Lesser Symbol of Protection (−19 extra).** EI guards the trait
+  proc with `UsingNoAnimatedCastChecker(SymbolOfProtection)`, and we had no
+  guard at all — every symbol effect was booked as the trait, including the
+  ones the real skill placed. The guard was already present in a weaker form
+  for the sibling 13677: it tested only for a cast *still open*, where EI
+  tests the whole cast window widened by a server delay at both ends. Both
+  are now driven by one `_NO_ANIMATED_CAST_GUARDS` table, which also fixes a
+  detail the old code got wrong — Luminous Staff collides with only one of
+  the two Symbol of Resolution variants, not both. Verified exact at 49
+  casts.
+- **Weaver attunements (−36 extra).** A Weaver swaps between *dual*
+  attunements, which EI books as their own skills — four real ids and twelve
+  synthetic negative ones — and it never books a base attunement skill for
+  one. Confirmed corpus-wide across all four elements: Elementalist,
+  Tempest, Catalyst and Evoker all get them, Weaver gets **zero**. We were
+  reporting the base skill from the base attunement buff, which the log does
+  carry for weavers. Those casts are now dropped rather than mislabelled.
+
+Deriving the weaver swaps themselves is left undone, so they stay in the
+missing column — that is the honest position, and it is visible.
 
 ### Open, and deliberately left: 29560 Spiteful Spirit
 

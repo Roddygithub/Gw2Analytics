@@ -13,6 +13,7 @@ from gw2_core import (
     BoonApplyEvent,
     DamageEvent,
     EffectEvent,
+    EliteSpec,
     Event,
     HealingEvent,
     MissileEvent,
@@ -175,6 +176,14 @@ _HEALING_CASTS = {
     72115,
 }
 _MISSILE_CASTS = {26261, 29889}
+#: The four base attunement buffs. A Weaver swaps between *dual*
+#: attunements, which Elite Insights books as their own skills -- four real
+#: ids and twelve synthetic negative ones -- and it never books a base
+#: attunement skill for one. Confirmed corpus-wide: every other
+#: elementalist spec gets them, Weaver gets none of the four. We do not
+#: derive the weaver swaps yet, so those casts stay missing rather than
+#: being reported under the wrong skill.
+_ATTUNEMENT_BUFFS = {5575, 5580, 5585, 5586}
 _BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291}
 #: ``BuffLossCastFinder`` is typed on ``BuffRemoveAllEvent``, so a partial
 #: strip is not a cast. Only the entries verified against Elite Insights are
@@ -323,6 +332,20 @@ _SECONDARY_EFFECTS = {
     "AB2E22E7EE74DA4C87DA777C62E475EA": ("4C7A5E148F7FD642B34EE4996DDCBBAB",),
     "40C9F5FE5BD3BD449B5E48DF1E5FD348": ("1B3ACEE36F61DE42AB1C24BD33B5B5AD",),
 }
+#: ``UsingNoAnimatedCastChecker``: a trait that places the same symbol as a
+#: real skill must not be booked when the skill itself is being cast. The
+#: test is on the *cast window*, widened by a server delay at both ends --
+#: not merely on a cast still open at that instant.
+_NO_ANIMATED_CAST_GUARDS = {
+    # Lesser Symbol of Resolution. Only the first variant collides with
+    # Luminous Staff; the large one does not.
+    "98C9834C6381204A85DC67C375D135E4": (9146, 76708),
+    "13D0B65D73B5334D80824EE17B5C257E": (9146,),
+    # Lesser Symbol of Protection.
+    "8321373FA14B2B4B8761CDC6EEADB161": (9161,),
+    "E10D2D0DF7803146A69BBB5BD47944FC": (9161,),
+}
+_GUARDED_CAST_SKILLS = {skill for skills in _NO_ANIMATED_CAST_GUARDS.values() for skill in skills}
 _BASE_SKILL_BY_ENHANCED_EFFECT = {
     "71B04F91F9B3DF4A8954059FCFAD630E": 42949,
     "E725FC2FD486A84EBEAC403DB4DA30DE": 40485,
@@ -356,6 +379,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     ranger_pet_agent_ids: Collection[int] = (),
     siege_turtle_agent_ids: Collection[int] = (),
     professions: Mapping[int, Profession] | None = None,
+    elite_specs: Mapping[int, EliteSpec] | None = None,
     agent_id_by_instance: Mapping[int, int] | None = None,
 ) -> list[SkillCast]:
     """Return completed, clipped casts ordered by fight-relative start time.
@@ -369,6 +393,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     """
     event_list = list(events)
     professions = professions or {}
+    elite_specs = elite_specs or {}
     agent_id_by_instance = agent_id_by_instance or {}
     if not event_list:
         return []
@@ -377,16 +402,30 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     swaps_by_agent: dict[int, list[WeaponSwapEvent]] = defaultdict(list)
     activations_by_agent: dict[int, list[SkillActivationEvent]] = defaultdict(list)
     spawn_owner_by_target: dict[int, int] = {}
+    cast_windows: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    open_casts: dict[tuple[int, int], int] = {}
     for indexed_event in event_list:
         if isinstance(indexed_event, WeaponSwapEvent):
             swaps_by_agent[indexed_event.source_agent_id].append(indexed_event)
         elif isinstance(indexed_event, SkillActivationEvent):
             activations_by_agent[indexed_event.source_agent_id].append(indexed_event)
+            if indexed_event.skill_id in _GUARDED_CAST_SKILLS:
+                window_key = (indexed_event.source_agent_id, indexed_event.skill_id)
+                if indexed_event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
+                    open_casts[window_key] = indexed_event.time_ms
+                else:
+                    start = open_casts.pop(
+                        window_key, indexed_event.time_ms - indexed_event.duration_ms
+                    )
+                    cast_windows[window_key].append((start, indexed_event.time_ms))
         elif isinstance(indexed_event, SpawnEvent):
             spawn_owner_by_target.setdefault(
                 indexed_event.target_agent_id,
                 indexed_event.source_agent_id,
             )
+    # A cast the log never closes still occupies its start instant.
+    for window_key, start in open_casts.items():
+        cast_windows[window_key].append((start, start))
     swap_times_by_agent = {
         agent_id: [swap.time_ms for swap in agent_swaps]
         for agent_id, agent_swaps in swaps_by_agent.items()
@@ -395,6 +434,13 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     casts: list[SkillCast] = []
     last_instant: dict[tuple[int, int], int] = {}
     active_buff_until: dict[tuple[int, int], int] = {}
+
+    def is_casting(agent_id: int, skill_id: int, time_ms: int, epsilon: int = 10) -> bool:
+        """Whether ``agent_id`` is inside a cast window of ``skill_id``."""
+        return any(
+            start - epsilon <= time_ms <= end + epsilon
+            for start, end in cast_windows.get((agent_id, skill_id), ())
+        )
 
     def nearby_events(time_ms: int, radius_ms: int) -> list[Event]:
         return event_list[
@@ -511,6 +557,10 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     event.kind != "apply"
                     and event.skill_id in _BUFF_LOSS_REMOVE_ALL_ONLY
                     and event.kind != "remove_all"
+                )
+                or (
+                    event.skill_id in _ATTUNEMENT_BUFFS
+                    and elite_specs.get(event.target_agent_id) is EliteSpec.WEAVER
                 )
             ):
                 mapped = None
@@ -641,10 +691,10 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                         effect_skill_id = 9084
                     else:
                         continue
-                if event.guid in {
-                    "98C9834C6381204A85DC67C375D135E4",
-                    "13D0B65D73B5334D80824EE17B5C257E",
-                } and any((caster, skill_id) in active for skill_id in (9146, 76708)):
+                guarded = _NO_ANIMATED_CAST_GUARDS.get(event.guid)
+                if guarded is not None and any(
+                    is_casting(caster, skill_id, event.time_ms) for skill_id in guarded
+                ):
                     continue
                 secondary = _SECONDARY_EFFECTS.get(event.guid, ())
                 # A secondary effect is matched on the finder's *key* agent,
