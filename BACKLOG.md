@@ -61,6 +61,10 @@ logs. The committed corpus is 35; always run the harness with no arguments.
   takes consumables from 39 to 95.
 - **Narrowing a target back to one agent per instance.** Regresses
   `20260224` from 682 to 3 205.
+- **Emitting 9084 "Advance!" for every guardian shout effect with fewer than
+  five self-stabilities.** Only 29 of 70 such effects are real casts; the other
+  41 become false positives. Corpus 690 → 726 (8 fixed, 44 introduced). The
+  50 ms instant-cast ICD does not absorb them.
 
 ## Next (2026-08-04, in impact order)
 
@@ -70,7 +74,14 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       (123)**, **9084 "Advance!" (68)**, **5535 Cleansing Fire (55)** — and
       skill **30961 (Exit Reaper's Shroud)** is 45 missing + 45 extra, i.e. the
       right cast 1-2 ms late (not a constant offset, so no blanket shift).
-      Start from the three finders, then the timing anchors.
+      Start from the three finders, then the timing anchors. Two are now
+      identified (see `SESSION.md`): **77370 Zap** keys on
+      `BoonApplyEvent 76639` (35/36 across three player/log pairs, not yet
+      wired), and **9084 "Advance!"** shares effect GUID
+      `122BA55CCDF2B643929F6C4A97226DC9` with 9153 "Stand Your Ground!" —
+      five-plus self-stabilities means 9153 (71/71), but what picks 9084 out
+      of the remaining guardian effects is still unknown. **5535 Cleansing
+      Fire** has no trigger that holds across players.
 - [ ] **`buffUptimes` (185)** — 120 of the pre-session 204 were Regeneration.
       Note the brief's premise is wrong: EI is *lower* in 80 cases and higher in
       40, median |delta| 0.053, and only 32 of 204 exceed 2. Port EI's
