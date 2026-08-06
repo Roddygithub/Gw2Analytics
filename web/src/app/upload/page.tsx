@@ -699,6 +699,16 @@ function DoneStep({
     >
       <h2 className={styles.cardTitle}>Upload complete</h2>
       <dl className={styles.cardGrid}>
+        <dt>Filename</dt>
+        <dd className={styles.mono}>{status.original_filename}</dd>
+        <dt>Size</dt>
+        <dd className={styles.mono}>
+          {status.size_bytes.toLocaleString()} bytes
+        </dd>
+        <dt>Uploaded</dt>
+        <dd className={styles.mono}>{status.uploaded_at}</dd>
+        <dt>Parser</dt>
+        <dd className={styles.mono}>{status.parser_version ?? "—"}</dd>
         <dt>ID</dt>
         <dd className={styles.mono}>{status.id}</dd>
         <dt>SHA-256</dt>
