@@ -99,6 +99,38 @@ So the bucket is roughly "a handful of high-frequency finders" plus "a few
 per-skill timing anchors", which is worth the systematic extraction the backlog
 asks for rather than diff-by-diff additions.
 
+### Rotation: two triggers identified, one implemented and reverted
+
+Probing the three biggest missing skills produced a usable answer for two and
+an honest dead end for the third. Two probes are added for it:
+`probe_cast_trigger.py` (what of ours coincides with a cast EI reports) and
+`probe_cast_candidates.py` (which candidate holds 1:1 across *different*
+players and logs — a single player is not enough, because a squad-wide boon
+coincides with everything).
+
+- **77370 Zap** — `BoonApplyEvent 76639` covers 35 of 36 casts across three
+  player/log pairs. A `_BUFF_GAIN_CASTS` entry, not yet wired.
+- **9084 "Advance!"** — effect GUID `122BA55CCDF2B643929F6C4A97226DC9`, which
+  the table *already* maps to 9153 "Stand Your Ground!". The two guardian
+  shouts share one effect. The self-stability count separates them cleanly in
+  one direction: all 71 guardian effects with five-plus self-stabs are 9153,
+  no exceptions. Warriors emit the same effect and EI books nothing for them,
+  so a profession gate is load-bearing (16 warrior effects in the sample).
+- **5535 Cleansing Fire** — every candidate that looked 1:1 for one player
+  failed to hold across others. No trigger found.
+
+**Attempted and reverted:** emitting 9084 whenever a guardian effect has fewer
+than five self-stabs. It is wrong — only 29 of the 70 such effects are real
+9084 casts, and the other 41 became false positives. Corpus went 690 → 726
+(8 fixed, 44 introduced). The remaining discriminator between those 29 and 41
+is unknown; the 50 ms instant-cast ICD does not absorb it. Do not re-attempt
+without finding it first.
+
+An effect-id caveat worth keeping: `EffectEvent.skill_id` is *per-log
+ephemeral*. EI keys its effect finders on the GUID, and a probe that groups by
+skill_id will show the same effect as a different candidate in every log —
+which is exactly what hid the 9084 trigger on the first pass.
+
 ### What was *not* done, and why
 
 The session's stated priority was Regeneration (buff 718) via a faithful port of
