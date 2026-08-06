@@ -354,6 +354,13 @@ _CBTBUFREMOVE_KINDS: Final[tuple[str, str, str]] = (
 #: 4 Evade, 5 Interrupt, 6 Absorb, 7 Blind, 8 KillingBlow, 9 Downed,
 #: 10 Breakbar, 11 Activation, 12 CrowdControl). This has been stable
 #: across every build in the corpus.
+#:
+#: Breakbar (result 10) is included here because the parser resolves it
+#: per-record, not per-(player, skill). Whether EI's connectedHits
+#: actually counts a result-10 hit depends on whether the player's other
+#: hits on that skill are all breakbar ticks -- a group-level rule that
+#: lives in ``ei_compare._skill_stats``. The parser flags every record
+#: honestly so consumers can re-aggregate either way.
 _DIRECT_HIT_RESULTS: Final[frozenset[int]] = frozenset({0, 1, 2, 8, 10})
 _DIRECT_ABSORB_RESULT: Final[int] = 6
 

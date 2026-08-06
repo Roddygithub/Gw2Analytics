@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from gw2_analytics.ei_compare import compare_elite_insights
+from gw2_analytics.ei_compare import _skill_stats, compare_elite_insights
 from gw2_core import (
     Agent,
     BoonApplyEvent,
     CombatOutcomeEvent,
+    DamageEvent,
     DeathEvent,
     EliteSpec,
     Fight,
@@ -111,3 +112,31 @@ def test_compare_elite_insights_prefers_outcome_downs_for_named_players() -> Non
     result = compare_elite_insights(fight, expected, events)
 
     assert result["differences"] == {}
+
+
+def _dmg(result: int, connected: bool, is_condition: bool = False) -> DamageEvent:
+    return DamageEvent(
+        time_ms=100,
+        source_agent_id=1,
+        target_agent_id=2,
+        skill_id=42,
+        damage=0,
+        connected=connected,
+        result=result,
+        is_condition=is_condition,
+    )
+
+
+def test_skill_stats_breakbar_grouprule() -> None:
+    # Mixed normals + breakbar: EI counts the normals and drops breakbar.
+    stats = _skill_stats([_dmg(1, True), _dmg(10, True)])
+    assert stats[42]["connectedHits"] == 1
+    # Breakbar only: EI counts them.
+    stats = _skill_stats([_dmg(10, True)])
+    assert stats[42]["connectedHits"] == 1
+    # Breakbar + blocked/evaded only: EI drops the skill entirely.
+    stats = _skill_stats([_dmg(10, True), _dmg(3, False)])
+    assert stats[42]["connectedHits"] == 0
+    # Condition landed alongside breakbar: normals win, breakbar dropped.
+    stats = _skill_stats([_dmg(10, True), _dmg(0, True, is_condition=True)])
+    assert stats[42]["connectedHits"] == 1
