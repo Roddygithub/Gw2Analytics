@@ -277,6 +277,7 @@ export interface PlayerPositionOut {
 }
 
 export interface FightPositionsOut {
+  fight_id: string;
   players: PlayerPositionOut[];
 }
 

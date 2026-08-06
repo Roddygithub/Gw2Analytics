@@ -46,11 +46,20 @@ IGNORED = {
     "items",
 }
 
-#: Hand-written interface -> the OpenAPI component it mirrors.
+#: Hand-written interface -> the OpenAPI component it mirrors. Kept explicit
+#: where the TS name and the schema short name disagree (or collide); every
+#: other interface is auto-matched by ``shortname == name`` or
+#: ``shortname == name + "Out"``.
 MIRRORED = {
     "PlayerProfile": "PlayerProfileOut",
     "PlayerTimelinePoint": "PlayerTimelinePointOut",
     "PerFightBreakdownRow": "PerFightBreakdownRowOut",
+    "AccountEnrichedRow": "AccountEnrichedOut",
+    "UploadCreatedRow": "UploadCreatedResponse",
+    "UploadStatusRow": "UploadOut",
+    # Both a route-level and a fight-level SkillOut exist; the client mirrors
+    # the fight-level one (id + name).
+    "SkillOut": "gw2analytics_api__schemas__fight__SkillOut",
 }
 
 
@@ -115,6 +124,21 @@ def handwritten_interfaces() -> dict[str, set[str]]:
     return out
 
 
+def mirror_map(components: dict, interfaces: dict[str, set[str]]) -> dict[str, str]:
+    shortnames: dict[str, str] = {}
+    for comp_name in components:
+        shortnames.setdefault(comp_name.rsplit("__", 1)[-1], comp_name)
+    mirrored = dict(MIRRORED)
+    for ts_name in interfaces:
+        if ts_name in mirrored:
+            continue
+        if ts_name in shortnames:
+            mirrored[ts_name] = shortnames[ts_name]
+        elif f"{ts_name}Out" in shortnames:
+            mirrored[ts_name] = shortnames[f"{ts_name}Out"]
+    return mirrored
+
+
 def main() -> int:
     spec = openapi_spec()
     components = spec.get("components", {}).get("schemas", {})
@@ -122,7 +146,8 @@ def main() -> int:
 
     print("=== 1. hand-written client interfaces vs the OpenAPI schema ===")
     interfaces = handwritten_interfaces()
-    for ts_name, component in sorted(MIRRORED.items()):
+    mirrored = mirror_map(components, interfaces)
+    for ts_name, component in sorted(mirrored.items()):
         declared = interfaces.get(ts_name)
         if declared is None or component not in components:
             print(f"  {ts_name}: SKIPPED (interface or component {component} not found)")
