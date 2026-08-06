@@ -261,6 +261,22 @@ _ABSENCE_FLOOR_MS = 1_000
 _DESPAWN_GRACE_MS = 10
 
 
+def _team_for_entry(is_last_slice: bool, team_id: int) -> int:
+    """EI reports an actor's team only on the last entry of its account.
+
+    arcdps has no team column in the agent table: the team arrives in a
+    ``CBTS_TEAMCHANGE`` record, and EI carries the *final* value on the
+    entry that is current at the end of the fight, leaving 0 on the
+    earlier slices of a split account.
+
+    The rule is "last slice", not "team known at the slice's end": on
+    20260412-220632 the record lands after every single-entry player's
+    lastAware, yet EI still reports 707 for them. Keying on the timestamp
+    instead fixed 22 differences and broke 36.
+    """
+    return team_id if is_last_slice else 0
+
+
 def _awareness_bound(
     agent_awareness: dict[int, tuple[int, int]] | None, alias_id: int, duration_ms: int
 ) -> int | None:
@@ -288,6 +304,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     actor's still-active buffs to the end of the fight. Optional so
     hand-built event streams keep working; without it the previous
     whole-fight behaviour applies.
+
     """
     header = fight.header
     actual: dict[str, object] = {
@@ -460,6 +477,13 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         isinstance(event, BoonApplyEvent) and event.kind == "apply" and event.skill_id == 770
         for event in event_list
     )
+    account_last_slice: dict[str, object] = {}
+    for entry in expected_players:
+        if isinstance(entry, dict) and isinstance(entry.get("account"), str):
+            first = entry.get("firstAware")
+            previous = account_last_slice.get(entry["account"])
+            if isinstance(first, int) and (not isinstance(previous, int) or first > previous):
+                account_last_slice[entry["account"]] = first
     account_entry_count: Counter[str] = Counter(
         entry["account"]
         for entry in expected_players
@@ -538,7 +562,9 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             ),
             "group": 51 if anonymous else int(agent.subgroup or 0),
             "instanceID": agent.instance_id,
-            "teamID": agent.team_id,
+            "teamID": _team_for_entry(
+                player.get("firstAware") == account_last_slice.get(account), agent.team_id
+            ),
         }
         _compare_fields(prefix, player, values, differences)
         # v0.17.0: exclude self-inflicted damage (src == dst) from the
