@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
@@ -16,6 +16,7 @@ from gw2_core import (
     Event,
     HealingEvent,
     MissileEvent,
+    Profession,
     SkillActivationEvent,
     SpawnEvent,
     WeaponSwapEvent,
@@ -245,8 +246,34 @@ _INSTANT_CASTS_BY_EFFECT = {
     "1066BEACB107C743908D860DA2D59796": 71252,
     "E78ED095E97F1D4A8BEB901796449E2F": 10562,
 }
+#: Familiar skill -> the player skill Elite Insights credits to its owner,
+#: transcribed from ``EvokerHelper``'s ``MinionCastCastFinder`` entries. The
+#: familiar keeps its own cast; only the owner gains a second, instant one.
+#: EI gates these on its default 50 ms ICD, but never refreshes the window
+#: after an accepted cast, so the gate is dead there. It is applied normally
+#: here: the closest two familiar casts by one owner on the corpus are 1 042
+#: ms apart, so the two behaviours cannot diverge on real data.
+_MINION_CASTS = {
+    76882: 76643,  # Ignite
+    76709: 77225,  # Splash
+    76803: 77370,  # Zap
+    76925: 77226,  # Calcify
+}
+#: Shared by every guardian shout, so the skill is decided by what the shout
+#: applied to its caster rather than by the effect itself.
+_GUARDIAN_SHOUT_EFFECT = "122BA55CCDF2B643929F6C4A97226DC9"
+#: ``UsingDstBaseSpecChecker``: the effect must sit on its destination, and
+#: that destination must be of this base profession. Warriors emit the
+#: guardian shout effect too, and EI books nothing for them.
+_EFFECT_SPEC_GATE = {
+    _GUARDIAN_SHOUT_EFFECT: Profession.GUARDIAN,
+    "BFFE3477ECFA26458D69E93EE76EFF6B": Profession.ELEMENTALIST,
+}
+_AEGIS_BUFF = 743
+_STABILITY_BUFF = 1122
 _EFFECT_CASTS_BY_DST = {
-    "122BA55CCDF2B643929F6C4A97226DC9": 9153,
+    _GUARDIAN_SHOUT_EFFECT: 9153,
+    "BFFE3477ECFA26458D69E93EE76EFF6B": 5535,  # Cleansing Fire
     "95B52793B838524AB237EB9FED7834BF": -22,
     "F53E2CE3B06B934085D46FA59468477B": 10214,
     "EA9896A81DDF4843B18DBF6EE4F25E18": 12502,
@@ -263,6 +290,10 @@ _EFFECT_CASTS_BY_DST = {
     "B02D3D0FF0A4FC47B23B1478D8E770AE": -29,
 }
 _SECONDARY_EFFECTS = {
+    "BFFE3477ECFA26458D69E93EE76EFF6B": (
+        "61F5669F9FAC1F48B47635C9F3833CEF",
+        "ABF2332D28C7D6449A5B822E5714ADA4",
+    ),
     "FB78801BB31CAF488B55F2F57EF9B070": ("7535B4CB815232418B69092F3390A7AB",),
     "4A83F0B627B75C47894941C4D35BA89F": ("FBA4C4F041E78748AC1CA5FF5D37D2DA",),
     "03850757F14FD44A9998D4CAD71CC589": ("08E6D231507CDD458EDECF67D264228C",),
@@ -312,9 +343,21 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     clone_agent_ids: Collection[int] = (),
     ranger_pet_agent_ids: Collection[int] = (),
     siege_turtle_agent_ids: Collection[int] = (),
+    professions: Mapping[int, Profession] | None = None,
+    agent_id_by_instance: Mapping[int, int] | None = None,
 ) -> list[SkillCast]:
-    """Return completed, clipped casts ordered by fight-relative start time."""
+    """Return completed, clipped casts ordered by fight-relative start time.
+
+    ``professions`` and ``agent_id_by_instance`` gate the finders that need
+    to know *who* an agent is: a shout effect is told apart from another
+    profession's by its caster, and a familiar's cast is credited to the
+    owner named by the record's ``src_master_instid``. Both are optional so
+    hand-built event streams keep working; the finders that need them are
+    simply skipped when they are absent.
+    """
     event_list = list(events)
+    professions = professions or {}
+    agent_id_by_instance = agent_id_by_instance or {}
     if not event_list:
         return []
     origin = start_time_ms if start_time_ms is not None else min(e.time_ms for e in event_list)
@@ -385,6 +428,11 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             key = (event.source_agent_id, event.skill_id)
             if event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
                 active[event.source_agent_id, event.skill_id] = event
+                owner_skill = _MINION_CASTS.get(event.skill_id)
+                if owner_skill is not None:
+                    owner = agent_id_by_instance.get(event.src_master_instid)
+                    if owner:
+                        add_instant(owner, owner_skill, event.time_ms)
             elif start := active.pop(key, None):
                 cast_duration = event.time_ms - start.time_ms
                 if cast_duration > 1:
@@ -539,32 +587,56 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     virtuoso_agent_ids if effect_skill_id == 68273 else mesmer_agent_ids
                 ):
                     continue
+                gate = _EFFECT_SPEC_GATE.get(event.guid)
+                if gate is not None and (
+                    not event.is_around_dst or professions.get(caster) is not gate
+                ):
+                    continue
                 needs_related = by_dst or event.guid in _SECONDARY_EFFECTS
                 needs_related = needs_related or event.guid in _MESMER_SHATTER_EFFECTS
                 related = nearby_events(event.time_ms, 9) if needs_related else []
-                if (
-                    event.guid == "122BA55CCDF2B643929F6C4A97226DC9"
-                    and sum(
-                        isinstance(other, BoonApplyEvent)
+                if event.guid == _GUARDIAN_SHOUT_EFFECT:
+                    # Every guardian shout shares one effect, so the skill is
+                    # read off what the caster granted itself: five-plus
+                    # stability stacks is "Stand Your Ground!", a 20-to-40
+                    # second aegis is "Advance!". Pure of Voice can extend a
+                    # shout's boons, which is why the aegis test is a window
+                    # and not an equality. No effect on the corpus satisfies
+                    # both, so the two are checked in sequence.
+                    self_applied = [
+                        other
+                        for other in related
+                        if isinstance(other, BoonApplyEvent)
                         and other.kind == "apply"
-                        and other.skill_id == 1122
                         and other.source_agent_id == caster
                         and other.target_agent_id == caster
-                        for other in related
-                    )
-                    < 5
-                ):
-                    continue
+                    ]
+                    if sum(other.skill_id == _STABILITY_BUFF for other in self_applied) >= 5:
+                        effect_skill_id = 9153
+                    elif any(
+                        other.skill_id == _AEGIS_BUFF
+                        and other.duration_ms + 10 >= 20_000
+                        and other.duration_ms - 10 <= 40_000
+                        for other in self_applied
+                    ):
+                        effect_skill_id = 9084
+                    else:
+                        continue
                 if event.guid in {
                     "98C9834C6381204A85DC67C375D135E4",
                     "13D0B65D73B5334D80824EE17B5C257E",
                 } and any((caster, skill_id) in active for skill_id in (9146, 76708)):
                     continue
                 secondary = _SECONDARY_EFFECTS.get(event.guid, ())
+                # A secondary effect is matched on the finder's *key* agent,
+                # which for a by-dst finder is the effect's destination. The
+                # two are the same agent for a self-targeted effect, so this
+                # only starts to matter with the first by-dst entry.
                 related_guids = {
                     other.guid
                     for other in related
-                    if isinstance(other, EffectEvent) and other.source_agent_id == caster
+                    if isinstance(other, EffectEvent)
+                    and (other.target_agent_id if by_dst else other.source_agent_id) == caster
                 }
                 if not all(guid in related_guids for guid in secondary):
                     continue

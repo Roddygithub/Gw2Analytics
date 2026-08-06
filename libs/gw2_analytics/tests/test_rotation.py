@@ -6,6 +6,7 @@ from gw2_core import (
     EffectEvent,
     HealingEvent,
     MissileEvent,
+    Profession,
     SkillActivationEvent,
     SpawnEvent,
     WeaponSwapEvent,
@@ -207,3 +208,144 @@ def test_build_skill_rotation_infers_engineer_kits_from_one_bundle_cast() -> Non
         (cast.skill_id, cast.time_ms, cast.duration_ms)
         for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
     ] == [(5927, 9, 0), (-2, 10, 0), (30800, 29, 0), (-2, 30, 0)]
+
+
+def _guardian_shout(origin: int, agent: int, boon: int, stacks: int, duration_ms: int) -> list:
+    """One shout effect plus the self-applied boons that identify the skill."""
+    return [
+        EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=agent,
+            target_agent_id=agent,
+            skill_id=0,
+            guid="122BA55CCDF2B643929F6C4A97226DC9",
+            is_around_dst=True,
+        ),
+        *(
+            BoonApplyEvent(
+                time_ms=origin + 100,
+                source_agent_id=agent,
+                target_agent_id=agent,
+                skill_id=boon,
+                duration_ms=duration_ms,
+                stacks=1,
+            )
+            for _ in range(stacks)
+        ),
+    ]
+
+
+def test_guardian_shout_effect_splits_by_the_boons_it_applied() -> None:
+    """One effect serves every guardian shout; the self-buff picks the skill.
+
+    Five-plus stacks of stability is "Stand Your Ground!", a 20-to-40 second
+    aegis is "Advance!". A shout that grants neither is one Elite Insights
+    does not attribute, so nothing is emitted for it.
+    """
+    origin = 42_000_000
+    guardians = {7: Profession.GUARDIAN}
+
+    def casts(events: list) -> list[tuple[int, int]]:
+        return [
+            (cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(
+                events, duration_ms=1_000, start_time_ms=origin, professions=guardians
+            )
+        ]
+
+    assert casts(_guardian_shout(origin, 7, 1122, 5, 5_000)) == [(9153, 100)]
+    assert casts(_guardian_shout(origin, 7, 743, 1, 24_000)) == [(9084, 100)]
+    # Three stabilities is a different shout, and a two-second aegis is the
+    # ordinary one every guardian shout grants -- neither is attributable.
+    assert casts(_guardian_shout(origin, 7, 1122, 3, 5_000)) == []
+    assert casts(_guardian_shout(origin, 7, 743, 1, 2_000)) == []
+
+
+def test_guardian_shout_effect_ignores_other_professions() -> None:
+    """Warriors emit the same effect and Elite Insights books nothing for them."""
+    origin = 42_000_000
+    events = _guardian_shout(origin, 7, 1122, 5, 5_000)
+
+    assert (
+        build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            professions={7: Profession.WARRIOR},
+        )
+        == []
+    )
+
+
+def test_cleansing_fire_needs_both_secondary_effects_on_the_same_target() -> None:
+    """A by-dst finder matches its secondaries on the destination, not the source.
+
+    The three effects are emitted by different sources, so keying the
+    secondary check on the source would find nothing.
+    """
+    origin = 42_000_000
+
+    def effect(guid: str, source: int, target: int) -> EffectEvent:
+        return EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=source,
+            target_agent_id=target,
+            skill_id=0,
+            guid=guid,
+            is_around_dst=True,
+        )
+
+    primary = effect("BFFE3477ECFA26458D69E93EE76EFF6B", 11, 7)
+    second = effect("61F5669F9FAC1F48B47635C9F3833CEF", 12, 7)
+    third = effect("ABF2332D28C7D6449A5B822E5714ADA4", 13, 7)
+    elementalists = {7: Profession.ELEMENTALIST}
+
+    def casts(events: list) -> list[tuple[int, int]]:
+        return [
+            (cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(
+                events, duration_ms=1_000, start_time_ms=origin, professions=elementalists
+            )
+        ]
+
+    assert casts([primary, second, third]) == [(5535, 100)]
+    assert casts([primary, second]) == []
+    # The secondaries land on a different actor, so they identify nothing.
+    assert casts([primary, effect("61F5669F9FAC1F48B47635C9F3833CEF", 12, 9), third]) == []
+
+
+def test_familiar_cast_is_credited_to_the_owner_named_by_the_record() -> None:
+    """Elite Insights books four Evoker familiar skills against the owner.
+
+    The familiar keeps its own cast; the owner gains a separate instant one.
+    """
+    origin = 42_000_000
+    events = [
+        SkillActivationEvent(
+            time_ms=origin + 100,
+            source_agent_id=99,
+            target_agent_id=0,
+            skill_id=76803,
+            activation=ActivationType.NORMAL,
+            duration_ms=0,
+            expected_duration_ms=0,
+            src_master_instid=1234,
+        ),
+    ]
+
+    def casts(**kwargs: object) -> list[tuple[int, int, int]]:
+        return [
+            (cast.source_agent_id, cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(
+                events, duration_ms=1_000, start_time_ms=origin, **kwargs
+            )
+        ]
+
+    assert casts(agent_id_by_instance={1234: 7}) == [
+        (99, 76803, 100),  # the familiar's own cast, unchanged
+        (7, 77370, 100),  # and the instant one credited to its owner
+    ]
+
+    # Without the instance lookup the owner cannot be named, so only the
+    # familiar's own cast survives rather than being misattributed.
+    assert casts() == [(99, 76803, 100)]

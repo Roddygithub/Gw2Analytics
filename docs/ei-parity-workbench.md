@@ -23,6 +23,20 @@ mkdir -p .tooling && curl -sL -o .tooling/GW2EICLI.zip https://github.com/baaron
 `.tooling/` and `zevtc files/` are gitignored: the vendored CLI, the raw logs
 and the reference JSON are all local artefacts.
 
+Elite Insights' own sources answer questions its JSON cannot — above all the
+`InstantCastFinder` rules behind `rotation`, which are declarative and cannot
+be recovered by correlating event streams. A shallow sparse clone is enough:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/baaron4/GW2-Elite-Insights-Parser.git .tooling/ei-src && git -C .tooling/ei-src sparse-checkout set GW2EIEvtcParser
+```
+
+The finders live in `GW2EIEvtcParser/EIData/ProfHelpers/<Profession>/`, their
+mechanics in `EIData/InstantCastFinders/`, and the id and GUID tables in
+`ParserHelpers/IDs/` and `ParserHelpers/GUIDs/`. Elite Insights is MIT
+licensed; what is taken from it here is game data and rule descriptions,
+reimplemented rather than transliterated.
+
 ## 2. Generating reference JSON
 
 `scripts/ei-parity/ei.conf` pins the settings that matter for parity — most importantly

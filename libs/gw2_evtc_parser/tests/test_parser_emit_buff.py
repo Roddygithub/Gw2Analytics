@@ -310,6 +310,39 @@ def test_parse_events_emits_skill_activation_from_byte_51() -> None:
     ]
 
 
+def test_parse_events_keeps_the_caster_but_carries_the_owner_on_an_activation() -> None:
+    """A minion's cast stays the minion's, with its owner alongside.
+
+    Damage and healing records are re-attributed to the owning agent, but an
+    activation must not be: every pet ability would otherwise surface in its
+    owner's rotation. Elite Insights credits the owner for a short list of
+    familiar skills only, through its ``MinionCastCastFinder``, and that
+    needs ``src_master_instid`` to survive parsing.
+    """
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True), (2, 2, 2, "Pet", False)],
+        build="20250925",
+        skills=[(76803, "Zap")],
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=2,
+                dst_agent=0,
+                value=0,
+                skill_id=76803,
+                is_activation=1,
+                src_instid=2,
+                src_master_instid=1,
+            )
+        ],
+    )
+
+    (activation,) = list(PythonEvtcParser().parse_events(evtc))
+    assert isinstance(activation, SkillActivationEvent)
+    assert activation.source_agent_id == 2
+    assert activation.src_master_instid == 1
+
+
 def test_parse_events_emits_cc_from_result_12() -> None:
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],

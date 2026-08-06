@@ -1005,6 +1005,7 @@ class PythonEvtcParser:
                     activation=ActivationType(is_activation),
                     duration_ms=max(0, value),
                     expected_duration_ms=max(0, buff_dmg),
+                    src_master_instid=src_master_inst,
                 )
                 continue
             # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11, commit

@@ -8,6 +8,80 @@ committed 35-log corpus). Setup: `docs/ei-parity-workbench.md`.
 
 ---
 
+## 2026-08-06 — 690 → 644
+
+One change, from one decision: stop inferring the instant-cast rules and
+read them out of Elite Insights' sources. Four finders transcribed, all four
+exact on the corpus before a line of production code was touched.
+
+### Why the previous approach could not work
+
+Three attempts at `rotation` had failed the same way, and the fourth
+diagnosis is now certain. Correlating our event stream against EI's cast
+list finds triggers that *cover* every cast; it cannot find the ones that
+fire *only* on casts. Two concrete refutations from this corpus:
+
+- **77370 Zap** was measured last session as keying on `BoonApplyEvent
+  76639` (35/36 across three player/log pairs). It does not. It is a
+  `MinionCastCastFinder`: the *familiar* casts 76803 and EI credits the
+  owner with 77370. Buff 76639 is "Familiar's Prowess", which correlates
+  only because the familiar is out.
+- **9084 "Advance!"** was assumed to be "a guardian shout that is not
+  Stand Your Ground". It is not. It is picked out by a self-applied aegis
+  of 20 to 40 seconds. The 41 false positives that regressed the corpus to
+  726 were the other shouts, which the real rule excludes.
+
+EI's finders are declarative, so they are transcribed and only *verified*
+here. `scripts/ei-parity/probe_ei_finders.py` scores a rule against EI's own
+output over all 35 logs; a rule is wired only at `missing=0 extra=0`.
+
+| finder | mechanism | casts |
+| --- | --- | ---: |
+| 9153 Stand Your Ground | five-plus self-stabilities (already shipped, used as the control) | 202 |
+| 9084 Advance! | self-applied aegis, 20–40 s | 68 |
+| 5535 Cleansing Fire | by-dst effect + two same-destination secondary effects | 55 |
+| 77370 / 76643 / 77225 / 77226 Evoker familiars | familiar's cast credited to its owner | 143 |
+
+Result: **266 casts recovered, 0 introduced** — 1 012 missing → 746, extra
+unchanged at 339. Corpus 690 → 644.
+
+### What had to change underneath
+
+- `SkillActivationEvent` now carries `src_master_instid`. Damage and healing
+  records are re-attributed to the owner at parse time, but an activation
+  must not be, or every pet ability would surface in its owner's rotation.
+  EI keeps the caster and lets the *finder* credit the owner, so the owner
+  is carried alongside instead.
+- A secondary effect is matched on the finder's **key** agent, which for a
+  by-dst finder is the destination, not the source. No by-dst entry used
+  secondary effects before Cleansing Fire, so the bug was latent.
+- `build_skill_rotation` takes `professions` and `agent_id_by_instance`.
+  Both are general lookups rather than another ad-hoc agent-id set, and both
+  are optional, so hand-built event streams keep working.
+
+### Details worth keeping
+
+- EI's `MinionCastCastFinder` never refreshes `lastTime` after an accepted
+  cast, so its ICD is dead code there. The normal 50 ms gate is applied
+  here instead: the closest two familiar casts by one owner on the corpus
+  are 1 042 ms apart, so the two behaviours cannot diverge on real data.
+- The guardian shout rules were checked for overlap before being chained:
+  **zero** effects on the corpus satisfy both, so `if/elif` is provably
+  equivalent to EI running the two finders independently.
+- The fight origin is `header.start_time_ms`, not the first *emitted*
+  event. On three logs the first raw record is a statechange `parse_events`
+  drops, and using the emitted stream shifts every cast 1 ms late. Production
+  already had this right; the first version of the probe did not, which is
+  what made three exact rules look like near-misses.
+
+### Ruled out this session
+
+- **`_BUFF_GAIN_CASTS[76639] = 77370` for Zap.** Wired and measured: 0
+  change in the player-row count but −71 missing / **+102 extra** at cast
+  level. This is what prompted the harness to report both.
+
+---
+
 ## 2026-08-04 — 798 → 690
 
 Three fixes, each found by probing a single player before touching any code.

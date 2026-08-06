@@ -4,10 +4,15 @@ Measured with `uv run python scripts/ei-parity/ei_diff.py` over the 35-log corpu
 Setup and probes: `docs/ei-parity-workbench.md`. Findings so far:
 `docs/parser-audit-2026-07-31.md`.
 
-**Scoreboard: 690 differences** over the 35-log corpus (2026-08-04).
+**Scoreboard: 644 differences** over the 35-log corpus (2026-08-06).
 Per-session history in `SESSION.md`.
 
-Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → 711 → **690**.
+Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → 711 → 690 →
+**644**.
+
+`rotation` is reported twice: a bucket count of player *rows*, and the cast
+counts under the total. Judge any rotation change on the casts — a partial
+finder can degrade the data while leaving the row count untouched.
 
 Note the "0 diffs corpus-wide" figure quoted in #117/#118 was measured over 20
 logs. The committed corpus is 35; always run the harness with no arguments.
@@ -47,6 +52,17 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       `boon_strips` / `condition_cleanses`; `PerFightBreakdownRow` was missing
       28 more. `scripts/ei-parity/api_coverage.py` now guards both directions.
 
+## Done (2026-08-06)
+
+- [x] **Four instant-cast finders transcribed from EI's sources**, each
+      verified exact over the corpus before being wired: 9084 "Advance!"
+      (self-aegis 20–40 s), 5535 Cleansing Fire (by-dst + two secondary
+      effects), and the four Evoker familiar skills (credited to the
+      owner). 266 casts recovered, 0 introduced. 690 → 644.
+      `scripts/ei-parity/probe_ei_finders.py` scores a candidate rule.
+- [x] `SkillActivationEvent` carries `src_master_instid`, so a familiar's
+      cast can be credited to its owner without re-attributing the cast.
+
 ## Ruled out — do not retry
 
 - **Windowing buff uptimes per slice.** EI reports the same whole-fight
@@ -64,24 +80,28 @@ logs. The committed corpus is 35; always run the harness with no arguments.
 - **Emitting 9084 "Advance!" for every guardian shout effect with fewer than
   five self-stabilities.** Only 29 of 70 such effects are real casts; the other
   41 become false positives. Corpus 690 → 726 (8 fixed, 44 introduced). The
-  50 ms instant-cast ICD does not absorb them.
+  50 ms instant-cast ICD does not absorb them. *Superseded 2026-08-06*: the
+  real rule is a self-applied aegis of 20 to 40 seconds, and it is exact.
+- **Deriving an `InstantCastFinder` by correlation.** Three attempts failed
+  the same way: a trigger that *covers* every cast is not one that fires
+  *only* on casts, and a single log cannot tell them apart. Both triggers
+  found this way were wrong on inspection of EI's sources — 77370 Zap is a
+  minion finder, not `BoonApplyEvent 76639`. Read the rule from
+  `.tooling/ei-src`, then verify it with `probe_ei_finders.py`.
 
-## Next (2026-08-04, in impact order)
+## Next (2026-08-06, in impact order)
 
-- [ ] **`players.rotation` (366)** — by far the largest bucket, now
-      characterised (see `SESSION.md`). 1 012 casts missing against 339 extra;
-      three `isInstantCast` skills carry 246 of the missing — **77370 Zap
-      (123)**, **9084 "Advance!" (68)**, **5535 Cleansing Fire (55)** — and
-      skill **30961 (Exit Reaper's Shroud)** is 45 missing + 45 extra, i.e. the
-      right cast 1-2 ms late (not a constant offset, so no blanket shift).
-      Start from the three finders, then the timing anchors. Two are now
-      identified (see `SESSION.md`): **77370 Zap** keys on
-      `BoonApplyEvent 76639` (35/36 across three player/log pairs, not yet
-      wired), and **9084 "Advance!"** shares effect GUID
-      `122BA55CCDF2B643929F6C4A97226DC9` with 9153 "Stand Your Ground!" —
-      five-plus self-stabilities means 9153 (71/71), but what picks 9084 out
-      of the remaining guardian effects is still unknown. **5535 Cleansing
-      Fire** has no trigger that holds across players.
+- [ ] **`players.rotation` (320 rows / 746 casts missing, 339 extra)** — still
+      the largest bucket, and the method is now settled: transcribe the finder
+      from `.tooling/ei-src` (a shallow sparse clone of
+      `baaron4/GW2-Elite-Insights-Parser`, MIT), then verify it with
+      `scripts/ei-parity/probe_ei_finders.py` before wiring anything. Adding a
+      rule to that probe is a few lines. Current heads of the distribution:
+      **30961 Exit Reaper's Shroud** is 45 missing *and* 45 extra — the right
+      cast 1-2 ms early, a timing anchor rather than a missing finder;
+      **29560 Spiteful Spirit** 33 missing; **5812** 25 missing. On the extra
+      side, **5492** (32) and **13684** (18) are casts we invent, which is a
+      finder that is too permissive rather than a missing one.
 - [ ] **`buffUptimes` (185)** — 120 of the pre-session 204 were Regeneration.
       Note the brief's premise is wrong: EI is *lower* in 80 cases and higher in
       40, median |delta| 0.053, and only 32 of 204 exceed 2. Port EI's
