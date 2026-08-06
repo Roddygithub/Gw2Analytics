@@ -8,10 +8,10 @@ committed 35-log corpus). Setup: `docs/ei-parity-workbench.md`.
 
 ---
 
-## 2026-08-04 — 798 → 711
+## 2026-08-04 — 798 → 690
 
-Two fixes, both found by probing a single player before touching any code.
-Neither was the regen work the session set out to do; see "What was *not* done".
+Three fixes, each found by probing a single player before touching any code.
+None was the regen work the session set out to do; see "What was *not* done".
 
 ### 1. Buff simulation now stops at an actor's last-aware (#130) — 798 → 779
 
@@ -58,6 +58,46 @@ we were repeating on each.
 
 Result: 68 differences resolved, 0 introduced. `againstDownedDamage`, `killed`
 and `downed` went to zero.
+
+### 3. `teamID` reported only on an account's last entry (#134) — 711 → 690
+
+arcdps has no team column in the agent table; the team arrives in a
+`CBTS_TEAMCHANGE` record, and EI carries the final value on the entry current
+at the end of the fight, leaving 0 on the earlier slices of a split account.
+
+Confirmed on `20260424-204954`, where `empiria.8961`, `Mikey.4982` and
+`SharpSteel.3051` each have a single team change on the very last millisecond
+and EI reports 0 on every slice but the last.
+
+The more mechanistic-looking rule — "team known at the slice's end" — is *not*
+what EI does, and was measured before being discarded: on `20260412-220632` the
+record lands after every single-entry player's `lastAware`, yet EI still reports
+707 for them. That variant fixed 22 and broke 36. The parser-side
+`scan_agent_team_changes` timeline it needed was removed again rather than left
+as dead code.
+
+Result: 22 resolved, 1 introduced. The one exception is documented rather than
+special-cased: `creative.1094` on `20260224-233019` has two slices, both
+`group=1`, and EI reports the team on both.
+
+### Where `rotation` (366) actually stands
+
+Characterised but not attacked — it is now 53 % of everything left, and the
+shape says the remedy is not uniform:
+
+- 216 of the 366 player rows are **missing casts only**, 33 are **extra only**,
+  117 are both. 1 012 casts missing against 339 extra.
+- Three skills account for 246 of the 1 012 missing, all `isInstantCast`:
+  **77370 Zap (123)**, **9084 "Advance!" (68)**, **5535 Cleansing Fire (55)**.
+  These are genuinely absent `InstantCastFinder` entries.
+- Skill **30961 (Exit Reaper's Shroud)** appears 45 times as missing *and* 45
+  as extra: same cast, wrong timestamp, 1 ms late 30 times and 2 ms late 15
+  times. Not a constant offset, so no blanket shift — the same trap as the
+  consumable +1 ms.
+
+So the bucket is roughly "a handful of high-frequency finders" plus "a few
+per-skill timing anchors", which is worth the systematic extraction the backlog
+asks for rather than diff-by-diff additions.
 
 ### What was *not* done, and why
 
