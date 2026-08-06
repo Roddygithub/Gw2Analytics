@@ -131,6 +131,36 @@ ephemeral*. EI keys its effect finders on the GUID, and a probe that groups by
 skill_id will show the same effect as a different candidate in every log —
 which is exactly what hid the 9084 trigger on the first pass.
 
+### Second rotation attempt: the Zap finder, also reverted
+
+`77370 Zap` keys on the self-applied buff 76639 — 35 of 36 casts across three
+player/log pairs, and nothing else covers them. Wiring it as a
+`_BUFF_GAIN_CASTS` entry removed **71** missing casts and added **102** extra:
+the buff fires more often than the cast does, which the per-player probe had
+already hinted at (49 firings for 36 casts) and which scales across the corpus.
+Net worse, so reverted.
+
+Two consecutive rotation attempts have now failed the same way: a trigger that
+*covers* every cast is not the same as one that *only* fires on casts. EI's
+finders carry internal cooldowns and conditions that coincidence-matching
+cannot recover. That is the case for the systematic extraction the backlog
+asks for, not an argument for more probing.
+
+### The harness was hiding this
+
+`rotation` is **one difference key per player, carrying the whole cast list**,
+so the bucket only moves when a player's list matches exactly. The Zap finder
+scored `0 fixed, 0 introduced` on the bucket count while making the underlying
+data net worse. `ei_diff.py` now reports casts missing and extra alongside the
+row count, so a partial finder shows its real effect:
+
+```
+=== TOTAL 690 differences across 35 logs ===
+    (rotation: 1012 casts missing, 339 extra -- the bucket below counts player rows, not casts)
+```
+
+Any future rotation work should be judged on those two numbers first.
+
 ### What was *not* done, and why
 
 The session's stated priority was Regeneration (buff 718) via a faithful port of

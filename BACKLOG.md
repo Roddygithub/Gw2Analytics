@@ -65,6 +65,12 @@ logs. The committed corpus is 35; always run the harness with no arguments.
   five self-stabilities.** Only 29 of 70 such effects are real casts; the other
   41 become false positives. Corpus 690 → 726 (8 fixed, 44 introduced). The
   50 ms instant-cast ICD does not absorb them.
+- **Wiring 77370 Zap as `_BUFF_GAIN_CASTS[76639]`.** The buff covers 35 of 36
+  casts, but fires more often than the cast: 71 missing casts removed, 102
+  extra added. Net worse. A trigger that *covers* every cast is not the same
+  as one that *only* fires on casts — both rotation attempts failed this way,
+  which is the case for extracting EI's finders (with their cooldowns and
+  conditions) rather than matching on coincidence.
 
 ## Next (2026-08-04, in impact order)
 
@@ -74,7 +80,10 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       (123)**, **9084 "Advance!" (68)**, **5535 Cleansing Fire (55)** — and
       skill **30961 (Exit Reaper's Shroud)** is 45 missing + 45 extra, i.e. the
       right cast 1-2 ms late (not a constant offset, so no blanket shift).
-      Start from the three finders, then the timing anchors. Two are now
+      Judge any attempt on the cast-level counts the harness now prints
+      (`1012 missing / 339 extra`), not on the 366 row count: the bucket is one
+      key per player carrying the whole list, so a partial finder can show zero
+      movement while making the data worse. Two triggers are now
       identified (see `SESSION.md`): **77370 Zap** keys on
       `BoonApplyEvent 76639` (35/36 across three player/log pairs, not yet
       wired), and **9084 "Advance!"** shares effect GUID
