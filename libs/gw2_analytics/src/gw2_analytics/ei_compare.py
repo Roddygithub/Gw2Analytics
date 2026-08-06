@@ -239,12 +239,56 @@ def _slice_bounds(player: dict[str, Any], origin: int) -> tuple[int, int]:
     return (origin + first, origin + last)
 
 
+#: How far before the fight ends an actor's last-aware has to fall before we
+#: treat it as "gone" and stop simulating its buffs there.
+#:
+#: EI runs each actor's buff simulation to the end of the phase, so a player
+#: present throughout must not be clamped -- their last-aware trails the phase
+#: end by a few tens of milliseconds purely because that is when their last
+#: record happens to land, and clamping on it shaves ~0.1 points off every
+#: uptime. A player who actually leaves is a different case: their still-active
+#: boons would otherwise run to the end of the fight and add the whole absence
+#: window to each one.
+#:
+#: The corpus separates the two cleanly -- absence is 70 ms at the median and
+#: jumps to 15 s at the 90th percentile, with a single player anywhere between
+#: 1 s and 5 s -- so any bound inside that gap behaves identically. Measured:
+#: 0 ms and 50 ms regress badly (440 and 251 buff differences over five logs
+#: against 87 unclamped), while 1 s and 3 s both give 79.
+_ABSENCE_FLOOR_MS = 1_000
+
+#: Despawn grace, mirroring the tracker's own end_agent(t + 10) convention.
+_DESPAWN_GRACE_MS = 10
+
+
+def _awareness_bound(
+    agent_awareness: dict[int, tuple[int, int]] | None, alias_id: int, duration_ms: int
+) -> int | None:
+    """Last-aware to stop an alias's buff simulation at, or ``None`` to run on."""
+    if not agent_awareness:
+        return None
+    span = agent_awareness.get(alias_id)
+    if span is None or duration_ms - span[1] <= _ABSENCE_FLOOR_MS:
+        return None
+    return span[1] + _DESPAWN_GRACE_MS
+
+
 def compare_elite_insights(  # noqa: PLR0912, PLR0915
     fight: Fight,
     expected: dict[str, object],
     events: Sequence[Event],
+    agent_awareness: dict[int, tuple[int, int]] | None = None,
 ) -> dict[str, object]:
-    """Return a JSON-serializable comparison report."""
+    """Return a JSON-serializable comparison report.
+
+    ``agent_awareness`` maps agent id to ``(first_aware_ms, last_aware_ms)``
+    as produced by :func:`gw2_evtc_parser.scan_agent_awareness`. It bounds
+    each actor's buff simulation: EI stops accruing uptime once the log
+    stops seeing an actor, whereas the tracker would otherwise run that
+    actor's still-active buffs to the end of the fight. Optional so
+    hand-built event streams keep working; without it the previous
+    whole-fight behaviour applies.
+    """
     header = fight.header
     actual: dict[str, object] = {
         "arcVersion": f"EVTC{header.build_version}" if header else None,
@@ -586,8 +630,18 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             # the whole-fight expected value is their sum -- see
             # ``account_buff_uptime`` above.
             uptime = dict.fromkeys(TRACKED_BUFFS, 0.0)
+            # Stop each alias's simulation at its own last-aware. A player
+            # who drops off the log mid-fight keeps whatever boons were up
+            # at that moment, and running them to the end of the fight adds
+            # exactly the absence window to every one of them -- the
+            # signature was several buffs on one actor all overcounting by
+            # the identical amount.
             for alias_id in agent_ids:
-                alias_uptime = tracker.compute_player_uptimes(alias_id, duration_ms)
+                alias_uptime = tracker.compute_player_uptimes(
+                    alias_id,
+                    duration_ms,
+                    active_duration_ms=_awareness_bound(agent_awareness, alias_id, duration_ms),
+                )
                 for name, value in alias_uptime.items():
                     uptime[name] += value
             for name, value in uptime.items():

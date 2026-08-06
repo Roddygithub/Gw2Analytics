@@ -2398,6 +2398,61 @@ def read_zevtc_bytes(data: bytes) -> bytes:
         return _first_entry(zf)
 
 
+def scan_agent_awareness(source: BinaryIO | bytes) -> dict[int, tuple[int, int]]:
+    """Return ``{agent_id: (first_aware_ms, last_aware_ms)}``, fight-relative.
+
+    Awareness is the span over which the log mentions an agent at all, as
+    either source or target, across the *raw* cbtevent stream -- including
+    the records ``parse_events`` filters out. That is the same definition
+    Elite Insights reports as ``firstAware`` / ``lastAware``, and it is
+    what bounds an actor's buff simulation: EI stops accruing uptime once
+    the log stops seeing the actor, rather than running its active buffs
+    to the end of the fight.
+
+    Deriving the bound from the *emitted* event stream instead lands a
+    median 181 ms early on the corpus, which is enough to shift every
+    player's uptime by ~0.25 points on a 70 s fight.
+
+    Records with ``time == 0`` are header-ish metadata rather than combat
+    activity and are skipped, matching the parser's own down-duration
+    scan.
+    """
+    data = _read_all(source)
+    build_str = data[BUILD_OFFSET : BUILD_OFFSET + 8].decode("ascii", errors="replace")
+    is_evtc_2025 = _build_version_from_build_str(build_str) >= 2025_00_00
+    unpack = (
+        _EVENT_STRUCT_EVENTS_2025.unpack_from if is_evtc_2025 else _EVENT_STRUCT_EVENTS.unpack_from
+    )
+    cursor = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
+    end = len(data)
+
+    awareness: dict[int, tuple[int, int]] = {}
+    origin: int | None = None
+    while cursor + EVENT_SIZE <= end:
+        unpacked = unpack(data, cursor)
+        cursor += EVENT_SIZE
+        time_ms, src_agent, dst_agent = unpacked[0], unpacked[1], unpacked[2]
+        if time_ms <= 0:
+            continue
+        if origin is None or time_ms < origin:
+            origin = time_ms
+        for agent_id in (src_agent, dst_agent):
+            if not agent_id:
+                continue
+            span = awareness.get(agent_id)
+            if span is None:
+                awareness[agent_id] = (time_ms, time_ms)
+            elif time_ms > span[1]:
+                awareness[agent_id] = (span[0], time_ms)
+            elif time_ms < span[0]:
+                awareness[agent_id] = (time_ms, span[1])
+    if origin is None:
+        return {}
+    return {
+        agent_id: (first - origin, last - origin) for agent_id, (first, last) in awareness.items()
+    }
+
+
 # Re-export the public header for downstream imports.
 __all__ = [
     "ACCOUNT_NAME_PREFIX",
@@ -2414,4 +2469,5 @@ __all__ = [
     "PythonEvtcParser",
     "read_zevtc_archive",
     "read_zevtc_bytes",
+    "scan_agent_awareness",
 ]

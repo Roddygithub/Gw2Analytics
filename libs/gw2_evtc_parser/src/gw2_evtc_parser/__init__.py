@@ -19,6 +19,7 @@ from gw2_evtc_parser.parser import (
     PythonEvtcParser,
     read_zevtc_archive,
     read_zevtc_bytes,
+    scan_agent_awareness,
 )
 from gw2_evtc_parser.statechange_dispatch import (
     STATE_CHANGE_BARRIER_UPDATE,
@@ -49,4 +50,5 @@ __all__ = [
     "parse_overlay_events",
     "read_zevtc_archive",
     "read_zevtc_bytes",
+    "scan_agent_awareness",
 ]
