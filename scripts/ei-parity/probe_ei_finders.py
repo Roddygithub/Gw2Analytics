@@ -26,9 +26,11 @@ ROOT = Path(__file__).resolve().parents[2]
 from gw2_core import (  # noqa: E402
     ActivationType,
     BoonApplyEvent,
+    DamageEvent,
     EffectEvent,
     Profession,
     SkillActivationEvent,
+    WeaponSwapEvent,
 )
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive  # noqa: E402
 
@@ -44,6 +46,10 @@ CLEANSING_FIRE_3 = "ABF2332D28C7D6449A5B822E5714ADA4"
 
 AEGIS = 743
 STABILITY = 1122
+REAPERS_SHROUD = 29446
+DESERT_SHROUD = 40052
+UNHOLY_BURST = 38767
+SPITEFUL_SPIRIT_EFFECT = "C4E8DD3234E0C647993857940ED79AC1"
 
 #: ``MinionCastCastFinder(playerSkill, petSkill)`` from ``EvokerHelper``.
 EVOKER_FAMILIARS = {
@@ -107,16 +113,40 @@ class Log:
         self.aegis_applies: list[BoonApplyEvent] = []
         self.stability_applies: list[BoonApplyEvent] = []
         self.casts_by_skill: dict[int, list[SkillActivationEvent]] = defaultdict(list)
+        self.shroud_losses: list[BoonApplyEvent] = []
+        self.desert_shroud_losses: list[int] = []
+        self.unholy_burst_hits: list[DamageEvent] = []
+        self.swaps_by_agent: dict[int, list[int]] = defaultdict(list)
         for event in self.events:
             if isinstance(event, EffectEvent):
                 self.effects_by_guid[event.guid].append(event)
-            elif isinstance(event, BoonApplyEvent) and event.kind == "apply":
-                if event.skill_id == AEGIS:
+            elif isinstance(event, BoonApplyEvent):
+                if event.kind == "apply" and event.skill_id == AEGIS:
                     self.aegis_applies.append(event)
-                elif event.skill_id == STABILITY:
+                elif event.kind == "apply" and event.skill_id == STABILITY:
                     self.stability_applies.append(event)
+                elif event.kind == "remove_all" and event.skill_id == REAPERS_SHROUD:
+                    self.shroud_losses.append(event)
+                elif event.kind == "remove_all" and event.skill_id == DESERT_SHROUD:
+                    self.desert_shroud_losses.append(event.time_ms)
+            elif isinstance(event, DamageEvent) and event.skill_id == UNHOLY_BURST:
+                self.unholy_burst_hits.append(event)
             elif isinstance(event, SkillActivationEvent) and event.skill_id in EVOKER_FAMILIARS:
                 self.casts_by_skill[event.skill_id].append(event)
+            elif isinstance(event, WeaponSwapEvent):
+                self.swaps_by_agent[event.source_agent_id].append(event.time_ms)
+
+    def before_weapon_swap(self, agent: int, time: int) -> int:
+        """EI's ``UsingBeforeWeaponSwap``: pull the cast just ahead of a swap.
+
+        The swap has to be within half a server delay, and the result is the
+        *earlier* of the two -- a cast already before the swap is left alone
+        rather than pushed forward onto it.
+        """
+        for swap_time in self.swaps_by_agent.get(agent, ()):
+            if abs(swap_time - time) < SERVER_DELAY / 2:
+                return min(swap_time - 1, time)
+        return time
 
     def expected(self, skill_id: int) -> set[tuple[int, int]]:
         """EI's own casts of ``skill_id`` as ``(instance_id, fight-relative ms)``."""
@@ -228,7 +258,45 @@ def rule_evoker_familiars(log: Log) -> list[tuple[int, int]]:
     return hits
 
 
+def rule_exit_reaper_shroud(log: Log) -> list[tuple[int, int]]:
+    """``BuffLossCastFinder(ExitReaperShroud, ReapersShroud).UsingBeforeWeaponSwap()``.
+
+    Only a *full* removal counts -- ``BuffLossCastFinder`` is typed on
+    ``BuffRemoveAllEvent`` -- and the cast is pulled just ahead of the
+    weapon swap that leaving shroud triggers. The ICD is gated on the raw
+    removal time, before that adjustment.
+    """
+    hits = _apply_icd([(loss.target_agent_id, loss.time_ms) for loss in log.shroud_losses])
+    return [(agent, log.before_weapon_swap(agent, time)) for agent, time in hits]
+
+
+def rule_spiteful_spirit(log: Log) -> list[tuple[int, int]]:
+    """``EffectCastFinder(SpitefulSpirit, NecromancerUnholyBurst)``.
+
+    One effect serves both Unholy Burst and Spiteful Spirit. Unholy Burst
+    only ever fires when it hits something, so a nearby hit of it rules the
+    effect out; the desert-shroud check disambiguates the scourge collision
+    and is deliberately global, not per-agent, in Elite Insights.
+    """
+    hits = []
+    for effect in log.effects_by_guid.get(SPITEFUL_SPIRIT_EFFECT, ()):
+        src = effect.source_agent_id
+        if log.profession.get(src) != Profession.NECROMANCER:
+            continue
+        if any(abs(time - effect.time_ms) < 50 for time in log.desert_shroud_losses):
+            continue
+        if any(
+            hit.source_agent_id == src and abs(hit.time_ms - effect.time_ms) < SERVER_DELAY
+            for hit in log.unholy_burst_hits
+        ):
+            continue
+        hits.append((src, effect.time_ms))
+    return _apply_icd(hits)
+
+
 RULES = {
+    "spiteful-spirit": (29560, rule_spiteful_spirit),
+    "exit-reaper-shroud": (30961, rule_exit_reaper_shroud),
     "advance": (9084, rule_advance),
     "stand-your-ground": (9153, rule_stand_your_ground),
     "cleansing-fire": (5535, rule_cleansing_fire),

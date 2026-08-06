@@ -349,3 +349,84 @@ def test_familiar_cast_is_credited_to_the_owner_named_by_the_record() -> None:
     # Without the instance lookup the owner cannot be named, so only the
     # familiar's own cast survives rather than being misattributed.
     assert casts() == [(99, 76803, 100)]
+
+
+def test_engineer_kit_table_covers_the_three_kits_added_from_the_api() -> None:
+    """Bomb, Tool and Grenade kits were absent, so their swaps went unnamed.
+
+    One bundle skill per kit is enough to identify the swap that preceded it.
+    """
+    origin = 42_000_000
+    base = {"target_agent_id": 0, "source_agent_id": 7}
+    events = []
+    for offset, bundle_skill in enumerate((5842, 5905, 5806)):
+        events.append(
+            WeaponSwapEvent(
+                time_ms=origin + offset * 100 + 10,
+                skill_id=0,
+                swapped_from=3,
+                swapped_to=2,
+                **base,
+            )
+        )
+        events.append(
+            SkillActivationEvent(
+                time_ms=origin + offset * 100 + 20,
+                skill_id=bundle_skill,
+                activation=ActivationType.RESET,
+                duration_ms=0,
+                expected_duration_ms=0,
+                **base,
+            )
+        )
+
+    kits = [
+        cast.skill_id
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+        if cast.skill_id > 0
+    ]
+    assert kits == [5812, 5904, 6020]
+
+
+def _shroud_loss(origin: int, offset: int, kind: str) -> BoonApplyEvent:
+    return BoonApplyEvent(
+        time_ms=origin + offset,
+        source_agent_id=7,
+        target_agent_id=7,
+        skill_id=29446,
+        duration_ms=0,
+        stacks=1,
+        kind=kind,
+    )
+
+
+def test_exit_reaper_shroud_needs_a_full_removal_and_lands_before_the_swap() -> None:
+    """``BuffLossCastFinder`` is typed on the full-removal event.
+
+    A partial strip of Reaper's Shroud is not a cast, and leaving shroud
+    triggers a weapon swap the cast has to sit just ahead of.
+    """
+    origin = 42_000_000
+
+    def casts(events: list) -> list[tuple[int, int]]:
+        return [
+            (cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+            if cast.skill_id == 30961
+        ]
+
+    swap = WeaponSwapEvent(
+        time_ms=origin + 502,
+        source_agent_id=7,
+        target_agent_id=0,
+        skill_id=0,
+        swapped_from=3,
+        swapped_to=5,
+    )
+
+    assert casts([_shroud_loss(origin, 500, "remove_all"), swap]) == [(30961, 500)]
+    assert casts([_shroud_loss(origin, 500, "remove_single")]) == []
+    # The swap lands first, so the cast is pulled back to just before it
+    # rather than left on its own timestamp.
+    swap_first = swap.model_copy(update={"time_ms": origin + 499})
+    assert casts([_shroud_loss(origin, 500, "remove_all"), swap_first]) == [(30961, 498)]

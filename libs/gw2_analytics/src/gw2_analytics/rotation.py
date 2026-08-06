@@ -22,11 +22,18 @@ from gw2_core import (
     WeaponSwapEvent,
 )
 
+#: Engineer kit -> the bundle it puts on the bar, as reported by
+#: ``/v2/skills``. Elite Insights declares one ``EngineerKitFinder`` per kit
+#: and reads the same list off the API at runtime; swapping to the kit set
+#: and then casting one of its skills is what identifies the swap.
 _ENGINEER_KIT_BUNDLES = {
-    5802: {58090, 30521, 29547, 49045, 49082, 58104, 50444},
-    5933: {5934, 5935, 5965, 5936, 6102, 5937},
-    5927: {5928, 5929, 5930, 5931, 76493},
-    30800: {30371, 30885, 30307, 30121, 30032},
+    5802: {58090, 30521, 29547, 49045, 49082, 58104, 50444},  # Med Kit
+    5812: {5813, 5822, 5823, 5842, 76530},  # Bomb Kit
+    5904: {5905, 5992, 5995, 5996, 5998, 6175},  # Tool Kit
+    5927: {5928, 5929, 5930, 5931, 76493},  # Flamethrower
+    5933: {5934, 5935, 5965, 5936, 6102, 5937},  # Elixir Gun
+    6020: {5806, 5807, 5808, 5809, 5882, 6167, 6168, 6169, 6170, 6171},  # Grenade Kit
+    30800: {30371, 30885, 30307, 30121, 30032},  # Elite Mortar Kit
 }
 _INSTANT_CASTS_BY_BUFF = {
     29446: (30792, True),  # Reaper's Shroud, immediately before its weapon swap
@@ -168,7 +175,12 @@ _HEALING_CASTS = {
     72115,
 }
 _MISSILE_CASTS = {26261, 29889}
-_BEFORE_SWAP_BUFFS = {31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291}
+_BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291}
+#: ``BuffLossCastFinder`` is typed on ``BuffRemoveAllEvent``, so a partial
+#: strip is not a cast. Only the entries verified against Elite Insights are
+#: listed; the rest keep the historical "any removal" behaviour until they
+#: are checked the same way.
+_BUFF_LOSS_REMOVE_ALL_ONLY = {29446}
 _AFTER_SWAP_BUFFS = {29703}
 _INSTANT_CASTS_BY_EFFECT = {
     "C4E8DD3234E0C647993857940ED79AC1": 29560,  # Spiteful Spirit
@@ -495,13 +507,20 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             if mapped is not None and (
                 (event.skill_id == 73955 and event.kind == "apply" and already_active)
                 or (event.skill_id in {27581, 73955} and event.kind not in {"apply", "remove_all"})
+                or (
+                    event.kind != "apply"
+                    and event.skill_id in _BUFF_LOSS_REMOVE_ALL_ONLY
+                    and event.kind != "remove_all"
+                )
             ):
                 mapped = None
             if mapped is not None:
                 mapped_time = event.time_ms
                 swap = nearby_swap(event.target_agent_id, event.time_ms)
                 if swap is not None and event.skill_id in _BEFORE_SWAP_BUFFS:
-                    mapped_time = swap.time_ms - 1
+                    # The earlier of the two: a cast already ahead of the swap
+                    # is left where it is rather than pushed onto it.
+                    mapped_time = min(swap.time_ms - 1, mapped_time)
                 elif swap is not None and event.skill_id in _AFTER_SWAP_BUFFS:
                     mapped_time = max(mapped_time, swap.time_ms + 1)
                 add_instant(event.target_agent_id, mapped, mapped_time)

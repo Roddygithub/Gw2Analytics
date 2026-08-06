@@ -4,11 +4,11 @@ Measured with `uv run python scripts/ei-parity/ei_diff.py` over the 35-log corpu
 Setup and probes: `docs/ei-parity-workbench.md`. Findings so far:
 `docs/parser-audit-2026-07-31.md`.
 
-**Scoreboard: 644 differences** over the 35-log corpus (2026-08-06).
+**Scoreboard: 635 differences** over the 35-log corpus (2026-08-06).
 Per-session history in `SESSION.md`.
 
 Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → 711 → 690 →
-**644**.
+644 → **635**.
 
 `rotation` is reported twice: a bucket count of player *rows*, and the cast
 counts under the total. Judge any rotation change on the casts — a partial
@@ -62,6 +62,12 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       `scripts/ei-parity/probe_ei_finders.py` scores a candidate rule.
 - [x] `SkillActivationEvent` carries `src_master_instid`, so a familiar's
       cast can be credited to its owner without re-attributing the cast.
+- [x] **Three missing engineer kits** (Bomb 5812, Tool 5904, Grenade 6020).
+      EI declares seven `EngineerKitFinder`s and reads each bundle off
+      `/v2/skills`; we had four. 644 → 641.
+- [x] **30961 Exit Reaper's Shroud** now fires only on a full removal and
+      lands at `min(swap - 1, time)`, matching `BuffLossCastFinder` +
+      `UsingBeforeWeaponSwap`. 45 fixed on each side. 641 → 635.
 
 ## Ruled out — do not retry
 
@@ -91,17 +97,20 @@ logs. The committed corpus is 35; always run the harness with no arguments.
 
 ## Next (2026-08-06, in impact order)
 
-- [ ] **`players.rotation` (320 rows / 746 casts missing, 339 extra)** — still
+- [ ] **`players.rotation` (311 rows / 668 casts missing, 289 extra)** — still
       the largest bucket, and the method is now settled: transcribe the finder
       from `.tooling/ei-src` (a shallow sparse clone of
       `baaron4/GW2-Elite-Insights-Parser`, MIT), then verify it with
       `scripts/ei-parity/probe_ei_finders.py` before wiring anything. Adding a
       rule to that probe is a few lines. Current heads of the distribution:
-      **30961 Exit Reaper's Shroud** is 45 missing *and* 45 extra — the right
-      cast 1-2 ms early, a timing anchor rather than a missing finder;
-      **29560 Spiteful Spirit** 33 missing; **5812** 25 missing. On the extra
-      side, **5492** (32) and **13684** (18) are casts we invent, which is a
-      finder that is too permissive rather than a missing one.
+      On the missing side **29560 Spiteful Spirit** (30) is the head and is
+      **not** explained by either of its two declared finders — see
+      `SESSION.md`; it needs a path outside `NecromancerHelper`. On the extra
+      side, **5492 Fire Attunement** (32) and **13684 Lesser Symbol of
+      Protection** (18) are casts we invent: EI gates 13684 with
+      `UsingNoAnimatedCastChecker(SymbolOfProtection=9161)`, which is a
+      cast-window test, where we only check for a currently-open activation
+      of 9146/76708.
 - [ ] **`buffUptimes` (185)** — 120 of the pre-session 204 were Regeneration.
       Note the brief's premise is wrong: EI is *lower* in 80 cases and higher in
       40, median |delta| 0.053, and only 32 of 204 exceed 2. Port EI's

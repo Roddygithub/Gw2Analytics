@@ -8,11 +8,11 @@ committed 35-log corpus). Setup: `docs/ei-parity-workbench.md`.
 
 ---
 
-## 2026-08-06 — 690 → 644
+## 2026-08-06 — 690 → 635
 
-One change, from one decision: stop inferring the instant-cast rules and
-read them out of Elite Insights' sources. Four finders transcribed, all four
-exact on the corpus before a line of production code was touched.
+Two passes, one decision: stop inferring the instant-cast rules and
+read them out of Elite Insights' sources. Seven finders transcribed, each
+verified on the corpus before a line of production code was touched.
 
 ### Why the previous approach could not work
 
@@ -74,11 +74,51 @@ unchanged at 339. Corpus 690 → 644.
   already had this right; the first version of the probe did not, which is
   what made three exact rules look like near-misses.
 
+### Second pass: three more finders — 644 → 635
+
+Same method, run again on the new heads of the distribution.
+
+- **Engineer kits (−38 casts).** EI declares seven `EngineerKitFinder`s and
+  reads each kit's bundle off `/v2/skills` at runtime; we had four kits
+  hard-coded. Added **Bomb Kit (5812)**, **Tool Kit (5904)** and **Grenade
+  Kit (6020)** from the same API, which also confirmed the four existing
+  bundles verbatim. 644 → 641.
+- **30961 Exit Reaper's Shroud (−45 missing, −45 extra).** Two divergences,
+  both mechanical: `BuffLossCastFinder` is typed on `BuffRemoveAllEvent`, so
+  a partial strip is not a cast; and `UsingBeforeWeaponSwap` places the cast
+  at `min(swap - 1, time)` when a swap is within half a server delay. We
+  emitted on any removal, at the raw time. This was the "1-2 ms off, not a
+  constant offset" entry from the previous pass — the offset is not constant
+  because it depends on where the swap falls. 641 → 635.
+
+The before-swap expression was corrected to EI's `min(swap - 1, time)` for
+every buff on that path, not just the new one; the corpus confirms none of
+the existing entries relied on the unconditional `swap - 1`.
+
+### Open, and deliberately left: 29560 Spiteful Spirit
+
+30 casts, and neither documented finder explains them. Both were
+transcribed and measured (`probe_ei_finders.py spiteful-spirit`): the
+`EffectCastFinder` on `NecromancerUnholyBurst` covers **194 with 0 extra**
+but misses 30, concentrated on two logs where the log contains *no* effect
+carrying that GUID and *no* damage of 38767. The companion
+`DamageCastFinder(SpitefulSpirit, SpitefulSpirit)` does not fill the gap
+either — on `20260712-203400` it predicts 5 against EI's 8, overlapping on
+only 1, and it is in any case gated off by `UsingDisableWithEffectData` on
+logs that plainly have effect data.
+
+So EI reaches those casts by a path not visible in `NecromancerHelper`.
+Worth noting the trap that cost time here: an `EffectEvent.skill_id` of
+29560 shows up on one of those logs and is **coincidence** — the field is a
+per-log ephemeral effect id, not a skill id, and those events belong to
+other players entirely.
+
 ### Ruled out this session
 
 - **`_BUFF_GAIN_CASTS[76639] = 77370` for Zap.** Wired and measured: 0
   change in the player-row count but −71 missing / **+102 extra** at cast
   level. This is what prompted the harness to report both.
+- **Reaching 29560 from either of its two declared finders.** See above.
 
 ---
 
