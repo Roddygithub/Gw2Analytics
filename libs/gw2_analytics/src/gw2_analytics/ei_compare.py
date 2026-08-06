@@ -393,7 +393,37 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         for entry in expected_players
         if isinstance(entry, dict) and isinstance(entry.get("account"), str)
     )
+    # A split account (character swap) is reported by EI as several ``players``
+    # entries, one per lifespan slice, and each slice's buffUptimes covers only
+    # its own window. The in-house tracker computes whole-fight presence, which
+    # equals the *sum* of the slice uptimes (verified on the corpus: Mikey's 3
+    # slices 46.3+1.5+52.2 = tracker 100.0). Aggregate the expected uptimes per
+    # account so the comparison is against the sum, not each slice.
+    account_buff_uptime: dict[str, dict[int, float]] = {}
+    for entry in expected_players:
+        if not isinstance(entry, dict) or not isinstance(entry.get("account"), str):
+            continue
+        expected_buffs = entry.get("buffUptimes")
+        if not isinstance(expected_buffs, list):
+            continue
+        per_buff = account_buff_uptime.setdefault(entry["account"], {})
+        for buff in expected_buffs:
+            if not isinstance(buff, dict) or not isinstance(buff.get("id"), int):
+                continue
+            buff_data = buff.get("buffData")
+            if (
+                not isinstance(buff_data, list)
+                or not buff_data
+                or not isinstance(buff_data[0], dict)
+            ):
+                continue
+            uptime = buff_data[0].get("uptime")
+            if isinstance(uptime, int | float):
+                per_buff[buff["id"]] = per_buff.get(buff["id"], 0.0) + uptime
     compared_players: dict[str, object] = {}
+    # Split accounts repeat the same whole-fight buff diff on every slice
+    # entry; report it once per (account, buff).
+    reported_buff_diffs: set[tuple[str, int]] = set()
 
     for player in expected_players:
         if not isinstance(player, dict) or not isinstance(player.get("account"), str):
@@ -550,11 +580,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
 
         expected_buffs = player.get("buffUptimes")
         if isinstance(expected_buffs, list):
-            # Uptimes stay whole-fight even on a sliced entry: EI reports
-            # the same buffUptimes on every entry of a split account, so
-            # restricting them to the slice measurably diverges (verified on
-            # the corpus: windowing them takes buff differences from 225 to
-            # 913 across the four logs that have splits).
+            # Each entry's buffUptimes is whole-fight in shape (not restricted
+            # to the slice: windowing them measurably diverges), but a split
+            # account's slices each carry the fraction of uptime they cover, so
+            # the whole-fight expected value is their sum -- see
+            # ``account_buff_uptime`` above.
             uptime = dict.fromkeys(TRACKED_BUFFS, 0.0)
             for alias_id in agent_ids:
                 alias_uptime = tracker.compute_player_uptimes(alias_id, duration_ms)
@@ -565,27 +595,27 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     uptime[name] = min(100.0, value)
             by_id = {buff_id: uptime[name] for name, buff_id in TRACKED_BUFFS.items()}
             compared_buffs: dict[int, float] = {}
+            # Expected per buff = whole-fight value, i.e. the sum over the
+            # account's split entries (see account_buff_uptime). A buff that
+            # EI omitted from one slice still contributes its other slices.
+            account_expected = account_buff_uptime.get(account, {})
             for expected_buff in expected_buffs:
                 if not isinstance(expected_buff, dict) or not isinstance(
                     expected_buff.get("id"), int
-                ):
-                    continue
-                buff_data = expected_buff.get("buffData")
-                if (
-                    not isinstance(buff_data, list)
-                    or not buff_data
-                    or not isinstance(buff_data[0], dict)
                 ):
                     continue
                 buff_id = expected_buff["id"]
                 if buff_id not in by_id:
                     continue
                 compared_buffs[buff_id] = round(by_id[buff_id], 3)
-                expected_uptime = buff_data[0].get("uptime")
+                expected_uptime = account_expected.get(buff_id)
+                if (account, buff_id) in reported_buff_diffs:
+                    continue
                 if (
-                    not isinstance(expected_uptime, int | float)
+                    expected_uptime is None
                     or abs(expected_uptime - compared_buffs[buff_id]) > 0.005
                 ):
+                    reported_buff_diffs.add((account, buff_id))
                     differences[f"{prefix}.buffUptimes[{buff_id}].uptime"] = {
                         "expected": expected_uptime,
                         "actual": compared_buffs[buff_id],
