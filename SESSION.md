@@ -161,8 +161,27 @@ early either way — but the scope is now the one EI actually has.
   capacity 5 evicts a different stack, and evicting a long one costs its
   whole remaining duration.
 
-So the next step is not another rule — it is to instrument which stack
-each model evicts on that player's three overflows.
+The evictions were then instrumented, and the result is a warning as much
+as a finding. On `Ver.5187`, moving each `added_active` apply to the front
+keeps the queue permanently full — **six** capacity overflows instead of
+three — and every overflow discards a whole stack's remaining duration.
+Not activating on apply reproduces EI almost exactly:
+
+| player | EI | no activate on apply | activate on apply |
+| --- | ---: | ---: | ---: |
+| `Ver.5187` | 81.941 | 81.839 | 60.923 |
+| `MOTEUS.4861` | 86.039 | **86.039** | 65.289 |
+| `syotox.7895` | 68.731 | 68.834 | 49.282 |
+| `masterp.6390` | 98.270 | **98.270** | 86.315 |
+
+Four players, two of them exact to three decimals — and **the change is
+still wrong**. Removing the activation took the corpus from 583 to **631**
+and `buffUptimes` from 136 to 184. It was reverted.
+
+That is the whole lesson of this pass: a four-player probe is not the
+corpus, and a rule that reproduces EI on the worst offenders can be
+net-negative everywhere else. The remaining regeneration residual is a
+question about *which* applies activate, not *whether* they do.
 
 One input is missing for that, and it is a parser-level gap worth naming:
 **we drop every uncredited regeneration remove-single.** The raw stream
@@ -198,6 +217,11 @@ other players entirely.
   change in the player-row count but −71 missing / **+102 extra** at cast
   level. This is what prompted the harness to report both.
 - **Reaching 29560 from either of its two declared finders.** See above.
+- **Dropping the `added_active` activation for regeneration.** Reproduces
+  EI on the four worst players (two exactly) and regresses the corpus 583
+  → 631. EI's sources do call `QueueLogic.Activate` on the item whenever
+  the record carries the flag, and the flag is set on most regeneration
+  applies in every arcdps era, so it is not a byte-mapping artefact.
 
 ---
 

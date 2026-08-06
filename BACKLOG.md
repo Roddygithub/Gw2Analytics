@@ -142,6 +142,15 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       that buff instance, else the one with the closest duration. That
       override cannot be written until the records reach the analytics
       layer. The rest of the bucket: might 23, swiftness 13, stability 9.
+      **Do not simply drop the `added_active` activation** — it reproduces
+      EI on the four worst players and regresses the corpus 583 → 631; see
+      "Ruled out". The question is which applies activate, not whether.
+- [ ] **Read buff capacities from the log, not a table.** EI overrides its
+      hard-coded capacity with the `BuffInfo` record's `MaxStacks`
+      (statechange 30, `SrcMasterInstid`). Our `_CAPACITIES` agrees with the
+      corpus on every tracked boon except **alacrity** (we default to 9, the
+      logs declare 99). No current difference depends on it, so this is
+      correctness rather than parity.
 - [ ] **`statsTargets.againstDownedCount` (24) + `statsTargets.downContribution`
       (22)** — the per-target rows already slice their inputs, so this is a
       different cause from the `statsAll` one fixed in #132. Dump the events we
