@@ -121,7 +121,8 @@ def _damage_stats(
 #: fallback for DamageEvents built by hand rather than by the parser
 #: (tests, fixtures, synthetic streams), which leave ``connected`` unset.
 #: The parser resolves the flag itself because the condition enum was
-#: renumbered in 2026-05 and reading it needs the build version.
+#: renumbered in 2026-05 and reading it needs the build version. Matches
+#: ``parser._DIRECT_HIT_RESULTS``.
 _DIRECT_HIT_RESULTS = frozenset({0, 1, 2, 8, 10})
 _DIRECT_ABSORB_RESULT = 6
 
@@ -178,15 +179,38 @@ def _skill_stats(events: list[DamageEvent]) -> dict[int, dict[str, int]]:
         by_skill[event.skill_id].append(event)
     result: dict[int, dict[str, int]] = {}
     for skill_id, skill_events in by_skill.items():
-        connected = sum(_connected(event) for event in skill_events)
-        direct_crits = [
-            event
-            for event in skill_events
-            if not event.is_condition and event.result in {1, 8} and event.buff_dmg == 0
-        ]
+        # EI's ``connectedHits`` rule for direct Breakbar hits (result=10)
+        # is group-level, not per-record: a breakbar tick damages the
+        # defiance bar rather than health, so EI only counts result-10
+        # hits when the player never managed a normal landed hit on that
+        # skill -- in which case the breakbar ticks ARE the skill's entry.
+        # If any normal landed (0/1/2) or condition landed hit exists, EI
+        # books the entry from those and drops result-10. And if the skill
+        # has only result-10 plus other non-landed (blocked/evaded/blind)
+        # records, EI omits the entry entirely (connectedHits = 0).
+        #
+        # Verified across the 35-log corpus: 45 over-counts (mixed normals
+        # and breakbar) and 8 under-counts (breakbar-only) and 7 misses
+        # (breakbar + blocked/evaded only) all explained by this rule.
+        direct = [e for e in skill_events if not e.is_condition]
+        condi = [e for e in skill_events if e.is_condition]
+        n_norm_direct = sum(e.result in {0, 1, 2} for e in direct)
+        n_condi_landed = sum(_connected(e) for e in condi)
+        n_breakbar = sum(e.result == 10 for e in direct)
+        n_other_failed = sum(e.result not in {0, 1, 2, 10} for e in direct)
+        if n_norm_direct + n_condi_landed > 0:
+            # Normals exist: EI counts the normals and skips breakbar ticks.
+            connected = n_norm_direct + n_condi_landed
+        elif n_other_failed == 0:
+            # Only breakbar hits: EI counts them.
+            connected = n_breakbar + n_condi_landed
+        else:
+            # Breakbar plus blocked/evaded/blind only: EI drops the skill.
+            connected = 0
+        direct_crits = [event for event in direct if event.result in {1, 8} and event.buff_dmg == 0]
         result[skill_id] = {
             "totalDamage": sum(event.damage for event in skill_events),
-            "connectedHits": connected or sum(event.result == 10 for event in skill_events),
+            "connectedHits": connected,
             "crit": len(direct_crits),
             "critDamage": sum(event.damage for event in direct_crits),
         }
