@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict, Field
 
 from gw2_analytics._boon_ids import BOON_SKILL_IDS
+from gw2_analytics.damage_predicates import landed_hit
 from gw2_core import (
     CCEvent,
     CombatOutcomeEvent,
@@ -135,7 +136,11 @@ class DownContributionAggregator:
             )
             for damage in damage_events:
                 acc = stats[damage.source_agent_id]
-                if damage.against_downed and damage.damage > 0:
+                # Elite Insights counts an against-downed hit when it
+                # *landed*, not when it carried damage: a hit fully absorbed
+                # or wholly converted to barrier still counts. The damage
+                # sums are unaffected, which is why only the counters drifted.
+                if damage.against_downed and landed_hit(damage):
                     acc.against_downed_count += 1
                     acc.against_downed_damage += damage.damage
                 if damage.damage > 0 and self._in_windows(

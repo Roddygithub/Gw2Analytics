@@ -389,3 +389,60 @@ def test_down_on_the_same_millisecond_as_death_earns_no_contribution() -> None:
     assert contribution(1_000) == 0
     # One millisecond later the segment exists, and so does the credit.
     assert contribution(1_001) == 500
+
+
+def test_against_downed_counts_a_landed_hit_that_dealt_no_damage() -> None:
+    """The counter asks whether the hit landed, not whether it hurt.
+
+    A hit wholly converted to barrier lands for zero health damage and
+    still counts; the damage sum is unaffected, which is why only the
+    counters drifted from Elite Insights.
+    """
+    rows = DownContributionAggregator().aggregate(
+        [
+            DamageEvent(
+                time_ms=100,
+                source_agent_id=1,
+                target_agent_id=7,
+                skill_id=42,
+                damage=0,
+                connected=True,
+                against_downed=True,
+            ),
+            DamageEvent(
+                time_ms=200,
+                source_agent_id=1,
+                target_agent_id=7,
+                skill_id=42,
+                damage=300,
+                connected=True,
+                against_downed=True,
+            ),
+            # Never connected, so it is not an against-downed hit at all.
+            DamageEvent(
+                time_ms=300,
+                source_agent_id=1,
+                target_agent_id=7,
+                skill_id=42,
+                damage=0,
+                connected=False,
+                result=3,
+                against_downed=True,
+            ),
+        ],
+        [DownEvent(time_ms=50, source_agent_id=7, target_agent_id=0, skill_id=0)],
+        [],
+        duration_s=10.0,
+        health_events=[
+            HealthUpdateEvent(
+                time_ms=10,
+                source_agent_id=7,
+                target_agent_id=0,
+                skill_id=0,
+                health_percent=40.0,
+            )
+        ],
+    )
+
+    row = next(row for row in rows if row.source_agent_id == 1)
+    assert (row.against_downed_count, row.against_downed_damage) == (2, 300)

@@ -4,11 +4,11 @@ Measured with `uv run python scripts/ei-parity/ei_diff.py` over the 35-log corpu
 Setup and probes: `docs/ei-parity-workbench.md`. Findings so far:
 `docs/parser-audit-2026-07-31.md`.
 
-**Scoreboard: 489 differences** over the 35-log corpus (2026-08-07).
+**Scoreboard: 444 differences** over the 35-log corpus (2026-08-07).
 Per-session history in `SESSION.md`.
 
 Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → 711 → 690 →
-644 → 635 → 632 → 583 → 533 → **489**.
+644 → 635 → 632 → 583 → 533 → 489 → **444**.
 
 `rotation` is reported twice: a bucket count of player *rows*, and the cast
 counts under the total. Judge any rotation change on the casts — a partial
@@ -84,6 +84,10 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       which stack an application displaced are dropped from the event stream
       — as they are in EI — but recovered as a side input. Regeneration
       116 → 17 over the session. 583 → 533.
+- [x] **`againstDownedCount` asks whether the hit landed, not whether it
+      hurt.** A hit absorbed or converted to barrier lands for zero and
+      still counts. All 45 differences resolved; the shared predicate now
+      lives in `damage_predicates.landed_hit`. 489 → 444.
 - [x] **A down that coincides with the death earns no contribution.** EI
       keeps a downed segment only when `start < end`, so such a down has no
       segment and `IsDownBeforeNext90` returns false for every hit that led
@@ -151,12 +155,9 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       corpus on every tracked boon except **alacrity** (we default to 9, the
       logs declare 99). No current difference depends on it, so this is
       correctness rather than parity.
-- [ ] **`againstDownedCount` (24 per-target + 21 `statsAll`)** — now the
-      head of this family, and untouched by the downed-segment fix: it reads
-      the damage record's own against-downed flag rather than
-      `IsDownBeforeNext90`. EI counts it in
-      `OffensiveStatistics` alongside `DownContribution`; read that loop
-      before changing anything.
+- [ ] **`group` (7)**, **`name` (3)**, and the single-digit `dps` /
+      `defenses` / `appliedCrowdControl` residuals — the long tail is now
+      35 differences across a dozen buckets, each likely its own small rule.
 - [ ] **`downContribution` residual (9 + 6)** — the `inst 7121` oddity
       recorded here turned out to be the down-on-death rule and is fixed.
       What is left has not been characterised.

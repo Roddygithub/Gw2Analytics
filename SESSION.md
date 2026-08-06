@@ -8,7 +8,7 @@ committed 35-log corpus). Setup: `docs/ei-parity-workbench.md`.
 
 ---
 
-## 2026-08-06 — 690 → 489
+## 2026-08-06 — 690 → 444
 
 Two passes, one decision: stop inferring the instant-cast rules and
 read them out of Elite Insights' sources. Nine finders transcribed, each
@@ -251,6 +251,28 @@ with them, since they test the same predicate.
 `againstDownedCount` (24 + 21) did **not** move: it reads the damage
 record's own against-downed flag rather than this predicate, so it is a
 separate problem.
+
+### Seventh pass: a landed hit is not a hit that hurt — 489 → 444
+
+`againstDownedCount` was the last big non-rotation bucket, and all 45 of
+its differences pointed the same way: **ours lower, by one to three**.
+
+Elite Insights counts an against-downed hit inside `if (dl.HasHit)` and
+asks nothing about its magnitude. We required `damage > 0`. A hit fully
+absorbed, or wholly converted to barrier, lands for zero health damage
+and still counts — which is exactly why the *damage* sums already matched
+and only the counters drifted.
+
+Confirmed before coding, on `SnuSnu.6290` / `20260526-202841`: 19
+against-downed records, 14 carrying damage, 5 at zero — of which exactly
+**1** landed. 14 + 1 = 15, which is EI's number.
+
+All 45 resolved; the bucket is gone.
+
+The predicate now lives in one place. `ei_compare` had a private
+`_connected` used by three counters, `down_contribution` had an
+open-coded `damage > 0`, and they were answering the same question
+differently. Both now import `damage_predicates.landed_hit`.
 
 ### Open, and deliberately left: 29560 Spiteful Spirit
 

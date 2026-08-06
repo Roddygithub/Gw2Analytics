@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from gw2_analytics.buff_state import MAX_STACKS, TRACKED_BUFFS, BuffStateTracker
+from gw2_analytics.damage_predicates import absorbed_hit, landed_hit
 from gw2_analytics.down_contribution import DownContributionAggregator
 from gw2_analytics.initial_buffs import extract_initial_buffs
 from gw2_analytics.rotation import build_skill_rotation
@@ -81,7 +82,7 @@ def _damage_stats(
     condition_skill_ids: set[int] | None,
 ) -> dict[str, int]:
     counted = [event for event in damage if event.result != 10]
-    connected = [event for event in counted if _connected(event)]
+    connected = [event for event in counted if landed_hit(event)]
     # Direct and condition do NOT partition ``connected``: EI counts a hit
     # as direct when it came down the physical channel, and as condition
     # when the buff behind it is classified as one. Life-steal effects
@@ -103,7 +104,7 @@ def _damage_stats(
         "critableDirectDamageCount": len(critable),
         "criticalRate": len(critical),
         "criticalDmg": sum(event.damage for event in critical),
-        "invulned": sum(_invulned(event) for event in counted),
+        "invulned": sum(absorbed_hit(event) for event in counted),
         "killed": getattr(down_row, "kills", 0),
         "downed": getattr(down_row, "downs", 0),
         "againstDownedCount": getattr(down_row, "against_downed_count", 0),
@@ -116,38 +117,6 @@ def _damage_stats(
         "appliedCrowdControl": len(crowd_control),
         "appliedCrowdControlDuration": sum(event.cc_value for event in crowd_control),
     }
-
-
-#: Direct-hit ``cbtresult`` values EI counts as landed. Only used as a
-#: fallback for DamageEvents built by hand rather than by the parser
-#: (tests, fixtures, synthetic streams), which leave ``connected`` unset.
-#: The parser resolves the flag itself because the condition enum was
-#: renumbered in 2026-05 and reading it needs the build version. Matches
-#: ``parser._DIRECT_HIT_RESULTS``.
-_DIRECT_HIT_RESULTS = frozenset({0, 1, 2, 8, 10})
-_DIRECT_ABSORB_RESULT = 6
-
-
-def _connected(event: DamageEvent) -> bool:
-    """Whether EI would count this record as a landed hit.
-
-    A condition tick that lands for zero health damage -- fully mitigated,
-    or entirely converted to barrier -- still counts, so the magnitude is
-    not a usable stand-in for the result byte.
-    """
-    if event.is_condition:
-        return event.connected
-    if event.connected:
-        return True
-    if event.buff_dmg > 0:
-        return event.damage > 0
-    return event.result in _DIRECT_HIT_RESULTS
-
-
-def _invulned(event: DamageEvent) -> bool:
-    if event.is_condition:
-        return event.absorbed
-    return event.absorbed or event.result == _DIRECT_ABSORB_RESULT
 
 
 def _is_condition(event: DamageEvent, condition_skill_ids: set[int] | None) -> bool:
@@ -196,7 +165,7 @@ def _skill_stats(events: list[DamageEvent]) -> dict[int, dict[str, int]]:
         direct = [e for e in skill_events if not e.is_condition]
         condi = [e for e in skill_events if e.is_condition]
         n_norm_direct = sum(e.result in {0, 1, 2} for e in direct)
-        n_condi_landed = sum(_connected(e) for e in condi)
+        n_condi_landed = sum(landed_hit(e) for e in condi)
         n_breakbar = sum(e.result == 10 for e in direct)
         n_other_failed = sum(e.result not in {0, 1, 2, 10} for e in direct)
         if n_norm_direct + n_condi_landed > 0:
@@ -634,7 +603,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             }
             defense_values = {
                 "damageTaken": sum(event.damage for event in taken),
-                "damageTakenCount": sum(_connected(event) for event in taken),
+                "damageTakenCount": sum(landed_hit(event) for event in taken),
                 "conditionDamageTaken": sum(
                     _condition_damage(event, condition_skill_ids) for event in taken
                 ),
