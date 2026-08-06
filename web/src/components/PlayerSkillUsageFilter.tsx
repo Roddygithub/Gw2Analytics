@@ -53,7 +53,7 @@ const PLAYER_SKILL_SELECT_STYLE: React.CSSProperties = {
   ...SELECT_STYLE,
   padding: "6px 10px",
   fontSize: 14,
-  background: "var(--bg-elev)",
+  background: "var(--surface-elevated)",
   color: "inherit",
   border: "1px solid var(--border)",
 };

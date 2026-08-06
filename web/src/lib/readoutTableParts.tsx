@@ -61,7 +61,7 @@ export const TH_STYLE: React.CSSProperties = {
   letterSpacing: "0.05em",
   color: "var(--foreground)",
   opacity: 0.7,
-  background: "var(--surface-elevated, rgba(255,255,255,0.05))",
+  background: "var(--surface-elevated)",
   borderBottom: "1px solid var(--border)",
   whiteSpace: "nowrap",
   cursor: "pointer",

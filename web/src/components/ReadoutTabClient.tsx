@@ -712,7 +712,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             </thead>
             <tbody>
               {damageSort.sorted.map((p, i) => (
-                <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
+                <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "var(--row-stripe)" }}>
                   <IdentityCells player={p} roleTooltips={ROLE_TOOLTIPS} />
                   <td style={TD_STYLE}><DpsBar power={p.damage.dps_power} condi={p.damage.dps_condi} total={p.damage.dps_total} /></td>
                   <td style={TD_STYLE}>{p.damage.strips}</td>
@@ -747,7 +747,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             </thead>
             <tbody>
               {healSort.sorted.map((p, i) => (
-                <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
+                <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "var(--row-stripe)" }}>
                   <IdentityCells player={p} roleTooltips={ROLE_TOOLTIPS} />
                   <td style={TD_STYLE}><HealBar hps={p.heal.hps} bps={p.heal.barrier_ps} total={p.heal.heal_total ?? 0} /></td>
                   <td style={TD_STYLE}>{p.heal.cleanses}</td>
@@ -802,7 +802,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             </thead>
             <tbody>
               {boonSort.sorted.map((p, i) => (
-                <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
+                <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "var(--row-stripe)" }}>
                   <IdentityCells player={p} roleTooltips={ROLE_TOOLTIPS} />
                   {BOONS.map((b) => {
                     const boons = p.boons as unknown as Record<string, number | null>;
@@ -850,7 +850,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
             </thead>
             <tbody>
               {defenseSort.sorted.map((p, i) => (
-                <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)" }}>
+                <tr key={p.agent_id} style={{ background: i % 2 === 0 ? "transparent" : "var(--row-stripe)" }}>
                   <IdentityCells player={p} roleTooltips={ROLE_TOOLTIPS} />
                   <td style={TD_STYLE}>{p.defense.damage_taken.toLocaleString()}</td>
                   <td style={TD_STYLE}>{p.defense.dodges}</td>

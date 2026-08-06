@@ -369,7 +369,7 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
           alignItems: "center",
           justifyContent: "center",
           height: 420,
-          color: "var(--muted-foreground)",
+          color: "var(--foreground-muted)",
           fontSize: 14,
         }}
       >
@@ -401,7 +401,7 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
           alignItems: "center",
           justifyContent: "center",
           height: 420,
-          color: "var(--muted-foreground)",
+          color: "var(--foreground-muted)",
           fontSize: 14,
         }}
       >
@@ -479,7 +479,7 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
         <span
           style={{
             fontSize: 13,
-            color: "var(--muted-foreground)",
+            color: "var(--foreground-muted)",
             fontVariantNumeric: "tabular-nums",
             minWidth: 60,
             textAlign: "right",
@@ -496,7 +496,7 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
           flexWrap: "wrap",
           gap: "4px 12px",
           fontSize: 12,
-          color: "var(--muted-foreground)",
+          color: "var(--foreground-muted)",
         }}
       >
         {Object.entries(PROFESSION_COLORS).map(([prof, color]) => (

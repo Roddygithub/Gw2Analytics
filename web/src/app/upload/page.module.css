@@ -156,7 +156,7 @@
 }
 
 .error {
-  color: #ff6e6e;
+  color: var(--error);
   font-size: 14px;
   margin: 0;
 }
@@ -372,7 +372,7 @@
    carry the alarming red colour (it's a "we gave up after 30s,
    try again" message, not a hard failure). */
 .warn {
-  color: #ffb86b;
+  color: var(--warning);
   font-size: 14px;
   margin: 0;
 }

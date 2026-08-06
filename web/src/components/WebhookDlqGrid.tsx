@@ -9,7 +9,7 @@ import type { WebhookDlqRow } from "@/lib/api";
 import { replayDlq } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 
-import { appGridTheme } from "./ag-grid-setup";
+import { appGridOptions, appGridTheme } from "./ag-grid-setup";
 import styles from "./WebhookDlqGrid.module.css";
 
 const GRID_CONTAINER_STYLE: React.CSSProperties = {
@@ -114,6 +114,7 @@ export function WebhookDlqGrid({ rows }: { rows: WebhookDlqRow[] }) {
     <div style={GRID_CONTAINER_STYLE}>
       <AgGridReact<WebhookDlqRow>
         theme={appGridTheme}
+        {...appGridOptions}
         rowData={rows}
         columnDefs={columnDefs}
         defaultColDef={defaultColDef}
