@@ -334,6 +334,34 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         cc_events=cc_events,
     )
     down_by_source = {row.source_agent_id: row for row in down_rows}
+
+    # A split account's entries each carry their own slice of the fight, and
+    # EI's down-contribution counters follow that split -- for
+    # krill le faucheur.1679 on 20260125-194936 the three slices report 0 /
+    # 1894 / 11441, summing to the 13335 the whole-fight row holds. The
+    # damage events feeding statsAll are already sliced; the down row was
+    # not, so every slice of a split account reported the whole-fight total.
+    # Cached per window because entries of one account share a slice shape
+    # and the aggregation walks the whole event stream.
+    sliced_down_cache: dict[tuple[int, int], dict[int, object]] = {}
+
+    def down_rows_for_slice(lo: int, hi: int) -> dict[int, object]:
+        cached = sliced_down_cache.get((lo, hi))
+        if cached is None:
+            rows = DownContributionAggregator().aggregate(
+                [event for event in actor_damage_events if lo <= event.time_ms <= hi],
+                [event for event in down_events if lo <= event.time_ms <= hi],
+                [event for event in death_events if lo <= event.time_ms <= hi],
+                duration_ms / 1000,
+                health_events=[event for event in health_events if lo <= event.time_ms <= hi],
+                up_events=[event for event in up_events if lo <= event.time_ms <= hi],
+                outcome_events=[event for event in outcome_events if lo <= event.time_ms <= hi],
+                cc_events=[event for event in cc_events if lo <= event.time_ms <= hi],
+            )
+            cached = {row.source_agent_id: row for row in rows}
+            sliced_down_cache[(lo, hi)] = cached
+        return cached
+
     agents_by_account = {
         agent.account_name.lstrip(":"): agent for agent in fight.agents if agent.account_name
     }
@@ -613,7 +641,9 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             stats_values = _damage_stats(
                 actor_damage,
                 source_cc,
-                down_by_source.get(agent.id),
+                (
+                    down_by_source if whole_fight_slice else down_rows_for_slice(slice_lo, slice_hi)
+                ).get(agent.id),
                 noncritable_skill_ids,
                 condition_skill_ids,
             )
