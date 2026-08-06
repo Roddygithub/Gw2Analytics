@@ -4,11 +4,11 @@ Measured with `uv run python scripts/ei-parity/ei_diff.py` over the 35-log corpu
 Setup and probes: `docs/ei-parity-workbench.md`. Findings so far:
 `docs/parser-audit-2026-07-31.md`.
 
-**Scoreboard: 632 differences** over the 35-log corpus (2026-08-06).
+**Scoreboard: 583 differences** over the 35-log corpus (2026-08-06).
 Per-session history in `SESSION.md`.
 
 Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → 711 → 690 →
-644 → 635 → **632**.
+644 → 635 → 632 → **583**.
 
 `rotation` is reported twice: a bucket count of player *rows*, and the cast
 counts under the total. Judge any rotation change on the casts — a partial
@@ -71,6 +71,14 @@ logs. The committed corpus is 35; always run the harness with no arguments.
 - [x] **`UsingNoAnimatedCastChecker` ported properly** for the guardian
       symbol traits (13684, 13677) — a cast-*window* test, not "a cast is
       open right now". 19 spurious casts dropped.
+- [x] **`BuffStackActiveEvent` now reaches the buff tracker.** The
+      `Activate` path existed but `ei_compare` never delivered the events,
+      so regeneration's queue was never reordered. 185 → 141 buff diffs.
+- [x] **The two `Activate` overloads separated.** Only the explicit
+      stack-active record gets EI's richer rule (replace a nearly-spent
+      active stack, pin `noSort`); an `addedActive` apply just moves its
+      stack to the front. `noSort` is now tracker-wide, matching EI's
+      shared static `HealingLogic`.
 - [x] **Base attunement skills are no longer booked for a Weaver.** EI books
       weaver dual-attunement swaps as separate skills and never the base
       one; confirmed corpus-wide on all four elements. 36 spurious casts
@@ -120,13 +128,20 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       buffs a weaver holds (`WeaverHelper.GetLastAttunement`). We now drop
       the base-attunement casts for weavers rather than mislabel them, so
       these sit squarely in the missing column.
-- [ ] **`buffUptimes` (185)** — 120 of the pre-session 204 were Regeneration.
-      Note the brief's premise is wrong: EI is *lower* in 80 cases and higher in
-      40, median |delta| 0.053, and only 32 of 204 exceed 2. Port EI's
-      `HealingLogic` (`BuffStackType.Regeneration`, capacity 5) faithfully:
-      `Activate` / `FindLowestValue`, replace by overrideStackID, else min
-      |TotalDuration - overrideDuration|, else last. Validate with
-      `scripts/ei-parity/probe_buff_ei.py` on one player before the corpus.
+- [ ] **`buffUptimes` (136)** — 67 are Regeneration, 24 of them under 0.1.
+      The queue model is confirmed correct (a plain FIFO replay of
+      `Ver.5187` on `20260526-202841` lands at 81.839 % against EI's
+      81.941 %); the residual is the **eviction victim** once `Activate`
+      reorders the queue — the same player through the tracker gives
+      66.668 %. Next step: instrument which stack each model evicts on that
+      player's three capacity-5 overflows. Blocked input, and a parser-level
+      gap: `parse_events` drops every uncredited regeneration remove-single
+      (`iff == 2 and dst_agent == 0`, 594 of them on that log). EI drops
+      them from the simulation too but keeps the last one to drive
+      `FindLowestValue` — an apply within 10 ms replaces the stack carrying
+      that buff instance, else the one with the closest duration. That
+      override cannot be written until the records reach the analytics
+      layer. The rest of the bucket: might 23, swiftness 13, stability 9.
 - [ ] **`statsTargets.againstDownedCount` (24) + `statsTargets.downContribution`
       (22)** — the per-target rows already slice their inputs, so this is a
       different cause from the `statsAll` one fixed in #132. Dump the events we

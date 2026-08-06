@@ -141,7 +141,6 @@ class _BuffStack:
         self.expirations: list[int | None] = []
         self.stack_ids: list[int] = []
         self.healing_scores: list[int] = []
-        self.no_sort = False
         self.last_time_ms: int = 0
         self.cumulative_stack_ms: int = 0
         self.name: str = name
@@ -182,6 +181,13 @@ class BuffStateTracker:
         )
         self._start_time_ms = start_time_ms
         self._healing_by_agent = healing_by_agent or {}
+        # Elite Insights keeps its HealingLogic on a single shared instance,
+        # so the first stack-active record anywhere in the log latches its
+        # "stop sorting" flag for *every* actor, permanently. The flag is
+        # therefore tracker-wide rather than per (agent, buff): scoping it
+        # per player leaves regeneration sorted long after EI stopped, and
+        # a differently ordered queue evicts a different stack on overflow.
+        self._healing_no_sort = False
 
     def _get_stack(self, agent_id: int, buff_name: str) -> _BuffStack:
         """Get or create the stack tracker for (agent, buff)."""
@@ -270,7 +276,7 @@ class BuffStateTracker:
                     stack.expirations.insert(0, expiry)
                     stack.stack_ids.insert(0, stack_id)
                     stack.healing_scores.insert(0, healing)
-                stack.no_sort = True
+                self._healing_no_sort = True
             return
         if isinstance(event, BuffApplyEvent):
             self._process_buff_apply(event)
@@ -328,7 +334,7 @@ class BuffStateTracker:
                     target_tracker.expirations.append(new_duration)
                     target_tracker.stack_ids.append(event.stack_id)
                     target_tracker.healing_scores.append(new_healing)
-                if not target_tracker.no_sort:
+                if not self._healing_no_sort:
                     pairs = sorted(
                         zip(
                             target_tracker.expirations,
@@ -342,20 +348,18 @@ class BuffStateTracker:
                     target_tracker.expirations = [expiry for expiry, _, _ in pairs]
                     target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs]
                     target_tracker.healing_scores = [healing for _, _, healing in pairs]
-                if event.added_active:
-                    target_tracker.no_sort = True
+                if event.added_active and event.stack_id in target_tracker.stack_ids:
+                    # An apply flagged active only moves its stack to the
+                    # front. Elite Insights reaches the richer rule -- replace
+                    # a nearly-spent active stack, and pin the ordering with
+                    # ``no_sort`` -- through the *other* Activate overload,
+                    # which only the explicit stack-active record calls.
                     new_index = target_tracker.stack_ids.index(event.stack_id)
-                    expiry = target_tracker.expirations.pop(new_index)
-                    stack_id = target_tracker.stack_ids.pop(new_index)
-                    healing = target_tracker.healing_scores.pop(new_index)
-                    if target_tracker.expirations and (target_tracker.expirations[0] or 0) < 50:
-                        target_tracker.expirations[0] = expiry
-                        target_tracker.stack_ids[0] = stack_id
-                        target_tracker.healing_scores[0] = healing
-                    else:
-                        target_tracker.expirations.insert(0, expiry)
-                        target_tracker.stack_ids.insert(0, stack_id)
-                        target_tracker.healing_scores.insert(0, healing)
+                    target_tracker.expirations.insert(0, target_tracker.expirations.pop(new_index))
+                    target_tracker.stack_ids.insert(0, target_tracker.stack_ids.pop(new_index))
+                    target_tracker.healing_scores.insert(
+                        0, target_tracker.healing_scores.pop(new_index)
+                    )
             else:
                 target_tracker.expirations.append(event.duration_ms or None)
                 target_tracker.stack_ids.append(event.stack_id)
@@ -499,7 +503,6 @@ class BuffStateTracker:
             snapshot.expirations = stack.expirations.copy()
             snapshot.stack_ids = stack.stack_ids.copy()
             snapshot.healing_scores = stack.healing_scores.copy()
-            snapshot.no_sort = stack.no_sort
             snapshot.last_time_ms = stack.last_time_ms
             snapshot.cumulative_stack_ms = stack.cumulative_stack_ms
             self._advance(snapshot, min(duration_ms, active_duration_ms or duration_ms))

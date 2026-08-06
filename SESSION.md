@@ -8,7 +8,7 @@ committed 35-log corpus). Setup: `docs/ei-parity-workbench.md`.
 
 ---
 
-## 2026-08-06 — 690 → 632
+## 2026-08-06 — 690 → 583
 
 Two passes, one decision: stop inferring the instant-cast rules and
 read them out of Elite Insights' sources. Nine finders transcribed, each
@@ -120,6 +120,59 @@ registers: 55 spurious casts came off with the bucket moving by 3.
 
 Deriving the weaver swaps themselves is left undone, so they stay in the
 missing column — that is the honest position, and it is visible.
+
+### Fourth pass: regeneration — 632 → 583
+
+`buffUptimes` 185 → 136, of which regeneration 116 → 67. Two changes, both
+read off EI's `HealingLogic` / `BuffSimulatorDuration`.
+
+- **`BuffStackActiveEvent` never reached the tracker (−44).** `process`
+  has handled it since the stack-id work, but `ei_compare` filtered the
+  event stream to apply / extension events only, so the whole `Activate`
+  path was dead. Regeneration is a queue where only the front stack burns
+  down and the rest wait, so activating a queued stack changes which
+  duration is spent — and on `20260526-202841` alone that stream carries
+  308 of these records.
+- **The two `Activate` overloads are not the same rule (−5).** EI reaches
+  the richer one — replace a nearly-spent active stack, and pin the
+  ordering with `noSort` — only from the explicit stack-active record.
+  An apply flagged `addedActive` goes through `QueueLogic.Activate`, which
+  just moves the stack to the front. We were applying the richer rule to
+  both, which pinned `noSort` from the first apply onwards.
+
+`noSort` is now tracker-wide rather than per (agent, buff), matching EI:
+its `HealingLogic` lives on a single `static readonly` instance, so the
+first stack-active record anywhere in the log latches the flag for every
+actor, permanently. On this corpus it changes nothing — the latch fires
+early either way — but the scope is now the one EI actually has.
+
+### Where regeneration still stands, precisely
+
+67 differences left, 24 of them under 0.1. The 19 above 2 concentrate on
+`20260526-202841`, and the cause is now located rather than guessed:
+
+- Our queue model **is** EI's. `BuffSimulatorDuration.Update` burns
+  `BuffStack[0]` and shifts the rest, which is what `_advance` does.
+- A plain FIFO replay of `Ver.5187` on that log lands at **81.839 %**
+  against EI's **81.941 %** — the model reproduces EI to a tenth of a
+  point when nothing reorders the queue.
+- The same player through the tracker lands at **66.668 %**. The gap is
+  the reordering: once `Activate` moves stacks to the front, overflow at
+  capacity 5 evicts a different stack, and evicting a long one costs its
+  whole remaining duration.
+
+So the next step is not another rule — it is to instrument which stack
+each model evicts on that player's three overflows.
+
+One input is missing for that, and it is a parser-level gap worth naming:
+**we drop every uncredited regeneration remove-single.** The raw stream
+for `20260526-202841` carries 594 of them (statechange 71, buffremove 2);
+`parse_events` skips them with `iff == 2 and dst_agent == 0`, matching EI's
+`OverstackOrNaturalEnd`. EI excludes them from the *simulation* too, but
+keeps the last one to drive `FindLowestValue`: an apply landing within 10
+ms of such a removal replaces the stack with that buff instance, or failing
+that the one whose duration is closest. That override is currently
+unimplementable here because the records never leave the parser.
 
 ### Open, and deliberately left: 29560 Spiteful Spirit
 

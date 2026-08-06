@@ -12,7 +12,12 @@ from gw2_analytics.buff_state import (
     TRACKED_BUFFS,
     BuffStateTracker,
 )
-from gw2_core import BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent
+from gw2_core import (
+    BoonApplyEvent,
+    BuffApplyEvent,
+    BuffExtensionEvent,
+    BuffStackActiveEvent,
+)
 
 
 def _boon_apply(
@@ -404,3 +409,42 @@ class TestBuffStateTracker:
         )
 
         assert tracker.compute_player_uptimes(1, 10_000)["protection"] == pytest.approx(50.0)
+
+
+def test_regeneration_stack_active_record_moves_the_stack_to_the_front() -> None:
+    """An explicit stack-active record activates a queued regeneration stack.
+
+    Regeneration is a queue: only the front stack burns down, the rest wait.
+    Activating a queued stack therefore changes which duration is spent
+    first, and Elite Insights latches "stop sorting" off the back of it.
+    """
+    tracker = BuffStateTracker()
+
+    def apply(time_ms: int, duration_ms: int, stack_id: int) -> BoonApplyEvent:
+        return BoonApplyEvent(
+            time_ms=time_ms,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            duration_ms=duration_ms,
+            stacks=1,
+            stack_id=stack_id,
+        )
+
+    tracker.process(apply(0, 1_000, 11))
+    tracker.process(apply(0, 5_000, 22))
+    assert tracker._healing_no_sort is False
+
+    tracker.process(
+        BuffStackActiveEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            stack_id=22,
+        )
+    )
+    assert tracker._healing_no_sort is True
+
+    # The long stack now burns first, so a 3 s window is fully covered.
+    assert tracker.compute_player_uptimes(7, 3_000)["regeneration"] == 100.0
