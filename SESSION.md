@@ -8,7 +8,7 @@ committed 35-log corpus). Setup: `docs/ei-parity-workbench.md`.
 
 ---
 
-## 2026-08-06 — 690 → 533
+## 2026-08-06 — 690 → 489
 
 Two passes, one decision: stop inferring the instant-cast rules and
 read them out of Elite Insights' sources. Nine finders transcribed, each
@@ -222,6 +222,35 @@ and only 2 above 2 points. `buffUptimes` 136 → 86, corpus 583 → 533.
 
 Might (740, 23 differences) is now the largest buff bucket, ahead of
 regeneration.
+
+### Sixth pass: the downed segment that never opens — 533 → 489
+
+`downContribution` was the next family by size, and its rule is
+`IsDownBeforeNext90`: at the moment of the hit the target is at or below
+90 % health, is not already downed, will go down before the log ends, and
+does not pass back above 90 % before that down.
+
+We had all of that. What we did not have is what happens *before* the
+rule runs. Elite Insights builds one downed **segment** per down event
+and keeps it only when `start < end`, so an actor that dies on the same
+millisecond it goes down has **no downed segment at all** — and
+`IsDownBeforeNext90` then finds no next down and returns false for every
+hit that took it there.
+
+On `20260129-110256`, target `inst 7121` downs and dies at 142866 exactly.
+EI credits zero down-contribution to it from anyone; we credited 16 838
+to `Amazing Grace.2309` alone, which was that player's entire
+`statsAll.downContribution` gap. The backlog had this recorded as a
+one-off oddity — "the only target in that log with `downCount > 0` and no
+contribution" — and it turns out to be a rule.
+
+`statsAll.downContribution` 25 → 9, `statsTargets.downContribution` 22 →
+6, and the four `appliedCrowdControl*DownContribution` buckets came down
+with them, since they test the same predicate.
+
+`againstDownedCount` (24 + 21) did **not** move: it reads the damage
+record's own against-downed flag rather than this predicate, so it is a
+separate problem.
 
 ### Open, and deliberately left: 29560 Spiteful Spirit
 

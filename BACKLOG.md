@@ -4,11 +4,11 @@ Measured with `uv run python scripts/ei-parity/ei_diff.py` over the 35-log corpu
 Setup and probes: `docs/ei-parity-workbench.md`. Findings so far:
 `docs/parser-audit-2026-07-31.md`.
 
-**Scoreboard: 533 differences** over the 35-log corpus (2026-08-06).
+**Scoreboard: 489 differences** over the 35-log corpus (2026-08-07).
 Per-session history in `SESSION.md`.
 
 Trajectory: 23 830 (2026-07-31 audit) → 4 503 → 1 116 → 798 → 711 → 690 →
-644 → 635 → 632 → 583 → **533**.
+644 → 635 → 632 → 583 → 533 → **489**.
 
 `rotation` is reported twice: a bucket count of player *rows*, and the cast
 counts under the total. Judge any rotation change on the casts — a partial
@@ -84,6 +84,10 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       which stack an application displaced are dropped from the event stream
       — as they are in EI — but recovered as a side input. Regeneration
       116 → 17 over the session. 583 → 533.
+- [x] **A down that coincides with the death earns no contribution.** EI
+      keeps a downed segment only when `start < end`, so such a down has no
+      segment and `IsDownBeforeNext90` returns false for every hit that led
+      to it. 533 → 489.
 - [x] **Base attunement skills are no longer booked for a Weaver.** EI books
       weaver dual-attunement swaps as separate skills and never the base
       one; confirmed corpus-wide on all four elements. 36 spurious casts
@@ -147,16 +151,15 @@ logs. The committed corpus is 35; always run the harness with no arguments.
       corpus on every tracked boon except **alacrity** (we default to 9, the
       logs declare 99). No current difference depends on it, so this is
       correctness rather than parity.
-- [ ] **`statsTargets.againstDownedCount` (24) + `statsTargets.downContribution`
-      (22)** — the per-target rows already slice their inputs, so this is a
-      different cause from the `statsAll` one fixed in #132. Dump the events we
-      include that EI does not.
-- [ ] **`statsTargets.downContribution` residual** — one narrow case found and
-      left: on `20260129-110256`, target inst 7121 (`Firebrand pl-7121`) has
-      `downCount=1` yet EI credits **zero** down-contribution to it from any
-      player, while we credit six. It is the only target in that log with
-      `downCount > 0` and no contribution, so it is an edge case rather than a
-      rule.
+- [ ] **`againstDownedCount` (24 per-target + 21 `statsAll`)** — now the
+      head of this family, and untouched by the downed-segment fix: it reads
+      the damage record's own against-downed flag rather than
+      `IsDownBeforeNext90`. EI counts it in
+      `OffensiveStatistics` alongside `DownContribution`; read that loop
+      before changing anything.
+- [ ] **`downContribution` residual (9 + 6)** — the `inst 7121` oddity
+      recorded here turned out to be the down-on-death rule and is fixed.
+      What is left has not been characterised.
 - [ ] **`group` (7)**, **`consumables`**, float residuals — long tail.
 
 ## Still open from earlier passes

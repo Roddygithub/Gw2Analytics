@@ -130,7 +130,9 @@ class DownContributionAggregator:
 
         stats: dict[int, _DownAccumulator] = defaultdict(_DownAccumulator)
         if health_events:
-            windows = self._pre_down_windows(health_events, down_events, up_events or [])
+            windows = self._pre_down_windows(
+                health_events, down_events, up_events or [], death_events
+            )
             for damage in damage_events:
                 acc = stats[damage.source_agent_id]
                 if damage.against_downed and damage.damage > 0:
@@ -171,12 +173,26 @@ class DownContributionAggregator:
         health_events: list[HealthUpdateEvent],
         down_events: list[DownEvent],
         up_events: list[UpEvent],
+        death_events: list[DeathEvent],
     ) -> dict[int, list[tuple[int, int]]]:
         health_by_target: dict[int, list[HealthUpdateEvent]] = defaultdict(list)
         for event in health_events:
             health_by_target[event.source_agent_id].append(event)
+        # Elite Insights builds a downed *segment* per down event and drops
+        # any whose start is not strictly before its end, so an actor that
+        # dies on the same millisecond it goes down has no downed segment at
+        # all -- and therefore earns nobody a down contribution. The rule
+        # reads like an implementation detail and behaves like one, but it
+        # is load-bearing: it is the whole gap on ``20260129-110256``.
+        instant_deaths: dict[int, set[int]] = defaultdict(set)
+        for death in death_events:
+            instant_deaths[death.source_agent_id].add(death.time_ms)
+        for up in up_events:
+            instant_deaths[up.source_agent_id].discard(up.time_ms)
         windows: dict[int, list[tuple[int, int]]] = defaultdict(list)
         for down in down_events:
+            if down.time_ms in instant_deaths.get(down.source_agent_id, ()):
+                continue
             start: int | None = None
             last_up = max(
                 (

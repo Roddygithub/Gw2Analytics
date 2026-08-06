@@ -350,3 +350,42 @@ class TestDownContributionAggregator:
         assert row.source_agent_id == 1
         assert row.down_contribution_dps == 10.0
         assert row.kills == 1
+
+
+def test_down_on_the_same_millisecond_as_death_earns_no_contribution() -> None:
+    """A downed segment that never opens credits nobody.
+
+    Elite Insights builds one segment per down event and keeps it only
+    when its start is strictly before its end, so an actor that dies on
+    the millisecond it goes down has no downed segment -- and the damage
+    that took it there is not down contribution.
+    """
+    damage = [
+        DamageEvent(
+            time_ms=900,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=42,
+            damage=500,
+        )
+    ]
+    health = [
+        HealthUpdateEvent(
+            time_ms=800, source_agent_id=7, target_agent_id=0, skill_id=0, health_percent=40.0
+        )
+    ]
+    down = [DownEvent(time_ms=1_000, source_agent_id=7, target_agent_id=0, skill_id=0)]
+
+    def contribution(death_time_ms: int) -> int:
+        rows = DownContributionAggregator().aggregate(
+            damage,
+            down,
+            [DeathEvent(time_ms=death_time_ms, source_agent_id=7, target_agent_id=0, skill_id=0)],
+            duration_s=10.0,
+            health_events=health,
+        )
+        return next((row.down_contribution_damage for row in rows if row.source_agent_id == 1), 0)
+
+    assert contribution(1_000) == 0
+    # One millisecond later the segment exists, and so does the credit.
+    assert contribution(1_001) == 500
