@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,19 +13,28 @@ from gw2_core import (
     BoonApplyEvent,
     DamageEvent,
     EffectEvent,
+    EliteSpec,
     Event,
     HealingEvent,
     MissileEvent,
+    Profession,
     SkillActivationEvent,
     SpawnEvent,
     WeaponSwapEvent,
 )
 
+#: Engineer kit -> the bundle it puts on the bar, as reported by
+#: ``/v2/skills``. Elite Insights declares one ``EngineerKitFinder`` per kit
+#: and reads the same list off the API at runtime; swapping to the kit set
+#: and then casting one of its skills is what identifies the swap.
 _ENGINEER_KIT_BUNDLES = {
-    5802: {58090, 30521, 29547, 49045, 49082, 58104, 50444},
-    5933: {5934, 5935, 5965, 5936, 6102, 5937},
-    5927: {5928, 5929, 5930, 5931, 76493},
-    30800: {30371, 30885, 30307, 30121, 30032},
+    5802: {58090, 30521, 29547, 49045, 49082, 58104, 50444},  # Med Kit
+    5812: {5813, 5822, 5823, 5842, 76530},  # Bomb Kit
+    5904: {5905, 5992, 5995, 5996, 5998, 6175},  # Tool Kit
+    5927: {5928, 5929, 5930, 5931, 76493},  # Flamethrower
+    5933: {5934, 5935, 5965, 5936, 6102, 5937},  # Elixir Gun
+    6020: {5806, 5807, 5808, 5809, 5882, 6167, 6168, 6169, 6170, 6171},  # Grenade Kit
+    30800: {30371, 30885, 30307, 30121, 30032},  # Elite Mortar Kit
 }
 _INSTANT_CASTS_BY_BUFF = {
     29446: (30792, True),  # Reaper's Shroud, immediately before its weapon swap
@@ -167,7 +176,20 @@ _HEALING_CASTS = {
     72115,
 }
 _MISSILE_CASTS = {26261, 29889}
-_BEFORE_SWAP_BUFFS = {31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291}
+#: The four base attunement buffs. A Weaver swaps between *dual*
+#: attunements, which Elite Insights books as their own skills -- four real
+#: ids and twelve synthetic negative ones -- and it never books a base
+#: attunement skill for one. Confirmed corpus-wide: every other
+#: elementalist spec gets them, Weaver gets none of the four. We do not
+#: derive the weaver swaps yet, so those casts stay missing rather than
+#: being reported under the wrong skill.
+_ATTUNEMENT_BUFFS = {5575, 5580, 5585, 5586}
+_BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291}
+#: ``BuffLossCastFinder`` is typed on ``BuffRemoveAllEvent``, so a partial
+#: strip is not a cast. Only the entries verified against Elite Insights are
+#: listed; the rest keep the historical "any removal" behaviour until they
+#: are checked the same way.
+_BUFF_LOSS_REMOVE_ALL_ONLY = {29446}
 _AFTER_SWAP_BUFFS = {29703}
 _INSTANT_CASTS_BY_EFFECT = {
     "C4E8DD3234E0C647993857940ED79AC1": 29560,  # Spiteful Spirit
@@ -245,8 +267,34 @@ _INSTANT_CASTS_BY_EFFECT = {
     "1066BEACB107C743908D860DA2D59796": 71252,
     "E78ED095E97F1D4A8BEB901796449E2F": 10562,
 }
+#: Familiar skill -> the player skill Elite Insights credits to its owner,
+#: transcribed from ``EvokerHelper``'s ``MinionCastCastFinder`` entries. The
+#: familiar keeps its own cast; only the owner gains a second, instant one.
+#: EI gates these on its default 50 ms ICD, but never refreshes the window
+#: after an accepted cast, so the gate is dead there. It is applied normally
+#: here: the closest two familiar casts by one owner on the corpus are 1 042
+#: ms apart, so the two behaviours cannot diverge on real data.
+_MINION_CASTS = {
+    76882: 76643,  # Ignite
+    76709: 77225,  # Splash
+    76803: 77370,  # Zap
+    76925: 77226,  # Calcify
+}
+#: Shared by every guardian shout, so the skill is decided by what the shout
+#: applied to its caster rather than by the effect itself.
+_GUARDIAN_SHOUT_EFFECT = "122BA55CCDF2B643929F6C4A97226DC9"
+#: ``UsingDstBaseSpecChecker``: the effect must sit on its destination, and
+#: that destination must be of this base profession. Warriors emit the
+#: guardian shout effect too, and EI books nothing for them.
+_EFFECT_SPEC_GATE = {
+    _GUARDIAN_SHOUT_EFFECT: Profession.GUARDIAN,
+    "BFFE3477ECFA26458D69E93EE76EFF6B": Profession.ELEMENTALIST,
+}
+_AEGIS_BUFF = 743
+_STABILITY_BUFF = 1122
 _EFFECT_CASTS_BY_DST = {
-    "122BA55CCDF2B643929F6C4A97226DC9": 9153,
+    _GUARDIAN_SHOUT_EFFECT: 9153,
+    "BFFE3477ECFA26458D69E93EE76EFF6B": 5535,  # Cleansing Fire
     "95B52793B838524AB237EB9FED7834BF": -22,
     "F53E2CE3B06B934085D46FA59468477B": 10214,
     "EA9896A81DDF4843B18DBF6EE4F25E18": 12502,
@@ -263,6 +311,10 @@ _EFFECT_CASTS_BY_DST = {
     "B02D3D0FF0A4FC47B23B1478D8E770AE": -29,
 }
 _SECONDARY_EFFECTS = {
+    "BFFE3477ECFA26458D69E93EE76EFF6B": (
+        "61F5669F9FAC1F48B47635C9F3833CEF",
+        "ABF2332D28C7D6449A5B822E5714ADA4",
+    ),
     "FB78801BB31CAF488B55F2F57EF9B070": ("7535B4CB815232418B69092F3390A7AB",),
     "4A83F0B627B75C47894941C4D35BA89F": ("FBA4C4F041E78748AC1CA5FF5D37D2DA",),
     "03850757F14FD44A9998D4CAD71CC589": ("08E6D231507CDD458EDECF67D264228C",),
@@ -280,6 +332,20 @@ _SECONDARY_EFFECTS = {
     "AB2E22E7EE74DA4C87DA777C62E475EA": ("4C7A5E148F7FD642B34EE4996DDCBBAB",),
     "40C9F5FE5BD3BD449B5E48DF1E5FD348": ("1B3ACEE36F61DE42AB1C24BD33B5B5AD",),
 }
+#: ``UsingNoAnimatedCastChecker``: a trait that places the same symbol as a
+#: real skill must not be booked when the skill itself is being cast. The
+#: test is on the *cast window*, widened by a server delay at both ends --
+#: not merely on a cast still open at that instant.
+_NO_ANIMATED_CAST_GUARDS = {
+    # Lesser Symbol of Resolution. Only the first variant collides with
+    # Luminous Staff; the large one does not.
+    "98C9834C6381204A85DC67C375D135E4": (9146, 76708),
+    "13D0B65D73B5334D80824EE17B5C257E": (9146,),
+    # Lesser Symbol of Protection.
+    "8321373FA14B2B4B8761CDC6EEADB161": (9161,),
+    "E10D2D0DF7803146A69BBB5BD47944FC": (9161,),
+}
+_GUARDED_CAST_SKILLS = {skill for skills in _NO_ANIMATED_CAST_GUARDS.values() for skill in skills}
 _BASE_SKILL_BY_ENHANCED_EFFECT = {
     "71B04F91F9B3DF4A8954059FCFAD630E": 42949,
     "E725FC2FD486A84EBEAC403DB4DA30DE": 40485,
@@ -312,9 +378,23 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     clone_agent_ids: Collection[int] = (),
     ranger_pet_agent_ids: Collection[int] = (),
     siege_turtle_agent_ids: Collection[int] = (),
+    professions: Mapping[int, Profession] | None = None,
+    elite_specs: Mapping[int, EliteSpec] | None = None,
+    agent_id_by_instance: Mapping[int, int] | None = None,
 ) -> list[SkillCast]:
-    """Return completed, clipped casts ordered by fight-relative start time."""
+    """Return completed, clipped casts ordered by fight-relative start time.
+
+    ``professions`` and ``agent_id_by_instance`` gate the finders that need
+    to know *who* an agent is: a shout effect is told apart from another
+    profession's by its caster, and a familiar's cast is credited to the
+    owner named by the record's ``src_master_instid``. Both are optional so
+    hand-built event streams keep working; the finders that need them are
+    simply skipped when they are absent.
+    """
     event_list = list(events)
+    professions = professions or {}
+    elite_specs = elite_specs or {}
+    agent_id_by_instance = agent_id_by_instance or {}
     if not event_list:
         return []
     origin = start_time_ms if start_time_ms is not None else min(e.time_ms for e in event_list)
@@ -322,16 +402,30 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     swaps_by_agent: dict[int, list[WeaponSwapEvent]] = defaultdict(list)
     activations_by_agent: dict[int, list[SkillActivationEvent]] = defaultdict(list)
     spawn_owner_by_target: dict[int, int] = {}
+    cast_windows: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    open_casts: dict[tuple[int, int], int] = {}
     for indexed_event in event_list:
         if isinstance(indexed_event, WeaponSwapEvent):
             swaps_by_agent[indexed_event.source_agent_id].append(indexed_event)
         elif isinstance(indexed_event, SkillActivationEvent):
             activations_by_agent[indexed_event.source_agent_id].append(indexed_event)
+            if indexed_event.skill_id in _GUARDED_CAST_SKILLS:
+                window_key = (indexed_event.source_agent_id, indexed_event.skill_id)
+                if indexed_event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
+                    open_casts[window_key] = indexed_event.time_ms
+                else:
+                    start = open_casts.pop(
+                        window_key, indexed_event.time_ms - indexed_event.duration_ms
+                    )
+                    cast_windows[window_key].append((start, indexed_event.time_ms))
         elif isinstance(indexed_event, SpawnEvent):
             spawn_owner_by_target.setdefault(
                 indexed_event.target_agent_id,
                 indexed_event.source_agent_id,
             )
+    # A cast the log never closes still occupies its start instant.
+    for window_key, start in open_casts.items():
+        cast_windows[window_key].append((start, start))
     swap_times_by_agent = {
         agent_id: [swap.time_ms for swap in agent_swaps]
         for agent_id, agent_swaps in swaps_by_agent.items()
@@ -340,6 +434,13 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     casts: list[SkillCast] = []
     last_instant: dict[tuple[int, int], int] = {}
     active_buff_until: dict[tuple[int, int], int] = {}
+
+    def is_casting(agent_id: int, skill_id: int, time_ms: int, epsilon: int = 10) -> bool:
+        """Whether ``agent_id`` is inside a cast window of ``skill_id``."""
+        return any(
+            start - epsilon <= time_ms <= end + epsilon
+            for start, end in cast_windows.get((agent_id, skill_id), ())
+        )
 
     def nearby_events(time_ms: int, radius_ms: int) -> list[Event]:
         return event_list[
@@ -385,14 +486,19 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             key = (event.source_agent_id, event.skill_id)
             if event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
                 active[event.source_agent_id, event.skill_id] = event
-            elif start := active.pop(key, None):
-                cast_duration = event.time_ms - start.time_ms
+                owner_skill = _MINION_CASTS.get(event.skill_id)
+                if owner_skill is not None:
+                    owner = agent_id_by_instance.get(event.src_master_instid)
+                    if owner:
+                        add_instant(owner, owner_skill, event.time_ms)
+            elif pending := active.pop(key, None):
+                cast_duration = event.time_ms - pending.time_ms
                 if cast_duration > 1:
                     casts.append(
                         SkillCast(
                             source_agent_id=event.source_agent_id,
                             skill_id=event.skill_id,
-                            time_ms=start.time_ms - origin,
+                            time_ms=pending.time_ms - origin,
                             duration_ms=cast_duration,
                         )
                     )
@@ -447,13 +553,24 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             if mapped is not None and (
                 (event.skill_id == 73955 and event.kind == "apply" and already_active)
                 or (event.skill_id in {27581, 73955} and event.kind not in {"apply", "remove_all"})
+                or (
+                    event.kind != "apply"
+                    and event.skill_id in _BUFF_LOSS_REMOVE_ALL_ONLY
+                    and event.kind != "remove_all"
+                )
+                or (
+                    event.skill_id in _ATTUNEMENT_BUFFS
+                    and elite_specs.get(event.target_agent_id) is EliteSpec.WEAVER
+                )
             ):
                 mapped = None
             if mapped is not None:
                 mapped_time = event.time_ms
                 swap = nearby_swap(event.target_agent_id, event.time_ms)
                 if swap is not None and event.skill_id in _BEFORE_SWAP_BUFFS:
-                    mapped_time = swap.time_ms - 1
+                    # The earlier of the two: a cast already ahead of the swap
+                    # is left where it is rather than pushed onto it.
+                    mapped_time = min(swap.time_ms - 1, mapped_time)
                 elif swap is not None and event.skill_id in _AFTER_SWAP_BUFFS:
                     mapped_time = max(mapped_time, swap.time_ms + 1)
                 add_instant(event.target_agent_id, mapped, mapped_time)
@@ -539,32 +656,56 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     virtuoso_agent_ids if effect_skill_id == 68273 else mesmer_agent_ids
                 ):
                     continue
+                gate = _EFFECT_SPEC_GATE.get(event.guid)
+                if gate is not None and (
+                    not event.is_around_dst or professions.get(caster) is not gate
+                ):
+                    continue
                 needs_related = by_dst or event.guid in _SECONDARY_EFFECTS
                 needs_related = needs_related or event.guid in _MESMER_SHATTER_EFFECTS
                 related = nearby_events(event.time_ms, 9) if needs_related else []
-                if (
-                    event.guid == "122BA55CCDF2B643929F6C4A97226DC9"
-                    and sum(
-                        isinstance(other, BoonApplyEvent)
+                if event.guid == _GUARDIAN_SHOUT_EFFECT:
+                    # Every guardian shout shares one effect, so the skill is
+                    # read off what the caster granted itself: five-plus
+                    # stability stacks is "Stand Your Ground!", a 20-to-40
+                    # second aegis is "Advance!". Pure of Voice can extend a
+                    # shout's boons, which is why the aegis test is a window
+                    # and not an equality. No effect on the corpus satisfies
+                    # both, so the two are checked in sequence.
+                    self_applied = [
+                        other
+                        for other in related
+                        if isinstance(other, BoonApplyEvent)
                         and other.kind == "apply"
-                        and other.skill_id == 1122
                         and other.source_agent_id == caster
                         and other.target_agent_id == caster
-                        for other in related
-                    )
-                    < 5
+                    ]
+                    if sum(other.skill_id == _STABILITY_BUFF for other in self_applied) >= 5:
+                        effect_skill_id = 9153
+                    elif any(
+                        other.skill_id == _AEGIS_BUFF
+                        and other.duration_ms + 10 >= 20_000
+                        and other.duration_ms - 10 <= 40_000
+                        for other in self_applied
+                    ):
+                        effect_skill_id = 9084
+                    else:
+                        continue
+                guarded = _NO_ANIMATED_CAST_GUARDS.get(event.guid)
+                if guarded is not None and any(
+                    is_casting(caster, skill_id, event.time_ms) for skill_id in guarded
                 ):
                     continue
-                if event.guid in {
-                    "98C9834C6381204A85DC67C375D135E4",
-                    "13D0B65D73B5334D80824EE17B5C257E",
-                } and any((caster, skill_id) in active for skill_id in (9146, 76708)):
-                    continue
                 secondary = _SECONDARY_EFFECTS.get(event.guid, ())
+                # A secondary effect is matched on the finder's *key* agent,
+                # which for a by-dst finder is the effect's destination. The
+                # two are the same agent for a self-targeted effect, so this
+                # only starts to matter with the first by-dst entry.
                 related_guids = {
                     other.guid
                     for other in related
-                    if isinstance(other, EffectEvent) and other.source_agent_id == caster
+                    if isinstance(other, EffectEvent)
+                    and (other.target_agent_id if by_dst else other.source_agent_id) == caster
                 }
                 if not all(guid in related_guids for guid in secondary):
                     continue
@@ -585,15 +726,15 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 ):
                     add_instant(caster, effect_skill_id, event.time_ms)
 
-    for start in active.values():
+    for pending in active.values():
         casts.append(
             SkillCast(
-                source_agent_id=start.source_agent_id,
-                skill_id=start.skill_id,
-                time_ms=start.time_ms - origin,
+                source_agent_id=pending.source_agent_id,
+                skill_id=pending.skill_id,
+                time_ms=pending.time_ms - origin,
                 duration_ms=min(
-                    start.duration_ms,
-                    max(0, duration_ms - (start.time_ms - origin)),
+                    pending.duration_ms,
+                    max(0, duration_ms - (pending.time_ms - origin)),
                 ),
             )
         )

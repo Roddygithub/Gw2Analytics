@@ -20,6 +20,7 @@ from gw2_evtc_parser.parser import (
     read_zevtc_archive,
     read_zevtc_bytes,
     scan_agent_awareness,
+    scan_regeneration_overstacks,
 )
 from gw2_evtc_parser.statechange_dispatch import (
     STATE_CHANGE_BARRIER_UPDATE,
@@ -51,4 +52,5 @@ __all__ = [
     "read_zevtc_archive",
     "read_zevtc_bytes",
     "scan_agent_awareness",
+    "scan_regeneration_overstacks",
 ]

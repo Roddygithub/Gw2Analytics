@@ -21,7 +21,12 @@ EI_OUT = ROOT / ".tooling" / "ei-out"
 CORPUS = Path(__file__).resolve().parent / "corpus.txt"
 
 from gw2_analytics.ei_compare import compare_elite_insights  # noqa: E402
-from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive, scan_agent_awareness  # noqa: E402
+from gw2_evtc_parser import (  # noqa: E402
+    PythonEvtcParser,
+    read_zevtc_archive,
+    scan_agent_awareness,
+    scan_regeneration_overstacks,
+)
 
 _BRACKET = re.compile(r"\[[^\]]*\]")
 
@@ -48,12 +53,35 @@ def run_one(stem: str) -> dict[str, object]:
     parse_s = time.monotonic() - started
 
     expected = json.loads(ei_path.read_text())
-    result = compare_elite_insights(fight, expected, events, scan_agent_awareness(raw))
+    result = compare_elite_insights(
+        fight,
+        expected,
+        events,
+        scan_agent_awareness(raw),
+        scan_regeneration_overstacks(raw),
+    )
     diffs = result["differences"]
     if not isinstance(diffs, dict):  # pragma: no cover - contract of compare_elite_insights
         raise TypeError(f"expected a differences mapping, got {type(diffs).__name__}")
 
+    # ``rotation`` is one difference key per player carrying the whole cast
+    # list, so the bucket count only moves when a player's list matches
+    # *exactly*. Wiring a single instant-cast finder can remove dozens of
+    # missing casts and still show zero progress -- or hide a net regression,
+    # if it also adds spurious ones. Count both sides separately.
+    rotation_missing = 0
+    rotation_extra = 0
+    for key, value in diffs.items():
+        if not key.endswith(".rotation") or not isinstance(value, dict):
+            continue
+        expected_casts = {tuple(c) for c in value.get("expected") or ()}
+        actual_casts = {tuple(c) for c in value.get("actual") or ()}
+        rotation_missing += len(expected_casts - actual_casts)
+        rotation_extra += len(actual_casts - expected_casts)
+
     return {
+        "rotation_missing": rotation_missing,
+        "rotation_extra": rotation_extra,
         "stem": stem,
         "parse_seconds": round(parse_s, 2),
         "events": len(events),
@@ -93,7 +121,14 @@ def main() -> int:
             flush=True,
         )
 
+    missing = sum(int(r["rotation_missing"]) for r in reports)
+    extra = sum(int(r["rotation_extra"]) for r in reports)
     print(f"\n=== TOTAL {sum(grand.values())} differences across {len(reports)} logs ===")
+    if missing or extra:
+        print(
+            f"    (rotation: {missing} casts missing, {extra} extra -- the bucket "
+            f"below counts player rows, not casts)"
+        )
     for key, count in grand.most_common(args.top):
         print(f"{count:>8}  {key}")
 

@@ -12,7 +12,12 @@ from gw2_analytics.buff_state import (
     TRACKED_BUFFS,
     BuffStateTracker,
 )
-from gw2_core import BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent
+from gw2_core import (
+    BoonApplyEvent,
+    BuffApplyEvent,
+    BuffExtensionEvent,
+    BuffStackActiveEvent,
+)
 
 
 def _boon_apply(
@@ -404,3 +409,93 @@ class TestBuffStateTracker:
         )
 
         assert tracker.compute_player_uptimes(1, 10_000)["protection"] == pytest.approx(50.0)
+
+
+def test_regeneration_stack_active_record_moves_the_stack_to_the_front() -> None:
+    """An explicit stack-active record activates a queued regeneration stack.
+
+    Regeneration is a queue: only the front stack burns down, the rest wait.
+    Activating a queued stack therefore changes which duration is spent
+    first, and Elite Insights latches "stop sorting" off the back of it.
+    """
+    tracker = BuffStateTracker()
+
+    def apply(time_ms: int, duration_ms: int, stack_id: int) -> BoonApplyEvent:
+        return BoonApplyEvent(
+            time_ms=time_ms,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            duration_ms=duration_ms,
+            stacks=1,
+            stack_id=stack_id,
+        )
+
+    tracker.process(apply(0, 1_000, 11))
+    tracker.process(apply(0, 5_000, 22))
+    assert tracker._healing_no_sort is False
+
+    tracker.process(
+        BuffStackActiveEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            stack_id=22,
+        )
+    )
+    assert tracker._healing_no_sort is True
+
+    # The long stack now burns first, so a 3 s window is fully covered.
+    assert tracker.compute_player_uptimes(7, 3_000)["regeneration"] == 100.0
+
+
+def _regen_apply(time_ms: int, duration_ms: int, stack_id: int) -> BoonApplyEvent:
+    return BoonApplyEvent(
+        time_ms=time_ms,
+        source_agent_id=1,
+        target_agent_id=7,
+        skill_id=718,
+        duration_ms=duration_ms,
+        stacks=1,
+        stack_id=stack_id,
+    )
+
+
+def _fill_regen_queue(tracker: BuffStateTracker) -> None:
+    """Five stacks, longest last, so evicting the tail is expensive."""
+    for index, duration in enumerate((1_000, 1_000, 1_000, 1_000, 60_000)):
+        tracker.process(_regen_apply(0, duration, 100 + index))
+
+
+def test_regeneration_overstack_hint_names_the_displaced_stack() -> None:
+    """arcdps says which stack an application displaced; the queue obeys it.
+
+    Without the hint the sixth application evicts the tail -- here a 60 s
+    stack -- and the whole queue is worth barely a second afterwards.
+    """
+    tracker = BuffStateTracker(regen_overstacks={7: [(5, 1_000, 102)]})
+    _fill_regen_queue(tracker)
+    tracker.process(_regen_apply(10, 2_000, 999))
+
+    # The hint named instance 102, a 1 s stack, so the 60 s one survives.
+    assert tracker.compute_player_uptimes(7, 30_000)["regeneration"] == 100.0
+
+
+def test_regeneration_overstack_hint_falls_back_to_the_closest_duration() -> None:
+    """With no matching instance, the stack closest to the removed duration goes."""
+    tracker = BuffStateTracker(regen_overstacks={7: [(5, 1_000, 0)]})
+    _fill_regen_queue(tracker)
+    tracker.process(_regen_apply(10, 2_000, 999))
+
+    assert tracker.compute_player_uptimes(7, 30_000)["regeneration"] == 100.0
+
+
+def test_regeneration_without_a_hint_still_evicts_the_tail() -> None:
+    """A hint too far from the application is not one, and the tail goes."""
+    tracker = BuffStateTracker(regen_overstacks={7: [(5, 1_000, 102)]})
+    _fill_regen_queue(tracker)
+    tracker.process(_regen_apply(100, 2_000, 999))
+
+    # The 60 s stack was evicted, so the queue runs dry long before 30 s.
+    assert tracker.compute_player_uptimes(7, 30_000)["regeneration"] < 30.0

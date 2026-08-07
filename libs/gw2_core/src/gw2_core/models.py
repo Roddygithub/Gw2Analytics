@@ -919,6 +919,20 @@ class SkillActivationEvent(BaseEvent):
     activation: ActivationType
     duration_ms: int = Field(..., ge=0)
     expected_duration_ms: int = Field(..., ge=0)
+    src_master_instid: int = Field(
+        default=0,
+        ge=0,
+        le=0xFFFF,
+        description=(
+            "arcdps src_master_instid from cbtevent. Unlike damage and "
+            "healing records, an activation keeps its raw caster: a minion "
+            "casting its own skill must stay attributed to the minion, or "
+            "every pet ability would surface in its owner's rotation. The "
+            "owner is carried alongside instead, because Elite Insights "
+            "credits a handful of familiar skills to the owner through its "
+            "``MinionCastCastFinder``."
+        ),
+    )
 
 
 class WeaponSwapEvent(BaseEvent):

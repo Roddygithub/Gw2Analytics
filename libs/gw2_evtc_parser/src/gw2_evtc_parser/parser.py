@@ -1005,6 +1005,7 @@ class PythonEvtcParser:
                     activation=ActivationType(is_activation),
                     duration_ms=max(0, value),
                     expected_duration_ms=max(0, buff_dmg),
+                    src_master_instid=src_master_inst,
                 )
                 continue
             # Phase 9 step 2-EMIT-BRANCH (SHIPPED 2026-07-11, commit
@@ -2453,6 +2454,68 @@ def scan_agent_awareness(source: BinaryIO | bytes) -> dict[int, tuple[int, int]]
     }
 
 
+#: arcdps buff id for Regeneration. The only buff Elite Insights routes
+#: through its regeneration-specific stacking logic.
+_REGENERATION_BUFF_ID: Final[int] = 718
+#: Elite Insights ignores a removal shorter than this when recording the
+#: overstack hint (``ParserHelper.BuffSimulatorDelayConstant``).
+_BUFF_SIMULATOR_DELAY_MS: Final[int] = 15
+
+
+def scan_regeneration_overstacks(source: BinaryIO | bytes) -> dict[int, list[tuple[int, int, int]]]:
+    """Return ``{agent_id: [(time_ms, removed_duration_ms, buff_instance)]}``.
+
+    Regeneration is a capacity-5 queue, so an application that arrives
+    while the queue is full has to displace one of the stacks. arcdps says
+    which one: the game emits an *uncredited* single-removal -- no remover,
+    no target agent, which is how a natural end or an overstack is
+    reported -- immediately before the application that replaced it,
+    carrying the displaced stack's remaining duration and its buff
+    instance.
+
+    Those records are deliberately absent from ``parse_events``: Elite
+    Insights excludes them from the simulation too
+    (``IsBuffSimulatorCompliant``), and emitting them as ordinary removals
+    would drop stacks the simulator is still meant to hold. It keeps the
+    last one as a *hint* instead, which is what this scan reproduces --
+    the same split, from the same records.
+
+    Times are absolute, matching the event stream rather than
+    :func:`scan_agent_awareness`'s fight-relative spans, because the only
+    consumer pairs them against an application's ``time_ms``.
+
+    Only the EVTC2025+ wire is scanned. Older logs keep these removals in
+    the emitted stream, so nothing is missing there to recover.
+    """
+    data = _read_all(source)
+    build_str = data[BUILD_OFFSET : BUILD_OFFSET + 8].decode("ascii", errors="replace")
+    if _build_version_from_build_str(build_str) < 2025_00_00:
+        return {}
+    unpack = _EVENT_STRUCT_EVENTS_2025.unpack_from
+    cursor = _compute_post_skills_offset(data, is_evtc_2025=True)
+    end = len(data)
+
+    out: dict[int, list[tuple[int, int, int]]] = {}
+    while cursor + EVENT_SIZE <= end:
+        unpacked = unpack(data, cursor)
+        cursor += EVENT_SIZE
+        if unpacked[6] != _REGENERATION_BUFF_ID:
+            continue
+        # A single removal on either the legacy channel (statechange 0) or
+        # the 2026-05 one (statechange 71); uncredited means iff UNKNOWN
+        # with no target agent, exactly Elite Insights' OverstackOrNaturalEnd.
+        if unpacked[15] != 2 or unpacked[16] not in (0, 71):
+            continue
+        if unpacked[11] != 2 or unpacked[2] != 0:
+            continue
+        removed_duration = unpacked[3]
+        if removed_duration <= _BUFF_SIMULATOR_DELAY_MS:
+            continue
+        # On a removal the buff's holder is the record's source.
+        out.setdefault(unpacked[1], []).append((unpacked[0], removed_duration, unpacked[19]))
+    return out
+
+
 # Re-export the public header for downstream imports.
 __all__ = [
     "ACCOUNT_NAME_PREFIX",
@@ -2470,4 +2533,5 @@ __all__ = [
     "read_zevtc_archive",
     "read_zevtc_bytes",
     "scan_agent_awareness",
+    "scan_regeneration_overstacks",
 ]
