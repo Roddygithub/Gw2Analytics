@@ -38,11 +38,20 @@ _CONST_RE = re.compile(r"public\s+const\s+long\s+(\w+)\s*=\s*(-?\d+)\s*;")
 
 #: Finder types that credit a player rotation entry in the WvW context.
 _CORE_FINDERS = {
-    "DamageCastFinder", "EffectCastFinder", "EffectCastFinderByDst",
-    "BuffGainCastFinder", "BuffLossCastFinder", "BuffGiveCastFinder",
-    "BuffExtendCastFinder", "MinionCastCastFinder", "MinionSpawnCastFinder",
-    "MinionCommandCastFinder", "WeaponSwapCastFinder", "MissileCastFinder",
-    "MarkerCastFinder", "CheckedCastFinder",
+    "DamageCastFinder",
+    "EffectCastFinder",
+    "EffectCastFinderByDst",
+    "BuffGainCastFinder",
+    "BuffLossCastFinder",
+    "BuffGiveCastFinder",
+    "BuffExtendCastFinder",
+    "MinionCastCastFinder",
+    "MinionSpawnCastFinder",
+    "MinionCommandCastFinder",
+    "WeaponSwapCastFinder",
+    "MissileCastFinder",
+    "MarkerCastFinder",
+    "CheckedCastFinder",
 }
 
 

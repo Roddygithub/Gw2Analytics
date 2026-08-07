@@ -370,9 +370,7 @@ def _exit_shroud_rule(buff_ids: int | set[int]) -> Callable[[Log], list[tuple[in
     def rule(log: Log) -> list[tuple[int, int]]:
         hits = []
         for buff_id in buffs:
-            hits += _apply_icd(
-                [(e.target_agent_id, e.time_ms) for e in log.buff_losses[buff_id]]
-            )
+            hits += _apply_icd([(e.target_agent_id, e.time_ms) for e in log.buff_losses[buff_id]])
         return [(agent, log.before_weapon_swap(agent, time)) for agent, time in hits]
 
     return rule
@@ -496,7 +494,6 @@ RULES = {
     "stand-your-ground": (9153, rule_stand_your_ground),
     "cleansing-fire": (5535, rule_cleansing_fire),
     "evoker-familiars": (0, rule_evoker_familiars),
-
     # BuffLossCastFinder shroud/tome exits -- buff IDs read off SkillIDs.cs.
     "exit-death-shroud": (10585, _exit_shroud_rule(790)),
     "exit-harbinger-shroud": (62540, _exit_shroud_rule(59964)),
@@ -504,7 +501,6 @@ RULES = {
     "exit-celestial-avatar": (31411, _exit_shroud_rule(31508)),
     "exit-radiant-forge": (76616, _exit_shroud_rule(77142)),
     "stow-tome": (41380, _exit_shroud_rule({41493, 42404, 44291})),
-
     # BuffGainCastFinder(Skill, Buff) -- buff IDs read off SkillIDs.cs.
     "enter-reaper-shroud": (30792, _buff_gain_rule(29446)),
     "spectral-walk": (10685, _buff_gain_rule(53476)),
@@ -520,7 +516,6 @@ RULES = {
     "arcane-shield": (5641, _buff_gain_rule(5640)),
     "infusing-terror": (29958, _buff_gain_rule(30129)),
     "superior-sigil-of-severance": (43930, _buff_gain_rule(43930)),
-
     # EffectCastFinder(Skill, EffectGUID) -- GUIDs read off EffectGUIDs.cs.
     "deploy-water-jade-sphere": (62723, _effect_rule("6D7EB5747873484DAF29C01FA51FE175")),
     "deploy-air-jade-sphere": (62940, _effect_rule("A3C8A55C3E530140A7F99AAA1CBB4E09")),
@@ -531,7 +526,6 @@ RULES = {
     "necromancer-distress": (73116, _effect_rule("239BF9EA9B7B44BACC63B86DC49B0D0")),
     "form-dervish": (76818, _effect_rule("B0CF6359EBF9BF4EB94E1A2A347EE5ECD")),
     "symbiotic-shielding": (76613, _effect_rule("842F977C318FDC4F96C99C385C1D0672")),
-
     # DamageCastFinder(Skill) -- self-keyed on the skill's own damage.
     "mug": (13014, _damage_rule(13014)),
     "lightning-flash": (5536, _damage_rule(5536)),
@@ -542,16 +536,13 @@ RULES = {
     "focused-devastation": (73064, _damage_rule(73064)),
     "timebomb": (79359, _damage_rule(79359)),
     "unseen-sword": (62847, _damage_rule(62847)),
-
     # BuffGiveCastFinder(Skill, Buff).
     "vulture-stance": (40498, _buff_give_rule(44651)),
     "moa-stance": (45970, _buff_give_rule(45038)),
     "dolyak-stance": (45789, _buff_give_rule(41815)),
     "dimensional-aperture": (71792, _buff_give_rule(71890)),
-
     # MissileCastFinder(Skill), self-keyed on the missile's own skill.
     "blade-burst": (42163, _missile_rule(42163)),
-
     # More EffectCastFinder -- GUIDs resolved off EffectGUIDs.cs.
     "suffer": (30670, _effect_rule("6C8C388BCD26F04CA6618D2916B8D796")),
     "outrage": (30258, _effect_rule("AC32B7F7BB281B4D94713F180C44F322")),
