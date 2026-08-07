@@ -39,7 +39,7 @@ dependencies = [
     # in a separate process; the FastAPI app only enqueues jobs
     # via ``arq.create_pool``.
     "arq>=0.25",
-    "redis>=5.0,<8",
+    "redis>=8.1.0,<9",
     # Phase 6.1: OpenTelemetry tracing. Gated behind
     # ``OTEL_EXPORTER_OTLP_ENDPOINT``; when unset, ``init_otel`` is a
     # no-op and the import is lazy so the cold-startup footprint is
