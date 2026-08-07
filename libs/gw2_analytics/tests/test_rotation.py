@@ -1,3 +1,5 @@
+from typing import Any
+
 from gw2_analytics.rotation import build_skill_rotation
 from gw2_core import (
     ActivationType,
@@ -5,6 +7,7 @@ from gw2_core import (
     DamageEvent,
     EffectEvent,
     EliteSpec,
+    Event,
     HealingEvent,
     MissileEvent,
     Profession,
@@ -211,7 +214,9 @@ def test_build_skill_rotation_infers_engineer_kits_from_one_bundle_cast() -> Non
     ] == [(5927, 9, 0), (-2, 10, 0), (30800, 29, 0), (-2, 30, 0)]
 
 
-def _guardian_shout(origin: int, agent: int, boon: int, stacks: int, duration_ms: int) -> list:
+def _guardian_shout(
+    origin: int, agent: int, boon: int, stacks: int, duration_ms: int
+) -> list[Event]:
     """One shout effect plus the self-applied boons that identify the skill."""
     return [
         EffectEvent(
@@ -246,7 +251,7 @@ def test_guardian_shout_effect_splits_by_the_boons_it_applied() -> None:
     origin = 42_000_000
     guardians = {7: Profession.GUARDIAN}
 
-    def casts(events: list) -> list[tuple[int, int]]:
+    def casts(events: list[Event]) -> list[tuple[int, int]]:
         return [
             (cast.skill_id, cast.time_ms)
             for cast in build_skill_rotation(
@@ -301,7 +306,7 @@ def test_cleansing_fire_needs_both_secondary_effects_on_the_same_target() -> Non
     third = effect("ABF2332D28C7D6449A5B822E5714ADA4", 13, 7)
     elementalists = {7: Profession.ELEMENTALIST}
 
-    def casts(events: list) -> list[tuple[int, int]]:
+    def casts(events: list[Event]) -> list[tuple[int, int]]:
         return [
             (cast.skill_id, cast.time_ms)
             for cast in build_skill_rotation(
@@ -334,7 +339,7 @@ def test_familiar_cast_is_credited_to_the_owner_named_by_the_record() -> None:
         ),
     ]
 
-    def casts(**kwargs: object) -> list[tuple[int, int, int]]:
+    def casts(**kwargs: Any) -> list[tuple[int, int, int]]:
         return [
             (cast.source_agent_id, cast.skill_id, cast.time_ms)
             for cast in build_skill_rotation(
@@ -359,7 +364,7 @@ def test_engineer_kit_table_covers_the_three_kits_added_from_the_api() -> None:
     """
     origin = 42_000_000
     base = {"target_agent_id": 0, "source_agent_id": 7}
-    events = []
+    events: list[Event] = []
     for offset, bundle_skill in enumerate((5842, 5905, 5806)):
         events.append(
             WeaponSwapEvent(
@@ -409,7 +414,7 @@ def test_exit_reaper_shroud_needs_a_full_removal_and_lands_before_the_swap() -> 
     """
     origin = 42_000_000
 
-    def casts(events: list) -> list[tuple[int, int]]:
+    def casts(events: list[Event]) -> list[tuple[int, int]]:
         return [
             (cast.skill_id, cast.time_ms)
             for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
@@ -464,7 +469,7 @@ def test_symbol_trait_is_not_booked_while_the_real_skill_is_being_cast() -> None
     origin = 42_000_000
     guid = "8321373FA14B2B4B8761CDC6EEADB161"
 
-    def casts(events: list) -> list[int]:
+    def casts(events: list[Event]) -> list[int]:
         return [
             cast.time_ms
             for cast in build_skill_rotation(events, duration_ms=10_000, start_time_ms=origin)
@@ -501,7 +506,7 @@ def test_weaver_attunement_buff_is_not_booked_as_a_base_attunement() -> None:
         stacks=1,
     )
 
-    def casts(**kwargs: object) -> list[int]:
+    def casts(**kwargs: Any) -> list[int]:
         return [
             cast.skill_id
             for cast in build_skill_rotation(

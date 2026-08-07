@@ -491,14 +491,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     owner = agent_id_by_instance.get(event.src_master_instid)
                     if owner:
                         add_instant(owner, owner_skill, event.time_ms)
-            elif start := active.pop(key, None):
-                cast_duration = event.time_ms - start.time_ms
+            elif pending := active.pop(key, None):
+                cast_duration = event.time_ms - pending.time_ms
                 if cast_duration > 1:
                     casts.append(
                         SkillCast(
                             source_agent_id=event.source_agent_id,
                             skill_id=event.skill_id,
-                            time_ms=start.time_ms - origin,
+                            time_ms=pending.time_ms - origin,
                             duration_ms=cast_duration,
                         )
                     )
@@ -726,15 +726,15 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 ):
                     add_instant(caster, effect_skill_id, event.time_ms)
 
-    for start in active.values():
+    for pending in active.values():
         casts.append(
             SkillCast(
-                source_agent_id=start.source_agent_id,
-                skill_id=start.skill_id,
-                time_ms=start.time_ms - origin,
+                source_agent_id=pending.source_agent_id,
+                skill_id=pending.skill_id,
+                time_ms=pending.time_ms - origin,
                 duration_ms=min(
-                    start.duration_ms,
-                    max(0, duration_ms - (start.time_ms - origin)),
+                    pending.duration_ms,
+                    max(0, duration_ms - (pending.time_ms - origin)),
                 ),
             )
         )
