@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +29,7 @@ from gw2_core import (  # noqa: E402
     BoonApplyEvent,
     DamageEvent,
     EffectEvent,
+    MissileEvent,
     Profession,
     SkillActivationEvent,
     WeaponSwapEvent,
@@ -118,9 +120,12 @@ class Log:
         self.aegis_applies: list[BoonApplyEvent] = []
         self.stability_applies: list[BoonApplyEvent] = []
         self.casts_by_skill: dict[int, list[SkillActivationEvent]] = defaultdict(list)
-        self.shroud_losses: list[BoonApplyEvent] = []
+        self.buff_losses: dict[int, list[BoonApplyEvent]] = defaultdict(list)
+        self.buff_gains: dict[int, list[BoonApplyEvent]] = defaultdict(list)
         self.desert_shroud_losses: list[int] = []
         self.unholy_burst_hits: list[DamageEvent] = []
+        self.damage_by_skill: dict[int, list[DamageEvent]] = defaultdict(list)
+        self.missile_by_skill: dict[int, list[MissileEvent]] = defaultdict(list)
         self.swaps_by_agent: dict[int, list[int]] = defaultdict(list)
         self.symbol_activations: list[SkillActivationEvent] = []
         for event in self.events:
@@ -134,6 +139,10 @@ class Log:
             self._index_buff(event)
         elif isinstance(event, DamageEvent) and event.skill_id == UNHOLY_BURST:
             self.unholy_burst_hits.append(event)
+        elif isinstance(event, DamageEvent):
+            self.damage_by_skill[event.skill_id].append(event)
+        elif isinstance(event, MissileEvent):
+            self.missile_by_skill[event.skill_id].append(event)
         elif isinstance(event, SkillActivationEvent):
             if event.skill_id in EVOKER_FAMILIARS:
                 self.casts_by_skill[event.skill_id].append(event)
@@ -144,14 +153,14 @@ class Log:
 
     def _index_buff(self, event: BoonApplyEvent) -> None:
         if event.kind == "apply":
+            self.buff_gains[event.skill_id].append(event)
             if event.skill_id == AEGIS:
                 self.aegis_applies.append(event)
             elif event.skill_id == STABILITY:
                 self.stability_applies.append(event)
         elif event.kind == "remove_all":
-            if event.skill_id == REAPERS_SHROUD:
-                self.shroud_losses.append(event)
-            elif event.skill_id == DESERT_SHROUD:
+            self.buff_losses[event.skill_id].append(event)
+            if event.skill_id == DESERT_SHROUD:
                 self.desert_shroud_losses.append(event.time_ms)
 
     def before_weapon_swap(self, agent: int, time: int) -> int:
@@ -276,15 +285,108 @@ def rule_evoker_familiars(log: Log) -> list[tuple[int, int]]:
     return hits
 
 
+def _damage_rule(skill_id: int, icd: int = DEFAULT_ICD) -> Callable[[Log], list[tuple[int, int]]]:
+    """``DamageCastFinder(Skill)``: damage from Skill implies the skill was cast."""
+
+    def rule(log: Log) -> list[tuple[int, int]]:
+        return _apply_icd(
+            [(e.source_agent_id, e.time_ms) for e in log.damage_by_skill.get(skill_id, ())],
+            icd,
+        )
+
+    return rule
+
+
+def _effect_rule(guid: str, key_on: str = "src") -> Callable[[Log], list[tuple[int, int]]]:
+    """``EffectCastFinder(Skill, EffectGUID)``: one effect created books one cast.
+
+    ``key_on`` mirrors EI's choice of which agent the finder is indexed on:
+    ``"dst"`` for the ByDst variants, ``"src"`` otherwise. ``IsAroundDst``
+    finders only fire when the effect is around a destination.
+    """
+
+    def rule(log: Log) -> list[tuple[int, int]]:
+        hits = []
+        for effect in log.effects_by_guid.get(guid, ()):
+            if key_on == "dst" and not effect.is_around_dst:
+                continue
+            agent = effect.target_agent_id if key_on == "dst" else effect.source_agent_id
+            hits.append((agent, effect.time_ms))
+        return _apply_icd(hits)
+
+    return rule
+
+
+def _missile_rule(skill_id: int) -> Callable[[Log], list[tuple[int, int]]]:
+    """``MissileCastFinder(Skill)``: a missile of Skill implies the skill was cast."""
+
+    def rule(log: Log) -> list[tuple[int, int]]:
+        return _apply_icd(
+            [(e.source_agent_id, e.time_ms) for e in log.missile_by_skill.get(skill_id, ())]
+        )
+
+    return rule
+
+
+def _buff_give_rule(buff_id: int) -> Callable[[Log], list[tuple[int, int]]]:
+    """``BuffGiveCastFinder(Skill, Buff)``: the source gave the buff to another."""
+
+    def rule(log: Log) -> list[tuple[int, int]]:
+        hits = [
+            (e.source_agent_id, e.time_ms)
+            for e in log.buff_gains[buff_id]
+            if e.source_agent_id != e.target_agent_id
+        ]
+        return _apply_icd(hits)
+
+    return rule
+
+
+def _buff_gain_rule(buff_id: int) -> Callable[[Log], list[tuple[int, int]]]:
+    """``BuffGainCastFinder(Skill, BuffID)``: the buff is self-applied at cast."""
+
+    def rule(log: Log) -> list[tuple[int, int]]:
+        return [
+            (e.target_agent_id, e.time_ms)
+            for e in log.buff_gains[buff_id]
+            if e.source_agent_id == e.target_agent_id
+        ]
+
+    return rule
+
+
+def _exit_shroud_rule(buff_ids: int | set[int]) -> Callable[[Log], list[tuple[int, int]]]:
+    """``BuffLossCastFinder(_, BuffID).UsingBeforeWeaponSwap()``.
+
+    Only a *full* removal counts -- the finder is typed on
+    ``BuffRemoveAllEvent`` -- and the cast is pulled just ahead of the
+    weapon swap the exit triggers (reaper shroud, celestial avatar, beast
+    mode, photon forge, the tomes...). ``buff_ids`` is one buff or several,
+    e.g. the three Firebrand tomes all route through ``StowTome``. The ICD
+    is gated on the raw removal time, before that adjustment.
+    """
+    buffs = {buff_ids} if isinstance(buff_ids, int) else buff_ids
+
+    def rule(log: Log) -> list[tuple[int, int]]:
+        hits = []
+        for buff_id in buffs:
+            hits += _apply_icd([(e.target_agent_id, e.time_ms) for e in log.buff_losses[buff_id]])
+        return [(agent, log.before_weapon_swap(agent, time)) for agent, time in hits]
+
+    return rule
+
+
 def rule_exit_reaper_shroud(log: Log) -> list[tuple[int, int]]:
     """``BuffLossCastFinder(ExitReaperShroud, ReapersShroud).UsingBeforeWeaponSwap()``.
 
-    Only a *full* removal counts -- ``BuffLossCastFinder`` is typed on
-    ``BuffRemoveAllEvent`` -- and the cast is pulled just ahead of the
-    weapon swap that leaving shroud triggers. The ICD is gated on the raw
-    removal time, before that adjustment.
+    Kept under its own name because one corpus log books two exits while
+    EI books one; the shroud has a re-enter within the server-delay
+    ``UsingBeforeWeaponSwap`` half-window and EI's ICD drops the second.
+    The generic rule does the same only for the atomic case.
     """
-    hits = _apply_icd([(loss.target_agent_id, loss.time_ms) for loss in log.shroud_losses])
+    hits = _apply_icd(
+        [(loss.target_agent_id, loss.time_ms) for loss in log.buff_losses[REAPERS_SHROUD]]
+    )
     return [(agent, log.before_weapon_swap(agent, time)) for agent, time in hits]
 
 
@@ -350,6 +452,40 @@ def rule_lesser_symbol_of_protection(log: Log) -> list[tuple[int, int]]:
     return _apply_icd(hits)
 
 
+def rule_signet_of_air(log: Log) -> list[tuple[int, int]]:
+    """Union of EI's DamageCastFinder + EffectCastFinderByDst(SignetOfAir)."""
+    hits = [(e.source_agent_id, e.time_ms) for e in log.damage_by_skill.get(5572, ())]
+    hits += [
+        (e.target_agent_id, e.time_ms)
+        for e in log.effects_by_guid.get("30A96C0E559DBD489FEE36DA96CC374A", ())
+        if e.is_around_dst
+    ]
+    return _apply_icd(hits)
+
+
+def rule_infiltrators_signet(log: Log) -> list[tuple[int, int]]:
+    """``EffectCastFinderByDst(InfiltratorsSignet, ThiefInfiltratorsSignet1)``
+    + ``UsingDstBaseSpecChecker(Thief)`` + ``UsingSecondaryEffectSameSrcChecker(GUID2)``.
+    """
+    hits, seen = [], set()
+    for effect in log.effects_by_guid.get("23284B87C26C9A41A887F410F930E1A2", ()):
+        dst = effect.target_agent_id
+        if not effect.is_around_dst or log.profession.get(dst) != Profession.THIEF:
+            continue
+        if not any(
+            abs(other.time_ms - effect.time_ms) < SERVER_DELAY
+            and other.source_agent_id == effect.source_agent_id
+            for other in log.effects_by_guid.get("2C89A39F7B88614ABED16D4B5A5BD2EB", ())
+        ):
+            continue
+        hit = (dst, effect.time_ms)
+        if hit in seen:
+            continue
+        seen.add(hit)
+        hits.append(hit)
+    return _apply_icd(hits)
+
+
 RULES = {
     "lesser-symbol-of-protection": (13684, rule_lesser_symbol_of_protection),
     "spiteful-spirit": (29560, rule_spiteful_spirit),
@@ -358,6 +494,63 @@ RULES = {
     "stand-your-ground": (9153, rule_stand_your_ground),
     "cleansing-fire": (5535, rule_cleansing_fire),
     "evoker-familiars": (0, rule_evoker_familiars),
+    # BuffLossCastFinder shroud/tome exits -- buff IDs read off SkillIDs.cs.
+    "exit-death-shroud": (10585, _exit_shroud_rule(790)),
+    "exit-harbinger-shroud": (62540, _exit_shroud_rule(59964)),
+    "exit-shadow-shroud": (63251, _exit_shroud_rule(63239)),
+    "exit-celestial-avatar": (31411, _exit_shroud_rule(31508)),
+    "exit-radiant-forge": (76616, _exit_shroud_rule(77142)),
+    "stow-tome": (41380, _exit_shroud_rule({41493, 42404, 44291})),
+    # BuffGainCastFinder(Skill, Buff) -- buff IDs read off SkillIDs.cs.
+    "enter-reaper-shroud": (30792, _buff_gain_rule(29446)),
+    "spectral-walk": (10685, _buff_gain_rule(53476)),
+    "shadowstep": (13002, _buff_gain_rule(13135)),
+    "dual-fire": (43470, _buff_gain_rule(43470)),
+    "desert-shroud": (44663, _buff_gain_rule(40052)),
+    "rocky-loop": (62975, _buff_gain_rule(62768)),
+    "icy-coil": (62834, _buff_gain_rule(62984)),
+    "crescent-wind": (62887, _buff_gain_rule(62707)),
+    "weapon-of-remedy": (77022, _buff_gain_rule(78272)),
+    "xinrae-weapon": (76941, _buff_gain_rule(78313)),
+    "mist-form": (5543, _buff_gain_rule(5543)),
+    "arcane-shield": (5641, _buff_gain_rule(5640)),
+    "infusing-terror": (29958, _buff_gain_rule(30129)),
+    "superior-sigil-of-severance": (43930, _buff_gain_rule(43930)),
+    # EffectCastFinder(Skill, EffectGUID) -- GUIDs read off EffectGUIDs.cs.
+    "deploy-water-jade-sphere": (62723, _effect_rule("6D7EB5747873484DAF29C01FA51FE175")),
+    "deploy-air-jade-sphere": (62940, _effect_rule("A3C8A55C3E530140A7F99AAA1CBB4E09")),
+    "tale-honorable-rogue": (76611, _effect_rule("DBECB5867D11264FA19FFCDC487A410E")),
+    "syncopate-delayed-wave": (76689, _effect_rule("24498E18DEC97B4094376849EF7A3746")),
+    "relic-holosmith": (75748, _effect_rule("DF03FACC6BA66F4BA89BA27636FB39EB")),
+    "relic-sorrow": (74410, _effect_rule("3D981397D9C6A44B8898212CE4E3D6F9A")),
+    "necromancer-distress": (73116, _effect_rule("239BF9EA9B7B44BACC63B86DC49B0D0")),
+    "form-dervish": (76818, _effect_rule("B0CF6359EBF9BF4EB94E1A2A347EE5ECD")),
+    "symbiotic-shielding": (76613, _effect_rule("842F977C318FDC4F96C99C385C1D0672")),
+    # DamageCastFinder(Skill) -- self-keyed on the skill's own damage.
+    "mug": (13014, _damage_rule(13014)),
+    "lightning-flash": (5536, _damage_rule(5536)),
+    "signet-of-air": (5572, rule_signet_of_air),
+    "flame-expulsion": (13334, _damage_rule(13334)),
+    "earthen-blast": (56885, _damage_rule(56885)),
+    "overcharged-shot": (6154, _damage_rule(6154)),
+    "focused-devastation": (73064, _damage_rule(73064)),
+    "timebomb": (79359, _damage_rule(79359)),
+    "unseen-sword": (62847, _damage_rule(62847)),
+    # BuffGiveCastFinder(Skill, Buff).
+    "vulture-stance": (40498, _buff_give_rule(44651)),
+    "moa-stance": (45970, _buff_give_rule(45038)),
+    "dolyak-stance": (45789, _buff_give_rule(41815)),
+    "dimensional-aperture": (71792, _buff_give_rule(71890)),
+    # MissileCastFinder(Skill), self-keyed on the missile's own skill.
+    "blade-burst": (42163, _missile_rule(42163)),
+    # More EffectCastFinder -- GUIDs resolved off EffectGUIDs.cs.
+    "suffer": (30670, _effect_rule("6C8C388BCD26F04CA6618D2916B8D796")),
+    "outrage": (30258, _effect_rule("AC32B7F7BB281B4D94713F180C44F322")),
+    "mantra-of-resolve": (10207, _effect_rule("593E668A006AB24D84999AED68F2E4C4")),
+    "shift-signet": (63111, _effect_rule("E1C1DD7F866B4149A1BADD216C9AA69D")),
+    "bypass-coating": (29665, _effect_rule("D2307A69B227BE4B831C2AA1DAAE646A")),
+    "eternal-bond": (59554, _effect_rule("BF0A5B11A4076A4F98C6E1D655D507B1")),
+    "infiltrators-signet": (13064, rule_infiltrators_signet),
 }
 
 

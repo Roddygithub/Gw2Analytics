@@ -104,6 +104,16 @@ _BUFF_GAIN_CASTS = {
     9422: 9422,
     29502: 30435,  # Berserk
     76507: 5635,  # Arcane Echo
+    53476: 10685,  # Spectral Walk (active)
+    13135: 13002,  # Shadowstep (<- Infiltration)
+    78272: 77022,  # Weapon of Remedy
+    78313: 76941,  # Xinrae Weapon
+    5543: 5543,  # Mist Form
+    5640: 5641,  # Arcane Shield
+    43930: 43930,  # Superior Sigil of Severance
+    62768: 62975,  # Rocky Loop (Catalyst orb)
+    62984: 62834,  # Icy Coil (Catalyst orb)
+    62707: 62887,  # Crescent Wind (Catalyst orb)
 }
 _BUFF_LOSS_CASTS = {
     29446: 30961,
@@ -129,7 +139,7 @@ _BUFF_LOSS_CASTS = {
     63239: 63251,
     77265: 76730,
 }
-_BUFF_GIVE_CASTS = {41815: 45789, 70350: 70350}
+_BUFF_GIVE_CASTS = {41815: 45789, 70350: 70350, 71890: 71792, 44651: 40498}
 _DAMAGE_CASTS = {
     5561: 50,
     9292: 500,
@@ -157,6 +167,15 @@ _DAMAGE_CASTS = {
     76783: 75,
     24305: 50,
     13907: 50,
+    # DamageCastFinder(Skill), self-keyed, verified EXACT against EI.
+    13014: 50,  # Mug
+    5536: 50,  # Lightning Flash
+    13334: 50,  # Flame Expulsion
+    56885: 50,  # Earthen Blast
+    73064: 50,  # Focused Devastation
+    79359: 50,  # Time Bomb
+    62847: 50,  # Unseen Sword
+    5572: 50,  # Signet of Air (damage path; + effect-by-dst below)
 }
 _DAMAGE_CASTS_BY_DAMAGE = {40071: 44428, 46808: 40813}
 _HEALING_CASTS = {
@@ -175,7 +194,7 @@ _HEALING_CASTS = {
     71356,
     72115,
 }
-_MISSILE_CASTS = {26261, 29889}
+_MISSILE_CASTS = {26261, 29889, 42163}
 #: The four base attunement buffs. A Weaver swaps between *dual*
 #: attunements, which Elite Insights books as their own skills -- four real
 #: ids and twelve synthetic negative ones -- and it never books a base
@@ -190,6 +209,17 @@ _BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44
 #: listed; the rest keep the historical "any removal" behaviour until they
 #: are checked the same way.
 _BUFF_LOSS_REMOVE_ALL_ONLY = {29446}
+#: BuffGainCastFinder books the buff gained by the player itself; arcdps
+#: also re-emits these buffs with ``src=0`` (env) for trait/sigil pulses,
+#: which EI excludes via ``!bae.Initial``. Self-apply gating reproduces
+#: that for the entries where the env applies would otherwise over-book.
+_BUFF_GAIN_SELF_ONLY = {29502, 62931}  # Berserk, Flame Wheel (env pulses)
+_GRAND_FINALE = 62876  # Weaver hammer 5; its buff-gain collides with Flame Wheel + orbs
+#: ``BuffGainCastFinder`` entries whose buff can also be granted by Grand Finale
+#: (Weaver hammer 5). EI's finder is gated on ``!IsCasting(GrandFinale)`` so a
+#: buff gain that falls inside a Grand Finale cast belongs to the hammer, not
+#: the skill itself.
+_BUFF_GAIN_GRAND_FINALE_GUARD = {62931, 62768, 62984, 62707}
 _AFTER_SWAP_BUFFS = {29703}
 _INSTANT_CASTS_BY_EFFECT = {
     "C4E8DD3234E0C647993857940ED79AC1": 29560,  # Spiteful Spirit
@@ -223,6 +253,7 @@ _INSTANT_CASTS_BY_EFFECT = {
     "98C9834C6381204A85DC67C375D135E4": 13677,
     "13D0B65D73B5334D80824EE17B5C257E": 13677,
     "FB78801BB31CAF488B55F2F57EF9B070": 78837,
+    "842F977C318FDC4F96C99C385C1D0672": 76613,  # Symbiotic Shielding
     "4A83F0B627B75C47894941C4D35BA89F": 78604,
     "03850757F14FD44A9998D4CAD71CC589": 78358,
     "611D90C69ECF8142BEEE84139F333388": 30101,
@@ -253,7 +284,15 @@ _INSTANT_CASTS_BY_EFFECT = {
     "D7006AC247BBE74BA54E912188EF6B12": 29786,
     "AFC5D5C7DA63D64BAAD55F787205B64F": 62813,
     "A674D3E7BC0C4342BC7A4EF0EE8FF8F0": 62837,
-    "842F977C318FDC4F96C99C385C1D0672": 76613,
+    "6D7EB5747873484DAF29C01FA51FE175": 62723,  # Deploy Jade Sphere: Water
+    "A3C8A55C3E530140A7F99AAA1CBB4E09": 62940,  # Deploy Jade Sphere: Air
+    "DBECB5867D11264FA19FFCDC487A410E": 76611,  # Tale of the Honorable Rogue
+    "24498E18DEC97B4094376849EF7A3746": 76689,  # Syncopate (Delayed Wave)
+    "DF03FACC6BA66F4BA89BA27636FB39EB": 75748,  # Relic of the Holosmith
+    "6C8C388BCD26F04CA6618D2916B8D796": 30670,  # Suffer (Reaper)
+    "AC32B7F7BB281B4D94713F180C44F322": 30258,  # Outrage (Berserker)
+    "BF0A5B11A4076A4F98C6E1D655D507B1": 59554,  # Eternal Bond (Soulbeast)
+    "D2307A69B227BE4B831C2AA1DAAE646A": 29665,  # Bypass Coating (Scrapper)
     "EEDCAB61CD35E840909B03D398878B1C": 62660,
     "F2FB8A03178A2B43B82E0113F20DF932": 76798,
     "FA37E0B77272314AA1ADCFF824F24C27": 79336,
@@ -289,6 +328,8 @@ _GUARDIAN_SHOUT_EFFECT = "122BA55CCDF2B643929F6C4A97226DC9"
 _EFFECT_SPEC_GATE = {
     _GUARDIAN_SHOUT_EFFECT: Profession.GUARDIAN,
     "BFFE3477ECFA26458D69E93EE76EFF6B": Profession.ELEMENTALIST,
+    "23284B87C26C9A41A887F410F930E1A2": Profession.THIEF,  # Infiltrator's Signet
+    "F53E2CE3B06B934085D46FA59468477B": Profession.MESMER,  # Power Return
 }
 _AEGIS_BUFF = 743
 _STABILITY_BUFF = 1122
@@ -309,6 +350,8 @@ _EFFECT_CASTS_BY_DST = {
     "02154B72900B5740A73CD0ADECED27BF": 10234,
     "9242D10B4F04274EB6E9EBCDB2262181": 77213,
     "B02D3D0FF0A4FC47B23B1478D8E770AE": -29,
+    "30A96C0E559DBD489FEE36DA96CC374A": 5572,  # Signet of Air
+    "23284B87C26C9A41A887F410F930E1A2": 13064,  # Infiltrator's Signet
 }
 _SECONDARY_EFFECTS = {
     "BFFE3477ECFA26458D69E93EE76EFF6B": (
@@ -316,6 +359,7 @@ _SECONDARY_EFFECTS = {
         "ABF2332D28C7D6449A5B822E5714ADA4",
     ),
     "FB78801BB31CAF488B55F2F57EF9B070": ("7535B4CB815232418B69092F3390A7AB",),
+    "23284B87C26C9A41A887F410F930E1A2": ("2C89A39F7B88614ABED16D4B5A5BD2EB",),
     "4A83F0B627B75C47894941C4D35BA89F": ("FBA4C4F041E78748AC1CA5FF5D37D2DA",),
     "03850757F14FD44A9998D4CAD71CC589": ("08E6D231507CDD458EDECF67D264228C",),
     "FB066A1F03294D4D850D22B26650FFA9": ("D23CB7F8A2755F4FA2A68A6834ABAD98",),
@@ -344,6 +388,9 @@ _NO_ANIMATED_CAST_GUARDS = {
     # Lesser Symbol of Protection.
     "8321373FA14B2B4B8761CDC6EEADB161": (9161,),
     "E10D2D0DF7803146A69BBB5BD47944FC": (9161,),
+    # Lesser Symbol of Blades -- trait version excluded inside the real Symbol of Blades cast.
+    "FA37E0B77272314AA1ADCFF824F24C27": (9097,),
+    "8B05122882E53242A4D4725F0A1537A4": (9097,),
 }
 _GUARDED_CAST_SKILLS = {skill for skills in _NO_ANIMATED_CAST_GUARDS.values() for skill in skills}
 _BASE_SKILL_BY_ENHANCED_EFFECT = {
@@ -562,6 +609,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     event.skill_id in _ATTUNEMENT_BUFFS
                     and elite_specs.get(event.target_agent_id) is EliteSpec.WEAVER
                 )
+                or (
+                    event.skill_id in _BUFF_GAIN_SELF_ONLY
+                    and event.source_agent_id != event.target_agent_id
+                )
+                or (
+                    event.skill_id in _BUFF_GAIN_GRAND_FINALE_GUARD
+                    and is_casting(event.target_agent_id, _GRAND_FINALE, event.time_ms, 500)
+                )
             ):
                 mapped = None
             if mapped is not None:
@@ -629,18 +684,23 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     else -27
                 )
             elif event.guid == "3D29ABD39CB5BD458C4D50A22FCC0E4B":
+                distortion_buff_nearby = any(
+                    isinstance(other, BoonApplyEvent)
+                    and other.kind == "apply"
+                    and other.skill_id == 10243
+                    and other.target_agent_id == caster
+                    and abs(other.time_ms - event.time_ms) < 10
+                    for other in nearby_events(event.time_ms, 9)
+                )
                 effect_skill_id = (
                     68273
-                    if caster in virtuoso_agent_ids
-                    else 10192
-                    if any(
-                        isinstance(other, BoonApplyEvent)
-                        and other.kind == "apply"
-                        and other.skill_id == 10243
-                        and other.target_agent_id == caster
-                        and abs(other.time_ms - event.time_ms) < 10
-                        for other in nearby_events(event.time_ms, 9)
+                    if (
+                        caster in virtuoso_agent_ids
+                        and distortion_buff_nearby
+                        and not is_casting(caster, 43343, event.time_ms, 50)
                     )
+                    else 10192
+                    if distortion_buff_nearby
                     else 10191
                     if caster in mesmer_agent_ids
                     else None
