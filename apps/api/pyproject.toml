@@ -18,7 +18,7 @@ authors = [{ name = "GW2Analytics team" }]
 dependencies = [
     "fastapi-mcp>=0.4",
     "fastapi>=0.140.13",
-    "uvicorn[standard]>=0.32",
+    "uvicorn[standard]>=0.52.1",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0",

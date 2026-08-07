@@ -66,7 +66,7 @@ dev = [
     # TODO: bump each <N -> <N+1 once a workspace member migrates that far.
     "fastapi-mcp>=0.4,<1",
     "fastapi>=0.140.13,<1",
-    "uvicorn[standard]>=0.32,<1",
+    "uvicorn[standard]>=0.52.1,<1",
     "pydantic-settings>=2.6,<3",
     "sqlalchemy>=2.0,<3",
     "psycopg[binary]>=3.3.4,<4",
