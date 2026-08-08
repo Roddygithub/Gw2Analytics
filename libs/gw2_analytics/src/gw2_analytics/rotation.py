@@ -138,6 +138,7 @@ _BUFF_LOSS_CASTS = {
     59579: 59562,
     59964: 62540,
     63239: 63251,
+    13135: 13106,
     77265: 76730,
 }
 _BUFF_GIVE_CASTS = {41815: 45789, 70350: 70350, 71890: 71792, 44651: 40498}
@@ -644,6 +645,11 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 )
                 or (
                     event.skill_id in _BUFF_GAIN_SELF_ONLY
+                    and event.source_agent_id != event.target_agent_id
+                )
+                or (
+                    event.skill_id == 13135
+                    and event.kind != "apply"
                     and event.source_agent_id != event.target_agent_id
                 )
                 or (
