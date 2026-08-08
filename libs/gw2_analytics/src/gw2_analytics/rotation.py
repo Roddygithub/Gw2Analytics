@@ -568,7 +568,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                             ),
                         )
                     )
-                if event.skill_id == 71892 and (pending := active.get(key)) is not None:
+                if (pending := active.pop(key, None)) and pending.time_ms >= origin:
                     casts.append(
                         SkillCast(
                             source_agent_id=pending.source_agent_id,

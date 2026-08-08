@@ -579,6 +579,65 @@ def test_engineer_kit_table_covers_the_three_kits_added_from_the_api() -> None:
     assert kits == [5812, 5904, 6020]
 
 
+def test_repeated_activation_start_closes_previous_cast() -> None:
+    origin = 42_000_000
+    base = {"source_agent_id": 7, "target_agent_id": 0, "skill_id": 30521}
+    events = [
+        SkillActivationEvent(
+            time_ms=origin + 100,
+            activation=ActivationType.NORMAL,
+            duration_ms=1_200,
+            expected_duration_ms=1_200,
+            **base,
+        ),
+        SkillActivationEvent(
+            time_ms=origin + 2_981,
+            activation=ActivationType.NORMAL,
+            duration_ms=1_200,
+            expected_duration_ms=1_200,
+            **base,
+        ),
+        SkillActivationEvent(
+            time_ms=origin + 3_604,
+            activation=ActivationType.NORMAL,
+            duration_ms=1_200,
+            expected_duration_ms=1_200,
+            **base,
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(events, duration_ms=5_000, start_time_ms=origin)
+    ] == [(30521, 100, 1_200), (30521, 2_981, 633), (30521, 3_604, 1_200)]
+
+
+def test_repeated_activation_start_ignores_previous_prefight_cast() -> None:
+    origin = 42_000_000
+    base = {"source_agent_id": 7, "target_agent_id": 0, "skill_id": 30521}
+    events = [
+        SkillActivationEvent(
+            time_ms=origin - 296,
+            activation=ActivationType.NORMAL,
+            duration_ms=1_200,
+            expected_duration_ms=1_200,
+            **base,
+        ),
+        SkillActivationEvent(
+            time_ms=origin + 56,
+            activation=ActivationType.NORMAL,
+            duration_ms=1_200,
+            expected_duration_ms=1_200,
+            **base,
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(events, duration_ms=2_000, start_time_ms=origin)
+    ] == [(30521, 56, 1_200)]
+
+
 def test_gunsaber_mode_books_enter_and_exit_before_swap() -> None:
     origin = 42_000_000
     events = [
