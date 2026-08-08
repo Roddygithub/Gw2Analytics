@@ -166,6 +166,21 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
             skill_id=0,
             guid="122BA55CCDF2B643929F6C4A97226DC9",
         ),
+        BoonApplyEvent(time_ms=origin + 170, skill_id=57031, duration_ms=1, stacks=1, **base),
+        BoonApplyEvent(time_ms=origin + 190, skill_id=73073, duration_ms=1, stacks=1, **base),
+        BoonApplyEvent(time_ms=origin + 250, skill_id=79347, duration_ms=1, stacks=1, **base),
+        BoonApplyEvent(time_ms=origin + 260, skill_id=9123, duration_ms=1, stacks=1, **base),
+        BoonApplyEvent(time_ms=origin + 265, skill_id=10582, duration_ms=1, stacks=1, **base),
+        BoonApplyEvent(
+            time_ms=origin + 270,
+            source_agent_id=7,
+            target_agent_id=10,
+            skill_id=45038,
+            duration_ms=1,
+            stacks=1,
+        ),
+        DamageEvent(time_ms=origin + 280, skill_id=31658, damage=1, **base),
+        BoonApplyEvent(time_ms=origin + 290, skill_id=62919, duration_ms=1, stacks=1, **base),
     ]
 
     assert [
@@ -200,6 +215,14 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         (13062, 140, 0),
         (63111, 150, 0),
         (9085, 160, 0),
+        (16435, 170, 0),
+        (73104, 190, 0),
+        (73104, 250, 0),
+        (9082, 260, 0),
+        (10583, 265, 0),
+        (45970, 270, 0),
+        (31658, 280, 0),
+        (62749, 290, 0),
     ]
 
 
@@ -475,6 +498,56 @@ def test_fern_hound_regenerate_is_credited_to_spawn_owner() -> None:
             fern_hound_agent_ids={99},
         )
     ] == [(7, 12717, 100)]
+
+
+def test_warclaw_rallying_roar_is_credited_to_spawn_owner() -> None:
+    origin = 42_000_000
+    events = [
+        SpawnEvent(time_ms=origin + 10, source_agent_id=7, target_agent_id=99, skill_id=0),
+        BoonApplyEvent(
+            time_ms=origin + 100,
+            source_agent_id=99,
+            target_agent_id=99,
+            skill_id=59536,
+            duration_ms=1_000,
+            stacks=1,
+        ),
+    ]
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            warclaw_agent_ids={99},
+        )
+    ] == [(7, 74314, 100)]
+
+
+def test_jungle_stalker_mighty_roar_is_credited_to_spawn_owner() -> None:
+    origin = 42_000_000
+    events = [
+        SpawnEvent(time_ms=origin + 10, source_agent_id=7, target_agent_id=99, skill_id=0),
+        BoonApplyEvent(
+            time_ms=origin + 100,
+            source_agent_id=99,
+            target_agent_id=99,
+            skill_id=59536,
+            duration_ms=1_000,
+            stacks=1,
+        ),
+    ]
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            jungle_stalker_agent_ids={99},
+        )
+    ] == [(7, 12658, 100)]
 
 
 def test_flash_spark_is_inferred_from_engineer_effect() -> None:

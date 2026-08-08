@@ -119,6 +119,12 @@ _BUFF_GAIN_CASTS = {
     62768: 62975,  # Rocky Loop (Catalyst orb)
     62984: 62834,  # Icy Coil (Catalyst orb)
     62707: 62887,  # Crescent Wind (Catalyst orb)
+    57031: 16435,  # Shadow Portal (Open)
+    73073: 73104,  # Galvanize
+    79347: 73104,  # Galvanize (Additional Strike)
+    9123: 9082,  # Shield of Wrath
+    10582: 10583,  # Spectral Armor
+    62919: 62749,  # Legendary Alliance Stance
 }
 _BUFF_LOSS_CASTS = {
     29446: 30961,
@@ -153,6 +159,7 @@ _BUFF_GIVE_CASTS = {
     44651: 40498,
     42428: 43532,
     70806: 70806,
+    45038: 45970,  # Moa Stance
 }
 _DAMAGE_CASTS = {
     6154: 50,
@@ -190,6 +197,7 @@ _DAMAGE_CASTS = {
     73064: 50,  # Focused Devastation
     79359: 50,  # Time Bomb
     62847: 50,  # Unseen Sword
+    31658: 50,  # Glyph of Equality
     5572: 50,  # Signet of Air (damage path; + effect-by-dst below)
 }
 _DAMAGE_CASTS_BY_DAMAGE = {40071: 44428, 46808: 40813}
@@ -516,6 +524,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     siege_turtle_agent_ids: Collection[int] = (),
     smokescale_agent_ids: Collection[int] = (),
     fern_hound_agent_ids: Collection[int] = (),
+    warclaw_agent_ids: Collection[int] = (),
+    jungle_stalker_agent_ids: Collection[int] = (),
     professions: Mapping[int, Profession] | None = None,
     elite_specs: Mapping[int, EliteSpec] | None = None,
     agent_id_by_instance: Mapping[int, int] | None = None,
@@ -843,6 +853,22 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                 if owner:
                     add_instant(owner, 31568, event.time_ms)
+            if (
+                event.kind == "apply"
+                and event.skill_id == 59536
+                and event.target_agent_id in warclaw_agent_ids
+            ):
+                owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
+                if owner:
+                    add_instant(owner, 74314, event.time_ms)
+            if (
+                event.kind == "apply"
+                and event.skill_id == 59536
+                and event.target_agent_id in jungle_stalker_agent_ids
+            ):
+                owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
+                if owner:
+                    add_instant(owner, 12658, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
             add_instant(
                 event.source_agent_id,
