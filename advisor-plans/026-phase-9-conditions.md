@@ -81,14 +81,14 @@ The net effect: 6 arcdps.h single-byte fields are swallowed into our 2 uint32 sl
 The parser's `parse_events` loop reads:
 
 ```python
-_is_cleanup,            # byte 46 (our label: dst_master_instid low per arcdps)
-is_nondamage,           # byte 47 (our label: dst_master_instid high per arcdps)
-is_statechange,         # byte 48 (our label: iff per arcdps)  ← WRONG FIELD
-_is_flanking,           # byte 49 (our label: buff per arcdps)
-_is_shields,            # byte 50 (our label: result per arcdps)
-_is_offcycle,           # byte 51 (our label: is_activation per arcdps)
-is_buffremove,          # byte 52 (our label: is_buffremove per arcdps) ✓
-is_ninety,              # byte 53 (our label: is_ninety per arcdps) ✓
+(_is_cleanup,)  # byte 46 (our label: dst_master_instid low per arcdps)
+(is_nondamage,)  # byte 47 (our label: dst_master_instid high per arcdps)
+(is_statechange,)  # byte 48 (our label: iff per arcdps)  ← WRONG FIELD
+(_is_flanking,)  # byte 49 (our label: buff per arcdps)
+(_is_shields,)  # byte 50 (our label: result per arcdps)
+(_is_offcycle,)  # byte 51 (our label: is_activation per arcdps)
+(is_buffremove,)  # byte 52 (our label: is_buffremove per arcdps) ✓
+(is_ninety,)  # byte 53 (our label: is_ninety per arcdps) ✓
 ```
 
 The **filter** `if is_statechange != 0: continue` (line ~341) is actually filtering on arcdps's `iff` byte (Friend/Foe flag; `iff=0` is friend, `iff=1` is enemy). The filter KEEPS records where `iff=0` (friend-target damage) and SKIPS records where `iff≠0` (enemy-target damage). **The damage-rollup `target_dps` is therefore biased toward FRIEND-target damage; enemy-target damage is dropped.** This is the OPPOSITE of what WvW semantics produce — most damage in a WvW raid is dealt TO enemies, so enemy-target damage is the bulk of the real signal. Pre-SYNC `target_dps` significantly undercounts for enemy agents. *(Corrected after 2026-07-11 reviewer feedback: the original draft stated "yields FRIEND AND skips FRIEND" which was self-contradictory.)*

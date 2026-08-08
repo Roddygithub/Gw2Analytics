@@ -47,6 +47,7 @@ In `libs/gw2_evtc_parser/src/gw2_evtc_parser/parser.py:187`, the `os.path.join` 
 
 ```python
 from pathlib import Path
+
 # ...
 fixture_path = Path("/tmp") / inner_name
 ```
