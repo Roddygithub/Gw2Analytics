@@ -153,6 +153,7 @@ ignore = [
     "COM812",  # conflict with formatter
     "ISC001",  # conflict with formatter
     "PLR0913", # too many args (Pydantic models need many)
+    "PLR0917", # too many positional args (companion to PLR0913; ruff 0.16+)
     "PLR2004", # magic values (tests / fixtures use them)
     "D",       # pydocstyle — handled by griffe / mkdocs later
 ]
