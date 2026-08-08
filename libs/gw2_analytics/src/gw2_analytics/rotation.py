@@ -534,6 +534,18 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         if isinstance(event, SkillActivationEvent):
             key = (event.source_agent_id, event.skill_id)
             if event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
+                if pending := active.pop((event.source_agent_id, 63267), None):
+                    casts.append(
+                        SkillCast(
+                            source_agent_id=pending.source_agent_id,
+                            skill_id=pending.skill_id,
+                            time_ms=pending.time_ms - origin,
+                            duration_ms=min(
+                                pending.expected_duration_ms,
+                                event.time_ms - pending.time_ms + 10,
+                            ),
+                        )
+                    )
                 if event.skill_id == 71892 and (pending := active.get(key)) is not None:
                     casts.append(
                         SkillCast(
