@@ -256,6 +256,7 @@ _INSTANT_CASTS_BY_EFFECT = {
     "19C4FA17A38E7E4780722799B48BF2BE": 31406,
     "98C9834C6381204A85DC67C375D135E4": 13677,
     "13D0B65D73B5334D80824EE17B5C257E": 13677,
+    "418A090D719AB44AAF1C4AD1473068C4": 43176,  # Flash Spark
     "FB78801BB31CAF488B55F2F57EF9B070": 78837,
     "842F977C318FDC4F96C99C385C1D0672": 76613,  # Symbiotic Shielding
     "4A83F0B627B75C47894941C4D35BA89F": 78604,
@@ -337,6 +338,7 @@ _EFFECT_SPEC_GATE = {
     "BFFE3477ECFA26458D69E93EE76EFF6B": Profession.ELEMENTALIST,
     "23284B87C26C9A41A887F410F930E1A2": Profession.THIEF,  # Infiltrator's Signet
     "F53E2CE3B06B934085D46FA59468477B": Profession.MESMER,  # Power Return
+    "418A090D719AB44AAF1C4AD1473068C4": Profession.ENGINEER,  # Flash Spark
 }
 _AEGIS_BUFF = 743
 _STABILITY_BUFF = 1122
@@ -432,6 +434,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     clone_agent_ids: Collection[int] = (),
     ranger_pet_agent_ids: Collection[int] = (),
     siege_turtle_agent_ids: Collection[int] = (),
+    smokescale_agent_ids: Collection[int] = (),
     professions: Mapping[int, Profession] | None = None,
     elite_specs: Mapping[int, EliteSpec] | None = None,
     agent_id_by_instance: Mapping[int, int] | None = None,
@@ -687,6 +690,13 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                 if owner:
                     add_instant(owner, 65418, event.time_ms)
+            if (
+                event.kind == "apply"
+                and event.skill_id == 59536
+                and event.duration_ms >= 1000
+                and event.target_agent_id in smokescale_agent_ids
+            ):
+                add_instant(event.source_agent_id, 31568, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
             add_instant(
                 event.source_agent_id,
