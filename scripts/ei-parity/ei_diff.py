@@ -99,10 +99,7 @@ def _print_rotation_skill_deltas(
     )
     for skill_id in ranked[:limit]:
         name = names.get(skill_id, "?")
-        print(
-            f"{missing_by_skill[skill_id]:>8} "
-            f"{extra_by_skill[skill_id]:>6}  {skill_id} {name}"
-        )
+        print(f"{missing_by_skill[skill_id]:>8} {extra_by_skill[skill_id]:>6}  {skill_id} {name}")
 
 
 def run_one(stem: str) -> dict[str, object]:
