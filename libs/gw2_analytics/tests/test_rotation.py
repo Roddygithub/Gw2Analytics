@@ -90,6 +90,7 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         BoonApplyEvent(time_ms=origin + 32, skill_id=34778, duration_ms=1, stacks=1, **base),
         BoonApplyEvent(time_ms=origin + 33, skill_id=40052, duration_ms=1, stacks=1, **base),
         BoonApplyEvent(time_ms=origin + 34, skill_id=76351, duration_ms=1, stacks=1, **base),
+        BoonApplyEvent(time_ms=origin + 35, skill_id=44272, duration_ms=0, stacks=1, **base),
         BoonApplyEvent(
             time_ms=origin + 40,
             skill_id=29446,
@@ -141,6 +142,7 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         (14412, 32, 0),
         (54870, 33, 0),
         (76351, 34, 0),
+        (41858, 35, 0),
         (30961, 40, 0),
         (29604, 50, 0),
         (45534, 60, 0),
@@ -550,6 +552,135 @@ def test_engineer_kit_table_covers_the_three_kits_added_from_the_api() -> None:
         if cast.skill_id > 0
     ]
     assert kits == [5812, 5904, 6020]
+
+
+def test_gunsaber_mode_books_enter_and_exit_before_swap() -> None:
+    origin = 42_000_000
+    events = [
+        WeaponSwapEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=0,
+            swapped_from=1,
+            swapped_to=5,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 101,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=62769,
+            duration_ms=0,
+            stacks=1,
+        ),
+        WeaponSwapEvent(
+            time_ms=origin + 500,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=0,
+            swapped_from=5,
+            swapped_to=1,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 501,
+            source_agent_id=0,
+            target_agent_id=7,
+            skill_id=62769,
+            duration_ms=0,
+            stacks=1,
+            kind="remove_all",
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 700,
+            source_agent_id=0,
+            target_agent_id=7,
+            skill_id=62769,
+            duration_ms=0,
+            stacks=1,
+            kind="remove_single",
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+        if cast.skill_id in {62745, 62861}
+    ] == [(62745, 99), (62861, 499)]
+
+
+def test_buff_give_casts_are_deduplicated_per_source_skill() -> None:
+    origin = 42_000_000
+    events = [
+        BoonApplyEvent(
+            time_ms=origin + 101,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=78624,
+            duration_ms=5_000,
+            stacks=1,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 200,
+            source_agent_id=7,
+            target_agent_id=8,
+            skill_id=70806,
+            duration_ms=5_000,
+            stacks=1,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 300,
+            source_agent_id=7,
+            target_agent_id=8,
+            skill_id=42428,
+            duration_ms=8_000,
+            stacks=1,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 300,
+            source_agent_id=7,
+            target_agent_id=9,
+            skill_id=42428,
+            duration_ms=8_000,
+            stacks=1,
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+    ] == [(76752, 101), (70806, 200), (43532, 300)]
+
+
+def test_post_july_sand_cascade_effect_is_deduplicated() -> None:
+    origin = 42_000_000
+    events = [
+        EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=8,
+            skill_id=42756,
+            guid="23613E6E374EC6429FE9A69CC893984D",
+            is_around_dst=True,
+        ),
+        EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=9,
+            skill_id=42756,
+            guid="23613E6E374EC6429FE9A69CC893984D",
+            is_around_dst=True,
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            professions={7: Profession.NECROMANCER},
+        )
+    ] == [(43448, 100)]
 
 
 def _shroud_loss(origin: int, offset: int, kind: str) -> BoonApplyEvent:
