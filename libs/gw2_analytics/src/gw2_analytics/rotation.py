@@ -55,6 +55,7 @@ _BUFF_GAIN_CASTS = {
     5586: 5493,
     5585: 5492,
     5863: 5861,
+    9103: 9104,
     9235: 9247,
     27376: 26644,
     27581: 27107,
@@ -305,6 +306,7 @@ _INSTANT_CASTS_BY_EFFECT = {
     "5E77D6C93F3D0747B0B81169C7C0E506": 31289,
     "1066BEACB107C743908D860DA2D59796": 71252,
     "E78ED095E97F1D4A8BEB901796449E2F": 10562,
+    "B59FCEFCF1D5D84B9FDB17F11E9B52E6": 41372,  # Mercy
 }
 #: Familiar skill -> the player skill Elite Insights credits to its owner,
 #: transcribed from ``EvokerHelper``'s ``MinionCastCastFinder`` entries. The
@@ -562,15 +564,20 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             next_swap_time = next_swap_time_after(event.source_agent_id, event.time_ms)
             agent_activations = activations_by_agent.get(event.source_agent_id, [])
             activation_times = [activation.time_ms for activation in agent_activations]
+            kit_activations = agent_activations[
+                bisect_left(activation_times, event.time_ms + 10) : bisect_left(
+                    activation_times,
+                    next_swap_time,
+                )
+            ]
+            kit_starts = [
+                other
+                for other in kit_activations
+                if other.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS)
+            ]
             for kit_skill, bundle_skills in _ENGINEER_KIT_BUNDLES.items():
                 if event.swapped_to == 2 and any(
-                    other.skill_id in bundle_skills
-                    for other in agent_activations[
-                        bisect_left(activation_times, event.time_ms + 10) : bisect_left(
-                            activation_times,
-                            next_swap_time,
-                        )
-                    ]
+                    other.skill_id in bundle_skills for other in (kit_starts or kit_activations)
                 ):
                     add_instant(event.source_agent_id, kit_skill, event.time_ms - 1)
                     break
@@ -643,7 +650,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 and event.skill_id == 59536
                 and event.target_agent_id in siege_turtle_agent_ids
             ):
-                owner = spawn_owner_by_target.get(event.target_agent_id, 0)
+                owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                 if owner:
                     add_instant(owner, 65418, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
