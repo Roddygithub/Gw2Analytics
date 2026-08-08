@@ -60,9 +60,7 @@ Ajouter un job CI qui vérifie que la couverture ne baisse PAS entre les phases.
 
 ```python
 # fight.py — sur OrmFightAgent
-__table_args__ = (
-    Index("ix_fight_agents_account_fight", "account_name", "fight_id"),
-)
+__table_args__ = (Index("ix_fight_agents_account_fight", "account_name", "fight_id"),)
 
 # webhook.py — sur OrmWebhookDelivery
 __table_args__ = (
@@ -71,9 +69,7 @@ __table_args__ = (
 )
 
 # guild.py — sur GuildMember
-__table_args__ = (
-    Index("ix_guild_members_account", "account_name"),
-)
+__table_args__ = (Index("ix_guild_members_account", "account_name"),)
 ```
 
 **Migration Alembic :**
@@ -196,13 +192,11 @@ class FightRepository:
     def get_by_id(self, fight_id: str) -> OrmFight | None:
         return self._session.get(OrmFight, fight_id)
 
-    def find_without_summaries(self, fight_ids: list[str] | None = None) -> set[str]:
-        ...
+    def find_without_summaries(self, fight_ids: list[str] | None = None) -> set[str]: ...
 
     def save_fight_with_agents_and_skills(
         self, upload: Upload, domain_fight: DomainFight
-    ) -> OrmFight:
-        ...
+    ) -> OrmFight: ...
 ```
 
 ### 2.2 Extraire la logique métier des routes
@@ -418,9 +412,7 @@ op.alter_column("uploads", "size_bytes", type_=sa.BigInteger())
 ```python
 # Base ou mixin
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -470,6 +462,7 @@ Nouveaux :
 # Utiliser un fichier temporaire pour les uploads > 10MB
 import tempfile
 
+
 async def _read_upload_streaming(file: UploadFile, max_size: int) -> bytes:
     if file.size and file.size < 10 * 1024 * 1024:
         return await file.read()
@@ -498,7 +491,7 @@ async def _read_upload_streaming(file: UploadFile, max_size: int) -> bytes:
 ```python
 # Garder l'iterator, ne PAS matérialiser en list
 fights = _parser.parse(evtc_bytes)  # Iterator, pas list
-core_fight = next(fights, None)     # Prendre le premier fight seulement
+core_fight = next(fights, None)  # Prendre le premier fight seulement
 # Vérifier qu'il n'y a qu'un fight
 for extra in fights:
     logger.warning("extra fight ignored: %s", extra.id)
@@ -514,8 +507,10 @@ def _serialize_events_stream(events: list[Event]) -> Iterator[bytes]:
     for event in events:
         yield event.model_dump_json().encode("utf-8") + b"\n"
 
+
 # Utilisation
 import gzip
+
 jsonl_stream = _serialize_events_stream(events)
 gz_bytes = b"".join(gzip.compress(line) for line in jsonl_stream)
 # Plus efficace : BytesIO + GzipFile writelines
@@ -532,16 +527,14 @@ gz_bytes = buf.getvalue()
 **Solution :**
 ```python
 # Avant
-stmt = (
-    select(...)
-    .limit(limit)
-    .offset(offset)
-)
+stmt = select(...).limit(limit).offset(offset)
+
 
 # Après (keyset pagination)
 class PlayerCursor(BaseModel):
     last_damage: int | None = None
     last_account: str | None = None
+
 
 @router.get("")
 def list_players(
@@ -577,10 +570,12 @@ def list_players(
     if has_more and rows:
         last = rows[-1]
         next_cursor = base64.urlsafe_b64encode(
-            json.dumps({
-                "last_damage": last.total_damage,
-                "last_account": last.account_name,
-            }).encode()
+            json.dumps(
+                {
+                    "last_damage": last.total_damage,
+                    "last_account": last.account_name,
+                }
+            ).encode()
         ).decode()
 ```
 
@@ -592,13 +587,12 @@ import json
 from typing import Any
 import redis.asyncio as aioredis
 
+
 class CacheService:
     def __init__(self, redis_url: str = "redis://localhost:6379"):
         self._redis = aioredis.from_url(redis_url)
 
-    async def get_or_compute(
-        self, key: str, ttl: int, compute: callable
-    ) -> Any:
+    async def get_or_compute(self, key: str, ttl: int, compute: callable) -> Any:
         cached = await self._redis.get(key)
         if cached:
             return json.loads(cached)
@@ -684,19 +678,19 @@ Nouveaux :
 **Cibles :**
 ```python
 # AVANT
-def process_parse(session_factory, upload_id, raw_bytes):
-    ...
+def process_parse(session_factory, upload_id, raw_bytes): ...
+
 
 # APRÈS
 from collections.abc import Callable
 from sqlalchemy.orm import Session
 
+
 def process_parse(
     session_factory: Callable[[], Session],
     upload_id: uuid.UUID,
     raw_bytes: bytes,
-) -> None:
-    ...
+) -> None: ...
 ```
 
 **Vérification mypy :**

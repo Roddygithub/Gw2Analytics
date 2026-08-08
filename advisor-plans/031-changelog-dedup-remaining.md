@@ -50,10 +50,10 @@ lines = changelog.read_text().splitlines(keepends=True)
 
 # Cut ranges (1-indexed, inclusive start, exclusive end):
 cuts = [
-    (3961, 3980),   # [0.4.0] misplaced
-    (3980, 4080),   # [0.5.0-web] duplicate
-    (4080, 4155),   # [0.5.0-parser] duplicate
-    (4155, 4200),   # [0.1.0] Phase 3 duplicate
+    (3961, 3980),  # [0.4.0] misplaced
+    (3980, 4080),  # [0.5.0-web] duplicate
+    (4080, 4155),  # [0.5.0-parser] duplicate
+    (4155, 4200),  # [0.1.0] Phase 3 duplicate
     (4200, len(lines) + 1),  # [0.2.0] misplaced
 ]
 
