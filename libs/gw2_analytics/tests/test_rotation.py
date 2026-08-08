@@ -98,6 +98,7 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         BoonApplyEvent(time_ms=origin + 34, skill_id=40052, duration_ms=6_000, stacks=1, **base),
         BoonApplyEvent(time_ms=origin + 34, skill_id=76351, duration_ms=1, stacks=1, **base),
         BoonApplyEvent(time_ms=origin + 35, skill_id=44272, duration_ms=0, stacks=1, **base),
+        BoonApplyEvent(time_ms=origin + 36, skill_id=44597, duration_ms=1, stacks=1, **base),
         BoonApplyEvent(
             time_ms=origin + 40,
             skill_id=29446,
@@ -208,6 +209,7 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         (44663, 34, 0),
         (76351, 34, 0),
         (41858, 35, 0),
+        (13046, 36, 0),
         (30961, 40, 0),
         (29604, 50, 0),
         (45534, 60, 0),
