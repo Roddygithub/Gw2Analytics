@@ -448,6 +448,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     ranger_pet_agent_ids: Collection[int] = (),
     siege_turtle_agent_ids: Collection[int] = (),
     smokescale_agent_ids: Collection[int] = (),
+    fern_hound_agent_ids: Collection[int] = (),
     professions: Mapping[int, Profession] | None = None,
     elite_specs: Mapping[int, EliteSpec] | None = None,
     agent_id_by_instance: Mapping[int, int] | None = None,
@@ -703,6 +704,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                 if owner:
                     add_instant(owner, 65418, event.time_ms)
+            if (
+                event.kind == "apply"
+                and event.skill_id == 59536
+                and event.target_agent_id in fern_hound_agent_ids
+            ):
+                owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
+                if owner:
+                    add_instant(owner, 12717, event.time_ms)
             if (
                 event.kind == "apply"
                 and event.skill_id == 59536

@@ -331,6 +331,31 @@ def test_smoke_cloud_skips_reapply_echo_from_env() -> None:
     ] == [(7, 31568, 100)]
 
 
+def test_fern_hound_regenerate_is_credited_to_spawn_owner() -> None:
+    origin = 42_000_000
+    events = [
+        SpawnEvent(time_ms=origin + 10, source_agent_id=7, target_agent_id=99, skill_id=0),
+        BoonApplyEvent(
+            time_ms=origin + 100,
+            source_agent_id=99,
+            target_agent_id=99,
+            skill_id=59536,
+            duration_ms=1_000,
+            stacks=1,
+        ),
+    ]
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            fern_hound_agent_ids={99},
+        )
+    ] == [(7, 12717, 100)]
+
+
 def test_flash_spark_is_inferred_from_engineer_effect() -> None:
     origin = 42_000_000
     events = [
