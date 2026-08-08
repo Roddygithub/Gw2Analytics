@@ -704,11 +704,9 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                         and abs(other.time_ms - event.time_ms) < 2
                         for other in nearby_events(event.time_ms, 1)
                     )
-                    else
-                    -27
+                    else -27
                     if elite_specs.get(caster) is EliteSpec.MIRAGE
-                    else
-                    10310
+                    else 10310
                     if any(
                         isinstance(other, SpawnEvent)
                         and other.source_agent_id == caster

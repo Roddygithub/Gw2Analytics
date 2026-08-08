@@ -476,8 +476,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         {
             agent.id
             for agent in fight.agents
-            if agent.name.startswith(("Juvenile ", "Jeune "))
-            or agent.name.endswith(" juvénile")
+            if agent.name.startswith(("Juvenile ", "Jeune ")) or agent.name.endswith(" juvénile")
         },
         {agent.id for agent in fight.agents if agent.species_id == 24796},
         professions={agent.id: agent.profession for agent in fight.agents},
