@@ -129,11 +129,23 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
             guid="734834E7EB7CD74EB129ACBCE5C64C1D",
             **base,
         ),
+        EffectEvent(
+            time_ms=origin + 140,
+            skill_id=0,
+            guid="BB5488951B60B546BB1BD5626DAE83E1",
+            is_around_dst=True,
+            **base,
+        ),
     ]
 
     assert [
         (cast.skill_id, cast.time_ms, cast.duration_ms)
-        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            professions={7: Profession.THIEF},
+        )
     ] == [
         (10197, 10, 0),
         (10199, 20, 0),
@@ -154,6 +166,7 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         (29786, 110, 0),
         (62813, 120, 0),
         (63095, 130, 0),
+        (13062, 140, 0),
     ]
 
 
