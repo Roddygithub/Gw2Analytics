@@ -325,6 +325,7 @@ _INSTANT_CASTS_BY_EFFECT = {
     "B59FCEFCF1D5D84B9FDB17F11E9B52E6": 41372,  # Mercy
     "29F6AADDF5E75348854123B956E4BF0E": 71989,  # Detonate Jurisdiction
     "D7F8FA5695F8714B99A51EE72EF6E178": 14413,  # Dolyak Signet
+    "E1C1DD7F866B4149A1BADD216C9AA69D": 63111,  # Shift Signet
 }
 #: Familiar skill -> the player skill Elite Insights credits to its owner,
 #: transcribed from ``EvokerHelper``'s ``MinionCastCastFinder`` entries. The
@@ -342,6 +343,8 @@ _MINION_CASTS = {
 #: Shared by every guardian shout, so the skill is decided by what the shout
 #: applied to its caster rather than by the effect itself.
 _GUARDIAN_SHOUT_EFFECT = "122BA55CCDF2B643929F6C4A97226DC9"
+_MECHANIST_SHIFT_SIGNET_EFFECT = "E1C1DD7F866B4149A1BADD216C9AA69D"
+_MECHANIST_SHIFT_SIGNET_SELF_EFFECT = "DB22850AE209B34BBD11372F56D42D43"
 #: ``UsingDstBaseSpecChecker``: the effect must sit on its destination, and
 #: that destination must be of this base profession. Warriors emit the
 #: guardian shout effect too, and EI books nothing for them.
@@ -378,6 +381,7 @@ _EFFECT_CASTS_BY_DST = {
     "BB5488951B60B546BB1BD5626DAE83E1": 13062,  # Signet of Agility
 }
 _SECONDARY_EFFECTS = {
+    _MECHANIST_SHIFT_SIGNET_EFFECT: (_MECHANIST_SHIFT_SIGNET_SELF_EFFECT,),
     "BFFE3477ECFA26458D69E93EE76EFF6B": (
         "61F5669F9FAC1F48B47635C9F3833CEF",
         "ABF2332D28C7D6449A5B822E5714ADA4",
@@ -803,6 +807,11 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             if effect_skill_id is not None:
                 if event.guid in _MESMER_SHATTER_EFFECTS and caster not in (
                     virtuoso_agent_ids if effect_skill_id == 68273 else mesmer_agent_ids
+                ):
+                    continue
+                if (
+                    event.guid == _MECHANIST_SHIFT_SIGNET_EFFECT
+                    and elite_specs.get(caster) is not EliteSpec.MECHANIST
                 ):
                     continue
                 gate = _EFFECT_SPEC_GATE.get(event.guid)

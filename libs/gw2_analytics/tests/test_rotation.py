@@ -136,6 +136,20 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
             is_around_dst=True,
             **base,
         ),
+        EffectEvent(
+            time_ms=origin + 150,
+            source_agent_id=8,
+            target_agent_id=8,
+            skill_id=0,
+            guid="E1C1DD7F866B4149A1BADD216C9AA69D",
+        ),
+        EffectEvent(
+            time_ms=origin + 151,
+            source_agent_id=8,
+            target_agent_id=8,
+            skill_id=0,
+            guid="DB22850AE209B34BBD11372F56D42D43",
+        ),
     ]
 
     assert [
@@ -145,6 +159,7 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
             duration_ms=1_000,
             start_time_ms=origin,
             professions={7: Profession.THIEF},
+            elite_specs={8: EliteSpec.MECHANIST},
         )
     ] == [
         (10197, 10, 0),
@@ -167,6 +182,7 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         (62813, 120, 0),
         (63095, 130, 0),
         (13062, 140, 0),
+        (63111, 150, 0),
     ]
 
 
