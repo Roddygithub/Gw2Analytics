@@ -48,6 +48,7 @@ Add a `services/scripts/metrics_smoke.py` that asserts after N parses the counte
 2. Modify `apps/api/src/gw2analytics_api/main.py`:
    ```python
    from prometheus_client import make_asgi_app
+
    _app.mount("/metrics", make_asgi_app())
    ```
 3. Modify `parser_worker.py:parse_job`:

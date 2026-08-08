@@ -37,7 +37,9 @@ Centralize env reads via `get_settings()` (cached `lru_cache` accessor). Add 4 S
    ```python
    arq_redis_host: str = Field(default="localhost", validation_alias="ARQ_REDIS_HOST")
    arq_redis_port: int = Field(default=6379, validation_alias="ARQ_REDIS_PORT")
-   allow_inrequest_parse_fallback: bool = Field(default=False, validation_alias="ALLOW_INREQUEST_PARSE_FALLBACK")
+   allow_inrequest_parse_fallback: bool = Field(
+       default=False, validation_alias="ALLOW_INREQUEST_PARSE_FALLBACK"
+   )
    skip_schema_guard: bool = Field(default=False, validation_alias="SKIP_SCHEMA_GUARD")
    secrets_kek_fallback: list[str] = Field(default=[], validation_alias="SECRETS_KEK_FALLBACK")
    ```

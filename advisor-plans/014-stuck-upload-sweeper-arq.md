@@ -57,7 +57,8 @@ Configure via `STUCK_SWEEPER_INTERVAL_S=300` and `STUCK_SWEEPER_THRESHOLD_S=300`
                    await session.commit()
                    if result.rowcount:
                        logger.warning(
-                           "stuck-upload sweeper marked %d row(s) as failed", result.rowcount,
+                           "stuck-upload sweeper marked %d row(s) as failed",
+                           result.rowcount,
                        )
            except Exception:
                logger.exception("stuck-upload sweeper iteration failed")
