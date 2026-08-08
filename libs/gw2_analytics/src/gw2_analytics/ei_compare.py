@@ -473,7 +473,12 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             and agent.elite in {EliteSpec.UNKNOWN, EliteSpec.MIRAGE, EliteSpec.CHRONOMANCER}
         },
         {agent.id for agent in fight.agents if agent.species_id == 8111},
-        {agent.id for agent in fight.agents if agent.name.startswith(("Juvenile ", "Jeune "))},
+        {
+            agent.id
+            for agent in fight.agents
+            if agent.name.startswith(("Juvenile ", "Jeune "))
+            or agent.name.endswith(" juvénile")
+        },
         {agent.id for agent in fight.agents if agent.species_id == 24796},
         professions={agent.id: agent.profession for agent in fight.agents},
         elite_specs={agent.id: agent.elite for agent in fight.agents},
