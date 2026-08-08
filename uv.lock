@@ -1012,7 +1012,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.0,<8" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", specifier = ">=2.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.1" },
 ]
 
 [package.metadata.requires-dev]
@@ -1082,7 +1082,7 @@ dev = [
     { name = "ruff", specifier = ">=0.15.22,<0.16" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "time-machine", specifier = ">=3.3.1" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32,<1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.1,<1" },
 ]
 
 [[package]]
