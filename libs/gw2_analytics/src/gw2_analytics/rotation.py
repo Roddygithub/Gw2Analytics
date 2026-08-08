@@ -691,6 +691,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 event.target_agent_id if by_dst else event.source_agent_id or event.target_agent_id
             )
             if event.guid == "C34E250B01FF534292EE6AB36D768337":
+                if professions and professions.get(caster) is not Profession.MESMER:
+                    continue
                 effect_skill_id = (
                     10337
                     if any(
@@ -702,6 +704,9 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                         and abs(other.time_ms - event.time_ms) < 2
                         for other in nearby_events(event.time_ms, 1)
                     )
+                    else
+                    -27
+                    if elite_specs.get(caster) is EliteSpec.MIRAGE
                     else
                     10310
                     if any(

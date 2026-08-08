@@ -760,7 +760,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 (
                     (cast.skill_id, cast.time_ms, cast.duration_ms)
                     for cast in rotation
-                    if cast.source_agent_id == agent.id
+                    if cast.source_agent_id in agent_ids
                     and (
                         (cast.time_ms + origin >= slice_lo and cast.time_ms + origin <= slice_hi)
                         or (
