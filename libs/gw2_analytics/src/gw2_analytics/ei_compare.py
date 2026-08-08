@@ -480,6 +480,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         },
         {agent.id for agent in fight.agents if agent.species_id == 24796},
         {agent.id for agent in fight.agents if agent.species_id == 15402},
+        {agent.id for agent in fight.agents if agent.species_id == 7336},
         professions={agent.id: agent.profession for agent in fight.agents},
         elite_specs={agent.id: agent.elite for agent in fight.agents},
         agent_id_by_instance={
