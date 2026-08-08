@@ -534,6 +534,18 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         if isinstance(event, SkillActivationEvent):
             key = (event.source_agent_id, event.skill_id)
             if event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
+                if event.skill_id == 71892 and (pending := active.get(key)) is not None:
+                    casts.append(
+                        SkillCast(
+                            source_agent_id=pending.source_agent_id,
+                            skill_id=pending.skill_id,
+                            time_ms=pending.time_ms - origin,
+                            duration_ms=min(
+                                pending.expected_duration_ms,
+                                event.time_ms - pending.time_ms + 10,
+                            ),
+                        )
+                    )
                 active[event.source_agent_id, event.skill_id] = event
                 owner_skill = _MINION_CASTS.get(event.skill_id)
                 if owner_skill is not None:
@@ -805,13 +817,16 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     add_instant(caster, effect_skill_id, event.time_ms)
 
     for pending in active.values():
+        duration = (
+            pending.expected_duration_ms if pending.skill_id == 71892 else pending.duration_ms
+        )
         casts.append(
             SkillCast(
                 source_agent_id=pending.source_agent_id,
                 skill_id=pending.skill_id,
                 time_ms=pending.time_ms - origin,
                 duration_ms=min(
-                    pending.duration_ms,
+                    duration,
                     max(0, duration_ms - (pending.time_ms - origin)),
                 ),
             )
