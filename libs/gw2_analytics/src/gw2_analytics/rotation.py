@@ -311,6 +311,7 @@ _INSTANT_CASTS_BY_EFFECT = {
     "E78ED095E97F1D4A8BEB901796449E2F": 10562,
     "B59FCEFCF1D5D84B9FDB17F11E9B52E6": 41372,  # Mercy
     "29F6AADDF5E75348854123B956E4BF0E": 71989,  # Detonate Jurisdiction
+    "D7F8FA5695F8714B99A51EE72EF6E178": 14413,  # Dolyak Signet
 }
 #: Familiar skill -> the player skill Elite Insights credits to its owner,
 #: transcribed from ``EvokerHelper``'s ``MinionCastCastFinder`` entries. The
