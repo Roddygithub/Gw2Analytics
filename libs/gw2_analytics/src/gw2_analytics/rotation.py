@@ -785,6 +785,15 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             )
             if event.kind == "apply" and event.skill_id == 40052:
                 mapped = 44663 if event.duration_ms >= 5_000 else 54870
+            if event.kind == "remove_all" and event.skill_id == 10686:
+                has_walk_loss = any(
+                    isinstance(other, BoonApplyEvent)
+                    and other.kind == "remove_all"
+                    and other.skill_id == 53476
+                    and abs(other.time_ms - (event.time_ms + 120)) < 10
+                    for other in nearby_events(event.time_ms + 120, 9)
+                )
+                mapped = None if has_walk_loss else 10687
             if mapped is not None and (
                 (event.skill_id == 73955 and event.kind == "apply" and already_active)
                 or (event.skill_id in {27581, 73955} and event.kind not in {"apply", "remove_all"})
