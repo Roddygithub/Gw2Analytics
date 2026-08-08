@@ -214,6 +214,84 @@ def test_build_skill_rotation_infers_engineer_kits_from_one_bundle_cast() -> Non
     ] == [(5927, 9, 0), (-2, 10, 0), (30800, 29, 0), (-2, 30, 0)]
 
 
+def test_engineer_kit_ignores_previous_kit_finisher_at_same_time() -> None:
+    origin = 42_000_000
+    base = {"target_agent_id": 0, "source_agent_id": 7}
+    events = [
+        WeaponSwapEvent(
+            time_ms=origin + 10,
+            skill_id=0,
+            swapped_from=4,
+            swapped_to=2,
+            **base,
+        ),
+        SkillActivationEvent(
+            time_ms=origin + 20,
+            skill_id=5931,
+            activation=ActivationType.MINIMUM,
+            duration_ms=0,
+            expected_duration_ms=0,
+            **base,
+        ),
+        SkillActivationEvent(
+            time_ms=origin + 20,
+            skill_id=5936,
+            activation=ActivationType.NORMAL,
+            duration_ms=0,
+            expected_duration_ms=0,
+            **base,
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+    ] == [(5933, 9, 0), (-2, 10, 0), (5936, 20, 0)]
+
+
+def test_hunker_down_uses_buff_source_when_turtle_spawn_owner_is_missing() -> None:
+    origin = 42_000_000
+    events = [
+        BoonApplyEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=99,
+            skill_id=59536,
+            duration_ms=1_000,
+            stacks=1,
+        )
+    ]
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            siege_turtle_agent_ids={99},
+        )
+    ] == [(7, 65418, 100, 0)]
+
+
+def test_mercy_is_inferred_from_effect() -> None:
+    origin = 42_000_000
+    events = [
+        EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=43917,
+            guid="B59FCEFCF1D5D84B9FDB17F11E9B52E6",
+            is_around_dst=True,
+        )
+    ]
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+    ] == [(7, 41372, 100, 0)]
+
+
 def _guardian_shout(
     origin: int, agent: int, boon: int, stacks: int, duration_ms: int
 ) -> list[Event]:

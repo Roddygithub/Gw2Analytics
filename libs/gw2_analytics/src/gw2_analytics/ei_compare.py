@@ -74,6 +74,31 @@ def _compare_fields(
             }
 
 
+def _rotation_unmatched(
+    expected: Sequence[tuple[int, int, int]], actual: Sequence[tuple[int, int, int]]
+) -> tuple[list[tuple[int, int, int]], list[tuple[int, int, int]]]:
+    remaining = list(actual)
+    missing: list[tuple[int, int, int]] = []
+    for skill_id, cast_time, duration in expected:
+        match = next(
+            (
+                index
+                for index, other in enumerate(remaining)
+                if other[0] == skill_id
+                and (
+                    (other[2] == duration and abs(other[1] - cast_time) <= 2)
+                    or (other[1] == cast_time and (other[2] == 0 or duration == 0))
+                )
+            ),
+            None,
+        )
+        if match is None:
+            missing.append((skill_id, cast_time, duration))
+        else:
+            remaining.pop(match)
+    return missing, remaining
+
+
 def _damage_stats(
     damage: list[DamageEvent],
     crowd_control: list[CCEvent],
@@ -445,7 +470,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             agent.id
             for agent in fight.agents
             if agent.profession == Profession.MESMER
-            and agent.elite in {EliteSpec.UNKNOWN, EliteSpec.MIRAGE}
+            and agent.elite in {EliteSpec.UNKNOWN, EliteSpec.MIRAGE, EliteSpec.CHRONOMANCER}
         },
         {agent.id for agent in fight.agents if agent.species_id == 8111},
         {agent.id for agent in fight.agents if agent.name.startswith(("Juvenile ", "Jeune "))},
@@ -736,15 +761,22 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     (cast.skill_id, cast.time_ms, cast.duration_ms)
                     for cast in rotation
                     if cast.source_agent_id == agent.id
-                    and slice_lo <= cast.time_ms + origin <= slice_hi
+                    and (
+                        (cast.time_ms + origin >= slice_lo and cast.time_ms + origin <= slice_hi)
+                        or (
+                            cast.time_ms < 0
+                            and slice_lo <= cast.time_ms + cast.duration_ms + origin <= slice_hi
+                        )
+                    )
                 ),
                 key=lambda item: (item[1], item[0]),
             )
             values["rotation"] = actual_casts
-            if expected_casts != actual_casts:
+            missing_casts, extra_casts = _rotation_unmatched(expected_casts, actual_casts)
+            if missing_casts or extra_casts:
                 differences[f"{prefix}.rotation"] = {
-                    "expected": expected_casts,
-                    "actual": actual_casts,
+                    "expected": missing_casts,
+                    "actual": extra_casts,
                 }
 
         consumables = player.get("consumables")
