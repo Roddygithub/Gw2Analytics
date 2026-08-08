@@ -151,6 +151,21 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
             skill_id=0,
             guid="DB22850AE209B34BBD11372F56D42D43",
         ),
+        EffectEvent(
+            time_ms=origin + 160,
+            source_agent_id=9,
+            target_agent_id=9,
+            skill_id=0,
+            guid="68F2C378E6C80548B5A3C89870C5DD86",
+            is_around_dst=True,
+        ),
+        EffectEvent(
+            time_ms=origin + 161,
+            source_agent_id=9,
+            target_agent_id=9,
+            skill_id=0,
+            guid="122BA55CCDF2B643929F6C4A97226DC9",
+        ),
     ]
 
     assert [
@@ -159,7 +174,7 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
             events,
             duration_ms=1_000,
             start_time_ms=origin,
-            professions={7: Profession.THIEF},
+            professions={7: Profession.THIEF, 9: Profession.GUARDIAN},
             elite_specs={8: EliteSpec.MECHANIST},
         )
     ] == [
@@ -184,7 +199,58 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         (63095, 130, 0),
         (13062, 140, 0),
         (63111, 150, 0),
+        (9085, 160, 0),
     ]
+
+
+def test_build_skill_rotation_transforms_weaver_attunements() -> None:
+    origin = 42_000_000
+    base = {"source_agent_id": 7, "target_agent_id": 7}
+    events = [
+        BuffApplyEvent(time_ms=origin, skill_id=5585, **base),
+        BuffApplyEvent(time_ms=origin, skill_id=43229, **base),
+        BuffApplyEvent(time_ms=origin, skill_id=40926, **base),
+        BuffApplyEvent(time_ms=origin + 20, skill_id=5580, **base),
+        BuffApplyEvent(time_ms=origin + 20, skill_id=42811, **base),
+        BuffApplyEvent(time_ms=origin + 20, skill_id=43740, **base),
+        BoonApplyEvent(
+            time_ms=origin + 100,
+            skill_id=42811,
+            duration_ms=0,
+            stacks=1,
+            kind="remove_all",
+            **base,
+        ),
+        BoonApplyEvent(time_ms=origin + 100, skill_id=44822, duration_ms=0, stacks=1, **base),
+        BoonApplyEvent(
+            time_ms=origin + 100,
+            skill_id=43740,
+            duration_ms=0,
+            stacks=1,
+            kind="remove_all",
+            **base,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 100,
+            skill_id=5580,
+            duration_ms=0,
+            stacks=1,
+            kind="remove_all",
+            **base,
+        ),
+        BoonApplyEvent(time_ms=origin + 101, skill_id=41692, duration_ms=0, stacks=1, **base),
+        BoonApplyEvent(time_ms=origin + 101, skill_id=5575, duration_ms=0, stacks=1, **base),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            elite_specs={7: EliteSpec.WEAVER},
+        )
+    ] == [(-14, 20, 0), (-13, 100, 0)]
 
 
 def test_build_skill_rotation_marks_french_ranger_pet_spawn() -> None:
@@ -945,11 +1011,7 @@ def test_symbol_trait_is_not_booked_while_the_real_skill_is_being_cast() -> None
 
 
 def test_weaver_attunement_buff_is_not_booked_as_a_base_attunement() -> None:
-    """A Weaver swaps dual attunements, which Elite Insights books separately.
-
-    Reporting the base skill would be a cast the log never contained, so the
-    buff is dropped for a Weaver rather than attributed to the wrong skill.
-    """
+    """A Weaver swaps dual attunements, which Elite Insights books separately."""
     origin = 42_000_000
     fire_attunement = BoonApplyEvent(
         time_ms=origin + 100,
@@ -970,4 +1032,4 @@ def test_weaver_attunement_buff_is_not_booked_as_a_base_attunement() -> None:
 
     assert casts() == [5492]
     assert casts(elite_specs={7: EliteSpec.TEMPEST}) == [5492]
-    assert casts(elite_specs={7: EliteSpec.WEAVER}) == []
+    assert casts(elite_specs={7: EliteSpec.WEAVER}) == [43470]

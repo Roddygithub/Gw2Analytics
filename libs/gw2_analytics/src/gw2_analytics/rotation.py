@@ -211,14 +211,39 @@ _HEALING_CASTS = {
     72115,
 }
 _MISSILE_CASTS = {26261, 29889, 42163}
-#: The four base attunement buffs. A Weaver swaps between *dual*
-#: attunements, which Elite Insights books as their own skills -- four real
-#: ids and twelve synthetic negative ones -- and it never books a base
-#: attunement skill for one. Confirmed corpus-wide: every other
-#: elementalist spec gets them, Weaver gets none of the four. We do not
-#: derive the weaver swaps yet, so those casts stay missing rather than
-#: being reported under the wrong skill.
 _ATTUNEMENT_BUFFS = {5575, 5580, 5585, 5586}
+_WEAVER_ATTUNEMENTS = _ATTUNEMENT_BUFFS | {
+    40926,
+    43236,
+    41692,
+    43740,
+    42811,
+    43370,
+    43229,
+    44822,
+    43470,
+    41166,
+    42264,
+    44857,
+}
+_WEAVER_BASIC_TO_DUAL = {5585: 43470, 5586: 41166, 5575: 42264, 5580: 44857}
+_WEAVER_MAJOR_TRANSLATION = {
+    5585: {-5, -6, -7, 43470},
+    40926: {-5, -6, -7, 43470},
+    5586: {-8, -9, -10, 41166},
+    43236: {-8, -9, -10, 41166},
+    5575: {-11, -12, -13, 42264},
+    41692: {-11, -12, -13, 42264},
+    5580: {-14, -15, -16, 44857},
+    43740: {-14, -15, -16, 44857},
+}
+_WEAVER_MINOR_TRANSLATION = {
+    42811: {-8, -11, -14, 43470},
+    43370: {-5, -12, -15, 41166},
+    43229: {-6, -9, -16, 42264},
+    44822: {-7, -10, -13, 44857},
+}
+_WEAVER_DUAL_ATTUNEMENTS = {43470, 41166, 42264, 44857}
 _BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291, 62769}
 #: ``BuffLossCastFinder`` is typed on ``BuffRemoveAllEvent``, so a partial
 #: strip is not a cast. Only the entries verified against Elite Insights are
@@ -359,6 +384,7 @@ _EFFECT_SPEC_GATE = {
     "F53E2CE3B06B934085D46FA59468477B": Profession.MESMER,  # Power Return
     "23613E6E374EC6429FE9A69CC893984D": Profession.NECROMANCER,  # Sand Cascade
     "D7F8FA5695F8714B99A51EE72EF6E178": Profession.WARRIOR,  # Dolyak Signet
+    "68F2C378E6C80548B5A3C89870C5DD86": Profession.GUARDIAN,  # "Save Yourselves!"
 }
 _EFFECT_SOURCE_SPEC_GATE = {
     "6646D48A2446884998EFADB3EFEF0483": Profession.GUARDIAN,  # Detonate Jurisdiction
@@ -392,6 +418,7 @@ _EFFECT_CASTS_BY_DST = {
     "BB5488951B60B546BB1BD5626DAE83E1": 13062,  # Signet of Agility
     "418A090D719AB44AAF1C4AD1473068C4": 43176,  # Flash Spark
     "D7F8FA5695F8714B99A51EE72EF6E178": 14413,  # Dolyak Signet
+    "68F2C378E6C80548B5A3C89870C5DD86": 9085,  # "Save Yourselves!"
 }
 _SECONDARY_EFFECTS = {
     _MECHANIST_SHIFT_SIGNET_EFFECT: (_MECHANIST_SHIFT_SIGNET_SELF_EFFECT,),
@@ -416,6 +443,7 @@ _SECONDARY_EFFECTS = {
     "DC1C8A043ADCD24B9458688A792B04BA": ("4C7A5E148F7FD642B34EE4996DDCBBAB",),
     "AB2E22E7EE74DA4C87DA777C62E475EA": ("4C7A5E148F7FD642B34EE4996DDCBBAB",),
     "40C9F5FE5BD3BD449B5E48DF1E5FD348": ("1B3ACEE36F61DE42AB1C24BD33B5B5AD",),
+    "68F2C378E6C80548B5A3C89870C5DD86": (_GUARDIAN_SHOUT_EFFECT,),
 }
 #: ``UsingNoAnimatedCastChecker``: a trait that places the same symbol as a
 #: real skill must not be booked when the skill itself is being cast. The
@@ -446,6 +474,26 @@ _MESMER_SHATTER_EFFECTS = {
     "3D29ABD39CB5BD458C4D50A22FCC0E4B",
 }
 _MESMER_CLONE_SHATTER_EFFECT = "5FA6527231BB8041AC783396142C6200"
+
+
+def _translate_weaver_attunement(events: list[BoonApplyEvent | BuffApplyEvent]) -> int | None:
+    ids = [event.skill_id for event in events]
+    if len(ids) == 1 and ids[0] in _WEAVER_BASIC_TO_DUAL:
+        return _WEAVER_BASIC_TO_DUAL[ids[0]]
+    for skill_id in ids:
+        if skill_id in _WEAVER_DUAL_ATTUNEMENTS:
+            return skill_id
+    major: set[int] | None = None
+    minor: set[int] | None = None
+    for skill_id in ids:
+        if skill_id in _WEAVER_MAJOR_TRANSLATION:
+            major = _WEAVER_MAJOR_TRANSLATION[skill_id]
+        elif skill_id in _WEAVER_MINOR_TRANSLATION:
+            minor = _WEAVER_MINOR_TRANSLATION[skill_id]
+    if major is None or minor is None:
+        return None
+    match = major & minor
+    return next(iter(match)) if len(match) == 1 else None
 
 
 class SkillCast(BaseModel):
@@ -489,6 +537,40 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         return []
     origin = start_time_ms if start_time_ms is not None else min(e.time_ms for e in event_list)
     event_times = [event.time_ms for event in event_list]
+    weaver_attunement_groups: dict[int, list[tuple[int, list[BoonApplyEvent | BuffApplyEvent]]]] = (
+        defaultdict(list)
+    )
+    for event in event_list:
+        if (
+            isinstance(event, (BoonApplyEvent, BuffApplyEvent))
+            and event.skill_id in _WEAVER_ATTUNEMENTS
+            and elite_specs.get(event.target_agent_id) is EliteSpec.WEAVER
+        ):
+            groups = weaver_attunement_groups[event.target_agent_id]
+            match = next(
+                (group for group in groups if abs(group[0] - event.time_ms) < 10),
+                None,
+            )
+            if match is None:
+                groups.append((event.time_ms, [event]))
+            else:
+                match[1].append(event)
+    weaver_attunement_casts = [
+        (agent_id, skill_id, time_ms)
+        for agent_id, groups in weaver_attunement_groups.items()
+        for time_ms, group in groups
+        if time_ms > origin
+        and (
+            skill_id := _translate_weaver_attunement(
+                [
+                    event
+                    for event in group
+                    if isinstance(event, BuffApplyEvent)
+                    or (isinstance(event, BoonApplyEvent) and event.kind == "apply")
+                ]
+            )
+        )
+    ]
     swaps_by_agent: dict[int, list[WeaponSwapEvent]] = defaultdict(list)
     activations_by_agent: dict[int, list[SkillActivationEvent]] = defaultdict(list)
     spawn_owner_by_target: dict[int, int] = {}
@@ -574,6 +656,9 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 )
             )
         last_instant[key] = time_ms
+
+    for source, skill_id, time_ms in weaver_attunement_casts:
+        add_instant(source, skill_id, time_ms)
 
     for event in event_list:
         if isinstance(event, SkillActivationEvent):
