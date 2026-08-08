@@ -109,15 +109,16 @@ wheels = [
 
 [[package]]
 name = "arq"
-version = "0.28.0"
+version = "0.25.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "redis", extra = ["hiredis"] },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a4/81/7f9db65a89c29ba374000309b9dd95509500045df5c7e22f26c3731b7380/arq-0.28.0.tar.gz", hash = "sha256:a458188aefc2d7ee17d136f80d8fa8df1d6eba4ceebdead87e9f172d027dc311", size = 416141, upload-time = "2026-04-16T10:50:23.893Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3a/ae/24a5e6476aba4e931b3b6ec19b6b45a9da2ba048992b4b49f12861a6df6f/arq-0.25.0.tar.gz", hash = "sha256:d176ebadfba920c039dc578814d19b7814d67fa15f82fdccccaedb4330d65dae", size = 288899, upload-time = "2022-12-02T13:21:18.284Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/48/32/66b616976c5058d434ca2017979bfffd784888177b16b5038abcec93954a/arq-0.28.0-py3-none-any.whl", hash = "sha256:b1696bf5614d60f4172a2c0cbdc177e23ba03a5eb9acc29bd8181f4ea71fff94", size = 26061, upload-time = "2026-04-16T10:50:22.321Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/47/626ad09333ffc73fdd2ed270d81ddd60befd8f5b3c904be132bc0e7ccede/arq-0.25.0-py3-none-any.whl", hash = "sha256:db072d0f39c0bc06b436db67ae1f315c81abc1527563b828955670531815290b", size = 25774, upload-time = "2022-12-02T13:21:15.874Z" },
 ]
 
 [[package]]
@@ -1009,7 +1010,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "redis", specifier = ">=5.0,<8" },
+    { name = "redis", specifier = ">=8.1.0,<9" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.1" },
@@ -1077,7 +1078,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=6.0" },
     { name = "pytest-env", specifier = ">=1.6.0" },
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
-    { name = "redis", specifier = ">=5.0,<8" },
+    { name = "redis", specifier = ">=8.1.0,<9" },
     { name = "respx", specifier = ">=0.21" },
     { name = "ruff", specifier = ">=0.15.22,<0.16" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
@@ -2480,14 +2481,11 @@ wheels = [
 
 [[package]]
 name = "redis"
-version = "5.3.1"
+version = "8.1.0"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyjwt" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/6a/cf/128b1b6d7086200c9f387bd4be9b2572a30b90745ef078bd8b235042dc9f/redis-5.3.1.tar.gz", hash = "sha256:ca49577a531ea64039b5a36db3d6cd1a0c7a60c34124d46924a45b956e8cf14c", size = 4626200, upload-time = "2025-07-25T08:06:27.778Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/99/604f0b666d4c616d891cf77ebb9db6bb21601344c051aebf1b72b9ff915f/redis-8.1.0.tar.gz", hash = "sha256:6e1a19beef9225c83efd689c7e6b7da2d5215b1f42cd13b7fc3714d0a09c7b25", size = 5254356, upload-time = "2026-07-30T08:51:00.269Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/26/5c5fa0e83c3621db835cfc1f1d789b37e7fa99ed54423b5f519beb931aa7/redis-5.3.1-py3-none-any.whl", hash = "sha256:dc1909bd24669cc31b5f67a039700b16ec30571096c5f1f0d9d2324bff31af97", size = 272833, upload-time = "2025-07-25T08:06:26.317Z" },
+    { url = "https://files.pythonhosted.org/packages/66/9d/c5731f6e3608663d4d3656fd8d3aecee8b509c3082818f5a13eae925baea/redis-8.1.0-py3-none-any.whl", hash = "sha256:a4fe1aac3d3b3cc791d4b3d5931c5a956045dc951ee74d1c913ee3ac4d2ee9fb", size = 560618, upload-time = "2026-07-30T08:50:58.497Z" },
 ]
 
 [package.optional-dependencies]

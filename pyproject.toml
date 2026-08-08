@@ -76,7 +76,7 @@ dev = [
     "cryptography>=50,<51",  # v0.10.26 CI: pip-audit → crypt>=48; v0.15.x: CVE-2026-69247/8/9 → >=50
 
     "arq>=0.25,<1",
-    "redis>=5.0,<8",
+    "redis>=8.1.0,<9",
     "prometheus_client>=0.26.0,<1",
 ]
 

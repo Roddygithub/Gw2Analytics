@@ -53,7 +53,7 @@ class CacheService:
         redis_url: str = "redis://localhost:6379",
         default_ttl: int = 60,
     ) -> None:
-        self._redis: aioredis.Redis = aioredis.from_url(  # type: ignore[no-untyped-call]
+        self._redis: aioredis.Redis = aioredis.from_url(
             redis_url,
             decode_responses=True,
         )
