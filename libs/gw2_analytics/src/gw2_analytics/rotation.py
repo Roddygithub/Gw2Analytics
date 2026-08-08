@@ -833,7 +833,9 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
 
     for pending in active.values():
         duration = (
-            pending.expected_duration_ms if pending.skill_id == 71892 else pending.duration_ms
+            pending.expected_duration_ms
+            if pending.skill_id in {71892, 72940}
+            else pending.duration_ms
         )
         casts.append(
             SkillCast(
