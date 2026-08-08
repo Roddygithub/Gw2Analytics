@@ -88,6 +88,7 @@ _BUFF_GAIN_CASTS = {
     41720: 42944,
     44693: 42944,
     44932: 42944,
+    44272: 41858,  # Legendary Renegade Stance
     33162: 31129,
     59964: 62567,
     63239: 63155,
@@ -97,6 +98,8 @@ _BUFF_GAIN_CASTS = {
     63145: 63344,
     77095: 76813,
     76351: 76351,
+    62769: 62745,
+    78624: 76752,
     76868: 77321,
     77362: 77018,
     51664: 14410,  # Signet of Fury (active buff)
@@ -138,10 +141,18 @@ _BUFF_LOSS_CASTS = {
     59579: 59562,
     59964: 62540,
     63239: 63251,
+    62769: 62861,
     13135: 13106,
     77265: 76730,
 }
-_BUFF_GIVE_CASTS = {41815: 45789, 70350: 70350, 71890: 71792, 44651: 40498}
+_BUFF_GIVE_CASTS = {
+    41815: 45789,
+    70350: 70350,
+    71890: 71792,
+    44651: 40498,
+    42428: 43532,
+    70806: 70806,
+}
 _DAMAGE_CASTS = {
     6154: 50,
     5561: 50,
@@ -207,12 +218,12 @@ _MISSILE_CASTS = {26261, 29889, 42163}
 #: derive the weaver swaps yet, so those casts stay missing rather than
 #: being reported under the wrong skill.
 _ATTUNEMENT_BUFFS = {5575, 5580, 5585, 5586}
-_BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291}
+_BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291, 62769}
 #: ``BuffLossCastFinder`` is typed on ``BuffRemoveAllEvent``, so a partial
 #: strip is not a cast. Only the entries verified against Elite Insights are
 #: listed; the rest keep the historical "any removal" behaviour until they
 #: are checked the same way.
-_BUFF_LOSS_REMOVE_ALL_ONLY = {29446}
+_BUFF_LOSS_REMOVE_ALL_ONLY = {29446, 62769}
 #: BuffGainCastFinder books the buff gained by the player itself; arcdps
 #: also re-emits these buffs with ``src=0`` (env) for trait/sigil pulses,
 #: which EI excludes via ``!bae.Initial``. Self-apply gating reproduces
@@ -252,6 +263,7 @@ _INSTANT_CASTS_BY_EFFECT = {
     "75EF160EAFC0394CACC436CF89819148": 14404,
     "42C2B92716D9174EBC43420D1D55FB92": 76769,
     "44092AEF6D619F4093FEA4E9D9142D01": 43448,
+    "23613E6E374EC6429FE9A69CC893984D": 43448,  # Sand Cascade, post-July 2026 effect
     "885B7AAA68F09E48A926BFFE488DB5AD": -37,
     "19C4FA17A38E7E4780722799B48BF2BE": 31406,
     "98C9834C6381204A85DC67C375D135E4": 13677,
@@ -339,6 +351,7 @@ _EFFECT_SPEC_GATE = {
     "23284B87C26C9A41A887F410F930E1A2": Profession.THIEF,  # Infiltrator's Signet
     "F53E2CE3B06B934085D46FA59468477B": Profession.MESMER,  # Power Return
     "418A090D719AB44AAF1C4AD1473068C4": Profession.ENGINEER,  # Flash Spark
+    "23613E6E374EC6429FE9A69CC893984D": Profession.NECROMANCER,  # Sand Cascade
 }
 _AEGIS_BUFF = 743
 _STABILITY_BUFF = 1122
