@@ -115,6 +115,7 @@ _BUFF_GAIN_CASTS = {
     5543: 5543,  # Mist Form
     5640: 5641,  # Arcane Shield
     43930: 43930,  # Superior Sigil of Severance
+    44597: 13046,  # Assassin's Signet
     62768: 62975,  # Rocky Loop (Catalyst orb)
     62984: 62834,  # Icy Coil (Catalyst orb)
     62707: 62887,  # Crescent Wind (Catalyst orb)
