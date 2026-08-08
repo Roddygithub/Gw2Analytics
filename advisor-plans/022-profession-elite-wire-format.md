@@ -52,6 +52,7 @@ def _profession_label(profession: Profession) -> str:
     v = profession.value if isinstance(profession, Profession) else int(profession)
     return "UNKNOWN" if v == 0 else f"PROF({v})"
 
+
 def _elite_label(elite: EliteSpec) -> str:
     v = elite.value if isinstance(elite, EliteSpec) else int(elite)
     return "BASE" if v == 0 else f"ELITE({v})"
@@ -87,9 +88,11 @@ Create `apps/api/src/gw2analytics_api/route_helpers.py`:
 ```python
 from gw2_core import EliteSpec, Profession
 
+
 def format_profession(profession: Profession | int) -> str:
     v = profession.value if isinstance(profession, Profession) else int(profession)
     return "UNKNOWN" if v == 0 else f"PROF({v})"
+
 
 def format_elite_spec(elite: EliteSpec | int) -> str:
     v = elite.value if isinstance(elite, EliteSpec) else int(elite)
@@ -113,8 +116,10 @@ Replace the inline code in `_profession_label` and `_elite_label` with calls to 
 ```python
 from gw2analytics_api.route_helpers import format_elite_spec, format_profession
 
+
 def _profession_label(profession: Profession) -> str:
     return format_profession(profession)
+
 
 def _elite_label(elite: EliteSpec) -> str:
     return format_elite_spec(elite)

@@ -89,6 +89,7 @@ class DamageEvent(BaseEvent):
     condi portion explicitly -- the canonical partitioning method
     is the skill-name lookup against ``KNOWN_CONDI_NAMES``).
     """
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_type: Literal[EventType.DAMAGE] = EventType.DAMAGE

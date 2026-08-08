@@ -21,7 +21,7 @@ license-files = ["LICENSE"]
 dev = [
     # v0.10.5 dep-cycle: bump to 0.15.21 (matches PR #8 + CI) so
     # local auto-fix produces the AST that the bumping CI validates.
-    "ruff>=0.15.22,<0.16",
+    "ruff>=0.16.1,<0.17",
     "mypy>=2.2.0",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
@@ -153,6 +153,7 @@ ignore = [
     "COM812",  # conflict with formatter
     "ISC001",  # conflict with formatter
     "PLR0913", # too many args (Pydantic models need many)
+    "PLR0917", # too many positional args (companion to PLR0913; ruff 0.16+)
     "PLR2004", # magic values (tests / fixtures use them)
     "D",       # pydocstyle — handled by griffe / mkdocs later
 ]

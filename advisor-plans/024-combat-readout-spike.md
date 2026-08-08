@@ -56,12 +56,13 @@ Check how many statechange event types actually appear in the `tests/fixtures/` 
 ```python
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_bytes
 import glob
+
 statechanges_seen = set()
 for f in glob.glob("apps/api/tests/_fixtures/*.zevtc"):
     raw = read_zevtc_bytes(open(f, "rb").read())
     for fight in PythonEvtcParser().parse(raw):
         for evt in PythonEvtcParser().parse_events(f.read()):
-            if hasattr(evt, 'is_statechange'):
+            if hasattr(evt, "is_statechange"):
                 statechanges_seen.add(evt.is_statechange)
 print(sorted(statechanges_seen))
 ```
@@ -80,6 +81,7 @@ class BoonApplyEvent(Event):
     skill_id: int
     duration_ms: int
     stacks: int
+
 
 class CCEvent(Event):
     event_type: Literal["cc"] = "cc"

@@ -55,9 +55,7 @@ After the operator runs the migration, they remove `SECRETS_KEK_FALLBACK` + `SEC
                    return _get_fernet(fallback).decrypt(ciphertext).decode("utf-8")
                except FernetInvalidToken:
                    continue
-           raise FernetInvalidToken(
-               "no KEK in primary or fallback list decrypted this ciphertext"
-           )
+           raise FernetInvalidToken("no KEK in primary or fallback list decrypted this ciphertext")
    ```
 2. Update `crypto.py._resolve_kek` to plumb the settings fallback list for reads (does NOT add a new Settings field — that's plan 016).
 3. Create `apps/api/scripts/rotate_kek.py` (~120 lines):
