@@ -329,6 +329,30 @@ def test_smoke_cloud_skips_reapply_echo_from_env() -> None:
     ] == [(7, 31568, 100)]
 
 
+def test_flash_spark_is_inferred_from_engineer_effect() -> None:
+    origin = 42_000_000
+    events = [
+        EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=2257,
+            guid="418A090D719AB44AAF1C4AD1473068C4",
+            is_around_dst=True,
+        )
+    ]
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            professions={7: Profession.ENGINEER},
+        )
+    ] == [(7, 43176, 100, 0)]
+
+
 def test_mercy_is_inferred_from_effect() -> None:
     origin = 42_000_000
     events = [
