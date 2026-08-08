@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from gw2_core import (
     ActivationType,
     BoonApplyEvent,
+    BuffApplyEvent,
     DamageEvent,
     EffectEvent,
     EliteSpec,
@@ -345,6 +346,8 @@ _MINION_CASTS = {
 _GUARDIAN_SHOUT_EFFECT = "122BA55CCDF2B643929F6C4A97226DC9"
 _MECHANIST_SHIFT_SIGNET_EFFECT = "E1C1DD7F866B4149A1BADD216C9AA69D"
 _MECHANIST_SHIFT_SIGNET_SELF_EFFECT = "DB22850AE209B34BBD11372F56D42D43"
+_FLOWING_RESOLVE_SKILL = 62603
+_FLOWING_RESOLVE_BUFF = 62632
 #: ``UsingDstBaseSpecChecker``: the effect must sit on its destination, and
 #: that destination must be of this base profession. Warriors emit the
 #: guardian shout effect too, and EI books nothing for them.
@@ -511,6 +514,10 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     casts: list[SkillCast] = []
     last_instant: dict[tuple[int, int], int] = {}
     active_buff_until: dict[tuple[int, int], int] = {}
+    has_flowing_resolve_animation = any(
+        isinstance(event, SkillActivationEvent) and event.skill_id == _FLOWING_RESOLVE_SKILL
+        for event in event_list
+    )
 
     def is_casting(agent_id: int, skill_id: int, time_ms: int, epsilon: int = 10) -> bool:
         """Whether ``agent_id`` is inside a cast window of ``skill_id``."""
@@ -641,6 +648,20 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     duration_ms=0,
                 )
             )
+        elif isinstance(event, BuffApplyEvent):
+            if (
+                not has_flowing_resolve_animation
+                and event.skill_id == _FLOWING_RESOLVE_BUFF
+                and elite_specs.get(event.target_agent_id) is EliteSpec.WILLBENDER
+            ):
+                casts.append(
+                    SkillCast(
+                        source_agent_id=event.target_agent_id,
+                        skill_id=_FLOWING_RESOLVE_SKILL,
+                        time_ms=event.time_ms - 440 - origin,
+                        duration_ms=500,
+                    )
+                )
         elif isinstance(event, BoonApplyEvent):
             buff_key = (event.target_agent_id, event.skill_id)
             already_active = active_buff_until.get(buff_key, -1) > event.time_ms

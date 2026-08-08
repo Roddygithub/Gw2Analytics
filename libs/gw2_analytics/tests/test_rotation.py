@@ -4,6 +4,7 @@ from gw2_analytics.rotation import build_skill_rotation
 from gw2_core import (
     ActivationType,
     BoonApplyEvent,
+    BuffApplyEvent,
     DamageEvent,
     EffectEvent,
     EliteSpec,
@@ -665,6 +666,32 @@ def test_repeated_activation_start_ignores_previous_prefight_cast() -> None:
         (cast.skill_id, cast.time_ms, cast.duration_ms)
         for cast in build_skill_rotation(events, duration_ms=2_000, start_time_ms=origin)
     ] == [(30521, 56, 1_200)]
+
+
+def test_flowing_resolve_is_synthesized_from_buff_end() -> None:
+    origin = 42_000_000
+    events = [
+        BuffApplyEvent(
+            time_ms=origin + 5,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=62632,
+            duration_ms=5_392,
+            original_duration_ms=6_000,
+            stacks=1,
+            initial=True,
+        )
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=10_000,
+            start_time_ms=origin,
+            elite_specs={7: EliteSpec.WILLBENDER},
+        )
+    ] == [(62603, -435, 500)]
 
 
 def test_gunsaber_mode_books_enter_and_exit_before_swap() -> None:
