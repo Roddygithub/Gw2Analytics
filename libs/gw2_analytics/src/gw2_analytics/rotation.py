@@ -82,7 +82,6 @@ _BUFF_GAIN_CASTS = {
     29703: 29703,
     31508: 31869,
     34778: 14412,
-    40052: 54870,
     42311: 40274,
     40069: 42944,
     40272: 42944,
@@ -395,6 +394,7 @@ _EFFECT_SPEC_GATE = {
     "68F2C378E6C80548B5A3C89870C5DD86": Profession.GUARDIAN,  # "Save Yourselves!"
 }
 _EFFECT_SOURCE_SPEC_GATE = {
+    "C4E8DD3234E0C647993857940ED79AC1": Profession.NECROMANCER,  # Spiteful Spirit
     "6646D48A2446884998EFADB3EFEF0483": Profession.GUARDIAN,  # Detonate Jurisdiction
     "3E33C9645D62CF4DBC208511BB3D12F1": Profession.GUARDIAN,  # Detonate Jurisdiction
     "29F6AADDF5E75348854123B956E4BF0E": Profession.GUARDIAN,  # Detonate Jurisdiction
@@ -782,6 +782,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 if event.kind == "apply"
                 else _BUFF_LOSS_CASTS.get(event.skill_id)
             )
+            if event.kind == "apply" and event.skill_id == 40052:
+                mapped = 44663 if event.duration_ms >= 5_000 else 54870
             if mapped is not None and (
                 (event.skill_id == 73955 and event.kind == "apply" and already_active)
                 or (event.skill_id in {27581, 73955} and event.kind not in {"apply", "remove_all"})
@@ -869,6 +871,18 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                 if owner:
                     add_instant(owner, 12658, event.time_ms)
+        elif isinstance(event, DamageEvent) and event.skill_id == 29560:
+            source_is_necro = (
+                not professions or professions.get(event.source_agent_id) is Profession.NECROMANCER
+            )
+            if source_is_necro and not any(
+                isinstance(other, EffectEvent)
+                and other.guid == "C4E8DD3234E0C647993857940ED79AC1"
+                and other.source_agent_id == event.source_agent_id
+                and abs(other.time_ms - event.time_ms) < 50
+                for other in nearby_events(event.time_ms, 49)
+            ):
+                add_instant(event.source_agent_id, event.skill_id, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
             add_instant(
                 event.source_agent_id,
@@ -1031,8 +1045,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     isinstance(other, DamageEvent)
                     and other.source_agent_id == caster
                     and other.skill_id == 38767
-                    and abs(other.time_ms - event.time_ms) < 50
-                    for other in nearby_events(event.time_ms, 49)
+                    and abs(other.time_ms - event.time_ms) < 10
+                    for other in nearby_events(event.time_ms, 9)
                 ):
                     add_instant(caster, effect_skill_id, event.time_ms)
 

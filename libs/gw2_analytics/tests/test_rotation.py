@@ -70,7 +70,12 @@ def test_build_skill_rotation_pairs_and_infers_casts() -> None:
 
     assert [
         (cast.skill_id, cast.time_ms, cast.duration_ms)
-        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            professions={7: Profession.NECROMANCER},
+        )
     ] == [
         (30792, 99, 0),
         (-2, 100, 0),
@@ -89,7 +94,8 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         BoonApplyEvent(time_ms=origin + 30, skill_id=33162, duration_ms=1, stacks=1, **base),
         BoonApplyEvent(time_ms=origin + 31, skill_id=5586, duration_ms=1, stacks=1, **base),
         BoonApplyEvent(time_ms=origin + 32, skill_id=34778, duration_ms=1, stacks=1, **base),
-        BoonApplyEvent(time_ms=origin + 33, skill_id=40052, duration_ms=1, stacks=1, **base),
+        BoonApplyEvent(time_ms=origin + 33, skill_id=40052, duration_ms=3_500, stacks=1, **base),
+        BoonApplyEvent(time_ms=origin + 34, skill_id=40052, duration_ms=6_000, stacks=1, **base),
         BoonApplyEvent(time_ms=origin + 34, skill_id=76351, duration_ms=1, stacks=1, **base),
         BoonApplyEvent(time_ms=origin + 35, skill_id=44272, duration_ms=0, stacks=1, **base),
         BoonApplyEvent(
@@ -199,6 +205,7 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         (5493, 31, 0),
         (14412, 32, 0),
         (54870, 33, 0),
+        (44663, 34, 0),
         (76351, 34, 0),
         (41858, 35, 0),
         (30961, 40, 0),
@@ -224,6 +231,50 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         (31658, 280, 0),
         (62749, 290, 0),
     ]
+
+
+def test_spiteful_spirit_only_suppresses_nearby_unholy_burst_hits() -> None:
+    origin = 42_000_000
+    events = [
+        EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=8553,
+            guid="C4E8DD3234E0C647993857940ED79AC1",
+        ),
+        DamageEvent(
+            time_ms=origin + 108,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=38767,
+            damage=1,
+        ),
+        EffectEvent(
+            time_ms=origin + 200,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=8553,
+            guid="C4E8DD3234E0C647993857940ED79AC1",
+        ),
+        DamageEvent(
+            time_ms=origin + 240,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=38767,
+            damage=1,
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            professions={7: Profession.NECROMANCER},
+        )
+    ] == [(38767, 108, 0), (29560, 200, 0), (38767, 240, 0)]
 
 
 def test_build_skill_rotation_transforms_weaver_attunements() -> None:
