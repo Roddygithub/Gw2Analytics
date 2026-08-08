@@ -20,6 +20,24 @@ LOGS = ROOT / "zevtc files"
 EI_OUT = ROOT / ".tooling" / "ei-out"
 CORPUS = Path(__file__).resolve().parent / "corpus.txt"
 
+KNOWN_ROTATION_DEAD_ENDS = {
+    -41,
+    -37,
+    -29,
+    -14,
+    -11,
+    -7,
+    -6,
+    1066,
+    13046,
+    29560,
+    43470,
+    44663,
+    62834,
+    62887,
+    62975,
+}
+
 from gw2_analytics.ei_compare import compare_elite_insights  # noqa: E402
 from gw2_evtc_parser import (  # noqa: E402
     PythonEvtcParser,
@@ -34,6 +52,54 @@ _BRACKET = re.compile(r"\[[^\]]*\]")
 def bucket(key: str) -> str:
     """Collapse ``players[foo.1234].statsAll.totalDmg`` -> ``players.statsAll.totalDmg``."""
     return _BRACKET.sub("", key)
+
+
+def _rotation_deltas(diffs: dict[str, object]) -> tuple[Counter[int], Counter[int]]:
+    missing: Counter[int] = Counter()
+    extra: Counter[int] = Counter()
+    for key, value in diffs.items():
+        if not key.endswith(".rotation") or not isinstance(value, dict):
+            continue
+        expected_casts = {tuple(c) for c in value.get("expected") or ()}
+        actual_casts = {tuple(c) for c in value.get("actual") or ()}
+        missing.update(int(cast[0]) for cast in expected_casts - actual_casts if cast)
+        extra.update(int(cast[0]) for cast in actual_casts - expected_casts if cast)
+    return missing, extra
+
+
+def _print_rotation_skill_deltas(
+    reports: list[dict[str, object]],
+    limit: int,
+    *,
+    show_known_dead_ends: bool,
+) -> None:
+    missing_by_skill: Counter[int] = Counter()
+    extra_by_skill: Counter[int] = Counter()
+    names: dict[int, str] = {}
+    for rep in reports:
+        missing_by_skill.update(rep["rotation_missing_by_skill"])
+        extra_by_skill.update(rep["rotation_extra_by_skill"])
+        names.update(rep["skill_names"])
+
+    print(f"\n=== TOP {limit} rotation skill deltas ===")
+    print(" missing  extra  skill")
+    skills = set(missing_by_skill) | set(extra_by_skill)
+    if not show_known_dead_ends:
+        skipped = skills & KNOWN_ROTATION_DEAD_ENDS
+        skills -= KNOWN_ROTATION_DEAD_ENDS
+        if skipped:
+            print(f" skipped {len(skipped)} known dead-end skills")
+    ranked = sorted(
+        skills,
+        key=lambda skill_id: (
+            missing_by_skill[skill_id] + extra_by_skill[skill_id],
+            missing_by_skill[skill_id],
+        ),
+        reverse=True,
+    )
+    for skill_id in ranked[:limit]:
+        name = names.get(skill_id, "?")
+        print(f"{missing_by_skill[skill_id]:>8} {extra_by_skill[skill_id]:>6}  {skill_id} {name}")
 
 
 def run_one(stem: str) -> dict[str, object]:
@@ -69,19 +135,19 @@ def run_one(stem: str) -> dict[str, object]:
     # *exactly*. Wiring a single instant-cast finder can remove dozens of
     # missing casts and still show zero progress -- or hide a net regression,
     # if it also adds spurious ones. Count both sides separately.
-    rotation_missing = 0
-    rotation_extra = 0
-    for key, value in diffs.items():
-        if not key.endswith(".rotation") or not isinstance(value, dict):
-            continue
-        expected_casts = {tuple(c) for c in value.get("expected") or ()}
-        actual_casts = {tuple(c) for c in value.get("actual") or ()}
-        rotation_missing += len(expected_casts - actual_casts)
-        rotation_extra += len(actual_casts - expected_casts)
+    missing_by_skill, extra_by_skill = _rotation_deltas(diffs)
+    skill_names = {
+        int(skill_id[1:]): data["name"]
+        for skill_id, data in expected.get("skillMap", {}).items()
+        if skill_id.startswith("s") and isinstance(data, dict) and data.get("name")
+    }
 
     return {
-        "rotation_missing": rotation_missing,
-        "rotation_extra": rotation_extra,
+        "rotation_missing": sum(missing_by_skill.values()),
+        "rotation_extra": sum(extra_by_skill.values()),
+        "rotation_missing_by_skill": missing_by_skill,
+        "rotation_extra_by_skill": extra_by_skill,
+        "skill_names": skill_names,
         "stem": stem,
         "parse_seconds": round(parse_s, 2),
         "events": len(events),
@@ -99,6 +165,17 @@ def main() -> int:
     ap.add_argument("stems", nargs="*")
     ap.add_argument("--json", dest="json_out")
     ap.add_argument("--top", type=int, default=40)
+    ap.add_argument(
+        "--rotation-skills",
+        type=int,
+        default=15,
+        help="print top rotation skill deltas",
+    )
+    ap.add_argument(
+        "--show-known-rotation-dead-ends",
+        action="store_true",
+        help="include rotation skills already proven noisy or regressive",
+    )
     ap.add_argument("--show", default=None, help="print raw diffs whose bucket matches this regex")
     args = ap.parse_args()
 
@@ -131,6 +208,13 @@ def main() -> int:
         )
     for key, count in grand.most_common(args.top):
         print(f"{count:>8}  {key}")
+
+    if args.rotation_skills and (missing or extra):
+        _print_rotation_skill_deltas(
+            reports,
+            args.rotation_skills,
+            show_known_dead_ends=args.show_known_rotation_dead_ends,
+        )
 
     if args.show:
         pat = re.compile(args.show)
