@@ -680,6 +680,17 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             )
             if event.guid == "C34E250B01FF534292EE6AB36D768337":
                 effect_skill_id = (
+                    10337
+                    if any(
+                        isinstance(other, BoonApplyEvent)
+                        and other.kind == "remove_all"
+                        and other.skill_id == 10353
+                        and other.source_agent_id == caster
+                        and other.target_agent_id == caster
+                        and abs(other.time_ms - event.time_ms) < 2
+                        for other in nearby_events(event.time_ms, 1)
+                    )
+                    else
                     10310
                     if any(
                         isinstance(other, SpawnEvent)
