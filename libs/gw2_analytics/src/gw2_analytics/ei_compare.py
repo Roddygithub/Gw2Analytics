@@ -461,6 +461,15 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             return agents_by_instance.get(instance_id)
         return None
 
+    def player_agent_ids(agent: Agent) -> set[int]:
+        if not agent.instance_id:
+            return {agent.id}
+        entries = agents_by_instance_entries.get(agent.instance_id, [])
+        accounts = {entry.account_name for entry in entries}
+        if len(accounts) > 1:
+            return {agent.id}
+        return agent_ids_by_instance.get(agent.instance_id, {agent.id})
+
     targets = expected.get("targets") if isinstance(expected.get("targets"), list) else []
     buff_map = expected.get("buffMap")
     condition_skill_ids: set[int] | None = (
@@ -743,7 +752,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             # exactly the absence window to every one of them -- the
             # signature was several buffs on one actor all overcounting by
             # the identical amount.
-            for alias_id in agent_ids:
+            for alias_id in player_agent_ids(agent):
                 alias_uptime = tracker.compute_player_uptimes(
                     alias_id,
                     duration_ms,

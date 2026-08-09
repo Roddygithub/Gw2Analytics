@@ -10,6 +10,7 @@ from gw2_core import (
     DamageEvent,
     DeathEvent,
     EliteSpec,
+    EvtcHeader,
     Fight,
     Profession,
 )
@@ -69,6 +70,7 @@ def test_compare_elite_insights_keeps_first_anonymous_agent_for_shared_instance(
 def test_compare_elite_insights_selects_split_account_agent_by_name() -> None:
     fight = Fight(
         id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=2, duration_ms=10_000),
         agents=[
             Agent(
                 id=1,
@@ -114,6 +116,72 @@ def test_compare_elite_insights_selects_split_account_agent_by_name() -> None:
     }
 
     result = compare_elite_insights(fight, expected, [])
+
+    assert result["differences"] == {}
+
+
+def test_compare_elite_insights_does_not_merge_shared_instance_buffs() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=2, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="Named",
+                profession=Profession.ENGINEER,
+                elite=EliteSpec.SCRAPPER,
+                is_player=True,
+                account_name=":Named.1234",
+                instance_id=1111,
+            ),
+            Agent(
+                id=2,
+                name="Mécatronicienne",
+                profession=Profession.ENGINEER,
+                elite=EliteSpec.SCRAPPER,
+                is_player=True,
+                instance_id=1111,
+            ),
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Named.1234",
+                "instanceID": 1111,
+                "name": "Named",
+                "buffUptimes": [{"id": 1187, "buffData": [{"uptime": 10.0}]}],
+            },
+            {
+                "account": "Non Squad Player 1",
+                "instanceID": 1111,
+                "name": "Scrapper pl-1111",
+                "buffUptimes": [{"id": 1187, "buffData": [{"uptime": 20.0}]}],
+            },
+        ]
+    }
+    events = [
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=1,
+            skill_id=1187,
+            duration_ms=1_000,
+            stacks=1,
+            kind="apply",
+        ),
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=2,
+            target_agent_id=2,
+            skill_id=1187,
+            duration_ms=2_000,
+            stacks=1,
+            kind="apply",
+        ),
+    ]
+
+    result = compare_elite_insights(fight, expected, events)
 
     assert result["differences"] == {}
 
