@@ -99,6 +99,12 @@ def _rotation_unmatched(
     return missing, remaining
 
 
+def _defense_landed_hit(event: DamageEvent) -> bool:
+    return landed_hit(event) and not (
+        not event.is_condition and event.result == 10 and event.damage == 0 and event.buff_dmg == 0
+    )
+
+
 def _damage_stats(
     damage: list[DamageEvent],
     crowd_control: list[CCEvent],
@@ -375,13 +381,16 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             sliced_down_cache[(lo, hi)] = cached
         return cached
 
-    agents_by_account = {
-        agent.account_name.lstrip(":"): agent for agent in fight.agents if agent.account_name
-    }
+    agents_by_account: dict[str, list[Agent]] = defaultdict(list)
+    for fight_agent in fight.agents:
+        if fight_agent.account_name:
+            agents_by_account[fight_agent.account_name.lstrip(":")].append(fight_agent)
     agents_by_instance: dict[int, Agent] = {}
+    agents_by_instance_entries: dict[int, list[Agent]] = defaultdict(list)
     for fight_agent in fight.agents:
         if fight_agent.instance_id:
             agents_by_instance.setdefault(fight_agent.instance_id, fight_agent)
+            agents_by_instance_entries[fight_agent.instance_id].append(fight_agent)
     agent_ids_by_instance: dict[int, set[int]] = defaultdict(set)
     for fight_agent in fight.agents:
         if fight_agent.instance_id:
@@ -424,6 +433,42 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         return [
             indexed_event for agent_id in agent_ids for indexed_event in index.get(agent_id, [])
         ]
+
+    def select_player_agent(player: dict[str, Any], account: str) -> Agent | None:
+        instance_id = player.get("instanceID")
+        if account.startswith("Non Squad Player") and isinstance(instance_id, int):
+            anonymous = [
+                agent
+                for agent in agents_by_instance_entries.get(instance_id, [])
+                if agent.account_name is None
+            ]
+            if anonymous:
+                return anonymous[0]
+        candidates = agents_by_account.get(account, [])
+        expected_name = player.get("name")
+        if isinstance(expected_name, str):
+            for agent in candidates:
+                if agent.name == expected_name:
+                    return agent
+        expected_profession = player.get("profession")
+        if isinstance(expected_profession, str):
+            for agent in candidates:
+                if spec_display_name(agent.profession, agent.elite) == expected_profession:
+                    return agent
+        if candidates:
+            return candidates[-1]
+        if isinstance(instance_id, int):
+            return agents_by_instance.get(instance_id)
+        return None
+
+    def player_agent_ids(agent: Agent) -> set[int]:
+        if not agent.instance_id:
+            return {agent.id}
+        entries = agents_by_instance_entries.get(agent.instance_id, [])
+        accounts = {entry.account_name for entry in entries}
+        if len(accounts) > 1:
+            return {agent.id}
+        return agent_ids_by_instance.get(agent.instance_id, {agent.id})
 
     targets = expected.get("targets") if isinstance(expected.get("targets"), list) else []
     buff_map = expected.get("buffMap")
@@ -542,10 +587,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         if not isinstance(player, dict) or not isinstance(player.get("account"), str):
             continue
         account = player["account"]
-        instance_id = player.get("instanceID")
-        agent: Agent | None = agents_by_account.get(account)
-        if agent is None and isinstance(instance_id, int):
-            agent = agents_by_instance.get(instance_id)
+        agent = select_player_agent(player, account)
         if agent is None:
             compared_players[account] = None
             differences[f"players[{account}]"] = {"expected": "present", "actual": None}
@@ -637,7 +679,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             }
             defense_values = {
                 "damageTaken": sum(event.damage for event in taken),
-                "damageTakenCount": sum(landed_hit(event) for event in taken),
+                "damageTakenCount": sum(_defense_landed_hit(event) for event in taken),
                 "conditionDamageTaken": sum(
                     _condition_damage(event, condition_skill_ids) for event in taken
                 ),
@@ -709,7 +751,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             # exactly the absence window to every one of them -- the
             # signature was several buffs on one actor all overcounting by
             # the identical amount.
-            for alias_id in agent_ids:
+            for alias_id in player_agent_ids(agent):
                 alias_uptime = tracker.compute_player_uptimes(
                     alias_id,
                     duration_ms,

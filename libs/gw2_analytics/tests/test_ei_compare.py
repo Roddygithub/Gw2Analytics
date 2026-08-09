@@ -10,6 +10,7 @@ from gw2_core import (
     DamageEvent,
     DeathEvent,
     EliteSpec,
+    EvtcHeader,
     Fight,
     Profession,
 )
@@ -19,6 +20,15 @@ def test_compare_elite_insights_keeps_first_anonymous_agent_for_shared_instance(
     fight = Fight(
         id="fight",
         agents=[
+            Agent(
+                id=99,
+                name="Named Player",
+                profession=Profession.GUARDIAN,
+                elite=EliteSpec.DRAGONHUNTER,
+                is_player=True,
+                account_name=":Named.1234",
+                instance_id=3994,
+            ),
             Agent(
                 id=1,
                 name="Chronomancienne",
@@ -50,6 +60,125 @@ def test_compare_elite_insights_keeps_first_anonymous_agent_for_shared_instance(
     events = [
         DeathEvent(time_ms=1, source_agent_id=1, target_agent_id=0, skill_id=0),
         DeathEvent(time_ms=2, source_agent_id=2, target_agent_id=0, skill_id=0),
+    ]
+
+    result = compare_elite_insights(fight, expected, events)
+
+    assert result["differences"] == {}
+
+
+def test_compare_elite_insights_selects_split_account_agent_by_name() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=2, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="First Character",
+                profession=Profession.NECROMANCER,
+                elite=EliteSpec.RITUALIST,
+                is_player=True,
+                account_name=":Player.1234",
+                subgroup="1",
+                instance_id=1111,
+            ),
+            Agent(
+                id=1,
+                name="Second Character",
+                profession=Profession.WARRIOR,
+                elite=EliteSpec.SPELLBREAKER,
+                is_player=True,
+                account_name=":Player.1234",
+                subgroup="1",
+                instance_id=1111,
+            ),
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "name": "First Character",
+                "profession": "Ritualist",
+                "group": 1,
+            },
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 1,
+                "name": "Second Character",
+                "profession": "Spellbreaker",
+                "group": 1,
+            },
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [])
+
+    assert result["differences"] == {}
+
+
+def test_compare_elite_insights_does_not_merge_shared_instance_buffs() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=2, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="Named",
+                profession=Profession.ENGINEER,
+                elite=EliteSpec.SCRAPPER,
+                is_player=True,
+                account_name=":Named.1234",
+                instance_id=1111,
+            ),
+            Agent(
+                id=2,
+                name="Mécatronicienne",
+                profession=Profession.ENGINEER,
+                elite=EliteSpec.SCRAPPER,
+                is_player=True,
+                instance_id=1111,
+            ),
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Named.1234",
+                "instanceID": 1111,
+                "name": "Named",
+                "buffUptimes": [{"id": 1187, "buffData": [{"uptime": 10.0}]}],
+            },
+            {
+                "account": "Non Squad Player 1",
+                "instanceID": 1111,
+                "name": "Scrapper pl-1111",
+                "buffUptimes": [{"id": 1187, "buffData": [{"uptime": 20.0}]}],
+            },
+        ]
+    }
+    events = [
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=1,
+            skill_id=1187,
+            duration_ms=1_000,
+            stacks=1,
+            kind="apply",
+        ),
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=2,
+            target_agent_id=2,
+            skill_id=1187,
+            duration_ms=2_000,
+            stacks=1,
+            kind="apply",
+        ),
     ]
 
     result = compare_elite_insights(fight, expected, events)
@@ -140,3 +269,33 @@ def test_skill_stats_breakbar_grouprule() -> None:
     # Condition landed alongside breakbar: normals win, breakbar dropped.
     stats = _skill_stats([_dmg(10, True), _dmg(0, True, is_condition=True)])
     assert stats[42]["connectedHits"] == 1
+
+
+def test_compare_elite_insights_excludes_breakbar_from_damage_taken_count() -> None:
+    fight = Fight(
+        id="fight",
+        agents=[
+            Agent(
+                id=2,
+                name="Player",
+                profession=Profession.MESMER,
+                elite=EliteSpec.CHRONOMANCER,
+                is_player=True,
+                account_name=":Player.1234",
+                instance_id=1111,
+            )
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "defenses": [{"damageTakenCount": 0}],
+            }
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [_dmg(10, True)])
+
+    assert result["differences"] == {}

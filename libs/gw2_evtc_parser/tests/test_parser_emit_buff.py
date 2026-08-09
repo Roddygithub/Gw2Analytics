@@ -431,6 +431,53 @@ def test_parse_events_emits_weapon_swap_and_late_mapped_effect() -> None:
     assert events[1].guid == guid.hex().upper()
 
 
+def test_parse_events_keeps_blood_moon_on_its_stone_spirit_caster() -> None:
+    """A Stone Spirit's Blood Moon stays credited to the spirit, not its owner.
+
+    Elite Insights uses the effect's Src agent as-is: the Stone Spirit is not
+    a Druid, so its Blood Moon (skill 31749) is not credited to the owner.
+    """
+    guid = bytes.fromhex("28346F32FD199C4B8F9B15438F27A434")
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Druid", True), (2, 1, 1, "Stone Spirit", False)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=1,
+                value=3,
+                skill_id=0,
+                is_statechange=11,
+                src_instid=7,
+            ),
+            _build_event_record_2025(
+                time_ms=0,
+                src_agent=int.from_bytes(guid[:8], "little"),
+                dst_agent=int.from_bytes(guid[8:], "little"),
+                value=0,
+                skill_id=31749,
+                is_statechange=46,
+            ),
+            _build_event_record_2025(
+                time_ms=1_100,
+                src_agent=2,
+                dst_agent=3,
+                value=0,
+                skill_id=31749,
+                is_statechange=60,
+                src_master_instid=7,
+            ),
+        ],
+    )
+
+    (effect,) = [
+        event for event in PythonEvtcParser().parse_events(evtc) if isinstance(event, EffectEvent)
+    ]
+    assert effect.guid == guid.hex().upper()
+    assert effect.source_agent_id == 2
+
+
 def test_parse_events_emit_buff_remove_all_yields_boon_apply_event() -> None:
     """``is_buffremove == 1`` (CBTB_ALL) yields ONE BoonApplyEvent with kind="remove_all".
 
