@@ -99,6 +99,12 @@ def _rotation_unmatched(
     return missing, remaining
 
 
+def _defense_landed_hit(event: DamageEvent) -> bool:
+    return landed_hit(event) and not (
+        not event.is_condition and event.result == 10 and event.damage == 0 and event.buff_dmg == 0
+    )
+
+
 def _damage_stats(
     damage: list[DamageEvent],
     crowd_control: list[CCEvent],
@@ -665,7 +671,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             }
             defense_values = {
                 "damageTaken": sum(event.damage for event in taken),
-                "damageTakenCount": sum(landed_hit(event) for event in taken),
+                "damageTakenCount": sum(_defense_landed_hit(event) for event in taken),
                 "conditionDamageTaken": sum(
                     _condition_damage(event, condition_skill_ids) for event in taken
                 ),

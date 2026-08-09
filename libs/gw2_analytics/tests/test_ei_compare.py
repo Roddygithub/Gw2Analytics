@@ -201,3 +201,33 @@ def test_skill_stats_breakbar_grouprule() -> None:
     # Condition landed alongside breakbar: normals win, breakbar dropped.
     stats = _skill_stats([_dmg(10, True), _dmg(0, True, is_condition=True)])
     assert stats[42]["connectedHits"] == 1
+
+
+def test_compare_elite_insights_excludes_breakbar_from_damage_taken_count() -> None:
+    fight = Fight(
+        id="fight",
+        agents=[
+            Agent(
+                id=2,
+                name="Player",
+                profession=Profession.MESMER,
+                elite=EliteSpec.CHRONOMANCER,
+                is_player=True,
+                account_name=":Player.1234",
+                instance_id=1111,
+            )
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "defenses": [{"damageTakenCount": 0}],
+            }
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [_dmg(10, True)])
+
+    assert result["differences"] == {}
