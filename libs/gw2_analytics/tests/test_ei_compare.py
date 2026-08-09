@@ -20,6 +20,15 @@ def test_compare_elite_insights_keeps_first_anonymous_agent_for_shared_instance(
         id="fight",
         agents=[
             Agent(
+                id=99,
+                name="Named Player",
+                profession=Profession.GUARDIAN,
+                elite=EliteSpec.DRAGONHUNTER,
+                is_player=True,
+                account_name=":Named.1234",
+                instance_id=3994,
+            ),
+            Agent(
                 id=1,
                 name="Chronomancienne",
                 profession=Profession.MESMER,
@@ -53,6 +62,58 @@ def test_compare_elite_insights_keeps_first_anonymous_agent_for_shared_instance(
     ]
 
     result = compare_elite_insights(fight, expected, events)
+
+    assert result["differences"] == {}
+
+
+def test_compare_elite_insights_selects_split_account_agent_by_name() -> None:
+    fight = Fight(
+        id="fight",
+        agents=[
+            Agent(
+                id=1,
+                name="First Character",
+                profession=Profession.NECROMANCER,
+                elite=EliteSpec.RITUALIST,
+                is_player=True,
+                account_name=":Player.1234",
+                subgroup="1",
+                instance_id=1111,
+            ),
+            Agent(
+                id=1,
+                name="Second Character",
+                profession=Profession.WARRIOR,
+                elite=EliteSpec.SPELLBREAKER,
+                is_player=True,
+                account_name=":Player.1234",
+                subgroup="1",
+                instance_id=1111,
+            ),
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "name": "First Character",
+                "profession": "Ritualist",
+                "group": 1,
+            },
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 1,
+                "name": "Second Character",
+                "profession": "Spellbreaker",
+                "group": 1,
+            },
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [])
 
     assert result["differences"] == {}
 
