@@ -304,6 +304,41 @@ def test_spiteful_spirit_only_suppresses_nearby_unholy_burst_hits() -> None:
     ] == [(38767, 108, 0), (29560, 200, 0), (38767, 240, 0)]
 
 
+def test_crisis_zone_requires_jade_mech_and_eye_glow() -> None:
+    origin = 42_000_000
+    crisis = EffectEvent(
+        time_ms=origin + 100,
+        source_agent_id=7,
+        target_agent_id=8,
+        skill_id=0,
+        guid="956450E1260FB94B8691BC1378086250",
+    )
+    glow = EffectEvent(
+        time_ms=origin + 101,
+        source_agent_id=7,
+        target_agent_id=8,
+        skill_id=0,
+        guid="CDF749672C01964BAEF64CCB3D431DEE",
+    )
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(
+            [crisis, glow],
+            duration_ms=1_000,
+            start_time_ms=origin,
+            jade_mech_agent_ids={8},
+        )
+    ] == [(8, 63293, 100)]
+    assert build_skill_rotation([crisis, glow], duration_ms=1_000, start_time_ms=origin) == []
+    assert (
+        build_skill_rotation(
+            [crisis], duration_ms=1_000, start_time_ms=origin, jade_mech_agent_ids={8}
+        )
+        == []
+    )
+
+
 def test_build_skill_rotation_transforms_weaver_attunements() -> None:
     origin = 42_000_000
     base = {"source_agent_id": 7, "target_agent_id": 7}

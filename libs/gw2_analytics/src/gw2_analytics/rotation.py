@@ -378,6 +378,8 @@ _MINION_CASTS = {
 _GUARDIAN_SHOUT_EFFECT = "122BA55CCDF2B643929F6C4A97226DC9"
 _MECHANIST_SHIFT_SIGNET_EFFECT = "E1C1DD7F866B4149A1BADD216C9AA69D"
 _MECHANIST_SHIFT_SIGNET_SELF_EFFECT = "DB22850AE209B34BBD11372F56D42D43"
+_MECHANIST_CRISIS_ZONE_EFFECT = "956450E1260FB94B8691BC1378086250"
+_MECHANIST_MECH_EYE_GLOW_EFFECT = "CDF749672C01964BAEF64CCB3D431DEE"
 _FLOWING_RESOLVE_SKILL = 62603
 _FLOWING_RESOLVE_BUFF = 62632
 #: ``UsingDstBaseSpecChecker``: the effect must sit on its destination, and
@@ -414,7 +416,7 @@ _EFFECT_CASTS_BY_DST = {
     "9B8A1BE554450B4899B64F7579DF0A8C": 31658,
     "74870558C43E4747955C573CAAC630A7": 31401,
     "734834E7EB7CD74EB129ACBCE5C64C1D": 63095,
-    "956450E1260FB94B8691BC1378086250": 63293,
+    _MECHANIST_CRISIS_ZONE_EFFECT: 63293,
     "9C06D9D9B0E22247A1752C426808CD80": 62671,
     "D43DC34DEF81B746BC130F7A0393AAC7": 5639,  # Armor of Earth
     "1A38CAE72C2F164BA3815441CA643A20": 12542,
@@ -528,6 +530,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     fern_hound_agent_ids: Collection[int] = (),
     warclaw_agent_ids: Collection[int] = (),
     jungle_stalker_agent_ids: Collection[int] = (),
+    jade_mech_agent_ids: Collection[int] = (),
     professions: Mapping[int, Profession] | None = None,
     elite_specs: Mapping[int, EliteSpec] | None = None,
     agent_id_by_instance: Mapping[int, int] | None = None,
@@ -1042,6 +1045,16 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     if isinstance(other, EffectEvent)
                     and (other.target_agent_id if by_dst else other.source_agent_id) == caster
                 }
+                if event.guid == _MECHANIST_CRISIS_ZONE_EFFECT and (
+                    event.target_agent_id not in jade_mech_agent_ids
+                    or not any(
+                        isinstance(other, EffectEvent)
+                        and other.guid == _MECHANIST_MECH_EYE_GLOW_EFFECT
+                        and other.source_agent_id == event.source_agent_id
+                        for other in related
+                    )
+                ):
+                    continue
                 if not all(guid in related_guids for guid in secondary):
                     continue
                 if (
