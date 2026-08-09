@@ -587,7 +587,6 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         if not isinstance(player, dict) or not isinstance(player.get("account"), str):
             continue
         account = player["account"]
-        instance_id = player.get("instanceID")
         agent = select_player_agent(player, account)
         if agent is None:
             compared_players[account] = None
