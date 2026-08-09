@@ -472,9 +472,7 @@ def test_parse_events_keeps_blood_moon_on_its_stone_spirit_caster() -> None:
     )
 
     (effect,) = [
-        event
-        for event in PythonEvtcParser().parse_events(evtc)
-        if isinstance(event, EffectEvent)
+        event for event in PythonEvtcParser().parse_events(evtc) if isinstance(event, EffectEvent)
     ]
     assert effect.guid == guid.hex().upper()
     assert effect.source_agent_id == 2
