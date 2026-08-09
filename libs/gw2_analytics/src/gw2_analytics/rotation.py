@@ -834,7 +834,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     mapped_time = min(swap.time_ms - 1, mapped_time)
                 elif swap is not None and event.skill_id in _AFTER_SWAP_BUFFS:
                     mapped_time = max(mapped_time, swap.time_ms + 1)
-                add_instant(event.target_agent_id, mapped, mapped_time)
+                icd = 0 if mapped == 41380 else 50
+                add_instant(event.target_agent_id, mapped, mapped_time, icd)
             if event.kind == "apply":
                 active_buff_until[buff_key] = max(
                     active_buff_until.get(buff_key, -1), event.time_ms + event.duration_ms
