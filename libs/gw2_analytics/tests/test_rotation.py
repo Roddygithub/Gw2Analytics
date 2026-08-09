@@ -196,6 +196,31 @@ def test_build_skill_rotation_ignores_inactive_distortion_shatter_refresh() -> N
     ] == [(68273, 1_000, 0)]
 
 
+def test_build_skill_rotation_ignores_chronomancer_mind_wrack_effect() -> None:
+    origin = 42_000_000
+    base = {
+        "target_agent_id": 999,
+        "skill_id": 36877,
+        "guid": "3D29ABD39CB5BD458C4D50A22FCC0E4B",
+        "is_around_dst": True,
+    }
+    events = [
+        EffectEvent(time_ms=origin + 100, source_agent_id=7, **base),
+        EffectEvent(time_ms=origin + 200, source_agent_id=8, **base),
+    ]
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            mesmer_agent_ids={7, 8},
+            elite_specs={7: EliteSpec.CHRONOMANCER, 8: EliteSpec.MIRAGE},
+        )
+    ] == [(8, 10191, 200)]
+
+
 def test_build_skill_rotation_infers_ei_instant_casts() -> None:
     origin = 42_000_000
     base = {"target_agent_id": 7, "source_agent_id": 7}

@@ -995,7 +995,10 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     else 10192
                     if distortion_buff_nearby
                     else 10191
-                    if caster in mesmer_agent_ids
+                    if (
+                        caster in mesmer_agent_ids
+                        and elite_specs.get(caster) is not EliteSpec.CHRONOMANCER
+                    )
                     else None
                 )
             else:
