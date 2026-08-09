@@ -97,6 +97,7 @@ _BUFF_GAIN_CASTS = {
     73071: 73037,
     63145: 63344,
     77095: 76813,
+    76326: 76326,
     76351: 76351,
     62769: 62745,
     78624: 76752,
@@ -199,6 +200,7 @@ _DAMAGE_CASTS = {
     62847: 50,  # Unseen Sword
     31658: 50,  # Glyph of Equality
     5572: 50,  # Signet of Air (damage path; + effect-by-dst below)
+    76315: 50,  # Bloodstone Explosion
 }
 _DAMAGE_CASTS_BY_DAMAGE = {40071: 44428, 46808: 40813}
 _HEALING_CASTS = {
@@ -427,6 +429,7 @@ _EFFECT_SOURCE_SPEC_GATE = {
 }
 _EFFECT_ELITE_GATE = {
     "418A090D719AB44AAF1C4AD1473068C4": EliteSpec.HOLOSMITH,  # Flash Spark
+    "9C06D9D9B0E22247A1752C426808CD80": EliteSpec.HARBINGER,
 }
 _AEGIS_BUFF = 743
 _STABILITY_BUFF = 1122
@@ -826,6 +829,19 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 mapped = None if has_walk_loss else 10687
             if mapped is not None and (
                 (event.skill_id == 73955 and event.kind == "apply" and already_active)
+                or (
+                    event.skill_id == 73955
+                    and event.kind == "apply"
+                    and sum(
+                        isinstance(other, BoonApplyEvent)
+                        and other.skill_id == 73955
+                        and other.kind == "apply"
+                        and other.source_agent_id == event.source_agent_id
+                        and other.target_agent_id == event.target_agent_id
+                        for other in nearby_events(event.time_ms, 0)
+                    )
+                    >= 3
+                )
                 or (event.skill_id in {27581, 73955} and event.kind not in {"apply", "remove_all"})
                 or (
                     event.kind != "apply"
@@ -1001,6 +1017,33 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     )
                     else None
                 )
+            elif event.guid == "B0CF6359EBF9BF4EB94E1A2A347E5ECD":
+                if elite_specs.get(caster) is not EliteSpec.CONDUIT:
+                    continue
+                has_nonself_nearby = any(
+                    isinstance(other, EffectEvent)
+                    and other.guid == event.guid
+                    and other.source_agent_id == caster
+                    and other.target_agent_id != caster
+                    for other in nearby_events(event.time_ms, 2)
+                )
+                effect_skill_id = (
+                    77116
+                    if event.target_agent_id != caster
+                    else None
+                    if has_nonself_nearby
+                    else 76818
+                )
+            elif event.guid == "239BF9EA9B747B44ACC63B86DC49B0D0":
+                has_distress_buffs = {73029, 73089} <= {
+                    other.skill_id
+                    for other in nearby_events(event.time_ms, 0)
+                    if isinstance(other, BoonApplyEvent)
+                    and other.kind == "apply"
+                    and other.source_agent_id == caster
+                    and other.target_agent_id == caster
+                }
+                effect_skill_id = 73116 if has_distress_buffs else None
             else:
                 effect_skill_id = (
                     _EFFECT_CASTS_BY_DST.get(event.guid)

@@ -221,6 +221,157 @@ def test_build_skill_rotation_ignores_chronomancer_mind_wrack_effect() -> None:
     ] == [(8, 10191, 200)]
 
 
+def test_build_skill_rotation_ignores_relic_of_the_claw_multi_apply() -> None:
+    origin = 42_000_000
+    base = {
+        "source_agent_id": 7,
+        "target_agent_id": 7,
+        "skill_id": 73955,
+        "duration_ms": 8_000,
+        "stacks": 1,
+    }
+    events = [
+        BoonApplyEvent(time_ms=origin + 100, **base),
+        BoonApplyEvent(time_ms=origin + 200, **base),
+        BoonApplyEvent(time_ms=origin + 200, **base),
+        BoonApplyEvent(time_ms=origin + 200, **base),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+    ] == [(73955, 100)]
+
+
+def test_build_skill_rotation_gates_harbinger_effect() -> None:
+    origin = 42_000_000
+    base = {
+        "skill_id": 38089,
+        "guid": "9C06D9D9B0E22247A1752C426808CD80",
+        "is_around_dst": True,
+    }
+    events = [
+        EffectEvent(time_ms=origin + 100, source_agent_id=7, target_agent_id=7, **base),
+        EffectEvent(time_ms=origin + 200, source_agent_id=8, target_agent_id=8, **base),
+    ]
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            elite_specs={7: EliteSpec.SCOURGE, 8: EliteSpec.HARBINGER},
+        )
+    ] == [(8, 62671, 200)]
+
+
+def test_build_skill_rotation_infers_bloodstone_explosion_damage() -> None:
+    origin = 42_000_000
+    events = [
+        DamageEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=999,
+            skill_id=76315,
+            damage=1_000,
+            result=1,
+        )
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+    ] == [(76315, 100)]
+
+
+def test_build_skill_rotation_infers_bloodstone_fervor_apply() -> None:
+    origin = 42_000_000
+    events = [
+        BoonApplyEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=76326,
+            duration_ms=8_000,
+            stacks=1,
+        )
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+    ] == [(76326, 100)]
+
+
+def test_build_skill_rotation_infers_conduit_dervish_effects() -> None:
+    origin = 42_000_000
+    base = {
+        "source_agent_id": 7,
+        "skill_id": 15483,
+        "guid": "B0CF6359EBF9BF4EB94E1A2A347E5ECD",
+        "is_around_dst": True,
+    }
+    events = [
+        EffectEvent(time_ms=origin + 100, target_agent_id=7, **base),
+        EffectEvent(time_ms=origin + 200, target_agent_id=999, **base),
+        EffectEvent(time_ms=origin + 201, target_agent_id=7, **base),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            elite_specs={7: EliteSpec.CONDUIT},
+        )
+    ] == [(76818, 100), (77116, 200)]
+
+
+def test_build_skill_rotation_infers_distress_effect_with_buffs() -> None:
+    origin = 42_000_000
+    events = [
+        EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=40764,
+            guid="239BF9EA9B747B44ACC63B86DC49B0D0",
+            is_around_dst=True,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 200,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=73029,
+            duration_ms=0,
+            stacks=1,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 200,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=73089,
+            duration_ms=0,
+            stacks=1,
+        ),
+        EffectEvent(
+            time_ms=origin + 200,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=40764,
+            guid="239BF9EA9B747B44ACC63B86DC49B0D0",
+            is_around_dst=True,
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms)
+        for cast in build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+    ] == [(73116, 200)]
+
+
 def test_build_skill_rotation_infers_ei_instant_casts() -> None:
     origin = 42_000_000
     base = {"target_agent_id": 7, "source_agent_id": 7}
