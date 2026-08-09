@@ -339,6 +339,23 @@ def test_crisis_zone_requires_jade_mech_and_eye_glow() -> None:
     )
 
 
+def test_stow_tome_can_repeat_inside_default_instant_icd() -> None:
+    origin = 42_000_000
+    base = {"source_agent_id": 0, "target_agent_id": 7, "duration_ms": 0, "stacks": 1}
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(
+            [
+                BoonApplyEvent(time_ms=origin + 100, skill_id=42404, kind="remove_all", **base),
+                BoonApplyEvent(time_ms=origin + 138, skill_id=41493, kind="remove_all", **base),
+            ],
+            duration_ms=1_000,
+            start_time_ms=origin,
+        )
+    ] == [(41380, 100, 0), (41380, 138, 0)]
+
+
 def test_build_skill_rotation_transforms_weaver_attunements() -> None:
     origin = 42_000_000
     base = {"source_agent_id": 7, "target_agent_id": 7}
