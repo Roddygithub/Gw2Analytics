@@ -652,6 +652,30 @@ def test_flash_spark_is_inferred_from_engineer_effect() -> None:
     ] == [(7, 43176, 100, 0)]
 
 
+def test_armor_of_earth_is_credited_to_elementalist_effect_destination() -> None:
+    origin = 42_000_000
+    events = [
+        EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=0,
+            target_agent_id=7,
+            skill_id=0,
+            guid="D43DC34DEF81B746BC130F7A0393AAC7",
+            is_around_dst=True,
+        )
+    ]
+
+    assert [
+        (cast.source_agent_id, cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=1_000,
+            start_time_ms=origin,
+            professions={7: Profession.ELEMENTALIST},
+        )
+    ] == [(7, 5639, 100, 0)]
+
+
 def test_mercy_is_inferred_from_effect() -> None:
     origin = 42_000_000
     events = [
