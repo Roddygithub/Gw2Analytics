@@ -1115,6 +1115,31 @@ def test_parse_events_2025_keeps_unknown_iff_damage() -> None:
     assert events[0].iff == 2
 
 
+def test_parse_events_2025_drops_unknown_iff_uncredited_master_condition_damage() -> None:
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True), (2, 1, 1, "Target", False)],
+        build="20260618",
+        skills=[(723, "Bleeding")],
+        events=[
+            _build_event_record_2025(
+                time_ms=10_000,
+                src_agent=0,
+                dst_agent=2,
+                value=0,
+                buff_dmg=33,
+                skill_id=723,
+                iff=2,
+                buff=1,
+                result=14,
+                src_instid=2437,
+                src_master_instid=1452,
+            ),
+        ],
+    )
+
+    assert list(PythonEvtcParser().parse_events(evtc)) == []
+
+
 def test_parse_events_2025_keeps_statechange_on_minion_actor() -> None:
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Owner", True), (2, 1, 1, "Minion", False)],

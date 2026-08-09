@@ -1201,6 +1201,9 @@ class PythonEvtcParser:
                 if _iff not in {1, 2} and not is_self_condi_tick:
                     continue
                 if _ev_buff:
+                    # Raw source-less condition ticks with UNKNOWN iff and a master are uncredited.
+                    if _iff == 2 and event_src_agent == 0 and src_master_inst != 0:
+                        continue
                     magnitude = 0 if buff_dmg >= _DAMAGE_SANITY_CAP else max(0, buff_dmg)
                     condition_damage = magnitude
                     is_attempt = magnitude > 0 or _result != 0
