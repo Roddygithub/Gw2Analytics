@@ -219,6 +219,7 @@ _HEALING_CASTS = {
     72115,
 }
 _MISSILE_CASTS = {26261, 29889, 42163}
+_PENDING_EXPECTED_DURATION_SKILLS = {9265, 71892, 72940}
 _ATTUNEMENT_BUFFS = {5575, 5580, 5585, 5586}
 _WEAVER_ATTUNEMENTS = _ATTUNEMENT_BUFFS | {
     40926,
@@ -1078,7 +1079,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     for pending in active.values():
         duration = (
             pending.expected_duration_ms
-            if pending.skill_id in {71892, 72940}
+            if pending.skill_id in _PENDING_EXPECTED_DURATION_SKILLS
             else pending.duration_ms
         )
         casts.append(

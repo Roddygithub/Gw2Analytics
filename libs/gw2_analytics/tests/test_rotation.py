@@ -85,6 +85,26 @@ def test_build_skill_rotation_pairs_and_infers_casts() -> None:
     ]
 
 
+def test_build_skill_rotation_uses_expected_duration_for_pending_all_in() -> None:
+    origin = 42_000_000
+    events = [
+        SkillActivationEvent(
+            time_ms=origin + 200,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=9265,
+            activation=ActivationType.NORMAL,
+            duration_ms=2_200,
+            expected_duration_ms=2_240,
+        )
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(events, duration_ms=3_000, start_time_ms=origin)
+    ] == [(9265, 200, 2_240)]
+
+
 def test_build_skill_rotation_infers_ei_instant_casts() -> None:
     origin = 42_000_000
     base = {"target_agent_id": 7, "source_agent_id": 7}
