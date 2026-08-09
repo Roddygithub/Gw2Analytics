@@ -540,12 +540,16 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         for event in event_list
     )
     account_last_slice: dict[str, object] = {}
+    account_names: dict[str, set[str]] = defaultdict(set)
     for entry in expected_players:
         if isinstance(entry, dict) and isinstance(entry.get("account"), str):
             first = entry.get("firstAware")
             previous = account_last_slice.get(entry["account"])
             if isinstance(first, int) and (not isinstance(previous, int) or first > previous):
                 account_last_slice[entry["account"]] = first
+            name = entry.get("name")
+            if isinstance(name, str):
+                account_names[entry["account"]].add(name)
     account_entry_count: Counter[str] = Counter(
         entry["account"]
         for entry in expected_players
@@ -622,7 +626,9 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             "group": 51 if anonymous else int(agent.subgroup or 0),
             "instanceID": agent.instance_id,
             "teamID": _team_for_entry(
-                player.get("firstAware") == account_last_slice.get(account), agent.team_id
+                len(account_names[account]) > 1
+                or player.get("firstAware") == account_last_slice.get(account),
+                agent.team_id,
             ),
         }
         _compare_fields(prefix, player, values, differences)
