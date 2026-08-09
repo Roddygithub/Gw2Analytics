@@ -105,6 +105,26 @@ def test_build_skill_rotation_uses_expected_duration_for_pending_all_in() -> Non
     ] == [(9265, 200, 2_240)]
 
 
+def test_build_skill_rotation_uses_expected_duration_for_pending_resurrect() -> None:
+    origin = 42_000_000
+    events = [
+        SkillActivationEvent(
+            time_ms=origin + 200,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=1066,
+            activation=ActivationType.NORMAL,
+            duration_ms=700,
+            expected_duration_ms=800,
+        )
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(events, duration_ms=3_000, start_time_ms=origin)
+    ] == [(1066, 200, 800)]
+
+
 def test_build_skill_rotation_clamps_endless_night_to_next_activation() -> None:
     origin = 42_000_000
     events = [

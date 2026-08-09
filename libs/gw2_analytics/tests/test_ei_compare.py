@@ -120,6 +120,103 @@ def test_compare_elite_insights_selects_split_account_agent_by_name() -> None:
     assert result["differences"] == {}
 
 
+def test_compare_elite_insights_keeps_team_for_character_swap_slices() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=2, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="First Character",
+                profession=Profession.NECROMANCER,
+                elite=EliteSpec.RITUALIST,
+                is_player=True,
+                account_name=":Player.1234",
+                subgroup="1",
+                instance_id=1111,
+                team_id=2767,
+            ),
+            Agent(
+                id=1,
+                name="Second Character",
+                profession=Profession.WARRIOR,
+                elite=EliteSpec.SPELLBREAKER,
+                is_player=True,
+                account_name=":Player.1234",
+                subgroup="1",
+                instance_id=1111,
+                team_id=2767,
+            ),
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "name": "First Character",
+                "profession": "Ritualist",
+                "teamID": 2767,
+            },
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 1,
+                "name": "Second Character",
+                "profession": "Spellbreaker",
+                "teamID": 2767,
+            },
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [])
+
+    assert result["differences"] == {}
+
+
+def test_compare_elite_insights_keeps_team_on_last_same_character_slice_only() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260424", agent_count=1, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="Same Character",
+                profession=Profession.GUARDIAN,
+                elite=EliteSpec.FIREBRAND,
+                is_player=True,
+                account_name=":Player.1234",
+                subgroup="5",
+                instance_id=1111,
+                team_id=2767,
+            ),
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "name": "Same Character",
+                "teamID": 0,
+            },
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 1,
+                "name": "Same Character",
+                "teamID": 2767,
+            },
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [])
+
+    assert result["differences"] == {}
+
+
 def test_compare_elite_insights_does_not_merge_shared_instance_buffs() -> None:
     fight = Fight(
         id="fight",
