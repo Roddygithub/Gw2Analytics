@@ -905,7 +905,14 @@ class PythonEvtcParser:
                 )
                 yield EffectEvent(
                     time_ms=time_ms,
-                    source_agent_id=owner_by_agent.get(event_src_agent, event_src_agent),
+                    # ponytail: keep the raw caster for Blood Moon. EI does not
+                    # resolve the owner of a Stone Spirit's Blood Moon (the
+                    # spirit is not a Druid, so the cast is not credited).
+                    source_agent_id=(
+                        event_src_agent
+                        if effect_guids[skill_id] == "28346F32FD199C4B8F9B15438F27A434"
+                        else owner_by_agent.get(event_src_agent, event_src_agent)
+                    ),
                     target_agent_id=dst_agent,
                     skill_id=skill_id,
                     guid=effect_guids[skill_id],
