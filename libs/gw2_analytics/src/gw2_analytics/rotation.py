@@ -980,6 +980,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     isinstance(other, BoonApplyEvent)
                     and other.kind == "apply"
                     and other.skill_id == 10243
+                    and other.added_active
                     and other.target_agent_id == caster
                     and abs(other.time_ms - event.time_ms) < 10
                     for other in nearby_events(event.time_ms, 9)

@@ -144,6 +144,58 @@ def test_build_skill_rotation_clamps_endless_night_to_next_activation() -> None:
     ] == [(100, 2_232), (5_000, 2_300)]
 
 
+def test_build_skill_rotation_ignores_inactive_distortion_shatter_refresh() -> None:
+    origin = 42_000_000
+    events = [
+        EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=999,
+            skill_id=36877,
+            guid="3D29ABD39CB5BD458C4D50A22FCC0E4B",
+            is_around_dst=True,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=10243,
+            duration_ms=3_000,
+            stacks=1,
+            added_active=False,
+            kind="apply",
+        ),
+        EffectEvent(
+            time_ms=origin + 1_000,
+            source_agent_id=7,
+            target_agent_id=999,
+            skill_id=36877,
+            guid="3D29ABD39CB5BD458C4D50A22FCC0E4B",
+            is_around_dst=True,
+        ),
+        BoonApplyEvent(
+            time_ms=origin + 1_000,
+            source_agent_id=7,
+            target_agent_id=7,
+            skill_id=10243,
+            duration_ms=3_000,
+            stacks=1,
+            added_active=True,
+            kind="apply",
+        ),
+    ]
+
+    assert [
+        (cast.skill_id, cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(
+            events,
+            duration_ms=2_000,
+            start_time_ms=origin,
+            virtuoso_agent_ids={7},
+        )
+    ] == [(68273, 1_000, 0)]
+
+
 def test_build_skill_rotation_infers_ei_instant_casts() -> None:
     origin = 42_000_000
     base = {"target_agent_id": 7, "source_agent_id": 7}
