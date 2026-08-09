@@ -330,12 +330,13 @@ def test_crisis_zone_requires_jade_mech_and_eye_glow() -> None:
             jade_mech_agent_ids={8},
         )
     ] == [(8, 63293, 100)]
-    assert build_skill_rotation(
-        [crisis, glow], duration_ms=1_000, start_time_ms=origin
-    ) == []
-    assert build_skill_rotation(
-        [crisis], duration_ms=1_000, start_time_ms=origin, jade_mech_agent_ids={8}
-    ) == []
+    assert build_skill_rotation([crisis, glow], duration_ms=1_000, start_time_ms=origin) == []
+    assert (
+        build_skill_rotation(
+            [crisis], duration_ms=1_000, start_time_ms=origin, jade_mech_agent_ids={8}
+        )
+        == []
+    )
 
 
 def test_build_skill_rotation_transforms_weaver_attunements() -> None:
