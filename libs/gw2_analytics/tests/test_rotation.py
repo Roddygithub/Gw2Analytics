@@ -105,6 +105,45 @@ def test_build_skill_rotation_uses_expected_duration_for_pending_all_in() -> Non
     ] == [(9265, 200, 2_240)]
 
 
+def test_build_skill_rotation_clamps_endless_night_to_next_activation() -> None:
+    origin = 42_000_000
+    events = [
+        SkillActivationEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=63128,
+            activation=ActivationType.NORMAL,
+            duration_ms=2_200,
+            expected_duration_ms=2_300,
+        ),
+        SkillActivationEvent(
+            time_ms=origin + 2_322,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=63066,
+            activation=ActivationType.NORMAL,
+            duration_ms=800,
+            expected_duration_ms=840,
+        ),
+        SkillActivationEvent(
+            time_ms=origin + 5_000,
+            source_agent_id=7,
+            target_agent_id=0,
+            skill_id=63128,
+            activation=ActivationType.NORMAL,
+            duration_ms=2_200,
+            expected_duration_ms=2_300,
+        ),
+    ]
+
+    assert [
+        (cast.time_ms, cast.duration_ms)
+        for cast in build_skill_rotation(events, duration_ms=8_000, start_time_ms=origin)
+        if cast.skill_id == 63128
+    ] == [(100, 2_232), (5_000, 2_300)]
+
+
 def test_build_skill_rotation_infers_ei_instant_casts() -> None:
     origin = 42_000_000
     base = {"target_agent_id": 7, "source_agent_id": 7}

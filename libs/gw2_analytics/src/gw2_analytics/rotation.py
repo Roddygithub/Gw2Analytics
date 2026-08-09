@@ -219,7 +219,29 @@ _HEALING_CASTS = {
     72115,
 }
 _MISSILE_CASTS = {26261, 29889, 42163}
-_PENDING_EXPECTED_DURATION_SKILLS = {9265, 71892, 72940}
+_PENDING_EXPECTED_DURATION_SKILLS = {
+    1097,
+    5526,
+    9086,
+    9098,
+    9143,
+    9265,
+    10237,
+    14447,
+    30825,
+    31710,
+    31968,
+    62624,
+    63066,
+    63128,
+    63220,
+    71892,
+    71986,
+    72051,
+    72940,
+    76746,
+}
+_NEXT_ACTIVATION_CLAMP_SKILLS = {63267, 63128}
 _ATTUNEMENT_BUFFS = {5575, 5580, 5585, 5586}
 _WEAVER_ATTUNEMENTS = _ATTUNEMENT_BUFFS | {
     40926,
@@ -680,18 +702,21 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         if isinstance(event, SkillActivationEvent):
             key = (event.source_agent_id, event.skill_id)
             if event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
-                if pending := active.pop((event.source_agent_id, 63267), None):
-                    casts.append(
-                        SkillCast(
-                            source_agent_id=pending.source_agent_id,
-                            skill_id=pending.skill_id,
-                            time_ms=pending.time_ms - origin,
-                            duration_ms=min(
-                                pending.expected_duration_ms,
-                                event.time_ms - pending.time_ms + 10,
-                            ),
+                for pending_skill_id in _NEXT_ACTIVATION_CLAMP_SKILLS:
+                    if pending_skill_id == event.skill_id:
+                        continue
+                    if pending := active.pop((event.source_agent_id, pending_skill_id), None):
+                        casts.append(
+                            SkillCast(
+                                source_agent_id=pending.source_agent_id,
+                                skill_id=pending.skill_id,
+                                time_ms=pending.time_ms - origin,
+                                duration_ms=min(
+                                    pending.expected_duration_ms,
+                                    event.time_ms - pending.time_ms + 10,
+                                ),
+                            )
                         )
-                    )
                 if (pending := active.pop(key, None)) and pending.time_ms >= origin:
                     casts.append(
                         SkillCast(
