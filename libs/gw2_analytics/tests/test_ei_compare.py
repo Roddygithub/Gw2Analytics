@@ -360,6 +360,14 @@ def test_skill_stats_breakbar_grouprule() -> None:
     # Breakbar only: EI counts them.
     stats = _skill_stats([_dmg(10, True)])
     assert stats[42]["connectedHits"] == 1
+    # Breakbar only + the player interrupted an enemy cast with that
+    # skill: EI books the entry as interrupted and drops the hit.
+    stats = _skill_stats([_dmg(10, True)], {42})
+    assert stats[42]["connectedHits"] == 0
+    # A landed normal keeps the normal count even when the skill
+    # interrupted: interrupt only affects the breakbar-only branch.
+    stats = _skill_stats([_dmg(1, True), _dmg(10, True)], {42})
+    assert stats[42]["connectedHits"] == 1
     # Breakbar + blocked/evaded only: EI drops the skill entirely.
     stats = _skill_stats([_dmg(10, True), _dmg(3, False)])
     assert stats[42]["connectedHits"] == 0

@@ -519,8 +519,13 @@ class BuffStateTracker:
         if target_tracker.expirations and (
             old_duration > 0 or len(target_tracker.expirations) >= _capacity_for(buff_name)
         ):
-            if target_tracker.expirations[0] is not None:
-                target_tracker.expirations[0] += event.extended_duration_ms
+            # EI BuffSimulatorIntensity.Extend grafts the extension onto the
+            # stack whose remaining duration is closest to oldValue, not the
+            # shortest one.
+            candidates = [(i, e) for i, e in enumerate(target_tracker.expirations) if e is not None]
+            if candidates:
+                index, remaining = min(candidates, key=lambda pair: abs(pair[1] - old_duration))
+                target_tracker.expirations[index] = remaining + event.extended_duration_ms
             return
         target_tracker.expirations.append(event.new_duration_ms)
         target_tracker.stack_ids.append(event.stack_id)

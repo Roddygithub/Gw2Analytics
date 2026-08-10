@@ -29,6 +29,7 @@ from gw2_core import (
     Event,
     Fight,
     HealthUpdateEvent,
+    InterruptEvent,
     Profession,
     UpEvent,
     spec_display_name,
@@ -174,7 +175,9 @@ def _condition_damage(event: DamageEvent, condition_skill_ids: set[int] | None) 
     return min(event.damage, event.buff_dmg)
 
 
-def _skill_stats(events: list[DamageEvent]) -> dict[int, dict[str, int]]:
+def _skill_stats(
+    events: list[DamageEvent], interrupted_skills: set[int] | None = None
+) -> dict[int, dict[str, int]]:
     by_skill: dict[int, list[DamageEvent]] = defaultdict(list)
     for event in events:
         by_skill[event.skill_id].append(event)
@@ -193,6 +196,14 @@ def _skill_stats(events: list[DamageEvent]) -> dict[int, dict[str, int]]:
         # Verified across the 35-log corpus: 45 over-counts (mixed normals
         # and breakbar) and 8 under-counts (breakbar-only) and 7 misses
         # (breakbar + blocked/evaded only) all explained by this rule.
+        #
+        # One further corner: when the player interrupted an enemy cast
+        # with that skill (an InterruptEvent from the same source), EI
+        # books the entry as ``interrupted`` and drops the breakbar-only
+        # hit, so connectedHits = 0. Only breakbar-only skills can hit
+        # this; a skill with landed normals keeps the normal count.
+        # Verified across the corpus: the only two such cases (skills
+        # 5930 / 12621 on 20260508-001302) are the sole remaining diffs.
         direct = [e for e in skill_events if not e.is_condition]
         condi = [e for e in skill_events if e.is_condition]
         n_norm_direct = sum(e.result in {0, 1, 2} for e in direct)
@@ -202,11 +213,14 @@ def _skill_stats(events: list[DamageEvent]) -> dict[int, dict[str, int]]:
         if n_norm_direct + n_condi_landed > 0:
             # Normals exist: EI counts the normals and skips breakbar ticks.
             connected = n_norm_direct + n_condi_landed
-        elif n_other_failed == 0:
-            # Only breakbar hits: EI counts them.
+        elif n_other_failed == 0 and skill_id not in (interrupted_skills or ()):
+            # Only breakbar hits: EI counts them -- unless the skill
+            # interrupted an enemy cast, which books the entry as
+            # interrupted (connectedHits = 0).
             connected = n_breakbar + n_condi_landed
         else:
-            # Breakbar plus blocked/evaded/blind only: EI drops the skill.
+            # Breakbar plus blocked/evaded/blind only, or an interrupting
+            # breakbar skill: EI drops the skill.
             connected = 0
         direct_crits = [event for event in direct if event.result in {1, 8} and event.buff_dmg == 0]
         result[skill_id] = {
@@ -337,6 +351,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     damage_events = [event for event in event_list if isinstance(event, DamageEvent)]
     actor_damage_events = [event for event in damage_events if event.src_master_instid == 0]
     cc_events = [event for event in event_list if isinstance(event, CCEvent)]
+    interrupt_events = [event for event in event_list if isinstance(event, InterruptEvent)]
     down_events = [event for event in event_list if isinstance(event, DownEvent)]
     death_events = [event for event in event_list if isinstance(event, DeathEvent)]
     health_events = [event for event in event_list if isinstance(event, HealthUpdateEvent)]
@@ -648,6 +663,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             and in_slice(event)
         ]
         actor_damage = [event for event in source_damage if event.src_master_instid == 0]
+        source_interrupts = {
+            event.skill_id
+            for event in interrupt_events
+            if event.source_agent_id in agent_ids and in_slice(event)
+        }
         source_cc = [
             event for event in cc_events if event.source_agent_id in agent_ids and in_slice(event)
         ]
@@ -977,7 +997,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
 
         damage_dist = player.get("totalDamageDist")
         if isinstance(damage_dist, list) and damage_dist and isinstance(damage_dist[0], list):
-            actual_skills = _skill_stats(actor_damage)
+            actual_skills = _skill_stats(actor_damage, source_interrupts)
             values["totalDamageDist"] = actual_skills
             for expected_skill in damage_dist[0]:
                 if not isinstance(expected_skill, dict) or not isinstance(
