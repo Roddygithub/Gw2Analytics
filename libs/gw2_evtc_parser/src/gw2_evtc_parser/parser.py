@@ -1171,6 +1171,24 @@ class PythonEvtcParser:
                 # use buff_dmg. Crowd-control and activation records carry
                 # values but are not health damage.
                 if _ev_buff and buff_dmg == 0 and value > 0 and is_activation == 0:
+                    # arcdps marks a buff REFRESH on a living stack with
+                    # is_offcycle != 0; EI converts these to BuffExtensionEvent
+                    # (extension into the closest existing stack, no new slot).
+                    if is_offcycle:
+                        yield BuffExtensionEvent(
+                            time_ms=time_ms,
+                            source_agent_id=src_agent,
+                            target_agent_id=dst_agent,
+                            skill_id=skill_id,
+                            extended_duration_ms=(
+                                0 if value >= _DAMAGE_SANITY_CAP else max(0, value)
+                            ),
+                            new_duration_ms=(
+                                0 if overstack >= _DAMAGE_SANITY_CAP else max(0, overstack)
+                            ),
+                            stack_id=pad,
+                        )
+                        continue
                     yield BoonApplyEvent(
                         time_ms=time_ms,
                         source_agent_id=src_agent,
