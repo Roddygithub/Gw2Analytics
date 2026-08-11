@@ -450,6 +450,34 @@ def test_regeneration_stack_active_record_moves_the_stack_to_the_front() -> None
     assert tracker.compute_player_uptimes(7, 3_000)["regeneration"] == 100.0
 
 
+def test_initial_regeneration_active_stack_starts_at_front() -> None:
+    tracker = BuffStateTracker()
+
+    tracker.process(
+        BuffApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            duration_ms=1_000,
+            stack_id=11,
+        )
+    )
+    tracker.process(
+        BuffApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            duration_ms=5_000,
+            stack_id=22,
+            added_active=True,
+        )
+    )
+
+    assert tracker.compute_player_uptimes(7, 3_000)["regeneration"] == 100.0
+
+
 def _regen_apply(time_ms: int, duration_ms: int, stack_id: int) -> BoonApplyEvent:
     return BoonApplyEvent(
         time_ms=time_ms,

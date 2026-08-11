@@ -391,6 +391,47 @@ def test_down_on_the_same_millisecond_as_death_earns_no_contribution() -> None:
     assert contribution(1_001) == 500
 
 
+def test_pre_down_damage_before_first_health_update_counts() -> None:
+    """EI treats HP as unknown (<=90%) before the first HealthUpdate.
+
+    Parity regression on ``20260213-213832``: creative.1094 (agent 2980)
+    lands 236 dmg at t=35, before the target's first HealthUpdate at t=88.
+    EI's ``IsDownedBeforeNext90`` counts it because the target will down
+    before its next >90% recovery -- even though the hit precedes every
+    recorded health reading. Before the fix we opened the pre-down window
+    at the first <=90% HealthUpdate and reported 267 instead of the EI
+    value of 503.
+    """
+    rows = DownContributionAggregator().aggregate(
+        [
+            _damage(source=1, target=2, damage=236, time_ms=35),
+            _damage(source=1, target=2, damage=267, time_ms=260),
+            DamageEvent(
+                time_ms=6_318,
+                source_agent_id=1,
+                target_agent_id=2,
+                skill_id=71892,
+                damage=201,
+                against_downed=True,
+            ),
+        ],
+        [_down(agent=2, time_ms=2_747)],
+        [_death(agent=2, time_ms=8_681)],
+        duration_s=900.0,
+        health_events=[
+            HealthUpdateEvent(
+                time_ms=88, source_agent_id=2, target_agent_id=0, skill_id=0, health_percent=13.46
+            ),
+            HealthUpdateEvent(
+                time_ms=380, source_agent_id=2, target_agent_id=0, skill_id=0, health_percent=6.0
+            ),
+        ],
+    )
+    row = rows[0]
+    assert row.down_contribution_damage == 503  # 236 + 267 == EI value
+    assert row.against_downed_damage == 201
+
+
 def test_against_downed_counts_a_landed_hit_that_dealt_no_damage() -> None:
     """The counter asks whether the hit landed, not whether it hurt.
 
