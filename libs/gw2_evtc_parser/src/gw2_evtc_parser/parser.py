@@ -2507,10 +2507,12 @@ def scan_agent_awareness(source: BinaryIO | bytes) -> dict[int, tuple[int, int]]
 
 #: arcdps statechange kinds excluded from :func:`scan_agent_awareness`.
 #: See that function's docstring for the contamination rationale.
-_AWARENESS_EXCLUDED_STATECHANGES: Final[frozenset[int]] = frozenset({
-    8,   # HealthUpdate — stale mentions of despawned merged-player raw ids
-    27,  # StackActive — buff-stack ticks on despawned minion stale ids
-})
+_AWARENESS_EXCLUDED_STATECHANGES: Final[frozenset[int]] = frozenset(
+    {
+        8,  # HealthUpdate — stale mentions of despawned merged-player raw ids
+        27,  # StackActive — buff-stack ticks on despawned minion stale ids
+    }
+)
 
 
 #: arcdps buff id for Regeneration. The only buff Elite Insights routes

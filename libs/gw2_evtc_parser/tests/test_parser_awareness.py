@@ -86,23 +86,26 @@ def test_scan_agent_awareness_ignores_absent_agent_ids() -> None:
 
 def test_scan_agent_awareness_excludes_healthupdate_and_stackactive() -> None:
     """HealthUpdate (8) and StackActive (27) carry stale agent mentions post-despawn."""
-    raw = _evtc([
-        _event(1_000, 10, 0, is_statechange=0),
-        _event(2_000, 10, 0, is_statechange=8),   # HealthUpdate — skipped
-        _event(3_000, 10, 0, is_statechange=27),  # StackActive — skipped
-        _event(4_000, 10, 0, is_statechange=0),
-    ])
+    raw = _evtc(
+        [
+            _event(1_000, 10, 0, is_statechange=0),
+            _event(2_000, 10, 0, is_statechange=8),  # HealthUpdate — skipped
+            _event(3_000, 10, 0, is_statechange=27),  # StackActive — skipped
+            _event(4_000, 10, 0, is_statechange=0),
+        ]
+    )
     awareness = scan_agent_awareness(raw)
 
     # 2_000 and 3_000 events are skipped, so span runs 1_000 to 4_000 (relative: 0 to 3_000)
     assert awareness[10] == (0, 3_000)
 
     # If all non-first events are skipped statechanges, the agent only stays aware at 1_000
-    raw_only_skipped = _evtc([
-        _event(1_000, 10, 0, is_statechange=0),
-        _event(5_000, 10, 0, is_statechange=8),
-        _event(6_000, 10, 0, is_statechange=27),
-    ])
+    raw_only_skipped = _evtc(
+        [
+            _event(1_000, 10, 0, is_statechange=0),
+            _event(5_000, 10, 0, is_statechange=8),
+            _event(6_000, 10, 0, is_statechange=27),
+        ]
+    )
     awareness_skipped = scan_agent_awareness(raw_only_skipped)
     assert awareness_skipped[10] == (0, 0)
-
