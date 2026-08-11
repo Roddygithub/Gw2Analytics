@@ -2445,6 +2445,24 @@ def scan_agent_awareness(source: BinaryIO | bytes) -> dict[int, tuple[int, int]]
     Records with ``time == 0`` are header-ish metadata rather than combat
     activity and are skipped, matching the parser's own down-duration
     scan.
+
+    Two arcdps statechange kinds are excluded because they reference a
+    stale agent id after that agent has despawned, contaminating the
+    last-aware bound. On the corpus these are the only kinds that
+    produce phantom mentions of despawned combined-player raw ids:
+
+    - ``HealthUpdate`` (byte 8): a heal on a minion whose raw id was
+      reused/merged can be logged against the *old* raw id long after
+      it despawned (druid healing instance 5342 at t=103267 while the
+      alive raw agent is 3534, not the dead 3515).
+    - ``StackActive`` (byte 27): a buff-stack activation tick on a
+      despawned minion's stale id (swiftness tick on 3514 at t=24012
+      after 3514 despawned at 16799, protection tick on 4182 at
+      t=141972 after 4182 despawned at 129403).
+
+    Without these exclusions every combined-player minion overcounts
+    boon uptime: the awareness bound runs past the despawn, so the buff
+    simulation accrues uptime that EI correctly truncates at despawn+10.
     """
     data = _read_all(source)
     build_str = data[BUILD_OFFSET : BUILD_OFFSET + 8].decode("ascii", errors="replace")
@@ -2452,6 +2470,9 @@ def scan_agent_awareness(source: BinaryIO | bytes) -> dict[int, tuple[int, int]]
     unpack = (
         _EVENT_STRUCT_EVENTS_2025.unpack_from if is_evtc_2025 else _EVENT_STRUCT_EVENTS.unpack_from
     )
+    # ponytail: is_statechange tuple index differs between the 2025 and legacy
+    # structs (16 vs 7). The exclusion set is the same either way.
+    _statechange_index = 16 if is_evtc_2025 else 7
     cursor = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
     end = len(data)
 
@@ -2465,6 +2486,8 @@ def scan_agent_awareness(source: BinaryIO | bytes) -> dict[int, tuple[int, int]]
             continue
         if origin is None or time_ms < origin:
             origin = time_ms
+        if unpacked[_statechange_index] in _AWARENESS_EXCLUDED_STATECHANGES:
+            continue
         for agent_id in (src_agent, dst_agent):
             if not agent_id:
                 continue
@@ -2480,6 +2503,14 @@ def scan_agent_awareness(source: BinaryIO | bytes) -> dict[int, tuple[int, int]]
     return {
         agent_id: (first - origin, last - origin) for agent_id, (first, last) in awareness.items()
     }
+
+
+#: arcdps statechange kinds excluded from :func:`scan_agent_awareness`.
+#: See that function's docstring for the contamination rationale.
+_AWARENESS_EXCLUDED_STATECHANGES: Final[frozenset[int]] = frozenset({
+    8,   # HealthUpdate — stale mentions of despawned merged-player raw ids
+    27,  # StackActive — buff-stack ticks on despawned minion stale ids
+})
 
 
 #: arcdps buff id for Regeneration. The only buff Elite Insights routes
