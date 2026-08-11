@@ -506,6 +506,11 @@ class BuffStateTracker:
             del target_tracker.expirations[_capacity_for(buff_name) :]
             del target_tracker.stack_ids[_capacity_for(buff_name) :]
             del target_tracker.healing_scores[_capacity_for(buff_name) :]
+            if event.added_active and event.stack_id in target_tracker.stack_ids:
+                index = target_tracker.stack_ids.index(event.stack_id)
+                target_tracker.expirations.insert(0, target_tracker.expirations.pop(index))
+                target_tracker.stack_ids.insert(0, target_tracker.stack_ids.pop(index))
+                target_tracker.healing_scores.insert(0, target_tracker.healing_scores.pop(index))
 
     def _process_buff_extension(self, event: BuffExtensionEvent) -> None:
         buff_name = _get_buff_name(event.skill_id)
