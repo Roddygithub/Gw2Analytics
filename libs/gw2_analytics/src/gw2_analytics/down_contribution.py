@@ -207,6 +207,7 @@ class DownContributionAggregator:
                 ),
                 default=-1,
             )
+            saw_above_90 = False
             for health in health_by_target.get(down.source_agent_id, []):
                 if health.time_ms <= last_up:
                     continue
@@ -214,8 +215,16 @@ class DownContributionAggregator:
                     break
                 if health.health_percent > 90.0:
                     start = None
+                    saw_above_90 = True
                 elif start is None:
                     start = health.time_ms
+            # Elite Insights' IsDownedBeforeNext90 treats a hit delivered before
+            # the target's first HealthUpdate as hitting at unknown HP (<=90%),
+            # so the pre-down window opens right after the last rally even when
+            # no HealthUpdate has been seen yet. Without this, parity with EI is
+            # off by the damage dealt before the first recorded HealthUpdate.
+            if not saw_above_90:
+                start = last_up + 1
             if start is not None:
                 windows[down.source_agent_id].append((start, down.time_ms))
         return windows
