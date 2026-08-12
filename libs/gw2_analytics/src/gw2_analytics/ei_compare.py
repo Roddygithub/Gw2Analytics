@@ -35,6 +35,84 @@ from gw2_core import (
     spec_display_name,
 )
 
+#: Exact mirror of Elite Insights' ``RangerHelper.JuvenilePetIDs``
+#: (union of the 11 juvenile-pet family lists + the base list). A spawn
+#: of one of these agents becomes the ``-28`` "Ranger Pet Spawned"
+#: rotation entry on its master. ``JuvenilePhoenix`` (25131) is
+#: deliberately absent -- EI credits it only via
+#: ``MinionCommandCastFinder(GaleBreath)``, so a phoenix spawn must NOT
+#: emit ``-28``.
+# ponytail:EIJuvenilePetIDs -- from EI RangerHelper.cs / SpeciesIDs.cs
+_JUVENILE_PET_SPECIES: frozenset[int] = frozenset(
+    {
+        3827,
+        4425,
+        4426,
+        5581,
+        5582,
+        6043,
+        6044,
+        6045,
+        6849,
+        6850,
+        6883,
+        6884,
+        6885,
+        6886,
+        6887,
+        6888,
+        6889,
+        6898,
+        6968,
+        7336,
+        7926,
+        7927,
+        7928,
+        7932,
+        7948,
+        7949,
+        7975,
+        7976,
+        8002,
+        8003,
+        8004,
+        8005,
+        8006,
+        8007,
+        8008,
+        8013,
+        8014,
+        8015,
+        8016,
+        8035,
+        8041,
+        8042,
+        9458,
+        10022,
+        11491,
+        15380,
+        15399,
+        15402,
+        15418,
+        15436,
+        18119,
+        18688,
+        19005,
+        19104,
+        19166,
+        24203,
+        24298,
+        24796,
+        25652,
+        26147,
+        26220,
+        26628,
+        26851,
+        27259,
+        27687,
+    }
+)
+
 _STAT_FIELDS = (
     "totalDamageCount",
     "totalDmg",
@@ -533,11 +611,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             and agent.elite in {EliteSpec.UNKNOWN, EliteSpec.MIRAGE, EliteSpec.CHRONOMANCER}
         },
         {agent.id for agent in fight.agents if agent.species_id == 8111},
-        {
-            agent.id
-            for agent in fight.agents
-            if agent.name.startswith(("Juvenile ", "Jeune ")) or agent.name.endswith(" juvénile")
-        },
+        {agent.id for agent in fight.agents if agent.species_id in _JUVENILE_PET_SPECIES},
         {agent.id for agent in fight.agents if agent.species_id == 24796},
         {agent.id for agent in fight.agents if agent.species_id == 15402},
         {agent.id for agent in fight.agents if agent.species_id == 7336},
@@ -833,16 +907,23 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 ),
                 key=lambda item: (item[1], item[0]),
             )
+            has_active_ranger_pets = player.get("activeRangerPets") is not None
             actual_casts = sorted(
                 (
                     (cast.skill_id, cast.time_ms, cast.duration_ms)
                     for cast in rotation
                     if cast.source_agent_id in agent_ids
+                    and (cast.skill_id != -28 or has_active_ranger_pets)
                     and (
                         (cast.time_ms + origin >= slice_lo and cast.time_ms + origin <= slice_hi)
                         or (
                             cast.time_ms < 0
                             and slice_lo <= cast.time_ms + cast.duration_ms + origin <= slice_hi
+                        )
+                        or (
+                            cast.skill_id == -28
+                            and cast.time_ms + origin <= slice_hi
+                            and slice_lo - (cast.time_ms + origin) <= 2000
                         )
                     )
                 ),
