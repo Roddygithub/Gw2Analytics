@@ -1,0 +1,24 @@
+{
+  "reference": {
+    "ei_version": "3.26.0.0",
+    "cli_sha256": "5ffe8565a55f2f80a88dc28f4ec0f383fd84a64954c360c47264ecafed7faa38",
+    "export_type": "detailed_wvw_kill"
+  },
+  "manifest_sha256": "ac66f2f7531dc9402592c8c7fe17918f71adfc5baa90b806af00105a7c39fce9",
+  "log_count": 35,
+  "buckets": {
+    "players.buffUptimes.uptime": 52,
+    "players.group": 6,
+    "players.rotation": 52,
+    "players.statsAll.appliedCrowdControl": 1,
+    "players.statsAll.appliedCrowdControlDownContribution": 2,
+    "players.statsAll.appliedCrowdControlDuration": 1,
+    "players.statsAll.appliedCrowdControlDurationDownContribution": 2,
+    "players.statsAll.downContribution": 6,
+    "players.statsTargets.appliedCrowdControl": 1,
+    "players.statsTargets.appliedCrowdControlDownContribution": 2,
+    "players.statsTargets.appliedCrowdControlDuration": 1,
+    "players.statsTargets.appliedCrowdControlDurationDownContribution": 2,
+    "players.statsTargets.downContribution": 5
+  }
+}
