@@ -23,6 +23,16 @@ mkdir -p .tooling && curl -sL -o .tooling/GW2EICLI.zip https://github.com/baaron
 `.tooling/` and `zevtc files/` are gitignored: the vendored CLI, the raw logs
 and the reference JSON are all local artefacts.
 
+`scripts/ei-parity/corpus-manifest.json` is the versioned, non-personal
+inventory that attests EI `3.26.0.0`, the SHA-256 of
+`GuildWars2EliteInsights-CLI.dll`, and each private EVTC/export pair. Verify
+the downloaded binary against its `reference.cli_sha256` before generating
+exports:
+
+```bash
+sha256sum .tooling/GW2EICLI/GuildWars2EliteInsights-CLI.dll
+```
+
 Elite Insights' own sources answer questions its JSON cannot — above all the
 `InstantCastFinder` rules behind `rotation`, which are declarative and cannot
 be recovered by correlating event streams. A shallow sparse clone is enough:
@@ -52,18 +62,38 @@ Output lands in `.tooling/ei-out/<stem>_detailed_wvw_kill.json`.
 ## 3. Diffing
 
 ```bash
-uv run python scripts/ei-parity/ei_diff.py
+uv run python scripts/ei-parity/ei_diff.py --json /tmp/ei-certification-baseline.json
 ```
 
-Runs `gw2_analytics.ei_compare.compare_elite_insights` over every corpus log
-that has a reference, and prints per-log difference counts plus a histogram of
-difference kinds with the per-player and per-target subscripts collapsed
+Before parsing any log, this validates the exact 35-entry alignment between
+`corpus.txt` and the manifest, the fixed EI version/export type/tag vocabulary,
+strict timestamp stems, and the presence and SHA-256 of the CLI, EVTC files,
+and exact `_detailed_wvw_kill.json` exports. The manifest, corpus, and exports
+must be valid UTF-8; the manifest rejects duplicate JSON keys, and every export
+must parse as JSON during preflight. Any failure refuses the complete run; no
+`_detailed_wvw*.json` fallback is accepted for certification.
+
+It then runs `gw2_analytics.ei_compare.compare_elite_insights` over every
+corpus log and prints per-log difference counts plus a histogram of difference
+kinds with the per-player and per-target subscripts collapsed
 (`players[x].statsAll.totalDmg` → `players.statsAll.totalDmg`), so a systemic
 error reads as one large bucket instead of hundreds of unrelated rows.
 
 Useful flags: `--show <regex>` prints raw expected/actual pairs for matching
-buckets, `--json <path>` dumps the full report, and positional arguments
-restrict the run to named log stems.
+buckets for local investigation, and positional arguments restrict a local run
+to named corpus stems. `--json <path>` requires the full corpus and writes only
+the reference, manifest SHA-256, log count, and key-sorted aggregate bucket
+counts; it never writes raw differences or player identifiers. It refuses any
+certification input as its destination and atomically replaces the output only
+after the complete run succeeds.
+
+The checked-in `scripts/ei-parity/corpus-baseline.json` is the current certified
+baseline. Regenerate it only after an approved reference/corpus change or an
+intentional parser result change:
+
+```bash
+uv run python scripts/ei-parity/ei_diff.py --json scripts/ei-parity/corpus-baseline.json
+```
 
 Supporting probes in `scripts/ei-parity/`:
 
@@ -83,6 +113,11 @@ across all seven months present (2026-01 → 2026-07) and four size tiers per
 month. The spread matters because arcdps changes the wire format between
 builds: the corpus covers ten distinct `arcVersion` values, including the
 2026-05-07 break described in `docs/EVTC2025_FORMAT.md`.
+
+`corpus.txt` is the canonical order. The manifest must contain exactly one
+entry per stem in that order. Changing the corpus, EI version, export type, tag
+vocabulary, or included bucket surface requires explicit approval and a new
+baseline.
 
 Re-running EI over the whole 7 758-log sink is possible but produces roughly
 100 GB of JSON; the stratified corpus is the working set, and a full sweep is
