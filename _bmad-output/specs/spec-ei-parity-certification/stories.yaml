@@ -1,0 +1,45 @@
+- id: "1"
+  title: Figer la référence et le corpus
+  description: >-
+    Couvre CAP-1 et établit le manifeste, l'attestation de version EI,
+    l'inventaire des 35 logs et la baseline complète par bucket.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Ne déplacer ni versionner aucun log privé. Réutiliser corpus.txt et ei_diff.py.
+- id: "2"
+  title: Normaliser le rapport de certification
+  description: >-
+    Couvre CAP-2 et CAP-3 en ajoutant les règles de comparaison, les états
+    PASS/KNOWN_DELTA/FAIL et une sortie JSON stable à la chaîne existante.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Aucun nouveau comparateur parallèle; étendre compare_elite_insights et scripts/ei-parity.
+- id: "3"
+  title: Certifier les identités et propriétaires temporels
+  description: >-
+    Couvre CAP-4 pour les slices joueur, changements de personnage,
+    réutilisations d'instance ID et relations maître/pet/minion.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Une architecture explicite est requise avant implémentation si plusieurs modèles de résolution temporelle restent viables.
+- id: "4"
+  title: Fermer la parité des événements et agrégats
+  description: >-
+    Couvre CAP-2 et CAP-5 sur les buckets inclus: dégâts, défense, boons,
+    rotation, cibles et contributions, avec un test synthétique par correction.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Traiter un bucket borné à la fois et conserver les deltas avant/après dans le rapport.
+- id: "5"
+  title: Émettre le verdict de certification
+  description: >-
+    Couvre CAP-5 en exécutant le corpus final, documentant le domaine certifié
+    et listant explicitement les surfaces EI hors périmètre.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Aucun verdict positif tant qu'un FAIL inexpliqué subsiste; les KNOWN_DELTA exigent l'accord du mainteneur.

@@ -12,6 +12,7 @@ from gw2_analytics.damage_predicates import absorbed_hit, landed_hit
 from gw2_analytics.down_contribution import DownContributionAggregator
 from gw2_analytics.initial_buffs import extract_initial_buffs
 from gw2_analytics.rotation import build_skill_rotation
+from gw2_analytics.temporal_identity import TemporalIdentityResolver, build_resolver
 from gw2_core import (
     Agent,
     BlockEvent,
@@ -35,6 +36,7 @@ from gw2_core import (
     UpEvent,
     spec_display_name,
 )
+from gw2_evtc_parser import OwnershipInterval
 
 #: Exact mirror of Elite Insights' ``RangerHelper.JuvenilePetIDs``
 #: (union of the 11 juvenile-pet family lists + the base list). A spawn
@@ -463,6 +465,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     events: Sequence[Event],
     agent_awareness: dict[int, tuple[int, int]] | None = None,
     regen_overstacks: dict[int, list[tuple[int, int, int]]] | None = None,
+    ownership_intervals: list[OwnershipInterval] | None = None,
 ) -> dict[str, object]:
     """Return a JSON-serializable comparison report.
 
@@ -538,6 +541,17 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         cc_events=cc_events,
     )
     down_by_source = {row.source_agent_id: row for row in down_rows}
+
+    # Build temporal identity resolver for CAP-4 (character swaps, instance
+    # recycling, master/pet/minion ownership). Falls back to static behavior
+    # if ownership_intervals not provided.
+    resolver: TemporalIdentityResolver | None = None
+    if ownership_intervals and agent_awareness:
+        resolver = build_resolver(
+            ownership_intervals=ownership_intervals,
+            agent_awareness=agent_awareness,
+            agents=fight.agents,
+        )
 
     # A split account's entries each carry their own slice of the fight, and
     # EI's down-contribution counters follow that split -- for
@@ -619,34 +633,107 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             indexed_event for agent_id in agent_ids for indexed_event in index.get(agent_id, [])
         ]
 
-    def select_player_agent(player: dict[str, Any], account: str) -> Agent | None:
+    def select_player_agent(player: dict[str, Any], account: str) -> Agent | None:  # noqa: PLR0911, PLR0912
+        """Resolve player agent using temporal identity (slice-aware).
+
+        Uses the slice midpoint to match EI's firstAware/lastAware window.
+        Temporal match is preferred; falls back to static lookup if no temporal match.
+        """
+        slice_lo, slice_hi = _slice_bounds(player, origin)
+        mid = ((slice_lo + slice_hi) // 2) - origin  # convert absolute mid to fight-relative
         instance_id = player.get("instanceID")
+
+        # Static matching logic (original behavior) - extracted for reuse
+        def _static_match() -> Agent | None:
+            instance_id = player.get("instanceID")
+            if account.startswith("Non Squad Player") and isinstance(instance_id, int):
+                anonymous = [
+                    agent
+                    for agent in agents_by_instance_entries.get(instance_id, [])
+                    if agent.account_name is None
+                ]
+                if anonymous:
+                    return anonymous[0]
+            candidates = agents_by_account.get(account, [])
+            expected_name = player.get("name")
+            if isinstance(expected_name, str):
+                for agent in candidates:
+                    if agent.name == expected_name:
+                        return agent
+            expected_profession = player.get("profession")
+            if isinstance(expected_profession, str):
+                for agent in candidates:
+                    if spec_display_name(agent.profession, agent.elite) == expected_profession:
+                        return agent
+            if candidates:
+                return candidates[-1]
+            if isinstance(instance_id, int):
+                return agents_by_instance.get(instance_id)
+            return None
+
+        if not resolver:
+            return _static_match()
+
+        # Temporal matching: try with presence check at slice midpoint
         if account.startswith("Non Squad Player") and isinstance(instance_id, int):
-            anonymous = [
-                agent
-                for agent in agents_by_instance_entries.get(instance_id, [])
-                if agent.account_name is None
-            ]
-            if anonymous:
-                return anonymous[0]
+            for agent in fight.agents:
+                if agent.instance_id == instance_id and agent.account_name is None:
+                    present = resolver.is_present_at(agent.id, mid)
+                    if present:
+                        return agent
         candidates = agents_by_account.get(account, [])
         expected_name = player.get("name")
         if isinstance(expected_name, str):
             for agent in candidates:
-                if agent.name == expected_name:
+                if agent.name == expected_name and resolver.is_present_at(agent.id, mid):
                     return agent
         expected_profession = player.get("profession")
         if isinstance(expected_profession, str):
             for agent in candidates:
-                if spec_display_name(agent.profession, agent.elite) == expected_profession:
+                if spec_display_name(
+                    agent.profession, agent.elite
+                ) == expected_profession and resolver.is_present_at(agent.id, mid):
                     return agent
-        if candidates:
-            return candidates[-1]
+        # Fallback: first candidate present in slice
+        for agent in candidates:
+            if resolver.is_present_at(agent.id, mid):
+                return agent
+        # Instance ID fallback at slice time
         if isinstance(instance_id, int):
-            return agents_by_instance.get(instance_id)
-        return None
+            for agent in agents_by_instance_entries.get(instance_id, []):
+                if resolver.is_present_at(agent.id, mid):
+                    return agent
 
-    def player_agent_ids(agent: Agent) -> set[int]:
+        # No temporal match found -> fall back to static matching
+        return _static_match()
+
+    def player_agent_ids(agent: Agent, slice_lo: int = 0, slice_hi: int = 0) -> set[int]:
+        """Return all agent_ids belonging to this entity at the given slice.
+
+        Uses temporal ownership to include pets/minions owned during the slice.
+        Also includes agents sharing the same instance_id whose awareness
+        overlaps the slice window (for instance ID recycling). Falls back to
+        static instance_id grouping when resolver unavailable.
+        """
+        if resolver:
+            # Owned pets/minions at slice midpoint
+            # slice_lo/slice_hi are absolute; convert to fight-relative for awareness checks
+            slice_lo_rel = slice_lo - origin if origin else slice_lo
+            slice_hi_rel = slice_hi - origin if origin else slice_hi
+            mid = (
+                (slice_lo_rel + slice_hi_rel) // 2 if slice_hi_rel > slice_lo_rel else slice_lo_rel
+            )
+            owned = resolver.owned_agents_at(agent.id, mid)
+            result = {agent.id} | set(owned)
+            # Instance recycling: other agents with same instance_id whose
+            # awareness spans overlap the slice window [slice_lo_rel, slice_hi_rel]
+            if agent.instance_id:
+                for other_id, first, last in resolver.awareness_by_instance(agent.instance_id):
+                    if other_id != agent.id and not (last < slice_lo_rel or first > slice_hi_rel):
+                        result.add(other_id)
+            return result
+
+        # Static fallback (original behavior)
         if not agent.instance_id:
             return {agent.id}
         entries = agents_by_instance_entries.get(agent.instance_id, [])

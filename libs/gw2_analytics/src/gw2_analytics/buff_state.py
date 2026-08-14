@@ -574,6 +574,89 @@ class BuffStateTracker:
                 )
         return result
 
+    def compute_merged_uptimes(
+        self,
+        agent_ids: list[int],
+        duration_ms: int,
+        slice_lo_ms: int = 0,
+        slice_hi_ms: int | None = None,
+        awareness_spans: dict[int, tuple[int, int]] | None = None,
+    ) -> dict[str, float]:
+        """Compute merged boon uptime for a group of agents as one entity.
+
+        Used for instance-recycled minions (same instance_id, no master, no account)
+        where EI reports a single uptime across all recycled agents over the
+        full slice duration.
+
+        For each agent, uptime is computed over its awareness span intersected
+        with the slice window [slice_lo_ms, slice_hi_ms). The merged uptime is
+        the sum of cumulative_stack_ms across all agents, divided by duration_ms.
+        """
+        if duration_ms <= 0:
+            return {}
+
+        if slice_hi_ms is None:
+            slice_hi_ms = slice_lo_ms + duration_ms
+
+        result: dict[str, float] = {}
+        for name in TRACKED_BUFFS:
+            total_cumulative_stack_ms = 0
+
+            for aid in agent_ids:
+                agent = self._agent_buffs.get(aid, {})
+                stack = agent.get(name)
+                if stack is None:
+                    continue
+
+                # Determine the time window for this agent within the slice
+                agent_start = 0
+                agent_end = duration_ms
+                if awareness_spans and aid in awareness_spans:
+                    span = awareness_spans[aid]
+                    # Awareness spans are fight-relative; convert to slice-relative
+                    abs_start = max(span[0], slice_lo_ms)
+                    abs_end = min(span[1], slice_hi_ms) if slice_hi_ms is not None else span[1]
+                    agent_start = max(0, abs_start - slice_lo_ms)
+                    agent_end = min(duration_ms, abs_end - slice_lo_ms)
+                    if agent_end <= agent_start:
+                        continue
+
+                # Compute uptime for this agent bounded by its effective window
+                snapshot = _BuffStack(name)
+                snapshot.expirations = stack.expirations.copy()
+                snapshot.stack_ids = stack.stack_ids.copy()
+                snapshot.healing_scores = stack.healing_scores.copy()
+                snapshot.last_time_ms = stack.last_time_ms
+                snapshot.cumulative_stack_ms = stack.cumulative_stack_ms
+                self._advance(snapshot, agent_end)
+                # Subtract uptime before agent_start
+                if agent_start > 0:
+                    snapshot_start = _BuffStack(name)
+                    snapshot_start.expirations = stack.expirations.copy()
+                    snapshot_start.stack_ids = stack.stack_ids.copy()
+                    snapshot_start.healing_scores = stack.healing_scores.copy()
+                    snapshot_start.last_time_ms = stack.last_time_ms
+                    snapshot_start.cumulative_stack_ms = stack.cumulative_stack_ms
+                    self._advance(snapshot_start, agent_start)
+                    total_cumulative_stack_ms += (
+                        snapshot.cumulative_stack_ms - snapshot_start.cumulative_stack_ms
+                    )
+                else:
+                    total_cumulative_stack_ms += snapshot.cumulative_stack_ms
+
+            if total_cumulative_stack_ms == 0:
+                result[name] = 0.0
+                continue
+
+            if _max_stacks_for(name) > 1:
+                result[name] = total_cumulative_stack_ms / duration_ms
+            else:
+                result[name] = min(
+                    100.0,
+                    (total_cumulative_stack_ms / duration_ms) * 100.0,
+                )
+        return result
+
     def compute_all_uptimes(self, duration_s: float) -> dict[int, dict[str, float]]:
         """Compute uptime percentages for all tracked players.
 

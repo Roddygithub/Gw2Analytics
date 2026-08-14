@@ -16,10 +16,12 @@ from gw2_evtc_parser.overlay_log import (
 )
 from gw2_evtc_parser.parser import (
     EVENT_SIZE,
+    OwnershipInterval,
     PythonEvtcParser,
     read_zevtc_archive,
     read_zevtc_bytes,
     scan_agent_awareness,
+    scan_ownership_intervals,
     scan_regeneration_overstacks,
 )
 from gw2_evtc_parser.statechange_dispatch import (
@@ -44,6 +46,7 @@ __all__ = [
     "EvtcParser",
     "OverlayLogAction",
     "OverlayLogEvent",
+    "OwnershipInterval",
     "PythonEvtcParser",
     "UnsupportedVersionError",
     "__version__",
@@ -52,5 +55,6 @@ __all__ = [
     "read_zevtc_archive",
     "read_zevtc_bytes",
     "scan_agent_awareness",
+    "scan_ownership_intervals",
     "scan_regeneration_overstacks",
 ]
