@@ -463,6 +463,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     events: Sequence[Event],
     agent_awareness: dict[int, tuple[int, int]] | None = None,
     regen_overstacks: dict[int, list[tuple[int, int, int]]] | None = None,
+    ownership_intervals: list[OwnershipInterval] | None = None,
 ) -> dict[str, object]:
     """Return a JSON-serializable comparison report.
 

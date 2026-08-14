@@ -561,6 +561,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     professions: Mapping[int, Profession] | None = None,
     elite_specs: Mapping[int, EliteSpec] | None = None,
     agent_id_by_instance: Mapping[int, int] | None = None,
+    ownership_resolver: callable | None = None,
 ) -> list[SkillCast]:
     """Return completed, clipped casts ordered by fight-relative start time.
 
@@ -570,6 +571,11 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     owner named by the record's ``src_master_instid``. Both are optional so
     hand-built event streams keep working; the finders that need them are
     simply skipped when they are absent.
+
+    ``ownership_resolver`` is an optional callable ``(minion_agent_id, time_ms)
+    -> owner_agent_id | None`` for temporal master/pet/minion resolution
+    (CAP-4). When provided, it takes precedence over ``agent_id_by_instance``
+    for minion cast attribution.
     """
     event_list = list(events)
     professions = professions or {}
@@ -736,7 +742,11 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 active[event.source_agent_id, event.skill_id] = event
                 owner_skill = _MINION_CASTS.get(event.skill_id)
                 if owner_skill is not None:
-                    owner = agent_id_by_instance.get(event.src_master_instid)
+                    owner = None
+                    if ownership_resolver:
+                        owner = ownership_resolver(event.source_agent_id, event.time_ms)
+                    if owner is None:
+                        owner = agent_id_by_instance.get(event.src_master_instid)
                     if owner:
                         add_instant(owner, owner_skill, event.time_ms)
             elif pending := active.pop(key, None):

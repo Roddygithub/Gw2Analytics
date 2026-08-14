@@ -52,3 +52,17 @@ rollups from a single ``isinstance``-split pass.
 from __future__ import annotations
 
 __version__ = "0.8.0"
+
+from .temporal_identity import (
+    AgentIdentity,
+    OwnershipInterval,
+    TemporalIdentityResolver,
+    build_resolver,
+)
+
+__all__ = [
+    "AgentIdentity",
+    "OwnershipInterval",
+    "TemporalIdentityResolver",
+    "build_resolver",
+]

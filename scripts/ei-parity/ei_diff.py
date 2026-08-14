@@ -75,6 +75,7 @@ from gw2_evtc_parser import (  # noqa: E402
     PythonEvtcParser,
     read_zevtc_archive,
     scan_agent_awareness,
+    scan_ownership_intervals,
     scan_regeneration_overstacks,
 )
 
@@ -364,6 +365,7 @@ def run_one(stem: str) -> dict[str, object]:
         events,
         scan_agent_awareness(raw),
         scan_regeneration_overstacks(raw),
+        ownership_intervals=scan_ownership_intervals(raw),
     )
     diffs = result["differences"]
     if not isinstance(diffs, dict):  # pragma: no cover - contract of compare_elite_insights

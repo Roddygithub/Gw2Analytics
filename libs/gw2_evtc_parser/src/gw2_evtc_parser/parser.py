@@ -69,6 +69,7 @@ import math
 import struct
 import zipfile
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Final
 
@@ -2515,6 +2516,232 @@ _AWARENESS_EXCLUDED_STATECHANGES: Final[frozenset[int]] = frozenset(
 )
 
 
+#: arcdps statechange codes for agent lifecycle.
+#: 0 = Spawn (agent enters combat log), 1 = Despawn (agent leaves combat log).
+_SPAWN_STATECHANGE: Final[int] = 0
+_DESPAWN_STATECHANGE: Final[int] = 1
+#: Statechange 22 = TeamChange (used in EVTC2025+ agent enrichment).
+_TEAMCHANGE_STATECHANGE_2025: Final[int] = 22
+
+
+@dataclass(frozen=True, slots=True)
+class OwnershipInterval:
+    """Temporal ownership of an agent by a master.
+
+    ``owner_agent_id`` is ``None`` when the agent is uncontrolled
+    (e.g. environmental gadget, unclaimed minion). The interval is
+    half-open: ``[start_ms, end_ms)`` fight-relative.
+    """
+
+    agent_id: int
+    owner_agent_id: int | None
+    instance_id: int
+    species_id: int | None
+    start_ms: int
+    end_ms: int
+    is_player: bool
+
+
+def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval]:
+    """Return temporal ownership intervals from the raw event stream.
+
+    An ownership interval captures the period during which an agent
+    (minion, pet, gadget) is owned by a master agent. The master is
+    identified by ``owner_agent_id`` — the agent whose ``instance_id``
+    matches the event's ``src_master_instid`` or ``dst_master_instid``.
+
+    The scan derives ownership from:
+    - **Spawn** (statechange 0): agent enters with a ``src_master_instid``
+      (or ``dst_master_instid``) indicating its master at that moment.
+    - **Despawn** (statechange 1): ends the current ownership interval.
+    - **Master change**: any event where ``src_master_instid`` differs
+      from the current owner starts a new interval.
+
+    Instance ID recycling (same ``instance_id`` on a different ``agent_id``)
+    is handled by closing the old interval at the previous agent's despawn
+    and opening a new one for the new agent.
+
+    Times are fight-relative (origin = first event with ``time_ms > 0``).
+    """
+    from gw2_core import Agent  # local import to avoid cycles
+
+    data = _read_all(source)
+    build_str = data[BUILD_OFFSET : BUILD_OFFSET + 8].decode("ascii", errors="replace")
+    is_evtc_2025 = _build_version_from_build_str(build_str) >= 2025_00_00
+    unpack = (
+        _EVENT_STRUCT_EVENTS_2025.unpack_from if is_evtc_2025 else _EVENT_STRUCT_EVENTS.unpack_from
+    )
+    # ponytail: is_statechange tuple index differs between the 2025 and legacy
+    # structs (16 vs 7). The exclusion set is the same either way.
+    _statechange_index = 16 if is_evtc_2025 else 7
+    _src_inst_index = 7 if is_evtc_2025 else 3  # legacy: byte 3=src_instid, 2025: byte 7
+    _dst_inst_index = 8 if is_evtc_2025 else 4
+    _src_master_inst_index = 14 if is_evtc_2025 else 5  # legacy: 5, 2025: 14
+    _dst_master_inst_index = 15 if is_evtc_2025 else 6  # legacy: 6, 2025: 15
+
+    cursor = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
+    end = len(data)
+
+    # First pass: collect agent metadata (species_id, is_player) from agent table.
+    # We need the raw agent list. Reuse the parser's agent parsing logic.
+    agents = list(_parse_agents_raw(data, is_evtc_2025))
+    agent_meta: dict[int, tuple[int | None, bool]] = {}  # agent_id -> (species_id, is_player)
+    for agent in agents:
+        agent_meta[agent.id] = (agent.species_id, agent.is_player)
+
+    # Build instance_id -> agent_id mapping from agent table (first seen wins).
+    # Instance IDs can be recycled; we track the current agent per instance_id.
+    instance_to_agent: dict[int, int] = {}
+    for agent in agents:
+        if agent.instance_id:
+            instance_to_agent.setdefault(agent.instance_id, agent.id)
+
+    origin: int | None = None
+    # Active ownership: agent_id -> (owner_agent_id, instance_id, start_ms)
+    active: dict[int, tuple[int | None, int, int]] = {}
+    intervals: list[OwnershipInterval] = []
+
+    while cursor + EVENT_SIZE <= end:
+        unpacked = unpack(data, cursor)
+        cursor += EVENT_SIZE
+        time_ms = unpacked[0]
+        src_agent = unpacked[1]
+        dst_agent = unpacked[2]
+        is_statechange = unpacked[_statechange_index]
+        src_inst = unpacked[_src_inst_index] if is_evtc_2025 else 0
+        dst_inst = unpacked[_dst_inst_index] if is_evtc_2025 else 0
+        src_master_inst = unpacked[_src_master_inst_index] if is_evtc_2025 else 0
+        dst_master_inst = unpacked[_dst_master_inst_index] if is_evtc_2025 else 0
+
+        if time_ms <= 0:
+            continue
+        if origin is None or time_ms < origin:
+            origin = time_ms
+
+        fight_time = time_ms - (origin or 0)
+
+        def resolve_owner(master_inst: int) -> int | None:
+            if not master_inst:
+                return None
+            return instance_to_agent.get(master_inst)
+
+        # Handle spawn/despawn statechanges for ownership lifecycle.
+        if is_statechange == _SPAWN_STATECHANGE and src_agent:
+            # Agent spawns: establish initial ownership from master_instid.
+            owner = resolve_owner(src_master_inst or dst_master_inst)
+            inst = src_inst or dst_inst
+            species_id, is_player = agent_meta.get(src_agent, (None, False))
+            active[src_agent] = (owner, inst, fight_time)
+
+        elif is_statechange == _DESPAWN_STATECHANGE and src_agent:
+            # Agent despawns: close any active ownership interval.
+            if src_agent in active:
+                owner, inst, start = active.pop(src_agent)
+                species_id, is_player = agent_meta.get(src_agent, (None, False))
+                intervals.append(
+                    OwnershipInterval(
+                        agent_id=src_agent,
+                        owner_agent_id=owner,
+                        instance_id=inst,
+                        species_id=species_id,
+                        start_ms=start,
+                        end_ms=fight_time,
+                        is_player=is_player,
+                    )
+                )
+
+        # Master change detection: any event where src_master_instid
+        # differs from current owner starts a new interval.
+        if src_agent and src_master_inst:
+            new_owner = resolve_owner(src_master_inst)
+            if src_agent in active:
+                cur_owner, inst, start = active[src_agent]
+                if new_owner != cur_owner:
+                    species_id, is_player = agent_meta.get(src_agent, (None, False))
+                    intervals.append(
+                        OwnershipInterval(
+                            agent_id=src_agent,
+                            owner_agent_id=cur_owner,
+                            instance_id=inst,
+                            species_id=species_id,
+                            start_ms=start,
+                            end_ms=fight_time,
+                            is_player=is_player,
+                        )
+                    )
+                    active[src_agent] = (new_owner, inst, fight_time)
+            elif src_agent not in active:
+                # First sighting with a master — start interval.
+                species_id, is_player = agent_meta.get(src_agent, (None, False))
+                inst = src_inst or dst_inst
+                active[src_agent] = (new_owner, inst, fight_time)
+
+    # Close any remaining open intervals at fight end.
+    if origin is not None:
+        fight_end = max((fight_time for _aid, (_o, _i, fight_time) in active.items()), default=0)
+        for agent_id, (owner, inst, start) in active.items():
+            if fight_end > start:
+                species_id, is_player = agent_meta.get(agent_id, (None, False))
+                intervals.append(
+                    OwnershipInterval(
+                        agent_id=agent_id,
+                        owner_agent_id=owner,
+                        instance_id=inst,
+                        species_id=species_id,
+                        start_ms=start,
+                        end_ms=fight_end,
+                        is_player=is_player,
+                    )
+                )
+
+    intervals.sort(key=lambda iv: (iv.start_ms, iv.agent_id))
+    return intervals
+
+
+def _parse_agents_raw(data: bytes, is_evtc_2025: bool) -> Iterator[Agent]:
+    """Parse the agent table from raw EVTC data (used by ownership scan)."""
+    from gw2_core import Agent, Profession, EliteSpec
+
+    agent_count = int.from_bytes(data[AGENT_COUNT_OFFSET : AGENT_COUNT_OFFSET + 4], "little")
+    cursor = HEADER_SIZE
+    end = cursor + agent_count * AGENT_SIZE
+    for _ in range(agent_count):
+        if cursor + AGENT_SIZE > len(data):
+            break
+        name_bytes = data[cursor : cursor + AGENT_NAME_SIZE]
+        name = name_bytes.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+        prof_raw = int.from_bytes(data[cursor + AGENT_NAME_SIZE : cursor + AGENT_NAME_SIZE + 4], "little")
+        elite_raw = int.from_bytes(data[cursor + AGENT_NAME_SIZE + 4 : cursor + AGENT_NAME_SIZE + 8], "little")
+        is_player = prof_raw == 0xFFFF and elite_raw != 0xFFFFFFFF
+        is_gadget = elite_raw == 0xFFFFFFFF and (prof_raw >> 16) == 0xFFFF
+        species_id = prof_raw & 0xFFFF if not is_player and not is_gadget else None
+        account_name = None
+        subgroup = None
+        if is_player:
+            parts = name.split("\x00")
+            if len(parts) >= 3:
+                name, account_name, subgroup = parts[0], parts[1], parts[2]
+        try:
+            elite = EliteSpec(elite_raw & 0xFFFFFFFF)
+        except ValueError:
+            elite = EliteSpec.UNKNOWN
+        yield Agent(
+            id=0,  # filled later by _parse_agents
+            name=name,
+            profession=Profession(prof_raw & 0xFFFF if is_player else 0),
+            elite=elite,
+            elite_raw=elite_raw,
+            species_id=species_id,
+            is_player=is_player,
+            is_gadget=is_gadget,
+            account_name=account_name,
+            subgroup=subgroup,
+            instance_id=0,  # filled by _enrich_evtc2025_agents
+            team_id=0,
+        )
+        cursor += AGENT_SIZE
+
+
 #: arcdps buff id for Regeneration. The only buff Elite Insights routes
 #: through its regeneration-specific stacking logic.
 _REGENERATION_BUFF_ID: Final[int] = 718
@@ -2590,9 +2817,11 @@ __all__ = [
     "MAX_EVTC_BYTES",
     "MAX_SKILLS",
     "SKILL_RECORD_SIZE",
+    "OwnershipInterval",
     "PythonEvtcParser",
     "read_zevtc_archive",
     "read_zevtc_bytes",
     "scan_agent_awareness",
+    "scan_ownership_intervals",
     "scan_regeneration_overstacks",
 ]
