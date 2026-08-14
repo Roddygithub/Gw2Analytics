@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from gw2_analytics.temporal_identity import (
-    AgentIdentity,
     OwnershipInterval,
-    TemporalIdentityResolver,
     build_resolver,
 )
 from gw2_core import (
@@ -98,7 +96,14 @@ def test_resolver_owned_agents_at() -> None:
 def test_resolver_agent_identity_at() -> None:
     """agent_identity_at resolves full identity including owner."""
     agents = [
-        _agent(1, "Master", account=":Master.1234", instance_id=100, profession=Profession.GUARDIAN, elite=EliteSpec.DRAGONHUNTER),
+        _agent(
+            1,
+            "Master",
+            account=":Master.1234",
+            instance_id=100,
+            profession=Profession.GUARDIAN,
+            elite=EliteSpec.DRAGONHUNTER,
+        ),
         _agent(2, "Pet", is_player=False, instance_id=100, species_id=3827),
     ]
     intervals = [_interval(2, 1, 100, 0, 10000)]
@@ -118,8 +123,22 @@ def test_resolver_agent_identity_at() -> None:
 def test_resolver_character_swap_same_account() -> None:
     """Split account with character swap: two agents, same instance_id, different names."""
     agents = [
-        _agent(1, "First Character", account=":Player.1234", instance_id=100, profession=Profession.NECROMANCER, elite=EliteSpec.RITUALIST),
-        _agent(2, "Second Character", account=":Player.1234", instance_id=100, profession=Profession.WARRIOR, elite=EliteSpec.SPELLBREAKER),
+        _agent(
+            1,
+            "First Character",
+            account=":Player.1234",
+            instance_id=100,
+            profession=Profession.NECROMANCER,
+            elite=EliteSpec.RITUALIST,
+        ),
+        _agent(
+            2,
+            "Second Character",
+            account=":Player.1234",
+            instance_id=100,
+            profession=Profession.WARRIOR,
+            elite=EliteSpec.SPELLBREAKER,
+        ),
     ]
     intervals = []  # players don't have ownership intervals
     awareness = {1: (0, 5000), 2: (5000, 10000)}

@@ -2542,7 +2542,7 @@ class OwnershipInterval:
     is_player: bool
 
 
-def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval]:
+def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval]:  # noqa: PLR0912,PLR0915
     """Return temporal ownership intervals from the raw event stream.
 
     An ownership interval captures the period during which an agent
@@ -2563,7 +2563,6 @@ def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval
 
     Times are fight-relative (origin = first event with ``time_ms > 0``).
     """
-    from gw2_core import Agent  # local import to avoid cycles
 
     data = _read_all(source)
     build_str = data[BUILD_OFFSET : BUILD_OFFSET + 8].decode("ascii", errors="replace")
@@ -2606,7 +2605,7 @@ def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval
         cursor += EVENT_SIZE
         time_ms = unpacked[0]
         src_agent = unpacked[1]
-        dst_agent = unpacked[2]
+        unpacked[2]
         is_statechange = unpacked[_statechange_index]
         src_inst = unpacked[_src_inst_index] if is_evtc_2025 else 0
         dst_inst = unpacked[_dst_inst_index] if is_evtc_2025 else 0
@@ -2698,20 +2697,23 @@ def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval
     return intervals
 
 
-def _parse_agents_raw(data: bytes, is_evtc_2025: bool) -> Iterator[Agent]:
+def _parse_agents_raw(data: bytes, _is_evtc_2025: bool) -> Iterator[Agent]:
     """Parse the agent table from raw EVTC data (used by ownership scan)."""
-    from gw2_core import Agent, Profession, EliteSpec
 
     agent_count = int.from_bytes(data[AGENT_COUNT_OFFSET : AGENT_COUNT_OFFSET + 4], "little")
     cursor = HEADER_SIZE
-    end = cursor + agent_count * AGENT_SIZE
+    cursor + agent_count * AGENT_SIZE
     for _ in range(agent_count):
         if cursor + AGENT_SIZE > len(data):
             break
         name_bytes = data[cursor : cursor + AGENT_NAME_SIZE]
         name = name_bytes.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
-        prof_raw = int.from_bytes(data[cursor + AGENT_NAME_SIZE : cursor + AGENT_NAME_SIZE + 4], "little")
-        elite_raw = int.from_bytes(data[cursor + AGENT_NAME_SIZE + 4 : cursor + AGENT_NAME_SIZE + 8], "little")
+        prof_raw = int.from_bytes(
+            data[cursor + AGENT_NAME_SIZE : cursor + AGENT_NAME_SIZE + 4], "little"
+        )
+        elite_raw = int.from_bytes(
+            data[cursor + AGENT_NAME_SIZE + 4 : cursor + AGENT_NAME_SIZE + 8], "little"
+        )
         is_player = prof_raw == 0xFFFF and elite_raw != 0xFFFFFFFF
         is_gadget = elite_raw == 0xFFFFFFFF and (prof_raw >> 16) == 0xFFFF
         species_id = prof_raw & 0xFFFF if not is_player and not is_gadget else None

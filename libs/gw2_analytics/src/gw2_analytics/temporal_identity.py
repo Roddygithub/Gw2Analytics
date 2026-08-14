@@ -11,10 +11,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from gw2_evtc_parser import OwnershipInterval, scan_ownership_intervals
+from gw2_evtc_parser import OwnershipInterval
 
 if TYPE_CHECKING:
-    from gw2_evtc_parser import Agent
     from gw2_core import Agent as CoreAgent
 
 
@@ -49,11 +48,19 @@ class TemporalIdentityResolver:
     agents: list[CoreAgent]
 
     # Private indices (not passed to constructor)
-    _by_agent: dict[int, list[OwnershipInterval]] = field(default_factory=lambda: defaultdict(list), init=False)
+    _by_agent: dict[int, list[OwnershipInterval]] = field(
+        default_factory=lambda: defaultdict(list), init=False
+    )
     _agent_by_id: dict[int, CoreAgent] = field(default_factory=dict, init=False)
-    _account_slices: dict[str, list[tuple[int, int]]] = field(default_factory=lambda: defaultdict(list), init=False)
-    _instance_history: dict[int, list[tuple[int, int, int]]] = field(default_factory=lambda: defaultdict(list), init=False)
-    _awareness_by_instance: dict[int, list[tuple[int, int, int]]] = field(default_factory=lambda: defaultdict(list), init=False)
+    _account_slices: dict[str, list[tuple[int, int]]] = field(
+        default_factory=lambda: defaultdict(list), init=False
+    )
+    _instance_history: dict[int, list[tuple[int, int, int]]] = field(
+        default_factory=lambda: defaultdict(list), init=False
+    )
+    _awareness_by_instance: dict[int, list[tuple[int, int, int]]] = field(
+        default_factory=lambda: defaultdict(list), init=False
+    )
 
     def __post_init__(self) -> None:
         # Index intervals by agent_id for fast lookup
@@ -68,12 +75,14 @@ class TemporalIdentityResolver:
             if agent.account_name:
                 self._account_slices[agent.account_name.lstrip(":")].append((agent.id, idx))
 
-        # Instance -> list of (agent_id, start_ms, end_ms) for recycling detection (from ownership intervals)
+        # Instance -> list of (agent_id, start_ms, end_ms) for recycling
+        # detection (from ownership intervals)
         for iv in self.ownership_intervals:
             if iv.instance_id:
                 self._instance_history[iv.instance_id].append((iv.agent_id, iv.start_ms, iv.end_ms))
 
-        # Instance -> list of (agent_id, first_aware, last_aware) for recycling detection (from awareness)
+        # Instance -> list of (agent_id, first_aware, last_aware) for recycling
+        # detection (from awareness)
         self._awareness_by_instance: dict[int, list[tuple[int, int, int]]] = defaultdict(list)
         for aid, (first, last) in self.agent_awareness.items():
             agent = self._agent_by_id.get(aid)
@@ -117,13 +126,17 @@ class TemporalIdentityResolver:
         iv = self.ownership_interval_at(agent_id, time_ms)
         owner_id = iv.owner_agent_id if iv else None
         owner_agent = self._agent_by_id.get(owner_id) if owner_id else None
-        owner_account = owner_agent.account_name.lstrip(":") if owner_agent and owner_agent.account_name else None
+        owner_account = (
+            owner_agent.account_name.lstrip(":")
+            if owner_agent and owner_agent.account_name
+            else None
+        )
 
         # Determine slice index for split accounts
         slice_index = None
         if agent.account_name:
             account = agent.account_name.lstrip(":")
-            for idx, (aid, sidx) in enumerate(self._account_slices.get(account, [])):
+            for idx, (aid, _sidx) in enumerate(self._account_slices.get(account, [])):
                 if aid == agent_id:
                     slice_index = idx
                     break
@@ -152,7 +165,11 @@ class TemporalIdentityResolver:
         if owner is None:
             return None
         owner_agent = self._agent_by_id.get(owner)
-        return owner_agent.account_name.lstrip(":") if owner_agent and owner_agent.account_name else None
+        return (
+            owner_agent.account_name.lstrip(":")
+            if owner_agent and owner_agent.account_name
+            else None
+        )
 
     # --- Instance recycling helpers ---
 
@@ -161,11 +178,13 @@ class TemporalIdentityResolver:
         return len(self._instance_history.get(instance_id, ()))
 
     def instance_agents(self, instance_id: int) -> list[tuple[int, int, int]]:
-        """All (agent_id, start_ms, end_ms) for this instance_id, chronological."""
+        """All (agent_id, start_ms, end_ms) for this instance_id
+        chronological."""
         return self._instance_history.get(instance_id, [])
 
     def awareness_by_instance(self, instance_id: int) -> list[tuple[int, int, int]]:
-        """All (agent_id, first_aware_ms, last_aware_ms) for this instance_id from awareness spans."""
+        """All (agent_id, first_aware_ms, last_aware_ms) for
+        this instance_id from awareness spans."""
         return self._awareness_by_instance.get(instance_id, [])
 
     # --- Awareness bounds ---
@@ -198,12 +217,15 @@ class TemporalIdentityResolver:
         count = 0
         for other_id, (first, last) in self.agent_awareness.items():
             other_agent = self._agent_by_id.get(other_id)
-            if other_agent and other_agent.instance_id == agent.instance_id:
-                if not (last < slice_lo or first > slice_hi):
-                    count += 1
-                    if count > 1:
-                        # Instance recycling detected within slice: use slice duration
-                        return slice_hi - slice_lo
+            if (
+                other_agent
+                and other_agent.instance_id == agent.instance_id
+                and not (last < slice_lo or first > slice_hi)
+            ):
+                count += 1
+                if count > 1:
+                    # Instance recycling detected within slice: use slice duration
+                    return slice_hi - slice_lo
         # No instance recycling: fall back to awareness bound
         span = self.agent_awareness.get(alias_id)
         if span is None or fight_duration_ms - span[1] <= 1000:
