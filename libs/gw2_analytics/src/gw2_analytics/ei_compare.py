@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from typing import Any
@@ -138,23 +139,65 @@ _STAT_FIELDS = (
 )
 
 
+def _atomic_result(
+    key: str,
+    matched: bool,
+    expected: object,
+    actual: object,
+    rule: str,
+    dimensions: dict[str, object] | None,
+) -> dict[str, object]:
+    delta: object = None
+    if (
+        isinstance(expected, (int, float))
+        and isinstance(actual, (int, float))
+        and not isinstance(expected, bool)
+        and not isinstance(actual, bool)
+    ):
+        computed = actual - expected
+        if math.isfinite(computed):
+            delta = computed
+    return {
+        "key": key,
+        "status": "PASS" if matched else "FAIL",
+        "expected": expected,
+        "actual": actual,
+        "delta": delta,
+        "rule": rule,
+        "dimensions": dict(dimensions or {}),
+    }
+
+
 def _compare_fields(
     prefix: str,
     expected: dict[str, Any],
     actual: dict[str, Any],
     differences: dict[str, object],
     fields: Sequence[str] | None = None,
+    *,
+    results: list[dict[str, object]] | None = None,
+    rule: str = "field-equal",
+    dimensions: dict[str, object] | None = None,
 ) -> None:
     for field in fields or tuple(actual):
-        if field in expected and expected[field] != actual.get(field):
-            differences[f"{prefix}.{field}"] = {
-                "expected": expected[field],
-                "actual": actual.get(field),
-            }
+        if field in expected:
+            exp = expected[field]
+            act = actual.get(field)
+            if exp != act:
+                differences[f"{prefix}.{field}"] = {"expected": exp, "actual": act}
+            if results is not None:
+                results.append(
+                    _atomic_result(f"{prefix}.{field}", exp == act, exp, act, rule, dimensions)
+                )
 
 
 def _rotation_unmatched(
-    expected: Sequence[tuple[int, int, int]], actual: Sequence[tuple[int, int, int]]
+    expected: Sequence[tuple[int, int, int]],
+    actual: Sequence[tuple[int, int, int]],
+    *,
+    prefix: str,
+    results: list[dict[str, object]],
+    dimensions: dict[str, object] | None = None,
 ) -> tuple[list[tuple[int, int, int]], list[tuple[int, int, int]]]:
     remaining = list(actual)
     missing: list[tuple[int, int, int]] = []
@@ -173,9 +216,41 @@ def _rotation_unmatched(
         )
         if match is None:
             missing.append((skill_id, cast_time, duration))
+            results.append(
+                _atomic_result(
+                    f"{prefix}.rotation[castTime={cast_time}][duration={duration}][skillID={skill_id}]",
+                    False,
+                    (skill_id, cast_time, duration),
+                    None,
+                    "rotation-cast-match",
+                    {**(dimensions or {}), "skill_id": skill_id},
+                )
+            )
         else:
-            remaining.pop(match)
-    return missing, remaining
+            matched = remaining.pop(match)
+            results.append(
+                _atomic_result(
+                    f"{prefix}.rotation[castTime={cast_time}][duration={duration}][skillID={skill_id}]",
+                    True,
+                    (skill_id, cast_time, duration),
+                    matched,
+                    "rotation-cast-match",
+                    {**(dimensions or {}), "skill_id": skill_id},
+                )
+            )
+    extra = remaining
+    for skill_id, cast_time, duration in extra:
+        results.append(
+            _atomic_result(
+                f"{prefix}.rotation[castTime={cast_time}][duration={duration}][skillID={skill_id}]",
+                False,
+                None,
+                (skill_id, cast_time, duration),
+                "rotation-cast-match",
+                {**(dimensions or {}), "skill_id": skill_id},
+            )
+        )
+    return missing, extra
 
 
 def _defense_landed_hit(event: DamageEvent) -> bool:
@@ -412,12 +487,29 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         "eiEncounterID": fight.ei_encounter_id,
     }
     differences: dict[str, object] = {}
-    _compare_fields("", expected, actual, differences)
+    results: list[dict[str, object]] = []
+    _compare_fields(
+        "",
+        expected,
+        actual,
+        differences,
+        fields=tuple(field for field in tuple(actual) if field != "players"),
+        results=results,
+        rule="header-field",
+    )
     differences = {key.removeprefix("."): value for key, value in differences.items()}
+    for result in results:
+        key = result.get("key")
+        result["key"] = key.removeprefix(".") if isinstance(key, str) else key
 
     expected_players = expected.get("players")
     if not isinstance(expected_players, list):
-        return {"matches": not differences, "compared": actual, "differences": differences}
+        return {
+            "matches": not differences,
+            "compared": actual,
+            "differences": differences,
+            "results": results,
+        }
 
     event_list = list(events)
     origin = (
@@ -684,6 +776,16 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         if agent is None:
             compared_players[account] = None
             differences[f"players[{account}]"] = {"expected": "present", "actual": None}
+            results.append(
+                _atomic_result(
+                    f"players[{account}]",
+                    False,
+                    "present",
+                    None,
+                    "player-present",
+                    {"account": account, "slice": player.get("firstAware")},
+                )
+            )
             continue
         slice_lo, slice_hi = _slice_bounds(player, origin)
         # Several EI entries can share an account; key the report by the
@@ -693,6 +795,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             if account_entry_count[account] < 2
             else f"players[{account}@{player.get('firstAware')}]"
         )
+        player_dims: dict[str, object] = {"account": account, "slice": player.get("firstAware")}
         anonymous = agent.account_name is None
         agent_ids = agent_ids_by_instance.get(agent.instance_id, {agent.id})
 
@@ -720,7 +823,15 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 agent.team_id,
             ),
         }
-        _compare_fields(prefix, player, values, differences)
+        _compare_fields(
+            prefix,
+            player,
+            values,
+            differences,
+            results=results,
+            rule="player-field",
+            dimensions=player_dims,
+        )
         # v0.17.0: exclude self-inflicted damage (src == dst) from the
         # DEALT side. A self-condition tick (e.g. skill 19426 on
         # wvw-large-fight) is recorded by arcdps with src == dst == the
@@ -758,7 +869,15 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 "powerDamage": damage - condition,
             }
             values["dpsAll"] = dps_values
-            _compare_fields(f"{prefix}.dpsAll", dps_all[0], dps_values, differences)
+            _compare_fields(
+                f"{prefix}.dpsAll",
+                dps_all[0],
+                dps_values,
+                differences,
+                results=results,
+                rule="dpsAll-field",
+                dimensions=player_dims,
+            )
 
         defenses = player.get("defenses")
         if isinstance(defenses, list) and defenses and isinstance(defenses[0], dict):
@@ -819,7 +938,15 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 ),
             }
             values["defenses"] = defense_values
-            _compare_fields(f"{prefix}.defenses", defenses[0], defense_values, differences)
+            _compare_fields(
+                f"{prefix}.defenses",
+                defenses[0],
+                defense_values,
+                differences,
+                results=results,
+                rule="defenses-field",
+                dimensions=player_dims,
+            )
 
         stats_all = player.get("statsAll")
         if isinstance(stats_all, list) and stats_all and isinstance(stats_all[0], dict):
@@ -834,7 +961,14 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             )
             values["statsAll"] = stats_values
             _compare_fields(
-                prefix + ".statsAll", stats_all[0], stats_values, differences, _STAT_FIELDS
+                prefix + ".statsAll",
+                stats_all[0],
+                stats_values,
+                differences,
+                _STAT_FIELDS,
+                results=results,
+                rule="statsAll-field",
+                dimensions=player_dims,
             )
 
         expected_buffs = player.get("buffUptimes")
@@ -880,15 +1014,26 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 expected_uptime = account_expected.get(buff_id)
                 if (account, buff_id) in reported_buff_diffs:
                     continue
-                if (
-                    expected_uptime is None
-                    or abs(expected_uptime - compared_buffs[buff_id]) > 0.005
-                ):
-                    reported_buff_diffs.add((account, buff_id))
+                reported_buff_diffs.add((account, buff_id))
+                matched = (
+                    expected_uptime is not None
+                    and abs(expected_uptime - compared_buffs[buff_id]) <= 0.005
+                )
+                if not matched:
                     differences[f"{prefix}.buffUptimes[{buff_id}].uptime"] = {
                         "expected": expected_uptime,
                         "actual": compared_buffs[buff_id],
                     }
+                results.append(
+                    _atomic_result(
+                        f"{prefix}.buffUptimes[{buff_id}].uptime",
+                        matched,
+                        expected_uptime,
+                        compared_buffs[buff_id],
+                        "buff-uptime-tolerance",
+                        {**player_dims, "buff_id": buff_id},
+                    )
+                )
             values["buffUptimes"] = compared_buffs
 
         expected_rotation = player.get("rotation")
@@ -930,7 +1075,13 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 key=lambda item: (item[1], item[0]),
             )
             values["rotation"] = actual_casts
-            missing_casts, extra_casts = _rotation_unmatched(expected_casts, actual_casts)
+            missing_casts, extra_casts = _rotation_unmatched(
+                expected_casts,
+                actual_casts,
+                prefix=prefix,
+                results=results,
+                dimensions=player_dims,
+            )
             if missing_casts or extra_casts:
                 differences[f"{prefix}.rotation"] = {
                     "expected": missing_casts,
@@ -964,6 +1115,27 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     "expected": expected_consumables,
                     "actual": actual_consumables,
                 }
+                results.append(
+                    _atomic_result(
+                        f"{prefix}.consumables",
+                        False,
+                        expected_consumables,
+                        actual_consumables,
+                        "consumables-match",
+                        player_dims,
+                    )
+                )
+            else:
+                results.append(
+                    _atomic_result(
+                        f"{prefix}.consumables",
+                        True,
+                        expected_consumables,
+                        actual_consumables,
+                        "consumables-match",
+                        player_dims,
+                    )
+                )
 
         dps_targets = player.get("dpsTargets")
         stats_targets = player.get("statsTargets")
@@ -1061,6 +1233,12 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                         dps_targets[index][0],
                         target_values,
                         differences,
+                        results=results,
+                        rule="dpsTargets-field",
+                        dimensions={
+                            **player_dims,
+                            "target_instance_id": target["instanceID"],
+                        },
                     )
                 if (
                     isinstance(stats_targets, list)
@@ -1073,6 +1251,12 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                         target_stats,
                         differences,
                         _STAT_FIELDS,
+                        results=results,
+                        rule="statsTargets-field",
+                        dimensions={
+                            **player_dims,
+                            "target_instance_id": target["instanceID"],
+                        },
                     )
             values["targets"] = compared_targets
 
@@ -1095,12 +1279,20 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     ),
                     differences,
                     ("totalDamage", "connectedHits", "crit", "critDamage"),
+                    results=results,
+                    rule="totalDamageDist-field",
+                    dimensions={**player_dims, "skill_id": skill_id},
                 )
 
         compared_players[account] = values
 
     actual["players"] = compared_players
-    return {"matches": not differences, "compared": actual, "differences": differences}
+    return {
+        "matches": not differences,
+        "compared": actual,
+        "differences": differences,
+        "results": results,
+    }
 
 
 __all__ = ["compare_elite_insights"]
