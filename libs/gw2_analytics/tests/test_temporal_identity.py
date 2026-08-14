@@ -140,7 +140,7 @@ def test_resolver_character_swap_same_account() -> None:
             elite=EliteSpec.SPELLBREAKER,
         ),
     ]
-    intervals = []  # players don't have ownership intervals
+    intervals: list[OwnershipInterval] = []  # players don't have ownership intervals
     awareness = {1: (0, 5000), 2: (5000, 10000)}
 
     resolver = build_resolver(intervals, awareness, agents)
@@ -217,7 +217,7 @@ def test_resolver_mid_slice_pet_despawn_respawn() -> None:
 def test_resolver_is_present_at() -> None:
     """is_present_at respects agent_awareness bounds."""
     agents = [_agent(1, "Player", account=":Player.1234", instance_id=100)]
-    intervals = []
+    intervals: list[OwnershipInterval] = []
     awareness = {1: (1000, 9000)}  # joins late, leaves early
 
     resolver = build_resolver(intervals, awareness, agents)
@@ -251,7 +251,7 @@ def test_resolver_anonymous_enemy_player() -> None:
         _agent(1, "Non Squad Player", account="Non Squad Player 5", instance_id=100),
         _agent(2, "Enemy", account=None, instance_id=100, is_player=False, species_id=8111),
     ]
-    intervals = []
+    intervals: list[OwnershipInterval] = []
     awareness = {1: (0, 10000), 2: (0, 10000)}
 
     resolver = build_resolver(intervals, awareness, agents)

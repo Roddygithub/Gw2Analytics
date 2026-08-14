@@ -16,6 +16,13 @@ from gw2_evtc_parser import OwnershipInterval
 if TYPE_CHECKING:
     from gw2_core import Agent as CoreAgent
 
+__all__ = [
+    "AgentIdentity",
+    "OwnershipInterval",
+    "TemporalIdentityResolver",
+    "build_resolver",
+]
+
 
 @dataclass(frozen=True, slots=True)
 class AgentIdentity:
@@ -85,9 +92,9 @@ class TemporalIdentityResolver:
         # detection (from awareness)
         self._awareness_by_instance: dict[int, list[tuple[int, int, int]]] = defaultdict(list)
         for aid, (first, last) in self.agent_awareness.items():
-            agent = self._agent_by_id.get(aid)
-            if agent and agent.instance_id:
-                self._awareness_by_instance[agent.instance_id].append((aid, first, last))
+            agent_obj: CoreAgent | None = self._agent_by_id.get(aid)
+            if agent_obj is not None and agent_obj.instance_id:
+                self._awareness_by_instance[agent_obj.instance_id].append((aid, first, last))
 
     # --- Core ownership queries ---
 

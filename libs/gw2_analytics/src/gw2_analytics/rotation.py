@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
@@ -561,7 +561,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     professions: Mapping[int, Profession] | None = None,
     elite_specs: Mapping[int, EliteSpec] | None = None,
     agent_id_by_instance: Mapping[int, int] | None = None,
-    ownership_resolver: callable | None = None,
+    ownership_resolver: Callable[[int, int], int | None] | None = None,
 ) -> list[SkillCast]:
     """Return completed, clipped casts ordered by fight-relative start time.
 
