@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from gw2_analytics.ei_compare import _skill_stats, compare_elite_insights
 from gw2_core import (
@@ -15,6 +15,10 @@ from gw2_core import (
     Profession,
     Skill,
 )
+
+
+def _rows(result: dict[str, object]) -> dict[str, dict[str, Any]]:
+    return {str(row["key"]): row for row in cast("list[dict[str, Any]]", result["results"])}
 
 
 def test_compare_elite_insights_keeps_first_anonymous_agent_for_shared_instance() -> None:
@@ -439,7 +443,7 @@ def test_compare_elite_insights_emits_atomic_results_for_players_and_header() ->
     result = compare_elite_insights(fight, expected, [])
 
     assert result["differences"] == {}
-    rows = {row["key"]: row for row in result["results"]}
+    rows = _rows(result)
     player = rows["players[Player.1234].name"]
     assert player["status"] == "PASS"
     assert player["rule"] == "player-field"
@@ -477,8 +481,8 @@ def test_compare_elite_insights_reports_fail_with_numeric_delta() -> None:
 
     result = compare_elite_insights(fight, expected, [])
 
-    assert len(result["differences"]) == 2
-    rows = {row["key"]: row for row in result["results"]}
+    assert len(cast("list[dict[str, object]]", result["differences"])) == 2
+    rows = _rows(result)
     name = rows["players[Player.1234].name"]
     assert name["status"] == "FAIL"
     assert name["expected"] == "Wrong Name"
@@ -497,7 +501,7 @@ def test_compare_elite_insights_emits_player_present_result_when_agent_missing()
 
     result = compare_elite_insights(fight, expected, [])
 
-    rows = {row["key"]: row for row in result["results"]}
+    rows = _rows(result)
     row = rows["players[Ghost.1234]"]
     assert row["status"] == "FAIL"
     assert row["rule"] == "player-present"
@@ -545,7 +549,7 @@ def test_compare_elite_insights_emits_buff_uptime_tolerance_result() -> None:
     result = compare_elite_insights(fight, expected, events)
 
     assert result["differences"] == {}
-    rows = {row["key"]: row for row in result["results"]}
+    rows = _rows(result)
     row = rows["players[Player.1234].buffUptimes[1187].uptime"]
     assert row["status"] == "PASS"
     assert row["rule"] == "buff-uptime-tolerance"
@@ -581,7 +585,7 @@ def test_compare_elite_insights_emits_per_cast_rotation_results() -> None:
 
     result = compare_elite_insights(fight, expected, [])
 
-    rows = {row["key"]: row for row in result["results"]}
+    rows = _rows(result)
     row = rows["players[Player.1234].rotation[castTime=100][duration=500][skillID=42]"]
     assert row["status"] == "FAIL"
     assert row["rule"] == "rotation-cast-match"
@@ -627,7 +631,7 @@ def test_compare_elite_insights_reports_dps_all_scalar_results() -> None:
 
     result = compare_elite_insights(fight, expected, [damage])
 
-    rows = {row["key"]: row for row in result["results"]}
+    rows = _rows(result)
     row = rows["players[Player.1234].dpsAll.damage"]
     assert row["status"] == "FAIL"
     assert row["rule"] == "dpsAll-field"
