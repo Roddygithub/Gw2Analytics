@@ -70,7 +70,7 @@ dev = [
     "pydantic-settings>=2.6,<3",
     "sqlalchemy>=2.0,<3",
     "psycopg[binary]>=3.3.4,<4",
-    "alembic>=1.13,<2",
+    "alembic>=1.19.1,<2",
     "minio>=7.2,<8",
     "python-multipart>=0.0.20,<1",
     "cryptography>=50,<51",  # v0.10.26 CI: pip-audit → crypt>=48; v0.15.x: CVE-2026-69247/8/9 → >=50
