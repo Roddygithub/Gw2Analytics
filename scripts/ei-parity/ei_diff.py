@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -23,12 +24,20 @@ ROOT = Path(__file__).resolve().parents[2]
 LOGS = ROOT / "zevtc files"
 EI_OUT = ROOT / ".tooling" / "ei-out"
 CORPUS = Path(__file__).resolve().parent / "corpus.txt"
+CORPUS_BASELINE = Path(__file__).resolve().parent / "corpus-baseline.json"
 MANIFEST = Path(__file__).resolve().parent / "corpus-manifest.json"
+KNOWN_DELTAS = Path(__file__).resolve().parent / "known-deltas.json"
 EI_CLI = ROOT / ".tooling" / "GW2EICLI" / "GuildWars2EliteInsights-CLI.dll"
 
 EI_VERSION = "3.26.0.0"
 EXPORT_TYPE = "detailed_wvw_kill"
+REPORT_SCHEMA_VERSION = 1
+KNOWN_DELTAS_SCHEMA_VERSION = 1
 MANIFEST_KEYS = {"schema_version", "reference", "tag_vocabulary", "entries"}
+KNOWN_DELTAS_KEYS = {"schema_version", "rules"}
+KNOWN_DELTA_RULE_KEYS = {"id", "selector", "constraint", "reason", "remove_when"}
+KNOWN_DELTA_SELECTOR_KEYS = {"stem", "account", "slice", "bucket", "skill_id", "buff_id", "key"}
+KNOWN_DELTA_CONSTRAINT_KEYS = {"max_abs_delta"}
 REFERENCE_KEYS = {"ei_version", "cli_sha256", "export_type"}
 ENTRY_KEYS = {"stem", "date", "evtc_sha256", "export_sha256", "tags"}
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -199,7 +208,13 @@ def validate_corpus() -> tuple[list[str], str, dict[str, object]]:  # noqa: PLR0
 
 def _validate_baseline_destination(path: Path, corpus: list[str]) -> Path:
     destination = path.resolve()
-    inputs = {MANIFEST.resolve(), CORPUS.resolve(), EI_CLI.resolve()}
+    inputs = {
+        MANIFEST.resolve(),
+        CORPUS.resolve(),
+        CORPUS_BASELINE.resolve(),
+        KNOWN_DELTAS.resolve(),
+        EI_CLI.resolve(),
+    }
     inputs.update((LOGS / f"{stem}.zevtc").resolve() for stem in corpus)
     inputs.update((EI_OUT / f"{stem}_{EXPORT_TYPE}.json").resolve() for stem in corpus)
     if destination in inputs:
@@ -207,7 +222,7 @@ def _validate_baseline_destination(path: Path, corpus: list[str]) -> Path:
     return destination
 
 
-def _write_baseline(destination: Path, content: str) -> None:
+def _write_atomic(destination: Path, content: str) -> None:
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -225,7 +240,62 @@ def _write_baseline(destination: Path, content: str) -> None:
     except OSError:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-        _fail("unable to write baseline")
+        _fail("unable to write output")
+
+
+def _validate_known_deltas(data: object) -> list[dict[str, object]]:  # noqa: PLR0912
+    if not isinstance(data, dict):
+        _fail("known-deltas.json must be a mapping")
+    if set(data) != KNOWN_DELTAS_KEYS:
+        _fail("known-deltas.json has unexpected top-level keys")
+    if data.get("schema_version") != KNOWN_DELTAS_SCHEMA_VERSION:
+        _fail("known-deltas.json has an unsupported schema version")
+    rules = data.get("rules")
+    if not isinstance(rules, list):
+        _fail("known-deltas.json rules must be a list")
+    seen_ids: set[str] = set()
+    for rule in rules:
+        if not isinstance(rule, dict):
+            _fail("known-deltas.json rule must be a mapping")
+        if set(rule) != KNOWN_DELTA_RULE_KEYS:
+            _fail("known-deltas.json rule has unexpected keys")
+        rule_id = rule.get("id")
+        if not isinstance(rule_id, str) or not rule_id:
+            _fail("known-deltas.json rule id must be a non-empty string")
+        if rule_id in seen_ids:
+            _fail(f"known-deltas.json duplicate rule id: {rule_id}")
+        seen_ids.add(rule_id)
+        selector = rule.get("selector")
+        if not isinstance(selector, dict) or not selector:
+            _fail("known-deltas.json rule selector must be a non-empty mapping")
+        if not set(selector) <= KNOWN_DELTA_SELECTOR_KEYS:
+            _fail("known-deltas.json rule selector has unexpected keys")
+        if any(value is None for value in selector.values()):
+            _fail("known-deltas.json rule selector must not contain null values")
+        if not all(isinstance(v, str | int | float | bool) for v in selector.values()):
+            _fail("known-deltas.json rule selector values must be scalar")
+        constraint = rule.get("constraint")
+        if not isinstance(constraint, dict) or not constraint:
+            _fail("known-deltas.json rule constraint must be a non-empty mapping")
+        if not set(constraint) <= KNOWN_DELTA_CONSTRAINT_KEYS:
+            _fail("known-deltas.json rule constraint has unexpected keys")
+        bound = constraint.get("max_abs_delta")
+        if (
+            not isinstance(bound, int | float)
+            or isinstance(bound, bool)
+            or not math.isfinite(bound)
+            or bound <= 0
+        ):
+            _fail("known-deltas.json rule max_abs_delta must be a positive number")
+    return rules
+
+
+def _load_known_deltas() -> list[dict[str, object]]:
+    if not KNOWN_DELTAS.is_file():
+        return []
+    return _validate_known_deltas(
+        _load_json(KNOWN_DELTAS, "known-deltas.json", reject_duplicates=True)
+    )
 
 
 def _rotation_deltas(diffs: dict[str, object]) -> tuple[Counter[int], Counter[int]]:
@@ -325,14 +395,138 @@ def run_one(stem: str) -> dict[str, object]:
         "ei_targets": len(expected.get("targets", [])),
         "n_diffs": len(diffs),
         "differences": diffs,
+        "results": result["results"],
         "buckets": Counter(bucket(k) for k in diffs),
     }
 
 
-def main() -> int:  # noqa: PLR0912
+def _selector_matches(
+    selector: dict[str, object],
+    stem: str,
+    result: dict[str, object],
+) -> bool:
+    dimensions = result.get("dimensions")
+    if not isinstance(dimensions, dict):
+        dimensions = {}
+    exact = {
+        "stem": stem,
+        "account": dimensions.get("account"),
+        "slice": dimensions.get("slice"),
+        "bucket": bucket(result.get("key", "")),
+        "skill_id": dimensions.get("skill_id"),
+        "buff_id": dimensions.get("buff_id"),
+        "key": result.get("key"),
+    }
+    return all(value == exact[key] for key, value in selector.items())
+
+
+def _constraint_matches(
+    constraint: dict[str, object],
+    result: dict[str, object],
+) -> bool:
+    delta = result.get("delta")
+    bound = constraint.get("max_abs_delta")
+    if bound is not None:
+        if not isinstance(delta, int | float) or not isinstance(bound, int | float):
+            return False
+        if abs(delta) > abs(bound):
+            return False
+    return True
+
+
+def _classify_results(
+    reports: list[dict[str, object]],
+    rules: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for rep in reports:
+        stem = rep["stem"]
+        for result in rep["results"]:
+            if not isinstance(result, dict):
+                continue
+            status = result.get("status")
+            if status not in {"PASS", "FAIL"}:
+                _fail(f"{stem}: unexpected result status {status!r}")
+            known: object = None
+            if status == "FAIL":
+                for rule in rules:
+                    if not _selector_matches(rule["selector"], stem, result):
+                        continue
+                    if not _constraint_matches(rule["constraint"], result):
+                        continue
+                    known = {
+                        "rule_id": rule["id"],
+                        "reason": rule["reason"],
+                        "remove_when": rule["remove_when"],
+                    }
+                    break
+            if known is not None:
+                status = "KNOWN_DELTA"
+            rows.append(
+                {
+                    "stem": stem,
+                    "key": result["key"],
+                    "bucket": bucket(result["key"]),
+                    "status": status,
+                    "expected": result.get("expected"),
+                    "actual": result.get("actual"),
+                    "delta": result.get("delta"),
+                    "rule": result.get("rule"),
+                    "dimensions": result.get("dimensions"),
+                    "known_delta": known,
+                }
+            )
+    rows.sort(key=lambda row: (row["stem"], row["key"]))
+    return rows
+
+
+def _build_report(
+    reports: list[dict[str, object]],
+    rules: list[dict[str, object]],
+    reference: str,
+    manifest_sha256: str,
+) -> dict[str, object]:
+    rows = _classify_results(reports, rules)
+    summary_by_status: Counter[str] = Counter(row["status"] for row in rows)
+    summary_by_status_bucket: dict[str, Counter[str]] = {}
+    for row in rows:
+        per_status = summary_by_status_bucket.setdefault(row["status"], Counter())
+        per_status[row["bucket"]] += 1
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "reference": reference,
+        "manifest_sha256": manifest_sha256,
+        "log_count": len(reports),
+        "summary_by_status": dict(sorted(summary_by_status.items())),
+        "summary_by_status_bucket": {
+            status: dict(sorted(buckets.items()))
+            for status, buckets in sorted(summary_by_status_bucket.items())
+        },
+        "results": rows,
+    }
+
+
+def _validate_report_destination(path: Path, corpus: list[str]) -> Path:
+    destination = path.resolve()
+    inputs = {
+        MANIFEST.resolve(),
+        CORPUS.resolve(),
+        CORPUS_BASELINE.resolve(),
+        KNOWN_DELTAS.resolve(),
+        EI_CLI.resolve(),
+    }
+    inputs.update((LOGS / f"{stem}.zevtc").resolve() for stem in corpus)
+    inputs.update((EI_OUT / f"{stem}_{EXPORT_TYPE}.json").resolve() for stem in corpus)
+    if destination in inputs:
+        _fail("report destination is a certification input")
+    return destination
+
+
+def main() -> int:  # noqa: PLR0912, PLR0915
     ap = argparse.ArgumentParser()
     ap.add_argument("stems", nargs="*")
     ap.add_argument("--json", dest="json_out")
+    ap.add_argument("--report-json", dest="report_out")
     ap.add_argument("--top", type=int, default=40)
     ap.add_argument(
         "--rotation-skills",
@@ -361,6 +555,13 @@ def main() -> int:  # noqa: PLR0912
     json_out = (
         _validate_baseline_destination(Path(args.json_out), corpus) if args.json_out else None
     )
+    if args.report_out and args.stems:
+        _fail("report output requires the complete corpus")
+    report_out = (
+        _validate_report_destination(Path(args.report_out), corpus) if args.report_out else None
+    )
+    if json_out is not None and report_out is not None and json_out == report_out:
+        _fail("json and report destinations must differ")
     stems = args.stems or corpus
     reports = []
     grand = Counter()
@@ -405,7 +606,7 @@ def main() -> int:  # noqa: PLR0912
                     shown += 1
 
     if json_out is not None:
-        _write_baseline(
+        _write_atomic(
             json_out,
             json.dumps(
                 {
@@ -415,9 +616,18 @@ def main() -> int:  # noqa: PLR0912
                     "buckets": dict(sorted(grand.items())),
                 },
                 indent=2,
+                allow_nan=False,
             )
             + "\n",
         )
+    if report_out is not None:
+        report = _build_report(
+            reports,
+            _load_known_deltas(),
+            reference,
+            manifest_sha256,
+        )
+        _write_atomic(report_out, json.dumps(report, indent=2, allow_nan=False) + "\n")
     return 0
 
 

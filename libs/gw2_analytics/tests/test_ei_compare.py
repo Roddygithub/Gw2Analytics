@@ -13,6 +13,7 @@ from gw2_core import (
     EvtcHeader,
     Fight,
     Profession,
+    Skill,
 )
 
 
@@ -404,3 +405,233 @@ def test_compare_elite_insights_excludes_breakbar_from_damage_taken_count() -> N
     result = compare_elite_insights(fight, expected, [_dmg(10, True)])
 
     assert result["differences"] == {}
+
+
+def test_compare_elite_insights_emits_atomic_results_for_players_and_header() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=1, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="Player",
+                profession=Profession.MESMER,
+                elite=EliteSpec.CHRONOMANCER,
+                is_player=True,
+                account_name=":Player.1234",
+                subgroup="1",
+                instance_id=1111,
+            )
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "name": "Player",
+                "group": 1,
+            }
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [])
+
+    assert result["differences"] == {}
+    rows = {row["key"]: row for row in result["results"]}
+    player = rows["players[Player.1234].name"]
+    assert player["status"] == "PASS"
+    assert player["rule"] == "player-field"
+    assert player["dimensions"] == {"account": "Player.1234", "slice": 0}
+    assert player["delta"] is None
+
+
+def test_compare_elite_insights_reports_fail_with_numeric_delta() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=1, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="Player",
+                profession=Profession.MESMER,
+                elite=EliteSpec.CHRONOMANCER,
+                is_player=True,
+                account_name=":Player.1234",
+                instance_id=1111,
+            )
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "name": "Wrong Name",
+                "group": 99,
+            }
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [])
+
+    assert len(result["differences"]) == 2
+    rows = {row["key"]: row for row in result["results"]}
+    name = rows["players[Player.1234].name"]
+    assert name["status"] == "FAIL"
+    assert name["expected"] == "Wrong Name"
+    assert name["actual"] == "Player"
+    assert name["delta"] is None
+    group = rows["players[Player.1234].group"]
+    assert group["status"] == "FAIL"
+    assert group["delta"] == 0 - 99
+
+
+def test_compare_elite_insights_emits_player_present_result_when_agent_missing() -> None:
+    fight = Fight(id="fight", agents=[])
+    expected: dict[str, Any] = {
+        "players": [{"account": "Ghost.1234", "instanceID": 1111, "name": "Ghost"}]
+    }
+
+    result = compare_elite_insights(fight, expected, [])
+
+    rows = {row["key"]: row for row in result["results"]}
+    row = rows["players[Ghost.1234]"]
+    assert row["status"] == "FAIL"
+    assert row["rule"] == "player-present"
+    assert row["dimensions"] == {"account": "Ghost.1234", "slice": None}
+
+
+def test_compare_elite_insights_emits_buff_uptime_tolerance_result() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=1, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="Player",
+                profession=Profession.ENGINEER,
+                elite=EliteSpec.SCRAPPER,
+                is_player=True,
+                account_name=":Player.1234",
+                instance_id=1111,
+            )
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "buffUptimes": [{"id": 1187, "buffData": [{"uptime": 100.0}]}],
+            }
+        ]
+    }
+    events = [
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=1,
+            skill_id=1187,
+            duration_ms=10_000,
+            stacks=1,
+            kind="apply",
+        )
+    ]
+
+    result = compare_elite_insights(fight, expected, events)
+
+    assert result["differences"] == {}
+    rows = {row["key"]: row for row in result["results"]}
+    row = rows["players[Player.1234].buffUptimes[1187].uptime"]
+    assert row["status"] == "PASS"
+    assert row["rule"] == "buff-uptime-tolerance"
+    assert row["dimensions"] == {"account": "Player.1234", "slice": 0, "buff_id": 1187}
+
+
+def test_compare_elite_insights_emits_per_cast_rotation_results() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=1, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="Player",
+                profession=Profession.MESMER,
+                elite=EliteSpec.CHRONOMANCER,
+                is_player=True,
+                account_name=":Player.1234",
+                instance_id=1111,
+            )
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "rotation": [{"id": 42, "skills": [{"castTime": 100, "duration": 500}]}],
+            }
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [])
+
+    rows = {row["key"]: row for row in result["results"]}
+    row = rows["players[Player.1234].rotation[castTime=100][duration=500][skillID=42]"]
+    assert row["status"] == "FAIL"
+    assert row["rule"] == "rotation-cast-match"
+    assert row["dimensions"] == {"account": "Player.1234", "slice": 0, "skill_id": 42}
+
+
+def test_compare_elite_insights_reports_dps_all_scalar_results() -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=1, duration_ms=10_000),
+        agents=[
+            Agent(
+                id=1,
+                name="Player",
+                profession=Profession.MESMER,
+                elite=EliteSpec.CHRONOMANCER,
+                is_player=True,
+                account_name=":Player.1234",
+                instance_id=1111,
+            )
+        ],
+        skills=[Skill(id=42, name="Blurred Frenzy")],
+    )
+    damage = DamageEvent(
+        time_ms=500,
+        source_agent_id=1,
+        target_agent_id=2,
+        skill_id=42,
+        damage=1000,
+        connected=True,
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "lastAware": 10000,
+                "dpsAll": [{"damage": 2000, "condiDamage": 0, "powerDamage": 2000}],
+            }
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [damage])
+
+    rows = {row["key"]: row for row in result["results"]}
+    row = rows["players[Player.1234].dpsAll.damage"]
+    assert row["status"] == "FAIL"
+    assert row["rule"] == "dpsAll-field"
+    assert row["expected"] == 2000
+    assert row["actual"] == 1000
+    assert row["delta"] == -1000
+    assert row["dimensions"] == {"account": "Player.1234", "slice": 0}

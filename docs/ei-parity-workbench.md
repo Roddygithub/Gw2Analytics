@@ -95,6 +95,37 @@ intentional parser result change:
 uv run python scripts/ei-parity/ei_diff.py --json scripts/ei-parity/corpus-baseline.json
 ```
 
+### Detailed local report and known-delta registry
+
+`compare_elite_insights` also emits one atomic result per comparison — key,
+status (`PASS`/`FAIL`), expected, actual, numeric `delta = actual - expected`
+(otherwise `null`), rule and dimensions — alongside the unchanged
+`matches`/`compared`/`differences` contract. `--report-json` requires the full
+corpus and writes a **local, private** report that never lands in Git:
+
+```bash
+uv run python scripts/ei-parity/ei_diff.py \
+  --report-json /tmp/ei-certification-report.json
+```
+
+The report root carries `schema_version` (1), the EI reference, the manifest
+SHA-256, a summary by status and by status/bucket, and a deterministically
+sorted result list. Player/slice identifiers appear only when available and
+are never copied into `corpus-baseline.json`, which stays aggregate.
+
+`scripts/ei-parity/known-deltas.json` is the versioned, initially-empty
+registry of exact, bounded exemptions (schema v1). A rule flips a `FAIL` to
+`KNOWN_DELTA` only when every selector field (stem, account, slice, bucket,
+skill id, buff id, full key) matches exactly and the delta is within the rule's
+`max_abs_delta` bound. Rules never touch a `PASS` row, and when several rules
+match one row the first listed rule wins. Fields are fixed rules: `id`,
+`selector`, `constraint`, `reason`, `remove_when`; the registry rejects unknown
+keys, empty selectors or constraints, wrong schema versions, and malformed
+rules (empty or duplicate ids, null selector values, non-positive or
+non-finite bounds). No regex ever masks a result, and the current 133
+differences stay `FAIL` with the empty registry. Use the registry to track a
+confirmed parity gap with a removal condition — never to silence a row.
+
 Supporting probes in `scripts/ei-parity/`:
 
 | Script | Answers |
