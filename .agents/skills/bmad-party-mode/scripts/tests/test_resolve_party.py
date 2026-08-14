@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import resolve_party as rp  # noqa: E402
+import resolve_party as rp
 
 AGENTS = {
     "bmad-agent-analyst": {"name": "Mary", "icon": "📊", "title": "Analyst"},

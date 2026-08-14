@@ -143,7 +143,7 @@ def _write_action_fixture(tmp_path):
 
 def _load(path):
     yaml = YAML(typ="rt")
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         return yaml.load(fh)
 
 
@@ -650,7 +650,7 @@ def test_template_round_trip_changes_only_last_updated(tmp_path):
     before = source.splitlines()
     after = target.read_text(encoding="utf-8").splitlines()
     assert len(before) == len(after)
-    changed = [(b, a) for b, a in zip(before, after) if b != a]
+    changed = [(b, a) for b, a in zip(before, after, strict=False) if b != a]
     assert len(changed) == 1, changed
     assert changed[0][1] == "last_updated: 01-01-2026 09:00"
     # The pre-existing action item keeps its 2-space sequence indent.
@@ -1096,7 +1096,7 @@ def test_set_action_status_changes_exactly_one_line(tmp_path):
     before = ACTION_FIXTURE.splitlines()
     after = target.read_text(encoding="utf-8").splitlines()
     assert len(before) == len(after)
-    changed = [(b, a) for b, a in zip(before, after) if b != a]
+    changed = [(b, a) for b, a in zip(before, after, strict=False) if b != a]
     assert changed == [('    status: "open"', '    status: "done"')], changed
 
 
@@ -1497,7 +1497,7 @@ def test_status_write_preserves_every_scalar_style(tmp_path):
     before = STYLE_FIXTURE.splitlines()
     after = target.read_text(encoding="utf-8").splitlines()
     assert len(before) == len(after)
-    changed = [(b, a) for b, a in zip(before, after) if b != a]
+    changed = [(b, a) for b, a in zip(before, after, strict=False) if b != a]
     assert changed == [
         ('    status: "open"', '    status: "done"'),
         ("    status: 'open'", "    status: 'done'"),

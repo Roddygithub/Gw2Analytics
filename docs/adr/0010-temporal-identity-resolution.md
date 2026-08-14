@@ -35,11 +35,11 @@ Result: `ownership_intervals = list[OwnershipInterval]` where each interval is:
 ```python
 @dataclass
 class OwnershipInterval:
-    agent_id: int                    # the minion/pet/gadget agent
-    owner_agent_id: int | None       # master at this time (None = uncontrolled)
+    agent_id: int  # the minion/pet/gadget agent
+    owner_agent_id: int | None  # master at this time (None = uncontrolled)
     instance_id: int
-    start_ms: int                    # fight-relative
-    end_ms: int                      # fight-relative (exclusive)
+    start_ms: int  # fight-relative
+    end_ms: int  # fight-relative (exclusive)
     species_id: int
     is_player: bool
 ```
@@ -49,8 +49,9 @@ Provide a **time-parameterized resolver** used by `ei_compare.py`:
 
 ```python
 class TemporalIdentityResolver:
-    def __init__(self, intervals: list[OwnershipInterval], agent_awareness: dict[int, tuple[int,int]]):
-        ...
+    def __init__(
+        self, intervals: list[OwnershipInterval], agent_awareness: dict[int, tuple[int, int]]
+    ): ...
 
     def owner_at(self, agent_id: int, time_ms: int) -> int | None:
         """Return owning agent_id at given fight-relative timestamp."""

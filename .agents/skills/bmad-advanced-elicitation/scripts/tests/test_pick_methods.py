@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import pick_methods  # noqa: E402
+import pick_methods
 
 CSV = """num,category,method_name,description,output_pattern
 1,risk,Pre-mortem Analysis,Imagine future failure then work backwards,failure → causes → prevention

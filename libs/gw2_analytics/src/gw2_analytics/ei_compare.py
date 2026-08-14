@@ -690,10 +690,9 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         expected_profession = player.get("profession")
         if isinstance(expected_profession, str):
             for agent in candidates:
-                if (
-                    spec_display_name(agent.profession, agent.elite) == expected_profession
-                    and resolver.is_present_at(agent.id, mid)
-                ):
+                if spec_display_name(
+                    agent.profession, agent.elite
+                ) == expected_profession and resolver.is_present_at(agent.id, mid):
                     return agent
         # Fallback: first candidate present in slice
         for agent in candidates:
@@ -722,21 +721,15 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             slice_lo_rel = slice_lo - origin if origin else slice_lo
             slice_hi_rel = slice_hi - origin if origin else slice_hi
             mid = (
-                (slice_lo_rel + slice_hi_rel) // 2
-                if slice_hi_rel > slice_lo_rel
-                else slice_lo_rel
+                (slice_lo_rel + slice_hi_rel) // 2 if slice_hi_rel > slice_lo_rel else slice_lo_rel
             )
             owned = resolver.owned_agents_at(agent.id, mid)
             result = {agent.id} | set(owned)
             # Instance recycling: other agents with same instance_id whose
             # awareness spans overlap the slice window [slice_lo_rel, slice_hi_rel]
             if agent.instance_id:
-                for other_id, first, last in resolver.awareness_by_instance(
-                    agent.instance_id
-                ):
-                    if other_id != agent.id and not (
-                        last < slice_lo_rel or first > slice_hi_rel
-                    ):
+                for other_id, first, last in resolver.awareness_by_instance(agent.instance_id):
+                    if other_id != agent.id and not (last < slice_lo_rel or first > slice_hi_rel):
                         result.add(other_id)
             return result
 

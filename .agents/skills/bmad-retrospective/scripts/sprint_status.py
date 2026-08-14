@@ -11,6 +11,7 @@ original file bytes on any validation failure.
 """
 
 import argparse
+import contextlib
 import hashlib
 import io
 import json
@@ -49,7 +50,7 @@ def _load_yaml(path):
     # file. utf-8 is ruamel's current default, but the file is read back as
     # utf-8 unconditionally, so state it rather than inherit it.
     yaml.encoding = "utf-8"
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         data = yaml.load(fh)
     return yaml, data
 
@@ -171,7 +172,7 @@ def _load_document(path, restored=None):
         _emit_error(f"{path} is not valid UTF-8: {exc}", 1, restored)
     except OSError as exc:
         _emit_error(str(exc), 1, restored)
-    except Exception as exc:  # noqa: BLE001 - report any parse error as JSON
+    except Exception as exc:
         _emit_error(str(exc), 1, restored)
 
     if data is not None and not isinstance(data, Mapping):
@@ -231,10 +232,8 @@ def _atomic_write(path, payload, mode=None):
             os.chmod(tmp_path, mode)
         os.replace(tmp_path, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
         raise
     # The directory sync sits outside the try because once os.replace has
     # returned, the new bytes ARE the file: a failure past that point must not
@@ -559,7 +558,7 @@ def cmd_update(args):
     # 7. Serialize, then swap the file atomically.
     try:
         _atomic_write(args.file, _dump_bytes(yaml, data), original_mode)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # The target is only ever touched by the final rename, so if the write
         # raised, the original is still on disk byte-for-byte. Calling _restore
         # here would rewrite a file that was never modified -- the one write in
@@ -573,7 +572,7 @@ def cmd_update(args):
 
     try:
         _, reloaded = _load_yaml(args.file)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _fail(f"re-parse failed after write: {exc}")
 
     if reloaded is None:
@@ -614,7 +613,7 @@ def cmd_update(args):
                 )
 
     try:
-        with open(args.file, "r", encoding="utf-8") as fh:
+        with open(args.file, encoding="utf-8") as fh:
             new_text = fh.read()
     except (OSError, UnicodeDecodeError) as exc:
         _fail(f"re-read failed after write: {exc}")
@@ -652,7 +651,7 @@ def _restore(path, original_bytes, mode=None):
     try:
         _atomic_write(path, original_bytes, mode)
         return True
-    except Exception as exc:  # noqa: BLE001 - best-effort restore
+    except Exception as exc:
         sys.stderr.write(f"restore failed: {exc}\n")
         return False
 

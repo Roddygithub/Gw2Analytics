@@ -123,7 +123,7 @@ def test_placeholder_version_caught():
 
 
 def test_no_stack_section_ok():
-    text = CLEAN.split("## Stack")[0]
+    text = CLEAN.split("## Stack", maxsplit=1)[0]
     result = lint_spine.lint(text)
     assert "version_pin" not in cats(result)
 

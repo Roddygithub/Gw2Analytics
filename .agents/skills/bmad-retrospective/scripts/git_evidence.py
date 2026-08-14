@@ -105,7 +105,7 @@ def _git_log(repo, extra_args, rng):
             errors="surrogateescape",
             env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _emit({"ok": False, "error": str(exc)}, 1)
 
     if proc.returncode != 0:
