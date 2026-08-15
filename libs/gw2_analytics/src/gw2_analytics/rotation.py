@@ -629,7 +629,10 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             swaps_by_agent[indexed_event.source_agent_id].append(indexed_event)
         elif isinstance(indexed_event, SkillActivationEvent):
             activations_by_agent[indexed_event.source_agent_id].append(indexed_event)
-            if indexed_event.skill_id in _GUARDED_CAST_SKILLS:
+            if (
+                indexed_event.skill_id in _GUARDED_CAST_SKILLS
+                or indexed_event.skill_id == _GRAND_FINALE
+            ):
                 window_key = (indexed_event.source_agent_id, indexed_event.skill_id)
                 if indexed_event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
                     open_casts[window_key] = indexed_event.time_ms
