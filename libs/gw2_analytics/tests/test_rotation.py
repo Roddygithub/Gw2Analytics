@@ -48,6 +48,7 @@ def test_build_skill_rotation_pairs_and_infers_casts() -> None:
             skill_id=13980,
             healing=1_000,
             barrier=0,
+            src_is_peer=True,
             **base,
         ),
         SkillActivationEvent(

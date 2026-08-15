@@ -220,7 +220,14 @@ _HEALING_CASTS = {
     71356,
     72115,
 }
-_MISSILE_CASTS = {26261, 29889, 42163}
+_MISSILE_CASTS = {26261, 29889, 42163, 5780}
+_MISSILE_ICD = {5780: 900}
+# Healing skills whose EI finder (EXTHealingCastFinder) groups by caster and
+# drops the whole group via SanitizeForSrc unless the caster is a squad peer.
+# Mirror that by only booking the instant cast when a squad set is available
+# and the caster is in it; without a squad set, fall back to the historical
+# "emit every ICD tick" behaviour.
+_HEALING_CASTS_SQUAD_ONLY = {71356, 13980}
 _PENDING_EXPECTED_DURATION_SKILLS = {
     1066,
     1097,
@@ -307,7 +314,6 @@ _INSTANT_CASTS_BY_EFFECT = {
     "863E477DA639694AB23E873D93E1B0AE": 76850,
     "2A1D0C23F448C348A83E9A4F2669B73F": 70491,
     "2BC033D40C0AEB40A77EEF28D51AE263": 69855,
-    "0131D1C31514044381C4F7F2DF009C30": 5780,
     "3D01B04C5700904BA279E9F135A3FAB3": -21,
     "8F0C77784AFD7F40B27446617DC05CDC": -20,
     "86CC98C9D9D2B64689F8993AB02B09E5": -23,
@@ -629,7 +635,10 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             swaps_by_agent[indexed_event.source_agent_id].append(indexed_event)
         elif isinstance(indexed_event, SkillActivationEvent):
             activations_by_agent[indexed_event.source_agent_id].append(indexed_event)
-            if indexed_event.skill_id in _GUARDED_CAST_SKILLS:
+            if (
+                indexed_event.skill_id in _GUARDED_CAST_SKILLS
+                or indexed_event.skill_id == _GRAND_FINALE
+            ):
                 window_key = (indexed_event.source_agent_id, indexed_event.skill_id)
                 if indexed_event.activation in (ActivationType.NORMAL, ActivationType.QUICKNESS):
                     open_casts[window_key] = indexed_event.time_ms
@@ -967,7 +976,18 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         elif (isinstance(event, HealingEvent) and event.skill_id in _HEALING_CASTS) or (
             isinstance(event, MissileEvent) and event.skill_id in _MISSILE_CASTS
         ):
-            add_instant(event.source_agent_id, event.skill_id, event.time_ms)
+            if (
+                isinstance(event, HealingEvent)
+                and event.skill_id in _HEALING_CASTS_SQUAD_ONLY
+                and not event.src_is_peer
+            ):
+                continue
+            add_instant(
+                event.source_agent_id,
+                event.skill_id,
+                event.time_ms,
+                _MISSILE_ICD.get(event.skill_id, 50),
+            )
         elif isinstance(event, SpawnEvent) and event.target_agent_id in ranger_pet_agent_ids:
             add_instant(event.source_agent_id, -28, event.time_ms)
         elif isinstance(event, EffectEvent):

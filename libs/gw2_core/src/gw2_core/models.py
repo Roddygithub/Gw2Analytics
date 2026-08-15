@@ -454,6 +454,12 @@ class HealingEvent(BaseEvent):
     dst_master_instid: int = Field(
         default=0, ge=0, le=0xFFFF, description="arcdps dst_master_instid from cbtevent"
     )
+    src_is_peer: bool = Field(
+        default=False,
+        description="True when the arcdps offcycle SrcPeer bit (0x80) is set; "
+        "mirrors GW2EIEvtcParser EXTHealingExtensionEvent.SrcIsPeer used by "
+        "SanitizeForSrc in EXTHealingCastFinder.",
+    )
 
 
 class BuffRemovalEvent(BaseEvent):
