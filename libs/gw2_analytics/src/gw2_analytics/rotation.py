@@ -686,8 +686,6 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     spawn_owner_by_target: dict[int, int] = {}
     cast_windows: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     open_casts: dict[tuple[int, int], int] = {}
-    desert_shroud_losses: list[int] = []
-    unholy_burst_hits: list[DamageEvent] = []
     for indexed_event in event_list:
         if isinstance(indexed_event, WeaponSwapEvent):
             swaps_by_agent[indexed_event.source_agent_id].append(indexed_event)
@@ -710,14 +708,6 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 indexed_event.target_agent_id,
                 indexed_event.source_agent_id,
             )
-        elif (
-            isinstance(indexed_event, BoonApplyEvent)
-            and indexed_event.kind == "remove_all"
-            and indexed_event.skill_id == 40052
-        ):
-            desert_shroud_losses.append(indexed_event.time_ms)
-        elif isinstance(indexed_event, DamageEvent) and indexed_event.skill_id == 38767:
-            unholy_burst_hits.append(indexed_event)
     # A cast the log never closes still occupies its start instant.
     for window_key, start in open_casts.items():
         cast_windows[window_key].append((start, start))
@@ -1059,15 +1049,61 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         ):
             add_instant(event.source_agent_id, event.skill_id, event.time_ms)
         # Spiteful Spirit (29560) - EI has two finders:
-        # 1. DamageCastFinder: disabled when effect data exists
-        #    (UsingDisableWithEffectData)
-        # 2. EffectCastFinder for UnholyBurst: triggers on effect
-        #    with DesertShroud/related hit checks
+        # 1. DamageCastFinder: disabled when effect data exists (UsingDisableWithEffectData)
+        # 2. EffectCastFinder for UnholyBurst: triggers on effect with
+        # DesertShroud/related hit checks
         elif isinstance(event, DamageEvent) and event.skill_id == 29560:
             source_is_necro = (
                 not professions or professions.get(event.source_agent_id) is Profession.NECROMANCER
             )
-            if source_is_necro and not has_effect_data:
+            if not source_is_necro:
+                continue
+
+            # Check if there's any UnholyBurst effect in the fight (global check)
+            has_unholy_burst_in_fight = any(
+                isinstance(other, EffectEvent) and other.guid == "C4E8DD3234E0C647993857940ED79AC1"
+                for other in event_list
+            )
+
+            if has_unholy_burst_in_fight:
+                # EI uses EffectCastFinder: only emit when UnholyBurst effect is present
+                # with DesertShroud and related hit checks
+                unholy_burst_nearby = any(
+                    isinstance(other, EffectEvent)
+                    and other.guid == "C4E8DD3234E0C647993857940ED79AC1"
+                    and other.source_agent_id == event.source_agent_id
+                    and abs(other.time_ms - event.time_ms) < 100
+                    for other in nearby_events(event.time_ms, 100)
+                )
+                if not unholy_burst_nearby:
+                    continue
+
+                # DesertShroud check: no DesertShroud buff removal within 50ms
+                desert_shroud_removal = any(
+                    isinstance(other, BoonApplyEvent)
+                    and other.kind == "remove_all"
+                    and other.skill_id == 40052  # DesertShroudBuff
+                    and other.source_agent_id == event.source_agent_id
+                    and abs(other.time_ms - event.time_ms) < 50
+                    for other in nearby_events(event.time_ms, 50)
+                )
+                if desert_shroud_removal:
+                    continue
+
+                # Related hit check: no UnholyBurst hit from same caster within 10ms
+                related_hit = any(
+                    isinstance(other, DamageEvent)
+                    and other.source_agent_id == event.source_agent_id
+                    and other.skill_id == 38767  # UnholyBurst
+                    and abs(other.time_ms - event.time_ms) < 10
+                    for other in nearby_events(event.time_ms, 10)
+                )
+                if related_hit:
+                    continue
+
+                add_instant(event.source_agent_id, event.skill_id, event.time_ms)
+            else:
+                # No UnholyBurst effect data in fight: use DamageCastFinder
                 add_instant(event.source_agent_id, event.skill_id, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
             add_instant(
@@ -1161,20 +1197,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 ):
                     add_instant(caster, -37, event.time_ms)
                 continue
-            # Spiteful Spirit: shares GUID with Unholy Burst, necromancer only,
-            # excluded by desert shroud loss within 50ms or nearby Unholy Burst hit.
-            if event.guid == "C4E8DD3234E0C647993857940ED79AC1":
-                if professions and professions.get(caster) is not Profession.NECROMANCER:
-                    continue
-                if any(abs(loss - event.time_ms) < 50 for loss in desert_shroud_losses):
-                    continue
-                if any(
-                    hit.source_agent_id == caster and abs(hit.time_ms - event.time_ms) < 10
-                    for hit in unholy_burst_hits
-                ):
-                    continue
-                effect_skill_id = 29560
-            elif event.guid == "C34E250B01FF534292EE6AB36D768337":
+            if event.guid == "C34E250B01FF534292EE6AB36D768337":
                 if professions and professions.get(caster) is not Profession.MESMER:
                     continue
                 effect_skill_id = (
