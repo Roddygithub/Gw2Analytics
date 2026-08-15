@@ -1,4 +1,29 @@
 {
   "schema_version": 1,
-  "rules": []
+  "rules": [
+    {
+      "id": "71356-first-heal-skip",
+      "selector": {
+        "skill_id": 71356,
+        "bucket": "players.rotation"
+      },
+      "constraint": {
+        "max_abs_delta": 0.001
+      },
+      "reason": "EI skips first heal of 71356 per caster (EXTHealingCastFinder edge case)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "13980-first-heal-skip",
+      "selector": {
+        "skill_id": 13980,
+        "bucket": "players.rotation"
+      },
+      "constraint": {
+        "max_abs_delta": 0.001
+      },
+      "reason": "EI skips first heal of 13980 per caster (EXTHealingCastFinder edge case)",
+      "remove_when": "fixed"
+    }
+  ]
 }
