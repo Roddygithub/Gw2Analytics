@@ -465,7 +465,7 @@ _EFFECT_CASTS_BY_DST = {
     "9242D10B4F04274EB6E9EBCDB2262181": 77213,
     "B02D3D0FF0A4FC47B23B1478D8E770AE": -29,
     "30A96C0E559DBD489FEE36DA96CC374A": 5572,  # Signet of Air
-    "23284B87C26C9A41A887F410F930E1A2": 13064,  # Infiltrator's Signet
+"23284B87C26C9A41A887F410F930E1A2": 13064,  # Infiltrator's Signet
     "BB5488951B60B546BB1BD5626DAE83E1": 13062,  # Signet of Agility
     "418A090D719AB44AAF1C4AD1473068C4": 43176,  # Flash Spark
     "D7F8FA5695F8714B99A5C3EE72EF6E178": 14413,  # Dolyak Signet
@@ -955,17 +955,61 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                 if owner:
                     add_instant(owner, 12658, event.time_ms)
+        # Spiteful Spirit (29560) - EI has two finders:
+        # 1. DamageCastFinder: disabled when effect data exists (UsingDisableWithEffectData)
+        # 2. EffectCastFinder for UnholyBurst: triggers on effect with DesertShroud/related hit checks
         elif isinstance(event, DamageEvent) and event.skill_id == 29560:
             source_is_necro = (
                 not professions or professions.get(event.source_agent_id) is Profession.NECROMANCER
             )
-            if source_is_necro and not any(
-                isinstance(other, EffectEvent)
-                and other.guid == "C4E8DD3234E0C647993857940ED79AC1"
-                and other.source_agent_id == event.source_agent_id
-                and abs(other.time_ms - event.time_ms) < 50
-                for other in nearby_events(event.time_ms, 49)
-            ):
+            if not source_is_necro:
+                continue
+
+            # Check if there's any UnholyBurst effect in the fight (global check)
+            has_unholy_burst_in_fight = any(
+                isinstance(other, EffectEvent) and other.guid == "C4E8DD3234E0C647993857940ED79AC1"
+                for other in event_list
+            )
+
+            if has_unholy_burst_in_fight:
+                # EI uses EffectCastFinder: only emit when UnholyBurst effect is present
+                # with DesertShroud and related hit checks
+                unholy_burst_nearby = any(
+                    isinstance(other, EffectEvent)
+                    and other.guid == "C4E8DD3234E0C647993857940ED79AC1"
+                    and other.source_agent_id == event.source_agent_id
+                    and abs(other.time_ms - event.time_ms) < 100
+                    for other in nearby_events(event.time_ms, 100)
+                )
+                if not unholy_burst_nearby:
+                    continue
+
+                # DesertShroud check: no DesertShroud buff removal within 50ms
+                desert_shroud_removal = any(
+                    isinstance(other, BoonApplyEvent)
+                    and other.kind == "remove_all"
+                    and other.skill_id == 40052  # DesertShroudBuff
+                    and other.source_agent_id == event.source_agent_id
+                    and abs(other.time_ms - event.time_ms) < 50
+                    for other in nearby_events(event.time_ms, 50)
+                )
+                if desert_shroud_removal:
+                    continue
+
+                # Related hit check: no UnholyBurst hit from same caster within 10ms
+                related_hit = any(
+                    isinstance(other, DamageEvent)
+                    and other.source_agent_id == event.source_agent_id
+                    and other.skill_id == 38767  # UnholyBurst
+                    and abs(other.time_ms - event.time_ms) < 10
+                    for other in nearby_events(event.time_ms, 10)
+                )
+                if related_hit:
+                    continue
+
+                add_instant(event.source_agent_id, event.skill_id, event.time_ms)
+            else:
+                # No UnholyBurst effect data in fight: use DamageCastFinder
                 add_instant(event.source_agent_id, event.skill_id, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
             add_instant(
