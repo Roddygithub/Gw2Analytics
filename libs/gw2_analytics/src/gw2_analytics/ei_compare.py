@@ -1072,7 +1072,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             # exactly the absence window to every one of them -- the
             # signature was several buffs on one actor all overcounting by
             # the identical amount.
-            for alias_id in player_agent_ids(agent):
+            for alias_id in player_agent_ids(agent, slice_lo, slice_hi):
                 alias_uptime = tracker.compute_player_uptimes(
                     alias_id,
                     duration_ms,
