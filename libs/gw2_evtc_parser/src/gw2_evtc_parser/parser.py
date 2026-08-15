@@ -876,7 +876,7 @@ class PythonEvtcParser:
                         iff=_iff & 0xFF,
                         src_master_instid=src_master_inst,
                         dst_master_instid=dst_master_inst,
-                        src_is_peer=True,
+                        src_is_peer=src_is_peer,
                     )
                 continue
             if is_statechange == 6:

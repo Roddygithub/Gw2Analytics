@@ -811,7 +811,6 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         agent_id_by_instance={
             agent.instance_id: agent.id for agent in fight.agents if agent.instance_id
         },
-        squad_agent_ids={agent.id for agent in fight.agents if agent.is_player},
         gw2_build=header.gw2_build if header else None,
         shambling_horror_agent_ids={
             agent.id for agent in fight.agents if agent.species_id == 15314
