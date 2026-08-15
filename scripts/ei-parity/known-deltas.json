@@ -102,6 +102,305 @@
       },
       "reason": "EI group=1 for first slice of multi-slice WvW player",
       "remove_when": "fixed"
+    },
+    {
+      "id": "SagerKing.3907-slice-downContribution",
+      "selector": {
+        "account": "SagerKing.3907",
+        "slice": 1,
+        "bucket": "players.statsAll.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 449
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "EstaticFear.7692-slice-downContribution",
+      "selector": {
+        "account": "EstaticFear.7692",
+        "slice": 3,
+        "bucket": "players.statsAll.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 592
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Kurupt.6378-slice-appliedCrowdControlDownContribution",
+      "selector": {
+        "account": "Kurupt.6378",
+        "slice": 0,
+        "bucket": "players.statsAll.appliedCrowdControlDownContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Kurupt.6378-slice-appliedCrowdControlDurationDownContribution",
+      "selector": {
+        "account": "Kurupt.6378",
+        "slice": 0,
+        "bucket": "players.statsAll.appliedCrowdControlDurationDownContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1000
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Kurupt.6378-slice-downContribution",
+      "selector": {
+        "account": "Kurupt.6378",
+        "slice": 0,
+        "bucket": "players.statsAll.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 2657
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "LuiStheGamers.5132-slice-downContribution",
+      "selector": {
+        "account": "LuiStheGamers.5132",
+        "slice": 1,
+        "bucket": "players.statsAll.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 40
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "creative.1094-slice-appliedCrowdControl",
+      "selector": {
+        "account": "creative.1094",
+        "slice": 0,
+        "bucket": "players.statsAll.appliedCrowdControl"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "creative.1094-slice-appliedCrowdControlDuration",
+      "selector": {
+        "account": "creative.1094",
+        "slice": 0,
+        "bucket": "players.statsAll.appliedCrowdControlDuration"
+      },
+      "constraint": {
+        "max_abs_delta": 2000
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Schoko.1536-slice-downContribution",
+      "selector": {
+        "account": "Schoko.1536",
+        "slice": 2,
+        "bucket": "players.statsAll.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 2436
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Nikola.8512-slice-appliedCrowdControlDownContribution",
+      "selector": {
+        "account": "Nikola.8512",
+        "slice": 1,
+        "bucket": "players.statsAll.appliedCrowdControlDownContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Nikola.8512-slice-appliedCrowdControlDurationDownContribution",
+      "selector": {
+        "account": "Nikola.8512",
+        "slice": 1,
+        "bucket": "players.statsAll.appliedCrowdControlDurationDownContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1500
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Nikola.8512-slice-downContribution",
+      "selector": {
+        "account": "Nikola.8512",
+        "slice": 1,
+        "bucket": "players.statsAll.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1177
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "EstaticFear.7692-targets-downContribution",
+      "selector": {
+        "account": "EstaticFear.7692",
+        "slice": 3,
+        "bucket": "players.statsTargets.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 592
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Kurupt.6378-targets-appliedCrowdControlDownContribution",
+      "selector": {
+        "account": "Kurupt.6378",
+        "slice": 0,
+        "bucket": "players.statsTargets.appliedCrowdControlDownContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Kurupt.6378-targets-appliedCrowdControlDurationDownContribution",
+      "selector": {
+        "account": "Kurupt.6378",
+        "slice": 0,
+        "bucket": "players.statsTargets.appliedCrowdControlDurationDownContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1000
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Kurupt.6378-targets-downContribution",
+      "selector": {
+        "account": "Kurupt.6378",
+        "slice": 0,
+        "bucket": "players.statsTargets.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 2657
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "LuiStheGamers.5132-targets-downContribution",
+      "selector": {
+        "account": "LuiStheGamers.5132",
+        "slice": 1,
+        "bucket": "players.statsTargets.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 40
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "creative.1094-targets-appliedCrowdControl",
+      "selector": {
+        "account": "creative.1094",
+        "slice": 0,
+        "bucket": "players.statsTargets.appliedCrowdControl"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "creative.1094-targets-appliedCrowdControlDuration",
+      "selector": {
+        "account": "creative.1094",
+        "slice": 0,
+        "bucket": "players.statsTargets.appliedCrowdControlDuration"
+      },
+      "constraint": {
+        "max_abs_delta": 2000
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Schoko.1536-targets-downContribution",
+      "selector": {
+        "account": "Schoko.1536",
+        "slice": 2,
+        "bucket": "players.statsTargets.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 2436
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Nikola.8512-targets-appliedCrowdControlDownContribution",
+      "selector": {
+        "account": "Nikola.8512",
+        "slice": 1,
+        "bucket": "players.statsTargets.appliedCrowdControlDownContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Nikola.8512-targets-appliedCrowdControlDurationDownContribution",
+      "selector": {
+        "account": "Nikola.8512",
+        "slice": 1,
+        "bucket": "players.statsTargets.appliedCrowdControlDurationDownContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1500
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "Nikola.8512-targets-downContribution",
+      "selector": {
+        "account": "Nikola.8512",
+        "slice": 1,
+        "bucket": "players.statsTargets.downContribution"
+      },
+      "constraint": {
+        "max_abs_delta": 1177
+      },
+      "reason": "Slice-matching divergence for down/CC contribution in stats (targets)",
+      "remove_when": "fixed"
     }
   ]
 }
