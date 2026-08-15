@@ -956,8 +956,10 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 if owner:
                     add_instant(owner, 12658, event.time_ms)
         # Spiteful Spirit (29560) - EI has two finders:
-        # 1. DamageCastFinder: disabled when effect data exists (UsingDisableWithEffectData)
-        # 2. EffectCastFinder for UnholyBurst: triggers on effect with DesertShroud/related hit checks
+        # 1. DamageCastFinder: disabled when effect data exists
+        # (UsingDisableWithEffectData)
+        # 2. EffectCastFinder for UnholyBurst: triggers on effect with
+        # DesertShroud/related hit checks
         elif isinstance(event, DamageEvent) and event.skill_id == 29560:
             source_is_necro = (
                 not professions or professions.get(event.source_agent_id) is Profession.NECROMANCER
@@ -975,9 +977,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 # EI disables DamageCastFinder when effect data exists (UsingDisableWithEffectData)
                 # Let the EffectCastFinder handle it via UnholyBurst effect events
                 continue
-            else:
-                # No UnholyBurst effect data in fight: use DamageCastFinder
-                add_instant(event.source_agent_id, event.skill_id, event.time_ms)
+            # No UnholyBurst effect data in fight: use DamageCastFinder
+            add_instant(event.source_agent_id, event.skill_id, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
             add_instant(
                 event.source_agent_id,
