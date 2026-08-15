@@ -21,15 +21,15 @@ license-files = ["LICENSE"]
 dev = [
     # v0.10.5 dep-cycle: bump to 0.15.21 (matches PR #8 + CI) so
     # local auto-fix produces the AST that the bumping CI validates.
-    "ruff>=0.16.1,<0.17",
+    "ruff>=0.16.2,<0.17",
     "mypy>=2.2.0",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    "pre-commit>=4.0",
+    "pre-commit>=4.6.2",
     "httpx>=0.27", # for tests
     "pytest-env>=1.6.0",
     "respx>=0.21",
-    "time-machine>=3.3.1",
+    "time-machine>=3.4.0",
     "pytest-cov>=6.0",
     "pip-audit>=2.7",    # v0.10.26-pre followup-5: the load-test harness in tests/load/locust/
     # imports `locust`; locust ships with PEP 561 type info since 2.x
@@ -67,10 +67,10 @@ dev = [
     "fastapi-mcp>=0.4,<1",
     "fastapi>=0.140.13,<1",
     "uvicorn[standard]>=0.52.1,<1",
-    "pydantic-settings>=2.6,<3",
+    "pydantic-settings>=2.15.0,<3",
     "sqlalchemy>=2.0,<3",
     "psycopg[binary]>=3.3.4,<4",
-    "alembic>=1.13,<2",
+    "alembic>=1.19.1,<2",
     "minio>=7.2,<8",
     "python-multipart>=0.0.20,<1",
     "cryptography>=50,<51",  # v0.10.26 CI: pip-audit → crypt>=48; v0.15.x: CVE-2026-69247/8/9 → >=50
