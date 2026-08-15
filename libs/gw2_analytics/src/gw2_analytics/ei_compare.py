@@ -884,7 +884,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         )
         player_dims: dict[str, object] = {"account": account, "slice": player.get("firstAware")}
         anonymous = agent.account_name is None
-        agent_ids = agent_ids_by_instance.get(agent.instance_id, {agent.id})
+        agent_ids = player_agent_ids(agent, slice_lo, slice_hi)
 
         whole_fight_slice = slice_lo <= origin and slice_hi >= origin + duration_ms
 
