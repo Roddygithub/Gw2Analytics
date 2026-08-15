@@ -203,7 +203,6 @@ _DAMAGE_CASTS = {
     31658: 50,  # Glyph of Equality
     5572: 50,  # Signet of Air (damage path; + effect-by-dst below)
     76315: 50,  # Bloodstone Explosion
-    22499: 50,  # Shattered Aegis
 }
 _DAMAGE_CASTS_BY_DAMAGE = {40071: 44428, 46808: 40813}
 _HEALING_CASTS = {
