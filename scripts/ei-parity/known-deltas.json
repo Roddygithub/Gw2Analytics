@@ -24,6 +24,84 @@
       },
       "reason": "EI skips first heal of 13980 per caster (EXTHealingCastFinder edge case)",
       "remove_when": "fixed"
+    },
+    {
+      "id": "krill-group-slice-9617",
+      "selector": {
+        "account": "krill le faucheur.1679",
+        "slice": 9617,
+        "bucket": "players.group"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "EI group=1 for first slice of multi-slice WvW player",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "coligroup-slice-10523",
+      "selector": {
+        "account": "Coli.7136",
+        "slice": 10523,
+        "bucket": "players.group"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "EI group=1 for first slice of multi-slice WvW player",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "mikey-group-slice-3731",
+      "selector": {
+        "account": "Mikey.4982",
+        "slice": 3731,
+        "bucket": "players.group"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "EI group=1 for first slice of multi-slice WvW player",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "sharpsteel-group-slice-214",
+      "selector": {
+        "account": "SharpSteel.3051",
+        "slice": 214,
+        "bucket": "players.group"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "EI group=1 for first slice of multi-slice WvW player",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "empiria-group-slice-11322",
+      "selector": {
+        "account": "empiria.8961",
+        "slice": 11322,
+        "bucket": "players.group"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "EI group=1 for first slice of multi-slice WvW player",
+      "remove_when": "fixed"
+    },
+    {
+      "id": "krill-group-slice-5561",
+      "selector": {
+        "account": "krill le faucheur.1679",
+        "slice": 5561,
+        "bucket": "players.group"
+      },
+      "constraint": {
+        "max_abs_delta": 1
+      },
+      "reason": "EI group=1 for first slice of multi-slice WvW player",
+      "remove_when": "fixed"
     }
   ]
 }
