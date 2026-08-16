@@ -1577,9 +1577,7 @@ def test_berserk_loss_is_booked_as_berserk_end() -> None:
     def casts(*events: Event) -> list[int]:
         return [
             cast.skill_id
-            for cast in build_skill_rotation(
-                list(events), duration_ms=1_000, start_time_ms=origin
-            )
+            for cast in build_skill_rotation(list(events), duration_ms=1_000, start_time_ms=origin)
         ]
 
     gain = BoonApplyEvent(
