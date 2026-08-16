@@ -998,10 +998,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         elif (isinstance(event, HealingEvent) and event.skill_id in _HEALING_CASTS) or (
             isinstance(event, MissileEvent) and event.skill_id in _MISSILE_CASTS
         ):
-            if (
-                isinstance(event, HealingEvent)
-                and event.skill_id in _HEALING_CASTS_SQUAD_ONLY
-            ):
+            if isinstance(event, HealingEvent) and event.skill_id in _HEALING_CASTS_SQUAD_ONLY:
                 # EI EXTHealingCastFinder: only book if caster is in squad.
                 # If squad set is available, require membership; else fall back to src_is_peer.
                 if squad_agent_ids and event.source_agent_id not in squad_agent_ids:
