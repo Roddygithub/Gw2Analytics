@@ -1568,3 +1568,36 @@ def test_weaver_attunement_buff_is_not_booked_as_a_base_attunement() -> None:
     assert casts() == [5492]
     assert casts(elite_specs={7: EliteSpec.TEMPEST}) == [5492]
     assert casts(elite_specs={7: EliteSpec.WEAVER}) == [43470]
+
+
+def test_berserk_loss_is_booked_as_berserk_end() -> None:
+    """EI books ``BerserkEndSkill`` (-41) when the Berserk buff is fully removed."""
+    origin = 42_000_000
+
+    def casts(*events: Event) -> list[int]:
+        return [
+            cast.skill_id
+            for cast in build_skill_rotation(
+                list(events), duration_ms=1_000, start_time_ms=origin
+            )
+        ]
+
+    gain = BoonApplyEvent(
+        time_ms=origin + 100,
+        source_agent_id=7,
+        target_agent_id=7,
+        skill_id=29502,
+        duration_ms=5_000,
+        stacks=1,
+    )
+    end = BoonApplyEvent(
+        time_ms=origin + 5_100,
+        source_agent_id=0,
+        target_agent_id=7,
+        skill_id=29502,
+        duration_ms=0,
+        stacks=0,
+        kind="remove_all",
+    )
+    assert casts(gain) == [30435]
+    assert casts(gain, end) == [30435, -41]
