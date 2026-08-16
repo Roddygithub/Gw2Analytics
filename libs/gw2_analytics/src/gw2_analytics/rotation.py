@@ -154,6 +154,7 @@ _BUFF_LOSS_CASTS = {
     62769: 62861,
     13135: 13106,
     77265: 76730,
+    29502: -41,  # Berserk (end): BuffLossCastFinder(BerserkEndSkill, BerserkBuff)
 }
 _BUFF_GIVE_CASTS = {
     41815: 45789,
@@ -292,7 +293,7 @@ _BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44
 #: strip is not a cast. Only the entries verified against Elite Insights are
 #: listed; the rest keep the historical "any removal" behaviour until they
 #: are checked the same way.
-_BUFF_LOSS_REMOVE_ALL_ONLY = {29446, 62769}
+_BUFF_LOSS_REMOVE_ALL_ONLY = {29446, 62769, 29502}
 #: BuffGainCastFinder books the buff gained by the player itself; arcdps
 #: also re-emits these buffs with ``src=0`` (env) for trait/sigil pulses,
 #: which EI excludes via ``!bae.Initial``. Self-apply gating reproduces
@@ -880,7 +881,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     and elite_specs.get(event.target_agent_id) is EliteSpec.WEAVER
                 )
                 or (
-                    event.skill_id in _BUFF_GAIN_SELF_ONLY
+                    event.kind == "apply"
+                    and event.skill_id in _BUFF_GAIN_SELF_ONLY
                     and event.source_agent_id != event.target_agent_id
                 )
                 or (
