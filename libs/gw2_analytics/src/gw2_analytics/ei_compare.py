@@ -737,6 +737,12 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         if not agent.instance_id:
             return {agent.id}
         entries = agents_by_instance_entries.get(agent.instance_id, [])
+        if agent.account_name is None:
+            # Non Squad Player: EI groups every anonymous agent sharing the
+            # instance into one entity, even when a named agent recycles it
+            anonymous = {entry.id for entry in entries if entry.account_name is None}
+            if len(anonymous) > 1:
+                return anonymous
         accounts = {entry.account_name for entry in entries}
         if len(accounts) > 1:
             return {agent.id}
