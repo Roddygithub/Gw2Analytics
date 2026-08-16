@@ -3,6 +3,9 @@
   "plugin": ["@dietrichgebert/ponytail"],
   "instructions": [],
   "references": {},
+  "skills": {
+    "paths": [".agents/skills"]
+  },
   "mcp": {
     "postgres": {
       "type": "local",
