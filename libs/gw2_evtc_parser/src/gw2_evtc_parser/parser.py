@@ -840,7 +840,7 @@ class PythonEvtcParser:
                     if _ev_buff != 0 and value == 0 and buff_dmg < 0
                     else 0
                 )
-                src_is_peer = bool(is_offcycle & 0x80) or not bool(is_offcycle & 0xC0)
+                src_is_peer = bool(is_offcycle & 0x80)
                 if magnitude > 0 and src_is_peer:
                     yield HealingEvent(
                         time_ms=time_ms,
@@ -852,7 +852,7 @@ class PythonEvtcParser:
                         iff=_iff & 0xFF,
                         src_master_instid=src_master_inst,
                         dst_master_instid=dst_master_inst,
-                        src_is_peer=bool(is_offcycle & 0x80),
+                        src_is_peer=True,
                     )
                 continue
             if is_statechange == 6:

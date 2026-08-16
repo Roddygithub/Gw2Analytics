@@ -576,6 +576,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     elite_specs: Mapping[int, EliteSpec] | None = None,
     agent_id_by_instance: Mapping[int, int] | None = None,
     ownership_resolver: Callable[[int, int], int | None] | None = None,
+    squad_agent_ids: Collection[int] = (),
 ) -> list[SkillCast]:
     """Return completed, clipped casts ordered by fight-relative start time.
 
@@ -997,12 +998,13 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         elif (isinstance(event, HealingEvent) and event.skill_id in _HEALING_CASTS) or (
             isinstance(event, MissileEvent) and event.skill_id in _MISSILE_CASTS
         ):
-            if (
-                isinstance(event, HealingEvent)
-                and event.skill_id in _HEALING_CASTS_SQUAD_ONLY
-                and not event.src_is_peer
-            ):
-                continue
+            if isinstance(event, HealingEvent) and event.skill_id in _HEALING_CASTS_SQUAD_ONLY:
+                # EI EXTHealingCastFinder: only book if caster is in squad.
+                # If squad set is available, require membership; else fall back to src_is_peer.
+                if squad_agent_ids and event.source_agent_id not in squad_agent_ids:
+                    continue
+                if not squad_agent_ids and not event.src_is_peer:
+                    continue
             add_instant(
                 event.source_agent_id,
                 event.skill_id,
