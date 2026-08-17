@@ -139,6 +139,8 @@ class _BuffStack:
 
     def __init__(self, name: str) -> None:
         self.expirations: list[int | None] = []
+        # TotalDuration = base + extensions (for OverrideLogic)
+        self.total_durations: list[int] = []
         self.stack_ids: list[int] = []
         self.healing_scores: list[int] = []
         self.last_time_ms: int = 0
@@ -223,6 +225,8 @@ class BuffStateTracker:
                 remaining -= active
                 if remaining == 0:
                     stack.expirations.pop(0)
+                    if stack.total_durations:
+                        stack.total_durations.pop(0)
                     stack.stack_ids.pop(0)
                     stack.healing_scores.pop(0)
                 else:
@@ -240,6 +244,8 @@ class BuffStateTracker:
             stack.last_time_ms = next_expiry
             index = stack.expirations.index(next_expiry)
             stack.expirations.pop(index)
+            if stack.total_durations:
+                stack.total_durations.pop(index)
             stack.stack_ids.pop(index)
             stack.healing_scores.pop(index)
         stack.cumulative_stack_ms += len(stack.expirations) * (new_time_ms - stack.last_time_ms)
@@ -348,23 +354,54 @@ class BuffStateTracker:
 
         if event.kind == "apply":
             if _max_stacks_for(buff_name) > 1:
-                target_tracker.expirations.extend([time_ms + event.duration_ms] * event.stacks)
-                target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
-                target_tracker.healing_scores.extend(
-                    [self._healing_by_agent.get(event.source_agent_id, 0)] * event.stacks
-                )
-                pairs = sorted(
-                    zip(
-                        target_tracker.expirations,
-                        target_tracker.stack_ids,
-                        target_tracker.healing_scores,
-                        strict=True,
+                if buff_name == "might":
+                    # OverrideLogic (EI): sort by TotalDuration (shortest first),
+                    # remove index 0 when at capacity.
+                    # TotalDuration = base duration + extensions (initially just base).
+                    for _ in range(event.stacks):
+                        total_dur = event.duration_ms
+                        # Binary search to find insertion index by TotalDuration
+                        lo, hi = 0, len(target_tracker.total_durations)
+                        while lo < hi:
+                            mid = (lo + hi) // 2
+                            if target_tracker.total_durations[mid] > total_dur:
+                                hi = mid
+                            else:
+                                lo = mid + 1
+                        insert_idx = lo
+                        if len(target_tracker.total_durations) >= _capacity_for(buff_name):
+                            # Remove shortest TotalDuration (index 0)
+                            target_tracker.expirations.pop(0)
+                            target_tracker.total_durations.pop(0)
+                            target_tracker.stack_ids.pop(0)
+                            target_tracker.healing_scores.pop(0)
+                            if insert_idx > 0:
+                                insert_idx -= 1
+                        target_tracker.expirations.insert(insert_idx, time_ms + event.duration_ms)
+                        target_tracker.total_durations.insert(insert_idx, total_dur)
+                        target_tracker.stack_ids.insert(insert_idx, event.stack_id)
+                        target_tracker.healing_scores.insert(
+                            insert_idx, self._healing_by_agent.get(event.source_agent_id, 0)
+                        )
+                else:
+                    # Other intensity buffs (stability): sort by expiration
+                    target_tracker.expirations.extend([time_ms + event.duration_ms] * event.stacks)
+                    target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
+                    target_tracker.healing_scores.extend(
+                        [self._healing_by_agent.get(event.source_agent_id, 0)] * event.stacks
                     )
-                )
-                pairs = pairs[-_capacity_for(buff_name) :]
-                target_tracker.expirations = [expiry for expiry, _, _ in pairs]
-                target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs]
-                target_tracker.healing_scores = [healing for _, _, healing in pairs]
+                    pairs = sorted(
+                        zip(
+                            target_tracker.expirations,
+                            target_tracker.stack_ids,
+                            target_tracker.healing_scores,
+                            strict=True,
+                        )
+                    )
+                    pairs = pairs[-_capacity_for(buff_name) :]
+                    target_tracker.expirations = [expiry for expiry, _, _ in pairs]
+                    target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs]
+                    target_tracker.healing_scores = [healing for _, _, healing in pairs]
             elif buff_name == "regeneration":
                 # EI BuffSimulatorDuration + HealingLogic: capacity-5
                 # queue, replace the lowest-heal stack on overflow
@@ -439,6 +476,8 @@ class BuffStateTracker:
                     )
                 if stack_index is not None:
                     target_tracker.expirations.pop(stack_index)
+                    if target_tracker.total_durations:
+                        target_tracker.total_durations.pop(stack_index)
                     target_tracker.stack_ids.pop(stack_index)
                     target_tracker.healing_scores.pop(stack_index)
             elif event.stacks and target_tracker.expirations:
@@ -451,10 +490,13 @@ class BuffStateTracker:
                     0,
                 )
                 target_tracker.expirations.pop(index)
+                if target_tracker.total_durations:
+                    target_tracker.total_durations.pop(index)
                 target_tracker.stack_ids.pop(index)
                 target_tracker.healing_scores.pop(index)
         elif event.kind == "remove_all":
             target_tracker.expirations.clear()
+            target_tracker.total_durations.clear()
             target_tracker.stack_ids.clear()
             target_tracker.healing_scores.clear()
 
@@ -484,21 +526,47 @@ class BuffStateTracker:
         self._advance(target_tracker, time_ms)
         expiry = time_ms + event.duration_ms if event.duration_ms > 0 else None
         if _max_stacks_for(buff_name) > 1:
-            target_tracker.expirations.extend([expiry] * event.stacks)
-            target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
-            target_tracker.healing_scores.extend([0] * event.stacks)
-            pairs = sorted(
-                zip(
-                    target_tracker.expirations,
-                    target_tracker.stack_ids,
-                    target_tracker.healing_scores,
-                    strict=True,
-                ),
-                key=lambda pair: pair[0] if pair[0] is not None else math.inf,
-            )[-_capacity_for(buff_name) :]
-            target_tracker.expirations = [value for value, _, _ in pairs]
-            target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs]
-            target_tracker.healing_scores = [healing for _, _, healing in pairs]
+            if buff_name == "might":
+                # OverrideLogic: track TotalDuration for each stack
+                total_dur = event.duration_ms
+                target_tracker.expirations.extend([expiry] * event.stacks)
+                target_tracker.total_durations.extend([total_dur] * event.stacks)
+                target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
+                target_tracker.healing_scores.extend([0] * event.stacks)
+                # Sort by TotalDuration (shortest first) for OverrideLogic
+                pairs = sorted(
+                    zip(
+                        target_tracker.expirations,
+                        target_tracker.total_durations,
+                        target_tracker.stack_ids,
+                        target_tracker.healing_scores,
+                        strict=True,
+                    ),
+                    key=lambda pair: pair[1],
+                )
+                pairs = pairs[-_capacity_for(buff_name) :]
+                target_tracker.expirations = [e for e, _, _, _ in pairs]
+                target_tracker.total_durations = [td for _, td, _, _ in pairs]
+                target_tracker.stack_ids = [sid for _, _, sid, _ in pairs]
+                target_tracker.healing_scores = [h for _, _, _, h in pairs]
+            else:
+                target_tracker.expirations.extend([expiry] * event.stacks)
+                target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
+                target_tracker.healing_scores.extend([0] * event.stacks)
+                pairs_3: list[tuple[int | None, int, int]] = sorted(
+                    zip(
+                        target_tracker.expirations,
+                        target_tracker.stack_ids,
+                        target_tracker.healing_scores,
+                        strict=True,
+                    ),
+                    key=lambda pair: pair[0] if pair[0] is not None else math.inf,
+                )[-_capacity_for(buff_name) :]
+                target_tracker.expirations = [value for value, _, _ in pairs_3]
+                target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs_3]
+                target_tracker.healing_scores = [healing for _, _, healing in pairs_3]
+                if target_tracker.total_durations:
+                    target_tracker.total_durations.clear()
         else:
             target_tracker.expirations.append(event.duration_ms or None)
             target_tracker.stack_ids.append(event.stack_id)
@@ -521,6 +589,17 @@ class BuffStateTracker:
         time_ms = self._relative_time(event.time_ms)
         self._advance(target_tracker, time_ms)
         old_duration = event.new_duration_ms - event.extended_duration_ms
+        if buff_name == "might" and target_tracker.total_durations:
+            # OverrideLogic: graft extension onto stack with TotalDuration closest to old_duration
+            index = min(
+                range(len(target_tracker.total_durations)),
+                key=lambda i: abs(target_tracker.total_durations[i] - old_duration),
+            )
+            target_tracker.total_durations[index] += event.extended_duration_ms
+            target_tracker.expirations[index] = (
+                (target_tracker.expirations[index] or 0) + event.extended_duration_ms
+            )
+            return
         if target_tracker.expirations and (
             old_duration > 0 or len(target_tracker.expirations) >= _capacity_for(buff_name)
         ):
