@@ -436,16 +436,24 @@ class BuffStateTracker:
                     target_tracker.healing_scores = [healing for _, _, healing in pairs]
                 if event.added_active and event.stack_id in target_tracker.stack_ids:
                     # An apply flagged active only moves its stack to the
-                    # front. Elite Insights reaches the richer rule -- replace
-                    # a nearly-spent active stack, and pin the ordering with
-                    # ``no_sort`` -- through the *other* Activate overload,
-                    # which only the explicit stack-active record calls.
-                    new_index = target_tracker.stack_ids.index(event.stack_id)
-                    target_tracker.expirations.insert(0, target_tracker.expirations.pop(new_index))
-                    target_tracker.stack_ids.insert(0, target_tracker.stack_ids.pop(new_index))
-                    target_tracker.healing_scores.insert(
-                        0, target_tracker.healing_scores.pop(new_index)
-                    )
+                    # front when paired with an overstack hint (uncredited
+                    # remove-single within 10 ms). Elite Insights reaches the
+                    # richer rule -- replace a nearly-spent active stack, and
+                    # pin the ordering with ``no_sort`` -- through the *other*
+                    # Activate overload, which only the explicit stack-active
+                    # record calls.
+                    hint = self._regen_overstack_hint(event.target_agent_id, event.time_ms)
+                    if hint is not None:
+                        new_index = target_tracker.stack_ids.index(event.stack_id)
+                        target_tracker.expirations.insert(
+                            0, target_tracker.expirations.pop(new_index)
+                        )
+                        target_tracker.stack_ids.insert(
+                            0, target_tracker.stack_ids.pop(new_index)
+                        )
+                        target_tracker.healing_scores.insert(
+                            0, target_tracker.healing_scores.pop(new_index)
+                        )
             else:
                 target_tracker.expirations.append(event.duration_ms or None)
                 target_tracker.stack_ids.append(event.stack_id)
