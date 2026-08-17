@@ -62,6 +62,11 @@ MAX_STACKS: dict[str, int] = {
     "might": 25,
     "stability": 25,
 }
+
+#: Intensity buffs that use Elite Insights' OverrideLogic (sort by TotalDuration,
+#: drop shortest on overflow, graft extensions by closest TotalDuration).
+_OVERRIDE_LOGIC_BUFFS: frozenset[str] = frozenset({"might", "stability"})
+
 _CAPACITIES = {
     "might": 25,
     "stability": 25,
@@ -354,7 +359,7 @@ class BuffStateTracker:
 
         if event.kind == "apply":
             if _max_stacks_for(buff_name) > 1:
-                if buff_name == "might":
+                if buff_name in _OVERRIDE_LOGIC_BUFFS:
                     # OverrideLogic (EI): sort by TotalDuration (shortest first),
                     # remove index 0 when at capacity.
                     # TotalDuration = base duration + extensions (initially just base).
@@ -448,9 +453,7 @@ class BuffStateTracker:
                         target_tracker.expirations.insert(
                             0, target_tracker.expirations.pop(new_index)
                         )
-                        target_tracker.stack_ids.insert(
-                            0, target_tracker.stack_ids.pop(new_index)
-                        )
+                        target_tracker.stack_ids.insert(0, target_tracker.stack_ids.pop(new_index))
                         target_tracker.healing_scores.insert(
                             0, target_tracker.healing_scores.pop(new_index)
                         )
@@ -534,7 +537,7 @@ class BuffStateTracker:
         self._advance(target_tracker, time_ms)
         expiry = time_ms + event.duration_ms if event.duration_ms > 0 else None
         if _max_stacks_for(buff_name) > 1:
-            if buff_name == "might":
+            if buff_name in _OVERRIDE_LOGIC_BUFFS:
                 # OverrideLogic: track TotalDuration for each stack
                 total_dur = event.duration_ms
                 target_tracker.expirations.extend([expiry] * event.stacks)
@@ -597,7 +600,7 @@ class BuffStateTracker:
         time_ms = self._relative_time(event.time_ms)
         self._advance(target_tracker, time_ms)
         old_duration = event.new_duration_ms - event.extended_duration_ms
-        if buff_name == "might" and target_tracker.total_durations:
+        if buff_name in _OVERRIDE_LOGIC_BUFFS and target_tracker.total_durations:
             # OverrideLogic: graft extension onto stack with TotalDuration closest to old_duration
             index = min(
                 range(len(target_tracker.total_durations)),
