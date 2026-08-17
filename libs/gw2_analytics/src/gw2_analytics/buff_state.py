@@ -597,8 +597,8 @@ class BuffStateTracker:
             )
             target_tracker.total_durations[index] += event.extended_duration_ms
             target_tracker.expirations[index] = (
-                (target_tracker.expirations[index] or 0) + event.extended_duration_ms
-            )
+                target_tracker.expirations[index] or 0
+            ) + event.extended_duration_ms
             return
         if target_tracker.expirations and (
             old_duration > 0 or len(target_tracker.expirations) >= _capacity_for(buff_name)
