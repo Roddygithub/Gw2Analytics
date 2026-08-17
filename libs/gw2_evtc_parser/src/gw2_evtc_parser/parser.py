@@ -80,6 +80,7 @@ from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
     BuffExtensionEvent,
+    BuffInfoEvent,
     BuffRemovalEvent,
     BuffStackActiveEvent,
     CCEvent,
@@ -830,6 +831,17 @@ class PythonEvtcParser:
                     extended_duration_ms=max(0, value),
                     new_duration_ms=max(0, overstack),
                     stack_id=pad,
+                )
+                continue
+            if is_statechange == 30:
+                # CBTS_BUFFINFO=30: buff metadata with MaxStacks in SrcMasterInstid
+                yield BuffInfoEvent(
+                    time_ms=time_ms,
+                    source_agent_id=event_src_agent,
+                    target_agent_id=dst_agent,
+                    skill_id=skill_id,
+                    max_stacks=src_master_inst,
+                    duration_cap=overstack,
                 )
                 continue
             if is_statechange == 49 and pad == 0x9C9B3C99:

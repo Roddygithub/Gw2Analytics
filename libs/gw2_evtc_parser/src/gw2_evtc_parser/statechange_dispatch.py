@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 #: consumers that read the event stream directly.
 STATE_CHANGE_STUN_BREAK: Final[int] = 56
 
+#: arcdps statechange byte for BuffInfo events (per statechange-ids.md).
+#: The BuffInfoEvent carries MaxStacks in SrcMasterInstid.
+STATE_CHANGE_BUFF_INFO: Final[int] = 30
+
 #: arcdps statechange byte for BarrierUpdate events (per
 #: statechange-ids.md -- CBTS_BARRIERUPDATE = 38). The BarrierEvent
 #: carries ``barrier_amount`` + ``duration_ms`` fields that the
@@ -151,6 +155,29 @@ def _emit_down(
         target_agent_id=0,
         skill_id=0,
     )
+
+
+def _emit_buff_info(
+    _time_ms: int,
+    _src_agent: int,
+    _dst_agent: int,
+    _value: int,
+    _skill_id: int,
+) -> Event | None:
+    """Emit a :class:`BuffInfoEvent` for arcdps byte 30 (BuffInfo).
+
+    The ``skill_id`` is the buff ID. MaxStacks comes from the cbtevent's
+    ``SrcMasterInstid`` (v0.11.0 parser reads it via the raw record).
+    For the dispatch function we only have the unpacked fields, so we
+    rely on the inline parser logic to read SrcMasterInstid directly.
+    This is a placeholder; the real emit is handled inline in parser.py.
+    """
+    # The actual emit is handled inline in parser.py to read SrcMasterInstid
+    return None  # placeholder
+
+
+# Exclude from STATECHANGE_MAP since the real emit is handled inline in parser.py
+# to read SrcMasterInstid from the raw record.
 
 
 #: Dispatch table mapping arcdps ``is_statechange`` byte -> emit constructor.

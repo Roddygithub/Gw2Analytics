@@ -95,7 +95,11 @@ def main() -> int:
     expected = json.loads(candidates[0].read_text())
     header = fight.header
     duration_ms = header.duration_ms if header and header.duration_ms else 0
-    origin = min(e.time_ms for e in events) if events else 0
+    origin = (
+        header.start_time_ms
+        if header and header.start_time_ms is not None
+        else (min(e.time_ms for e in events) if events else 0)
+    )
 
     # find agent ids for the account
     logger = getattr(fight, "agents", [])  # noqa

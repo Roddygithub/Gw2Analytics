@@ -337,6 +337,7 @@ class EventType(StrEnum):
     BUFF_APPLY = "BUFF_APPLY"
     BUFF_EXTENSION = "BUFF_EXTENSION"
     BUFF_STACK_ACTIVE = "BUFF_STACK_ACTIVE"
+    BUFF_INFO = "BUFF_INFO"
     POSITION = "POSITION"
     SKILL_ACTIVATION = "SKILL_ACTIVATION"
     WEAPON_SWAP = "WEAPON_SWAP"
@@ -904,6 +905,23 @@ class BuffStackActiveEvent(BaseEvent):
     stack_id: int = Field(..., ge=0, le=0xFFFFFFFF)
 
 
+class BuffInfoEvent(BaseEvent):
+    """CBTS_BUFFINFO=30 statechange: buff metadata including MaxStacks.
+
+    The arcdps ``SrcMasterInstid`` field carries the maximum stack count
+    for the buff. Elite Insights uses this to override hard-coded
+    capacity tables (e.g. alacrity declares 99, not 9).
+    """
+
+    event_type: Literal[EventType.BUFF_INFO] = EventType.BUFF_INFO
+    time_ms: int = Field(default=0, ge=0)
+    source_agent_id: int = Field(default=0, ge=0)
+    target_agent_id: int = Field(default=0, ge=0)
+    skill_id: int = Field(..., ge=0)
+    max_stacks: int = Field(default=0, ge=0)
+    duration_cap: int = Field(default=0, ge=0)
+
+
 class PositionEvent(BaseEvent):
     """CBTS_POSITION=19 statechange emit path (position update)."""
 
@@ -994,6 +1012,7 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.BUFF_APPLY: BuffApplyEvent,
     EventType.BUFF_EXTENSION: BuffExtensionEvent,
     EventType.BUFF_STACK_ACTIVE: BuffStackActiveEvent,
+    EventType.BUFF_INFO: BuffInfoEvent,
     EventType.POSITION: PositionEvent,
     EventType.SKILL_ACTIVATION: SkillActivationEvent,
     EventType.WEAPON_SWAP: WeaponSwapEvent,
