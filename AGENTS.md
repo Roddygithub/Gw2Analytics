@@ -33,6 +33,8 @@ Plateforme d'analyse de combats WvW. Les contrats et conventions détaillés viv
 
 - Exécuter les outils Python via `uv run`; une invocation Python nue contourne l'environnement du workspace.
 - Itérer avec les tests ciblés; la suite Python complète impose une couverture globale de 90 % et peut nécessiter les services Docker pour les tests d'intégration.
+- Les skills BMAD vivent dans `.agents/skills/bmad-*` (chargés via `skills.paths` d'`opencode.json`) et le framework dans `_bmad/`. Le noyau (`resolve_config.py`, `resolve_customization.py`, `render_skill.py`, `memlog.py`) ne dépend que de la stdlib — vérifiable via `tests/scripts/test_bmad_framework.py`.
+- opencode ne substitue aucune variable dans les skills (à la différence de Claude Code) : remplacer manuellement `{project-root}` par la racine du repo (`/home/roddy/Work/Gw2Analytics`) et `{skill-root}` par le répertoire du skill invoqué (le bloc « Base directory » de l'outil skill).
 
 ## Conventions that differ from defaults
 

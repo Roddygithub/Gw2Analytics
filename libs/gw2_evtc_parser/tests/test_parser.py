@@ -1040,6 +1040,7 @@ def test_parse_events_2025_healing_extension_combat_round_trips() -> None:
                 13980,
                 is_statechange=49,
                 pad=0x9C9B3C99,
+                is_offcycle=0x80,
             ),
             _build_event_record_2025(
                 43_500,
@@ -1050,6 +1051,7 @@ def test_parse_events_2025_healing_extension_combat_round_trips() -> None:
                 is_statechange=49,
                 is_shields=1,
                 pad=0x9C9B3C99,
+                is_offcycle=0x80,
             ),
         ],
     )

@@ -737,6 +737,12 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         if not agent.instance_id:
             return {agent.id}
         entries = agents_by_instance_entries.get(agent.instance_id, [])
+        if agent.account_name is None:
+            # Non Squad Player: EI groups every anonymous agent sharing the
+            # instance into one entity, even when a named agent recycles it
+            anonymous = {entry.id for entry in entries if entry.account_name is None}
+            if len(anonymous) > 1:
+                return anonymous
         accounts = {entry.account_name for entry in entries}
         if len(accounts) > 1:
             return {agent.id}
@@ -802,6 +808,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         agent_id_by_instance={
             agent.instance_id: agent.id for agent in fight.agents if agent.instance_id
         },
+        squad_agent_ids={agent.id for agent in fight.agents if agent.is_player},
     )
     has_downed_buff_applies = any(
         isinstance(event, BoonApplyEvent) and event.kind == "apply" and event.skill_id == 770
@@ -884,7 +891,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         )
         player_dims: dict[str, object] = {"account": account, "slice": player.get("firstAware")}
         anonymous = agent.account_name is None
-        agent_ids = agent_ids_by_instance.get(agent.instance_id, {agent.id})
+        agent_ids = player_agent_ids(agent, slice_lo, slice_hi)
 
         whole_fight_slice = slice_lo <= origin and slice_hi >= origin + duration_ms
 
@@ -1072,7 +1079,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             # exactly the absence window to every one of them -- the
             # signature was several buffs on one actor all overcounting by
             # the identical amount.
-            for alias_id in player_agent_ids(agent):
+            for alias_id in player_agent_ids(agent, slice_lo, slice_hi):
                 alias_uptime = tracker.compute_player_uptimes(
                     alias_id,
                     duration_ms,

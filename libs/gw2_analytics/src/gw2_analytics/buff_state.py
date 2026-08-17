@@ -424,7 +424,7 @@ class BuffStateTracker:
                     (
                         i
                         for i, stack_id in enumerate(target_tracker.stack_ids)
-                        if event.stack_id and stack_id == event.stack_id
+                        if event.stack_id is not None and stack_id == event.stack_id
                     ),
                     None,
                 )
@@ -446,7 +446,7 @@ class BuffStateTracker:
                     (
                         i
                         for i, stack_id in enumerate(target_tracker.stack_ids)
-                        if event.stack_id and stack_id == event.stack_id
+                        if event.stack_id is not None and stack_id == event.stack_id
                     ),
                     0,
                 )

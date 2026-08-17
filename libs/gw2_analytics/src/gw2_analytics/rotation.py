@@ -126,6 +126,8 @@ _BUFF_GAIN_CASTS = {
     9123: 9082,  # Shield of Wrath
     10582: 10583,  # Spectral Armor
     62919: 62749,  # Legendary Alliance Stance
+    72996: 72906,  # Shale Storm buff -> Shale Storm skill
+    79373: 72906,  # Shale Storm Secondary Attack buff -> Shale Storm skill
 }
 _BUFF_LOSS_CASTS = {
     29446: 30961,
@@ -152,6 +154,7 @@ _BUFF_LOSS_CASTS = {
     62769: 62861,
     13135: 13106,
     77265: 76730,
+    29502: -41,  # Berserk (end): BuffLossCastFinder(BerserkEndSkill, BerserkBuff)
 }
 _BUFF_GIVE_CASTS = {
     41815: 45789,
@@ -308,7 +311,7 @@ _BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44
 #: strip is not a cast. Only the entries verified against Elite Insights are
 #: listed; the rest keep the historical "any removal" behaviour until they
 #: are checked the same way.
-_BUFF_LOSS_REMOVE_ALL_ONLY = {29446, 62769}
+_BUFF_LOSS_REMOVE_ALL_ONLY = {29446, 62769, 29502}
 #: BuffGainCastFinder books the buff gained by the player itself; arcdps
 #: also re-emits these buffs with ``src=0`` (env) for trait/sigil pulses,
 #: which EI excludes via ``!bae.Initial``. Self-apply gating reproduces
@@ -353,6 +356,10 @@ _INSTANT_CASTS_BY_EFFECT = {
     "13D0B65D73B5334D80824EE17B5C257E": 13677,
     "FB78801BB31CAF488B55F2F57EF9B070": 78837,
     "842F977C318FDC4F96C99C385C1D0672": 76613,  # Symbiotic Shielding
+    "3D981397D9C6A44B888212CE4E3F6F9A": 74410,  # Relic of Sorrow
+    "DB02EB39ABBEE241859DC9662AD49FA5": 74410,  # Relic of Sorrow
+    "FEEA4632BAF0B1438D83F6C8B71AEA15": 74410,  # Relic of Sorrow
+    "8D36806A690A5442A983308EDCECB018": 63195,  # Unnatural Traversal
     "4A83F0B627B75C47894941C4D35BA89F": 78604,
     "03850757F14FD44A9998D4CAD71CC589": 78358,
     "611D90C69ECF8142BEEE84139F333388": 30101,
@@ -480,8 +487,9 @@ _EFFECT_CASTS_BY_DST = {
     "23284B87C26C9A41A887F410F930E1A2": 13064,  # Infiltrator's Signet
     "BB5488951B60B546BB1BD5626DAE83E1": 13062,  # Signet of Agility
     "418A090D719AB44AAF1C4AD1473068C4": 43176,  # Flash Spark
-    "D7F8FA5695F8714B99A51EE72EF6E178": 14413,  # Dolyak Signet
+    "D7F8FA5695F8714B99A5C3EE72EF6E178": 14413,  # Dolyak Signet
     "68F2C378E6C80548B5A3C89870C5DD86": 9085,  # "Save Yourselves!"
+    "8D36806A690A5442A983308EDCECB018": 63195,  # Unnatural Traversal
 }
 _SECONDARY_EFFECTS = {
     _MECHANIST_SHIFT_SIGNET_EFFECT: (_MECHANIST_SHIFT_SIGNET_SELF_EFFECT,),
@@ -586,6 +594,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     elite_specs: Mapping[int, EliteSpec] | None = None,
     agent_id_by_instance: Mapping[int, int] | None = None,
     ownership_resolver: Callable[[int, int], int | None] | None = None,
+    squad_agent_ids: Collection[int] = (),
 ) -> list[SkillCast]:
     """Return completed, clipped casts ordered by fight-relative start time.
 
@@ -902,7 +911,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     and elite_specs.get(event.target_agent_id) is EliteSpec.WEAVER
                 )
                 or (
-                    event.skill_id in _BUFF_GAIN_SELF_ONLY
+                    event.kind == "apply"
+                    and event.skill_id in _BUFF_GAIN_SELF_ONLY
                     and event.source_agent_id != event.target_agent_id
                 )
                 or (
@@ -977,6 +987,11 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                 if owner:
                     add_instant(owner, 12658, event.time_ms)
+        # Spiteful Spirit (29560) - EI has two finders:
+        # 1. DamageCastFinder: disabled when effect data exists
+        #    (UsingDisableWithEffectData)
+        # 2. EffectCastFinder for UnholyBurst: triggers on effect
+        #    with DesertShroud/related hit checks
         elif isinstance(event, DamageEvent) and event.skill_id == 29560:
             source_is_necro = (
                 not professions or professions.get(event.source_agent_id) is Profession.NECROMANCER
@@ -999,12 +1014,13 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         elif (isinstance(event, HealingEvent) and event.skill_id in _HEALING_CASTS) or (
             isinstance(event, MissileEvent) and event.skill_id in _MISSILE_CASTS
         ):
-            if (
-                isinstance(event, HealingEvent)
-                and event.skill_id in _HEALING_CASTS_SQUAD_ONLY
-                and not event.src_is_peer
-            ):
-                continue
+            if isinstance(event, HealingEvent) and event.skill_id in _HEALING_CASTS_SQUAD_ONLY:
+                # EI EXTHealingCastFinder: only book if caster is in squad.
+                # If squad set is available, require membership; else fall back to src_is_peer.
+                if squad_agent_ids and event.source_agent_id not in squad_agent_ids:
+                    continue
+                if not squad_agent_ids and not event.src_is_peer:
+                    continue
             add_instant(
                 event.source_agent_id,
                 event.skill_id,
@@ -1206,7 +1222,35 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 base_skill = _BASE_SKILL_BY_ENHANCED_EFFECT.get(event.guid)
                 if base_skill is not None and (caster, base_skill) in active:
                     continue
-                if event.guid != "C4E8DD3234E0C647993857940ED79AC1" or not any(
+                # Spiteful Spirit (29560) via UnholyBurst effect (EffectCastFinder path)
+                # EI's EffectCastFinder for Spiteful Spirit triggers on UnholyBurst effect
+                # with DesertShroud and related hit checks
+                if event.guid == "C4E8DD3234E0C647993857940ED79AC1":
+                    # DesertShroud check: no DesertShroud buff removal within 50ms
+                    desert_shroud_removal = any(
+                        isinstance(other, BoonApplyEvent)
+                        and other.kind == "remove_all"
+                        and other.skill_id == 40052  # DesertShroudBuff
+                        and other.source_agent_id == caster
+                        and abs(other.time_ms - event.time_ms) < 50
+                        for other in nearby_events(event.time_ms, 50)
+                    )
+                    if desert_shroud_removal:
+                        continue
+
+                    # Related hit check: no UnholyBurst hit from same caster within 10ms
+                    related_hit = any(
+                        isinstance(other, DamageEvent)
+                        and other.source_agent_id == caster
+                        and other.skill_id == 38767  # UnholyBurst
+                        and abs(other.time_ms - event.time_ms) < 10
+                        for other in nearby_events(event.time_ms, 10)
+                    )
+                    if related_hit:
+                        continue
+
+                    add_instant(caster, effect_skill_id, event.time_ms)
+                elif event.guid != "C4E8DD3234E0C647993857940ED79AC1" or not any(
                     isinstance(other, DamageEvent)
                     and other.source_agent_id == caster
                     and other.skill_id == 38767
