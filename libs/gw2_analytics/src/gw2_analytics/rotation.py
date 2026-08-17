@@ -287,7 +287,25 @@ _WEAVER_MINOR_TRANSLATION = {
     43229: {-6, -9, -16, 42264},
     44822: {-7, -10, -13, 44857},
 }
-_WEAVER_DUAL_ATTUNEMENTS = {43470, 41166, 42264, 44857}
+_WEAVER_DUAL_ATTUNEMENTS = {
+    43470,
+    41166,
+    42264,
+    44857,
+    # Synthetic negative IDs for mixed attunements (EI SkillIDs.cs)
+    -5,
+    -6,
+    -7,
+    -8,
+    -9,
+    -10,
+    -11,
+    -12,
+    -13,
+    -14,
+    -15,
+    -16,
+}
 _BEFORE_SWAP_BUFFS = {29446, 31508, 59964, 63239, 77142, 76958, 41493, 42404, 44291, 62769}
 #: ``BuffLossCastFinder`` is typed on ``BuffRemoveAllEvent``, so a partial
 #: strip is not a cast. Only the entries verified against Elite Insights are
@@ -598,6 +616,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     agent_id_by_instance = agent_id_by_instance or {}
     if not event_list:
         return []
+    has_effect_data = any(isinstance(e, EffectEvent) for e in event_list)
     origin = start_time_ms if start_time_ms is not None else min(e.time_ms for e in event_list)
     event_times = [event.time_ms for event in event_list]
     weaver_attunement_groups: dict[int, list[tuple[int, list[BoonApplyEvent | BuffApplyEvent]]]] = (
@@ -639,6 +658,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     spawn_owner_by_target: dict[int, int] = {}
     cast_windows: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     open_casts: dict[tuple[int, int], int] = {}
+    desert_shroud_losses: list[int] = []
+    unholy_burst_hits: list[DamageEvent] = []
     for indexed_event in event_list:
         if isinstance(indexed_event, WeaponSwapEvent):
             swaps_by_agent[indexed_event.source_agent_id].append(indexed_event)
@@ -661,6 +682,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 indexed_event.target_agent_id,
                 indexed_event.source_agent_id,
             )
+        elif (
+            isinstance(indexed_event, BoonApplyEvent)
+            and indexed_event.kind == "remove_all"
+            and indexed_event.skill_id == 40052
+        ):
+            desert_shroud_losses.append(indexed_event.time_ms)
+        elif isinstance(indexed_event, DamageEvent) and indexed_event.skill_id == 38767:
+            unholy_burst_hits.append(indexed_event)
     # A cast the log never closes still occupies its start instant.
     for window_key, start in open_casts.items():
         cast_windows[window_key].append((start, start))
@@ -967,21 +996,8 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             source_is_necro = (
                 not professions or professions.get(event.source_agent_id) is Profession.NECROMANCER
             )
-            if not source_is_necro:
-                continue
-
-            # Check if there's any UnholyBurst effect in the fight (global check)
-            has_unholy_burst_in_fight = any(
-                isinstance(other, EffectEvent) and other.guid == "C4E8DD3234E0C647993857940ED79AC1"
-                for other in event_list
-            )
-
-            if has_unholy_burst_in_fight:
-                # EI disables DamageCastFinder when effect data exists
-                # Let the EffectCastFinder handle it via UnholyBurst effect events
-                continue
-            # No UnholyBurst effect data in fight: use DamageCastFinder
-            add_instant(event.source_agent_id, event.skill_id, event.time_ms)
+            if source_is_necro and not has_effect_data:
+                add_instant(event.source_agent_id, event.skill_id, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
             add_instant(
                 event.source_agent_id,
@@ -1019,7 +1035,20 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             caster = (
                 event.target_agent_id if by_dst else event.source_agent_id or event.target_agent_id
             )
-            if event.guid == "C34E250B01FF534292EE6AB36D768337":
+            # Spiteful Spirit: shares GUID with Unholy Burst, necromancer only,
+            # excluded by desert shroud loss within 50ms or nearby Unholy Burst hit.
+            if event.guid == "C4E8DD3234E0C647993857940ED79AC1":
+                if professions and professions.get(caster) is not Profession.NECROMANCER:
+                    continue
+                if any(abs(loss - event.time_ms) < 50 for loss in desert_shroud_losses):
+                    continue
+                if any(
+                    hit.source_agent_id == caster and abs(hit.time_ms - event.time_ms) < 10
+                    for hit in unholy_burst_hits
+                ):
+                    continue
+                effect_skill_id = 29560
+            elif event.guid == "C34E250B01FF534292EE6AB36D768337":
                 if professions and professions.get(caster) is not Profession.MESMER:
                     continue
                 effect_skill_id = (
