@@ -7,7 +7,7 @@
   "manifest_sha256": "c6a3bb012c2974200951b3149687151d462feed8228452b9fc2e7c778dfeb148",
   "log_count": 35,
   "buckets": {
-    "players.buffUptimes.uptime": 568,
+    "players.buffUptimes.uptime": 518,
     "players.group": 6,
     "players.rotation": 41,
     "players.statsAll.appliedCrowdControl": 1,

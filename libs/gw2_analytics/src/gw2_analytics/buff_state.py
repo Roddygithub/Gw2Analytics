@@ -91,7 +91,7 @@ _CAPACITIES = {
     "stability": 25,
     "regeneration": 5,
     "stealth": 9,
-    "fury": 9,
+    "fury": 15,
     "quickness": 9,
     "alacrity": 9,
     "protection": 9,
