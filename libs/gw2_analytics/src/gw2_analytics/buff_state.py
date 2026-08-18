@@ -28,7 +28,6 @@ skill_id. ``max_stacks`` is per the GW2 wiki:
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 
 from pydantic import BaseModel, ConfigDict
@@ -67,18 +66,30 @@ MAX_STACKS: dict[str, int] = {
 #: drop shortest on overflow, graft extensions by closest TotalDuration).
 _OVERRIDE_LOGIC_BUFFS: frozenset[str] = frozenset({"might", "stability"})
 
+#: Single-stack duration boons that use Elite Insights' QueueLogic (capacity 9,
+#: only front stack counts toward uptime, drop shortest on overflow,
+#: graft extensions by closest duration, added_active moves to front).
+#: Regeneration uses its own special queue logic; might/stability use OverrideLogic.
+_QUEUE_LOGIC_BUFFS: frozenset[str] = frozenset({
+    "fury", "quickness", "alacrity", "protection", "vigor",
+    "aegis", "swiftness", "resistance", "resolution", "superspeed", "stealth",
+})
+
 _CAPACITIES = {
     "might": 25,
     "stability": 25,
     "regeneration": 5,
-    "stealth": 5,
-    "fury": 99,
-    "quickness": 99,
-    "protection": 99,
-    "vigor": 99,
-    "swiftness": 99,
-    "resistance": 99,
-    "resolution": 99,
+    "stealth": 9,
+    "fury": 9,
+    "quickness": 9,
+    "alacrity": 9,
+    "protection": 9,
+    "vigor": 9,
+    "aegis": 9,
+    "swiftness": 9,
+    "resistance": 9,
+    "resolution": 9,
+    "superspeed": 9,
 }
 # All other boons default to 1 stack max (handled in compute logic).
 
@@ -215,29 +226,37 @@ class BuffStateTracker:
         return agent[buff_name]
 
     @staticmethod
-    def _advance(stack: _BuffStack, new_time_ms: int) -> None:
-        """Accumulate stack-time through expirations up to ``new_time_ms``."""
-        if _max_stacks_for(stack.name) == 1:
-            elapsed = new_time_ms - stack.last_time_ms
-            while elapsed > 0 and stack.expirations:
-                remaining = stack.expirations[0]
-                if remaining is None:
-                    stack.cumulative_stack_ms += elapsed
-                    break
-                active = min(elapsed, remaining)
-                stack.cumulative_stack_ms += active
-                elapsed -= active
-                remaining -= active
-                if remaining == 0:
-                    stack.expirations.pop(0)
-                    if stack.total_durations:
-                        stack.total_durations.pop(0)
-                    stack.stack_ids.pop(0)
-                    stack.healing_scores.pop(0)
-                else:
-                    stack.expirations[0] = remaining
-            stack.last_time_ms = new_time_ms
-            return
+    def _advance_single(stack: _BuffStack, new_time_ms: int) -> None:
+        """Accumulate stack-time for single-stack (max_stacks=1) through expirations."""
+        elapsed = new_time_ms - stack.last_time_ms
+        while elapsed > 0 and stack.expirations:
+            remaining = stack.expirations[0]
+            if remaining is None:
+                stack.cumulative_stack_ms += elapsed
+                break
+            active = min(elapsed, remaining)
+            stack.cumulative_stack_ms += active
+            elapsed -= active
+            remaining -= active
+            if remaining == 0:
+                stack.expirations.pop(0)
+                if stack.total_durations:
+                    stack.total_durations.pop(0)
+                stack.stack_ids.pop(0)
+                stack.healing_scores.pop(0)
+            else:
+                stack.expirations[0] = remaining
+        stack.last_time_ms = new_time_ms
+
+    @staticmethod
+    def _advance_queue(stack: _BuffStack, new_time_ms: int) -> None:
+        """Accumulate stack-time for QueueLogic (only front stack counts)."""
+        # QueueLogic uses the same front-stack consumption logic as single-stack
+        BuffStateTracker._advance_single(stack, new_time_ms)
+
+    @staticmethod
+    def _advance_intensity(stack: _BuffStack, new_time_ms: int) -> None:
+        """Accumulate stack-time for intensity buffs (max_stacks > 1)."""
         while True:
             next_expiry = min(
                 (expiry for expiry in stack.expirations if expiry is not None),
@@ -255,6 +274,17 @@ class BuffStateTracker:
             stack.healing_scores.pop(index)
         stack.cumulative_stack_ms += len(stack.expirations) * (new_time_ms - stack.last_time_ms)
         stack.last_time_ms = new_time_ms
+
+    @staticmethod
+    def _advance(stack: _BuffStack, new_time_ms: int) -> None:
+        """Accumulate stack-time through expirations up to ``new_time_ms``."""
+        if _max_stacks_for(stack.name) == 1:
+            if stack.name in _QUEUE_LOGIC_BUFFS:
+                BuffStateTracker._advance_queue(stack, new_time_ms)
+            else:
+                BuffStateTracker._advance_single(stack, new_time_ms)
+            return
+        BuffStateTracker._advance_intensity(stack, new_time_ms)
 
     def _regen_overstack_hint(self, agent_id: int, time_ms: int) -> tuple[int, int] | None:
         """The displaced-stack hint arcdps recorded just before this apply."""
@@ -358,7 +388,38 @@ class BuffStateTracker:
         self._advance(target_tracker, time_ms)
 
         if event.kind == "apply":
-            if _max_stacks_for(buff_name) > 1:
+            # QueueLogic buffs (single-stack duration boons with queue behavior)
+            # are handled separately even though they have max_stacks=1.
+            if buff_name in _QUEUE_LOGIC_BUFFS:
+                # QueueLogic (EI): capacity 9, only front stack counts.
+                # Add new stack to end; if at capacity, drop shortest (not front).
+                expiry = time_ms + event.duration_ms if event.duration_ms > 0 else None
+                if len(target_tracker.expirations) >= _capacity_for(buff_name):
+                    # Find shortest duration (excluding front which is active)
+                    # EI drops the shortest duration stack, not the front
+                    if len(target_tracker.expirations) > 1:
+                        # Find shortest among non-front stacks
+                        min_idx = 1
+                        min_dur = target_tracker.expirations[1]
+                        for i in range(2, len(target_tracker.expirations)):
+                            dur = target_tracker.expirations[i]
+                            if dur is not None and (min_dur is None or dur < min_dur):
+                                min_dur = dur
+                                min_idx = i
+                        target_tracker.expirations.pop(min_idx)
+                        target_tracker.stack_ids.pop(min_idx)
+                        target_tracker.healing_scores.pop(min_idx)
+                    else:
+                        # Only one stack, replace it
+                        target_tracker.expirations.pop(0)
+                        target_tracker.stack_ids.pop(0)
+                        target_tracker.healing_scores.pop(0)
+                target_tracker.expirations.append(expiry)
+                target_tracker.stack_ids.append(event.stack_id)
+                target_tracker.healing_scores.append(
+                    self._healing_by_agent.get(event.source_agent_id, 0)
+                )
+            elif _max_stacks_for(buff_name) > 1:
                 if buff_name in _OVERRIDE_LOGIC_BUFFS:
                     # OverrideLogic (EI): sort by TotalDuration (shortest first),
                     # remove index 0 when at capacity.
@@ -467,7 +528,8 @@ class BuffStateTracker:
                 del target_tracker.stack_ids[_capacity_for(buff_name) :]
                 del target_tracker.healing_scores[_capacity_for(buff_name) :]
         elif event.kind == "remove_single":
-            if _max_stacks_for(buff_name) == 1 and target_tracker.expirations:
+            if buff_name in _QUEUE_LOGIC_BUFFS and target_tracker.expirations:
+                # QueueLogic: find stack by stack_id or closest duration
                 stack_index = next(
                     (
                         i
@@ -487,11 +549,9 @@ class BuffStateTracker:
                     )
                 if stack_index is not None:
                     target_tracker.expirations.pop(stack_index)
-                    if target_tracker.total_durations:
-                        target_tracker.total_durations.pop(stack_index)
                     target_tracker.stack_ids.pop(stack_index)
                     target_tracker.healing_scores.pop(stack_index)
-            elif event.stacks and target_tracker.expirations:
+            elif _max_stacks_for(buff_name) == 1 and target_tracker.expirations:
                 index = next(
                     (
                         i
@@ -536,7 +596,22 @@ class BuffStateTracker:
         time_ms = self._relative_time(event.time_ms)
         self._advance(target_tracker, time_ms)
         expiry = time_ms + event.duration_ms if event.duration_ms > 0 else None
-        if _max_stacks_for(buff_name) > 1:
+        # QueueLogic buffs (single-stack duration boons with queue behavior)
+        if buff_name in _QUEUE_LOGIC_BUFFS:
+            # QueueLogic: add initial stacks as queue
+            target_tracker.expirations.extend([expiry] * event.stacks)
+            target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
+            target_tracker.healing_scores.extend([0] * event.stacks)
+            # No total_durations for QueueLogic buffs
+            # Keep only up to capacity (drop oldest if over capacity)
+            if len(target_tracker.expirations) > _capacity_for(buff_name):
+                excess = len(target_tracker.expirations) - _capacity_for(buff_name)
+                target_tracker.expirations = target_tracker.expirations[excess:]
+                target_tracker.stack_ids = target_tracker.stack_ids[excess:]
+                target_tracker.healing_scores = target_tracker.healing_scores[excess:]
+
+        # Intensity buffs with max_stacks > 1 (might, stability)
+        elif _max_stacks_for(buff_name) > 1:
             if buff_name in _OVERRIDE_LOGIC_BUFFS:
                 # OverrideLogic: track TotalDuration for each stack
                 total_dur = event.duration_ms
@@ -561,23 +636,26 @@ class BuffStateTracker:
                 target_tracker.stack_ids = [sid for _, _, sid, _ in pairs]
                 target_tracker.healing_scores = [h for _, _, _, h in pairs]
             else:
+                # Other intensity buffs (stability): sort by expiration
                 target_tracker.expirations.extend([expiry] * event.stacks)
                 target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
-                target_tracker.healing_scores.extend([0] * event.stacks)
-                pairs_3: list[tuple[int | None, int, int]] = sorted(
+                target_tracker.healing_scores.extend(
+                    [self._healing_by_agent.get(event.source_agent_id, 0)] * event.stacks
+                )
+                stability_pairs = sorted(
                     zip(
                         target_tracker.expirations,
                         target_tracker.stack_ids,
                         target_tracker.healing_scores,
                         strict=True,
-                    ),
-                    key=lambda pair: pair[0] if pair[0] is not None else math.inf,
-                )[-_capacity_for(buff_name) :]
-                target_tracker.expirations = [value for value, _, _ in pairs_3]
-                target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs_3]
-                target_tracker.healing_scores = [healing for _, _, healing in pairs_3]
-                if target_tracker.total_durations:
-                    target_tracker.total_durations.clear()
+                    )
+                )
+                stability_pairs = stability_pairs[-_capacity_for(buff_name) :]
+                target_tracker.expirations = [expiry for expiry, _, _ in stability_pairs]
+                target_tracker.stack_ids = [stack_id for _, stack_id, _ in stability_pairs]
+                target_tracker.healing_scores = [healing for _, _, healing in stability_pairs]
+
+        # Single-stack duration boons (fury, quickness, etc.) - original behavior
         else:
             target_tracker.expirations.append(event.duration_ms or None)
             target_tracker.stack_ids.append(event.stack_id)
@@ -610,6 +688,15 @@ class BuffStateTracker:
             target_tracker.expirations[index] = (
                 target_tracker.expirations[index] or 0
             ) + event.extended_duration_ms
+            return
+        if buff_name in _QUEUE_LOGIC_BUFFS and target_tracker.expirations:
+            # QueueLogic: graft extension onto stack with duration closest to old_duration
+            # Find stack with expiration closest to old_duration (using absolute time)
+            candidates = [(i, e) for i, e in enumerate(target_tracker.expirations) if e is not None]
+            if candidates:
+                target_time = time_ms + old_duration
+                index, remaining = min(candidates, key=lambda pair: abs(pair[1] - target_time))
+                target_tracker.expirations[index] = remaining + event.extended_duration_ms
             return
         if target_tracker.expirations and (
             old_duration > 0 or len(target_tracker.expirations) >= _capacity_for(buff_name)
