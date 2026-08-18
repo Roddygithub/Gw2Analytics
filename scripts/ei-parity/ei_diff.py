@@ -19,6 +19,7 @@ import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from typing import TypedDict
 
 ROOT = Path(__file__).resolve().parents[2]
 LOGS = ROOT / "zevtc files"
@@ -70,6 +71,25 @@ KNOWN_ROTATION_DEAD_ENDS = {
     62975,
 }
 
+
+class RunReport(TypedDict):
+    rotation_missing: int
+    rotation_extra: int
+    rotation_missing_by_skill: dict[int, int]
+    rotation_extra_by_skill: dict[int, int]
+    skill_names: dict[int, str]
+    stem: str
+    parse_seconds: float
+    events: int
+    agents: int
+    ei_players: int
+    ei_targets: int
+    n_diffs: int
+    differences: dict[str, dict[str, object]]
+    results: list[dict[str, object]]
+    buckets: Counter[str]
+
+
 from gw2_analytics.ei_compare import compare_elite_insights  # noqa: E402
 from gw2_evtc_parser import (  # noqa: E402
     PythonEvtcParser,
@@ -93,6 +113,24 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _export_sha256(path: Path) -> str:
+    """Compute deterministic SHA-256 of EI export JSON by normalizing runtime instanceIDs."""
+    try:
+        data = json.loads(path.read_bytes().decode("utf-8"))
+        if isinstance(data, dict):
+            for target in data.get("targets", []):
+                if isinstance(target, dict) and "instanceID" in target:
+                    target["instanceID"] = 0
+            for player in data.get("players", []):
+                if isinstance(player, dict) and "instanceID" in player:
+                    player["instanceID"] = 0
+            norm_bytes = json.dumps(data, sort_keys=True).encode("utf-8")
+            return hashlib.sha256(norm_bytes).hexdigest()
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        pass
+    return _sha256(path)
 
 
 def _fail(message: str) -> None:
@@ -133,7 +171,8 @@ def _check_artifact(stem: str, artifact: str, path: Path, expected_sha256: objec
         _fail(f"{stem}: invalid {artifact} SHA-256")
     if not path.is_file():
         _fail(f"{stem}: missing {artifact}")
-    if _sha256(path) != expected_sha256:
+    digest = _export_sha256(path) if artifact == "EI export" else _sha256(path)
+    if digest != expected_sha256:
         _fail(f"{stem}: altered {artifact}")
 
 
@@ -313,7 +352,7 @@ def _rotation_deltas(diffs: dict[str, object]) -> tuple[Counter[int], Counter[in
 
 
 def _print_rotation_skill_deltas(
-    reports: list[dict[str, object]],
+    reports: list[RunReport],
     limit: int,
     *,
     show_known_dead_ends: bool,
@@ -347,7 +386,7 @@ def _print_rotation_skill_deltas(
         print(f"{missing_by_skill[skill_id]:>8} {extra_by_skill[skill_id]:>6}  {skill_id} {name}")
 
 
-def run_one(stem: str) -> dict[str, object]:
+def run_one(stem: str) -> RunReport:
     log_path = LOGS / f"{stem}.zevtc"
     ei_path = EI_OUT / f"{stem}_{EXPORT_TYPE}.json"
 
@@ -437,7 +476,7 @@ def _constraint_matches(
 
 
 def _classify_results(
-    reports: list[dict[str, object]],
+    reports: list[RunReport],
     rules: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
@@ -446,15 +485,16 @@ def _classify_results(
         for result in rep["results"]:
             if not isinstance(result, dict):
                 continue
-            status = result.get("status")
+            result_ = result  # type: ignore[assignment]  # narrow to dict[str, object]
+            status = result_.get("status")
             if status not in {"PASS", "FAIL"}:
                 _fail(f"{stem}: unexpected result status {status!r}")
             known: object = None
             if status == "FAIL":
                 for rule in rules:
-                    if not _selector_matches(rule["selector"], stem, result):
+                    if not _selector_matches(rule["selector"], stem, result_):
                         continue
-                    if not _constraint_matches(rule["constraint"], result):
+                    if not _constraint_matches(rule["constraint"], result_):
                         continue
                     known = {
                         "rule_id": rule["id"],
@@ -467,8 +507,8 @@ def _classify_results(
             rows.append(
                 {
                     "stem": stem,
-                    "key": result["key"],
-                    "bucket": bucket(result["key"]),
+                    "key": result_["key"],
+                    "bucket": bucket(result_["key"]),
                     "status": status,
                     "expected": result.get("expected"),
                     "actual": result.get("actual"),
@@ -483,9 +523,9 @@ def _classify_results(
 
 
 def _build_report(
-    reports: list[dict[str, object]],
+    reports: list[RunReport],
     rules: list[dict[str, object]],
-    reference: str,
+    reference: dict[str, object],
     manifest_sha256: str,
 ) -> dict[str, object]:
     rows = _classify_results(reports, rules)
@@ -566,11 +606,11 @@ def main() -> int:  # noqa: PLR0912, PLR0915
         _fail("json and report destinations must differ")
     stems = args.stems or corpus
     reports = []
-    grand = Counter()
+    grand: Counter[str] = Counter()
     for stem in stems:
         rep = run_one(stem)
         reports.append(rep)
-        grand.update(rep["buckets"])
+        grand.update(rep["buckets"])  # type: ignore[call-overload]
         print(
             f"{stem}: {rep['n_diffs']:>6} diffs  "
             f"({rep['events']} events, {rep['agents']} agents, "
@@ -579,8 +619,8 @@ def main() -> int:  # noqa: PLR0912, PLR0915
             flush=True,
         )
 
-    missing = sum(int(r["rotation_missing"]) for r in reports)
-    extra = sum(int(r["rotation_extra"]) for r in reports)
+    missing = sum(int(r["rotation_missing"]) for r in reports)  # type: ignore[call-overload]
+    extra = sum(int(r["rotation_extra"]) for r in reports)  # type: ignore[call-overload]
     print(f"\n=== TOTAL {sum(grand.values())} differences across {len(reports)} logs ===")
     if missing or extra:
         print(
