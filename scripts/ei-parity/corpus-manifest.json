@@ -15,40 +15,355 @@
     "post-2026-05-07-format"
   ],
   "entries": [
-    {"stem": "20260128-160105", "date": "2026-01-28", "evtc_sha256": "0ab8329c6fcd1ec6b50cf2a463615d22b4bb7437bdfb6154a311fb009ff8dd56", "export_sha256": "cfff3c4a0996faab96c77455692d026162ba04460f0f111a702a61c6fe014b5d", "tags": ["monthly-size-1", "pre-2026-05-07-format"]},
-    {"stem": "20260122-223116", "date": "2026-01-22", "evtc_sha256": "9df07559a828096e0fd7883dd94ef6495e325750b695f9323f87b2e74fb0f450", "export_sha256": "70c77245288afdad2ea1fadfa46f404e1279b34640270a881da4e86d9dfd40b1", "tags": ["monthly-size-2", "pre-2026-05-07-format"]},
-    {"stem": "20260125-194936", "date": "2026-01-25", "evtc_sha256": "9f5537d107eaa2e01bcded500a33fbdfeff5c4fda109820d6b8b392ed502d19f", "export_sha256": "b9ddd56d1b0bfd42f2f6ab719e8210362a28cfcb1cd5792a1701158f26fcdb67", "tags": ["monthly-size-3", "pre-2026-05-07-format"]},
-    {"stem": "20260129-110256", "date": "2026-01-29", "evtc_sha256": "4ec3d39fedd8acc4fec7fcbae7fde957e73cfb0fc1565ace796df51d536a5716", "export_sha256": "6c485dd7dc142667ed70dea0a2f6f54d93948468a983923fb640662e68f3d825", "tags": ["monthly-size-4", "pre-2026-05-07-format"]},
-    {"stem": "20260213-213832", "date": "2026-02-13", "evtc_sha256": "6fbf851690f78988af28623cf62c7892ef8730d633775325ef58f1ea47e340fa", "export_sha256": "b1baa12654610204422548c55deb80e29db424a459f39e71a29be3c6a0530911", "tags": ["monthly-size-1", "pre-2026-05-07-format"]},
-    {"stem": "20260210-235749", "date": "2026-02-10", "evtc_sha256": "128ec8f15e09e95e68835bbdee5ff8b36625efc5ecadaad2f442de35a28a38c1", "export_sha256": "a0c922e8a56b4535b545960a222a5ef33ff94c1dbaf51353e2089c6ee417624f", "tags": ["monthly-size-2", "pre-2026-05-07-format"]},
-    {"stem": "20260205-231349", "date": "2026-02-05", "evtc_sha256": "1906b70a0605db07e7c2f38e90f9a9f459f10ed6e6cd3fc0455a158aeb4c7f8e", "export_sha256": "e636d45e0259382463748f59a7d975ee304cbcf54ed5e15b3fc594f7bf305913", "tags": ["monthly-size-3", "pre-2026-05-07-format"]},
-    {"stem": "20260224-233019", "date": "2026-02-24", "evtc_sha256": "f74b311e10f75acaea41890097e53ffcb05954612185c064276e8fe3833a03d2", "export_sha256": "3833a321be1806825aa222feb300329fb946d445cf01599615ff35ebd2d22345", "tags": ["monthly-size-4", "pre-2026-05-07-format"]},
-    {"stem": "20260316-231209", "date": "2026-03-16", "evtc_sha256": "7e48ffdb9465f5a666128ca32ef15cd6ef89a58cf577bc84fcca5aaef122b75d", "export_sha256": "47cda13d912c86342f00ab35424e9e45a5ca23f326b6ea51bba42713debf43a6", "tags": ["monthly-size-1", "pre-2026-05-07-format"]},
-    {"stem": "20260309-233818", "date": "2026-03-09", "evtc_sha256": "3d5453d90969cbb6ce796bde9ce3e34769504d00805ac5eb8eb2ae6d45a387e8", "export_sha256": "ecfbb99c899abd165da5b36a4845b724bd3dfeaccaf7adea7386d8a20871a80b", "tags": ["monthly-size-2", "pre-2026-05-07-format"]},
-    {"stem": "20260324-013930", "date": "2026-03-24", "evtc_sha256": "a5b8f62cc3fe1c254c0a0b6dbba2eb5c4d9bbf3d0238d781b8b5ca8c31e50e78", "export_sha256": "a5fc8b60f5747e66f901e750b646e97624d17841139efd39a25bb1c44ad43453", "tags": ["monthly-size-3", "pre-2026-05-07-format"]},
-    {"stem": "20260314-234454", "date": "2026-03-14", "evtc_sha256": "70c692803838cb42afb3b1c6fcc5430ba065a0be648c93382229e33e36f76b3b", "export_sha256": "4a2654ff893bbb7f04db1adfe63118ca0a949b34feaaec2c1b3f567d7dd223be", "tags": ["monthly-size-4", "pre-2026-05-07-format"]},
-    {"stem": "20260409-004339", "date": "2026-04-09", "evtc_sha256": "2e09ccb36f5ffead46c9bc4549fc6b62a0732ed3c790df5bb72cb8c2089bbfce", "export_sha256": "9768a8fbe2f68bfa6929106a10ce223ec29d8e491603a7db2c5b1607c1f5f3c2", "tags": ["monthly-size-1", "pre-2026-05-07-format"]},
-    {"stem": "20260429-222732", "date": "2026-04-29", "evtc_sha256": "e7357e78d4c4fbf0a0990ca344c74beabcf90fdf28b126e572b7874bfc1b55df", "export_sha256": "0f332cea038ec425bfc355df8915cdf0ccaa68bbb37f4cc7bca939ad8cecbb31", "tags": ["monthly-size-2", "pre-2026-05-07-format"]},
-    {"stem": "20260412-220632", "date": "2026-04-12", "evtc_sha256": "281441131dd4fff47533b3bf3e3a6c661053a55a5e088e02d0c8cbc9b13af4a6", "export_sha256": "9aeae27447ec36134daf1fb265a5ce818d94cb097011e589130a0dc35ebc4c7f", "tags": ["monthly-size-3", "pre-2026-05-07-format"]},
-    {"stem": "20260424-204954", "date": "2026-04-24", "evtc_sha256": "3acbea5c38c0517cfd23acf5af38f5390d15597b8fb87168deb785cdafd74f5c", "export_sha256": "069a56acc3a72768c135c4273863f5f27763710118684e4d43252d04de48df1c", "tags": ["monthly-size-4", "pre-2026-05-07-format"]},
-    {"stem": "20260519-112129", "date": "2026-05-19", "evtc_sha256": "502aa4810485cb613ad6d078b6296baa65b334aea2cedafd1bb9db8e1acbfd7c", "export_sha256": "c194fc9457262499915fb6bc550a5cf8cea8b0af233da0b11ea9c5fd51849cd1", "tags": ["monthly-size-1", "post-2026-05-07-format"]},
-    {"stem": "20260512-181500", "date": "2026-05-12", "evtc_sha256": "51881dbb6e428c92a4b739f0ed8e5755dae5d5053c3c790a394bb51db18f7496", "export_sha256": "02a2668a15b4d9363583feaeb6ed5cf66730fbd34fdbb1c9af7537b4f54b0253", "tags": ["monthly-size-2", "post-2026-05-07-format"]},
-    {"stem": "20260526-202841", "date": "2026-05-26", "evtc_sha256": "f493b1eccec4f4efab6c796e36c6a4ac74fa4249a8a1bbc55cd3edb2303a04fe", "export_sha256": "d459a959ed3d18acb94ca3d6c8d68ab26106f2dcdd142e5852f8a65f7dac4c74", "tags": ["monthly-size-3", "post-2026-05-07-format"]},
-    {"stem": "20260508-001302", "date": "2026-05-08", "evtc_sha256": "b423025d29b3621fa90c61c9e1464edc2518e145d0d93caa5f90a11252f143a9", "export_sha256": "7d3a1407ae138caf5fad3ecdfc97f61cd939e55cee921c451d538ef041abf798", "tags": ["monthly-size-4", "pre-2026-05-07-format"]},
-    {"stem": "20260608-011208", "date": "2026-06-08", "evtc_sha256": "785e94ef2d6eda75a0410d9ccbf2a0cb814d3652c59d4070d68efb0e4181e813", "export_sha256": "90357f0f97e8021eb399a2f908c9ca7f22ff29b409b13d148607f0c8325e9e0c", "tags": ["monthly-size-1", "post-2026-05-07-format"]},
-    {"stem": "20260618-182428", "date": "2026-06-18", "evtc_sha256": "ec299025f4c2de8ec4cda5c23ddc4963478d6bbc62009fa110557c33ee36a86a", "export_sha256": "ecf15b80711a3374b1466987618d6a673b45a8ae3dacf3c207fad457cdf77983", "tags": ["monthly-size-2", "post-2026-05-07-format"]},
-    {"stem": "20260621-225056", "date": "2026-06-21", "evtc_sha256": "0841cde9cf608759d52a4feaadded2a47e64145732cc196eb0eb789edf1cd398", "export_sha256": "000ac99fddb3cb49270d65282d0a53b2b468bdd1b3ca52971543f708c875e16f", "tags": ["monthly-size-3", "post-2026-05-07-format"]},
-    {"stem": "20260625-215943", "date": "2026-06-25", "evtc_sha256": "a7fc9595896e293a078b40b9774893019e0c3682aae26c86c2da99eca141b8db", "export_sha256": "eb09f04bddbd0717175ddbae8293250c7d54ccd64e7887651df64a10c6fbed29", "tags": ["monthly-size-4", "post-2026-05-07-format"]},
-    {"stem": "20260717-225125", "date": "2026-07-17", "evtc_sha256": "7da6211479329feb8ff4b97eb3edca549987bcd886875650786ac16eb44e6b6a", "export_sha256": "fa6a97a9bd60a9eeea0d592bbc9ec24c015ad84b64bc491ab8c777e8697b98dd", "tags": ["monthly-size-1", "post-2026-05-07-format"]},
-    {"stem": "20260705-234656", "date": "2026-07-05", "evtc_sha256": "5e351898b3580bffbc40ab09bad9d3b3a6abcd836df910273ddec3c55d43b7ca", "export_sha256": "12455e839c7c861520709cc8b33d7b43bc82231133d8ca2390d4e0c5bff558b5", "tags": ["monthly-size-2", "post-2026-05-07-format"]},
-    {"stem": "20260712-203400", "date": "2026-07-12", "evtc_sha256": "f9a98079163147dbcd8e5c9b22eff1721933c16937bd89804e74c102f2e0a098", "export_sha256": "a28fa6e926bb9b5c27c9efc991a630478c2fea522c1691b16ade11705f83fd0d", "tags": ["monthly-size-3", "post-2026-05-07-format"]},
-    {"stem": "20260708-215736", "date": "2026-07-08", "evtc_sha256": "9fb6096501759911edba3062efb3c27dc5c7f5d7f6d575bc8d5d7a5e6095d0ed", "export_sha256": "ebac71e573e09d7664b986cdf36fb043a96c9cd0cd9fed1f30eafbf9cf2dd388", "tags": ["monthly-size-4", "post-2026-05-07-format"]},
-    {"stem": "20260118-020548", "date": "2026-01-18", "evtc_sha256": "88e06fd301a8982c8ee3f5db1cd8563a721aace2f5c5ac30e393a2841eb542cb", "export_sha256": "823b3c2a86ecf837bb0898cc2cb1e39ab5608099d37509e6bbd0c91fa5873a9d", "tags": ["monthly-supplement", "pre-2026-05-07-format"]},
-    {"stem": "20260217-210926", "date": "2026-02-17", "evtc_sha256": "a2b40e3a98b96a5dd426d615b2dabc2451a17ecf13dbbc2ffd0ec46ec4da9d3a", "export_sha256": "d7659c24d761a4eaa10e42db22a8523662d9497f715fd49118d8a8b73565bf63", "tags": ["monthly-supplement", "pre-2026-05-07-format"]},
-    {"stem": "20260327-223844", "date": "2026-03-27", "evtc_sha256": "6a17ada92630f6fee0a4902e5924f21c80136a767447535a0d5940827c252390", "export_sha256": "c73964bd2ee61e21daa4952905074c52d1ab7c5d737af64ea4b025bcf81e518f", "tags": ["monthly-supplement", "pre-2026-05-07-format"]},
-    {"stem": "20260428-222420", "date": "2026-04-28", "evtc_sha256": "19e6ddc7fee048ff4f2aa5e0dd8420b44a937474ffbc8da7284e80b656d8c47d", "export_sha256": "e512522a08feae96d356924605c559fe688782028165d7ae69183b777e064c6d", "tags": ["monthly-supplement", "pre-2026-05-07-format"]},
-    {"stem": "20260506-211522", "date": "2026-05-06", "evtc_sha256": "ccbb295acb40d825a2a27dc2a7cd472b4a1b6c2d8263c7f72e3de2c3b6a06dab", "export_sha256": "ffa5ca596c4dcb2310ad6c2b3003770859f01fd786d739d003b482547d254cbe", "tags": ["monthly-supplement", "pre-2026-05-07-format"]},
-    {"stem": "20260610-212627", "date": "2026-06-10", "evtc_sha256": "f5bb746d504ad80eed211a1bf030b4cf12a034e7446a0970ecbfebb01f09734b", "export_sha256": "a249c26fa269ba93e1a26b0725ce37ffafe1a42c639d265f269d7300f9030366", "tags": ["monthly-supplement", "post-2026-05-07-format"]},
-    {"stem": "20260718-154555", "date": "2026-07-18", "evtc_sha256": "9e63f3cbd8c9f9a4c813d617656ebd949a65fb18357e3d7c89c7939343737837", "export_sha256": "d7c22f8f5534fd476e1ab4435aa5021171e6a0236ddb227635c4f05f60752be4", "tags": ["monthly-supplement", "post-2026-05-07-format"]}
+    {
+      "stem": "20260128-160105",
+      "date": "2026-01-28",
+      "evtc_sha256": "0ab8329c6fcd1ec6b50cf2a463615d22b4bb7437bdfb6154a311fb009ff8dd56",
+      "export_sha256": "3092e60958a1ca6690d5c544bb2bf1b69e4cacc7b141bd207f3497e31104489e",
+      "tags": [
+        "monthly-size-1",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260122-223116",
+      "date": "2026-01-22",
+      "evtc_sha256": "9df07559a828096e0fd7883dd94ef6495e325750b695f9323f87b2e74fb0f450",
+      "export_sha256": "3bfa6facf09ad3121a88fe4cd77c3d3be93867b518da56172be2bc024e865a41",
+      "tags": [
+        "monthly-size-2",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260125-194936",
+      "date": "2026-01-25",
+      "evtc_sha256": "9f5537d107eaa2e01bcded500a33fbdfeff5c4fda109820d6b8b392ed502d19f",
+      "export_sha256": "036c9ba7d1779905fb6805ad949443f8faa3a1bc00f3c79fae989ee26607f424",
+      "tags": [
+        "monthly-size-3",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260129-110256",
+      "date": "2026-01-29",
+      "evtc_sha256": "4ec3d39fedd8acc4fec7fcbae7fde957e73cfb0fc1565ace796df51d536a5716",
+      "export_sha256": "5190f7f1528bc3848866d8f75ed8d952413ad9eae26de74c8ab49a870a021bed",
+      "tags": [
+        "monthly-size-4",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260213-213832",
+      "date": "2026-02-13",
+      "evtc_sha256": "6fbf851690f78988af28623cf62c7892ef8730d633775325ef58f1ea47e340fa",
+      "export_sha256": "d2f5bdb403079542dcfcf627d2f7d34411b7d659d923ac8f8cd1240b0d4c250b",
+      "tags": [
+        "monthly-size-1",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260210-235749",
+      "date": "2026-02-10",
+      "evtc_sha256": "128ec8f15e09e95e68835bbdee5ff8b36625efc5ecadaad2f442de35a28a38c1",
+      "export_sha256": "d6466981bc7489586c9b9a2746e0ace95aa9dbdccd9731c85500ef03c97271d2",
+      "tags": [
+        "monthly-size-2",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260205-231349",
+      "date": "2026-02-05",
+      "evtc_sha256": "1906b70a0605db07e7c2f38e90f9a9f459f10ed6e6cd3fc0455a158aeb4c7f8e",
+      "export_sha256": "4b10bb967461007b53a3e5549546b11808d9fe8e8881319034a0066b3f384485",
+      "tags": [
+        "monthly-size-3",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260224-233019",
+      "date": "2026-02-24",
+      "evtc_sha256": "f74b311e10f75acaea41890097e53ffcb05954612185c064276e8fe3833a03d2",
+      "export_sha256": "42e7aefef0e1e13f1618a91527d068d8042c65b3a1378d3d5d1ec559669b2830",
+      "tags": [
+        "monthly-size-4",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260316-231209",
+      "date": "2026-03-16",
+      "evtc_sha256": "7e48ffdb9465f5a666128ca32ef15cd6ef89a58cf577bc84fcca5aaef122b75d",
+      "export_sha256": "f440ee41dc49290447b8637151dddd971a8b15efda59c2151197f866f6b63e94",
+      "tags": [
+        "monthly-size-1",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260309-233818",
+      "date": "2026-03-09",
+      "evtc_sha256": "3d5453d90969cbb6ce796bde9ce3e34769504d00805ac5eb8eb2ae6d45a387e8",
+      "export_sha256": "0c3b08a5d09add84275919b0c18b2b75321d4bf9c103e309edb258351ac5ab2f",
+      "tags": [
+        "monthly-size-2",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260324-013930",
+      "date": "2026-03-24",
+      "evtc_sha256": "a5b8f62cc3fe1c254c0a0b6dbba2eb5c4d9bbf3d0238d781b8b5ca8c31e50e78",
+      "export_sha256": "e89cd209ede6a2b35d349e52ed376c6c970f7093ede772aa471bfb40a0cb55c9",
+      "tags": [
+        "monthly-size-3",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260314-234454",
+      "date": "2026-03-14",
+      "evtc_sha256": "70c692803838cb42afb3b1c6fcc5430ba065a0be648c93382229e33e36f76b3b",
+      "export_sha256": "061617ccbc8a2e56f6c524333881905a8ef7bd6dfc0edb354f97df6d89eae09a",
+      "tags": [
+        "monthly-size-4",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260409-004339",
+      "date": "2026-04-09",
+      "evtc_sha256": "2e09ccb36f5ffead46c9bc4549fc6b62a0732ed3c790df5bb72cb8c2089bbfce",
+      "export_sha256": "4d9397e2baf8de7d625c46ca60f3a731dbffc25a53af05f050caa9869f8f2356",
+      "tags": [
+        "monthly-size-1",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260429-222732",
+      "date": "2026-04-29",
+      "evtc_sha256": "e7357e78d4c4fbf0a0990ca344c74beabcf90fdf28b126e572b7874bfc1b55df",
+      "export_sha256": "397ec1e88826ad969e404cfdcc8a7c1f46c3e1d724144db8700a79aa02416cc6",
+      "tags": [
+        "monthly-size-2",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260412-220632",
+      "date": "2026-04-12",
+      "evtc_sha256": "281441131dd4fff47533b3bf3e3a6c661053a55a5e088e02d0c8cbc9b13af4a6",
+      "export_sha256": "b10e369fde670c0b1a8948f0d3d76768bf8a6dac1647a36bfebd67c69415b290",
+      "tags": [
+        "monthly-size-3",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260424-204954",
+      "date": "2026-04-24",
+      "evtc_sha256": "3acbea5c38c0517cfd23acf5af38f5390d15597b8fb87168deb785cdafd74f5c",
+      "export_sha256": "0608fc821ec1b016f5fea71b1dba7746eb504bdc16083b4a688385a3a82be713",
+      "tags": [
+        "monthly-size-4",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260519-112129",
+      "date": "2026-05-19",
+      "evtc_sha256": "502aa4810485cb613ad6d078b6296baa65b334aea2cedafd1bb9db8e1acbfd7c",
+      "export_sha256": "fb209d9e243883767825b88be6bd2bc98ad717b03050f4904a080da8d0033331",
+      "tags": [
+        "monthly-size-1",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260512-181500",
+      "date": "2026-05-12",
+      "evtc_sha256": "51881dbb6e428c92a4b739f0ed8e5755dae5d5053c3c790a394bb51db18f7496",
+      "export_sha256": "3727ddcd83534a58b32d8528cab683300161eeba0414f2bdd711877f00c104ef",
+      "tags": [
+        "monthly-size-2",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260526-202841",
+      "date": "2026-05-26",
+      "evtc_sha256": "f493b1eccec4f4efab6c796e36c6a4ac74fa4249a8a1bbc55cd3edb2303a04fe",
+      "export_sha256": "212aef199f229f1e8ecbf8d2ae58c43bc8c679febd637a7b524ebffc5a9f219d",
+      "tags": [
+        "monthly-size-3",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260508-001302",
+      "date": "2026-05-08",
+      "evtc_sha256": "b423025d29b3621fa90c61c9e1464edc2518e145d0d93caa5f90a11252f143a9",
+      "export_sha256": "4932a54d392bc3263d86bac58eff0bc8c4a44898a30f25b9b86740e0c689f677",
+      "tags": [
+        "monthly-size-4",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260608-011208",
+      "date": "2026-06-08",
+      "evtc_sha256": "785e94ef2d6eda75a0410d9ccbf2a0cb814d3652c59d4070d68efb0e4181e813",
+      "export_sha256": "3e95c1fb04301a55a51d109e17b4b3143c10b0eb4316e87470d16a7b770b860a",
+      "tags": [
+        "monthly-size-1",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260618-182428",
+      "date": "2026-06-18",
+      "evtc_sha256": "ec299025f4c2de8ec4cda5c23ddc4963478d6bbc62009fa110557c33ee36a86a",
+      "export_sha256": "9b9ec26229ca122c04afd45da6833df9f2d6b3577d57af0212352ce80963058e",
+      "tags": [
+        "monthly-size-2",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260621-225056",
+      "date": "2026-06-21",
+      "evtc_sha256": "0841cde9cf608759d52a4feaadded2a47e64145732cc196eb0eb789edf1cd398",
+      "export_sha256": "922bbf8e2815e087e85ec7d9f4087d78ee18b90d3a859d6625989b2ec9ab8005",
+      "tags": [
+        "monthly-size-3",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260625-215943",
+      "date": "2026-06-25",
+      "evtc_sha256": "a7fc9595896e293a078b40b9774893019e0c3682aae26c86c2da99eca141b8db",
+      "export_sha256": "9ebd654c86cf0371fedfe82f63fdd84ebe8523b641becec9fe011970828fec1e",
+      "tags": [
+        "monthly-size-4",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260717-225125",
+      "date": "2026-07-17",
+      "evtc_sha256": "7da6211479329feb8ff4b97eb3edca549987bcd886875650786ac16eb44e6b6a",
+      "export_sha256": "44330e7d2e579041900046734092707eeeaf618e940de066f75b3e0356c53c05",
+      "tags": [
+        "monthly-size-1",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260705-234656",
+      "date": "2026-07-05",
+      "evtc_sha256": "5e351898b3580bffbc40ab09bad9d3b3a6abcd836df910273ddec3c55d43b7ca",
+      "export_sha256": "5732e219974bd3a2b393eafdcca5cad4ba1f7914c70ca41bf3f47f9a8cc8cc6c",
+      "tags": [
+        "monthly-size-2",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260712-203400",
+      "date": "2026-07-12",
+      "evtc_sha256": "f9a98079163147dbcd8e5c9b22eff1721933c16937bd89804e74c102f2e0a098",
+      "export_sha256": "84fbed0d866e9cfa5ae5c146cc8a5721c1e9ae7b693fc2d4e3563d1d13a98719",
+      "tags": [
+        "monthly-size-3",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260708-215736",
+      "date": "2026-07-08",
+      "evtc_sha256": "9fb6096501759911edba3062efb3c27dc5c7f5d7f6d575bc8d5d7a5e6095d0ed",
+      "export_sha256": "86ae80111120750384928a8350cdd468981521b564768cb161ec1996d68f1a85",
+      "tags": [
+        "monthly-size-4",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260118-020548",
+      "date": "2026-01-18",
+      "evtc_sha256": "88e06fd301a8982c8ee3f5db1cd8563a721aace2f5c5ac30e393a2841eb542cb",
+      "export_sha256": "60a630359c887f131fa99472e9109c84fc6feab2db0432307c868ce56a941ab1",
+      "tags": [
+        "monthly-supplement",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260217-210926",
+      "date": "2026-02-17",
+      "evtc_sha256": "a2b40e3a98b96a5dd426d615b2dabc2451a17ecf13dbbc2ffd0ec46ec4da9d3a",
+      "export_sha256": "0e4ebc72bfb4f2d5c74e56129580dae7c34a3c8d6b5b55e50889e7d03a5fc597",
+      "tags": [
+        "monthly-supplement",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260327-223844",
+      "date": "2026-03-27",
+      "evtc_sha256": "6a17ada92630f6fee0a4902e5924f21c80136a767447535a0d5940827c252390",
+      "export_sha256": "b00bad3113afd8d94d7e911151712b9ab58194a98cf9b7a7957e98ded778ea51",
+      "tags": [
+        "monthly-supplement",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260428-222420",
+      "date": "2026-04-28",
+      "evtc_sha256": "19e6ddc7fee048ff4f2aa5e0dd8420b44a937474ffbc8da7284e80b656d8c47d",
+      "export_sha256": "0989a50256baa829eddd9de3c13c1f38e4003fb62ced4fc0226f7e5d25dbdb5b",
+      "tags": [
+        "monthly-supplement",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260506-211522",
+      "date": "2026-05-06",
+      "evtc_sha256": "ccbb295acb40d825a2a27dc2a7cd472b4a1b6c2d8263c7f72e3de2c3b6a06dab",
+      "export_sha256": "32b9c5c99ae447bd5bc324a8303291528b54b34289e2e202b372e4b2d9cde410",
+      "tags": [
+        "monthly-supplement",
+        "pre-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260610-212627",
+      "date": "2026-06-10",
+      "evtc_sha256": "f5bb746d504ad80eed211a1bf030b4cf12a034e7446a0970ecbfebb01f09734b",
+      "export_sha256": "96e31609abd96a4d3682b661dcd14415ce96697a01ca99edb42e5c99f974b4b5",
+      "tags": [
+        "monthly-supplement",
+        "post-2026-05-07-format"
+      ]
+    },
+    {
+      "stem": "20260718-154555",
+      "date": "2026-07-18",
+      "evtc_sha256": "9e63f3cbd8c9f9a4c813d617656ebd949a65fb18357e3d7c89c7939343737837",
+      "export_sha256": "a7946ce0045cdc91bb14519c4b326d481f229d81d36d2c067893d7e1da37c084",
+      "tags": [
+        "monthly-supplement",
+        "post-2026-05-07-format"
+      ]
+    }
   ]
 }

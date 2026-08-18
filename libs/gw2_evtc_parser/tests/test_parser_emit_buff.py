@@ -1379,7 +1379,7 @@ def test_scan_regeneration_overstacks_reports_uncredited_removals() -> None:
     """
     evtc = _build_minimal_evtc(
         [(1, 1, 1, "Src", True)],
-        build="20250925",
+        build="20260507",
         skills=[(718, "Regeneration")],
         events=[
             # Uncredited: iff UNKNOWN and no target agent.
@@ -1429,3 +1429,42 @@ def test_scan_regeneration_overstacks_reports_uncredited_removals() -> None:
         for event in PythonEvtcParser().parse_events(evtc)
         if getattr(event, "kind", None) == "remove_single"
     ] == [2_000]
+
+
+def test_2026_05_statechange_fold_is_build_gated() -> None:
+    """Codes 69/71/72 (buff apply/remove) and 67/68 (cast) only fold on
+    builds >= 2026-05-07.
+
+    arcdps moved buff application/removal and cast start/stop onto
+    dedicated statechange codes only from build 2026-05-07; before that
+    the legacy channel (statechange 0 with ``ev.buff``/``is_activation``)
+    carried them. Folding unconditionally would reinterpret whatever a
+    pre-2026-05-07 log wrote in those code slots.
+    """
+    skill_725 = _build_event_record_2025(
+        time_ms=1_000,
+        src_agent=1,
+        dst_agent=2,
+        value=10_000,
+        skill_id=725,  # Fury
+        is_statechange=69,  # BuffApply on the 2026-05 channel
+    )
+    for build in ("20250925", "20260506"):
+        evtc = _build_minimal_evtc(
+            [(1, 1, 1, "Src", True)],
+            build=build,
+            skills=[(725, "Fury")],
+            events=[skill_725],
+        )
+        events = list(PythonEvtcParser().parse_events(evtc))
+        assert not any(e.skill_id == 725 for e in events), (
+            f"statechange 69 folded on pre-2026-05-07 build {build}"
+        )
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20260507",
+        skills=[(725, "Fury")],
+        events=[skill_725],
+    )
+    events = list(PythonEvtcParser().parse_events(evtc))
+    assert any(e.skill_id == 725 for e in events), "statechange 69 not folded on 2026-05-07 build"

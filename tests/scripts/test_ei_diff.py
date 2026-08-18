@@ -95,7 +95,7 @@ def test_manifest_and_versioned_baseline_match_canonical_corpus():
     assert [entry["stem"] for entry in manifest["entries"]] == corpus
     assert baseline["reference"] == manifest["reference"]
     assert baseline["manifest_sha256"] == _sha256(ROOT / "scripts/ei-parity/corpus-manifest.json")
-    assert sum(baseline["buckets"].values()) == 133
+    assert sum(baseline["buckets"].values()) == 588
     assert len(baseline["buckets"]) == 13
 
 

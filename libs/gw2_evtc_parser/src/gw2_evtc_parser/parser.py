@@ -728,19 +728,27 @@ class PythonEvtcParser:
                 # overstacked, carrying the wasted duration in
                 # overstack_value with value == 0, and it does not change
                 # the target's buff state.
-                if is_statechange in _BUFF_STATECHANGES_2026_05:
-                    is_statechange = 0
-                elif is_statechange == _CAST_START_STATECHANGE_2026_05:
-                    # Cast start. The old channel signalled this with
-                    # is_activation = NORMAL (or QUICKNESS, which no log in
-                    # the corpus uses); the new one leaves the byte at 0 and
-                    # carries the same value/buff_dmg duration pair.
-                    is_statechange = 0
-                    is_activation = ActivationType.NORMAL
-                elif is_statechange == _CAST_END_STATECHANGE_2026_05:
-                    # Cast end: is_activation still holds the terminal
-                    # ActivationType (MINIMUM / CANCEL / RESET / NO_DATA).
-                    is_statechange = 0
+                if build_int >= _CONDITION_ENUM_REBASE_BUILD and is_statechange in (
+                    _BUFF_STATECHANGES_2026_05
+                    | {_CAST_START_STATECHANGE_2026_05, _CAST_END_STATECHANGE_2026_05}
+                ):
+                    # Code 70 is deliberately NOT folded in: it is an apply that
+                    # overstacked, carrying the wasted duration in
+                    # overstack_value with value == 0, and it does not change
+                    # the target's buff state.
+                    if is_statechange in _BUFF_STATECHANGES_2026_05:
+                        is_statechange = 0
+                    elif is_statechange == _CAST_START_STATECHANGE_2026_05:
+                        # Cast start. The old channel signalled this with
+                        # is_activation = NORMAL (or QUICKNESS, which no log in
+                        # the corpus uses); the new one leaves the byte at 0 and
+                        # carries the same value/buff_dmg duration pair.
+                        is_statechange = 0
+                        is_activation = ActivationType.NORMAL
+                    elif is_statechange == _CAST_END_STATECHANGE_2026_05:
+                        # Cast end: is_activation still holds the terminal
+                        # ActivationType (MINIMUM / CANCEL / RESET / NO_DATA).
+                        is_statechange = 0
             else:
                 (
                     time_ms,
