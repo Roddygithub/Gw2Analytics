@@ -70,10 +70,21 @@ _OVERRIDE_LOGIC_BUFFS: frozenset[str] = frozenset({"might", "stability"})
 #: only front stack counts toward uptime, drop shortest on overflow,
 #: graft extensions by closest duration, added_active moves to front).
 #: Regeneration uses its own special queue logic; might/stability use OverrideLogic.
-_QUEUE_LOGIC_BUFFS: frozenset[str] = frozenset({
-    "fury", "quickness", "alacrity", "protection", "vigor",
-    "aegis", "swiftness", "resistance", "resolution", "superspeed", "stealth",
-})
+_QUEUE_LOGIC_BUFFS: frozenset[str] = frozenset(
+    {
+        "fury",
+        "quickness",
+        "alacrity",
+        "protection",
+        "vigor",
+        "aegis",
+        "swiftness",
+        "resistance",
+        "resolution",
+        "superspeed",
+        "stealth",
+    }
+)
 
 _CAPACITIES = {
     "might": 25,
