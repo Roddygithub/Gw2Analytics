@@ -89,7 +89,7 @@ _QUEUE_LOGIC_BUFFS: frozenset[str] = frozenset(
 _CAPACITIES = {
     "might": 25,
     "stability": 25,
-    "regeneration": 5,
+    "regeneration": 15,
     "stealth": 9,
     "fury": 15,
     "quickness": 9,
@@ -99,7 +99,7 @@ _CAPACITIES = {
     "aegis": 9,
     "swiftness": 9,
     "resistance": 9,
-    "resolution": 9,
+    "resolution": 15,
     "superspeed": 9,
 }
 # All other boons default to 1 stack max (handled in compute logic).

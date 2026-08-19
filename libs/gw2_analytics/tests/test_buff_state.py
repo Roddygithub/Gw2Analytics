@@ -491,8 +491,10 @@ def _regen_apply(time_ms: int, duration_ms: int, stack_id: int) -> BoonApplyEven
 
 
 def _fill_regen_queue(tracker: BuffStateTracker) -> None:
-    """Five stacks, longest last, so evicting the tail is expensive."""
-    for index, duration in enumerate((1_000, 1_000, 1_000, 1_000, 60_000)):
+    """Fill queue to capacity (15), longest last, so evicting the tail is expensive."""
+    # 14 short stacks + 1 long stack = 15 total (capacity)
+    durations = [1_000] * 14 + [60_000]
+    for index, duration in enumerate(durations):
         tracker.process(_regen_apply(0, duration, 100 + index))
 
 
@@ -521,9 +523,25 @@ def test_regeneration_overstack_hint_falls_back_to_the_closest_duration() -> Non
 
 def test_regeneration_without_a_hint_still_evicts_the_tail() -> None:
     """A hint too far from the application is not one, and the tail goes."""
+    from gw2_analytics.buff_state import _capacity_for
+    # Temporarily reduce capacity for this test to match original test design (capacity 5)
+    original_capacity_for = _capacity_for
+    def test_capacity_for(name: str) -> int:
+        if name == "regeneration":
+            return 5
+        return original_capacity_for(name)
+    import gw2_analytics.buff_state as bs
+    bs._capacity_for = test_capacity_for
+
     tracker = BuffStateTracker(regen_overstacks={7: [(5, 1_000, 102)]})
-    _fill_regen_queue(tracker)
+    # Fill to capacity (5): 4 short (1s) + 1 long (60s) = 5 stacks
+    for index, duration in enumerate([1_000] * 4 + [60_000]):
+        tracker.process(_regen_apply(0, duration, 100 + index))
+    # 6th application at 100ms: should overflow and evict tail (60s stack)
     tracker.process(_regen_apply(100, 2_000, 999))
 
     # The 60 s stack was evicted, so the queue runs dry long before 30 s.
     assert tracker.compute_player_uptimes(7, 30_000)["regeneration"] < 30.0
+
+    # Restore
+    bs._capacity_for = original_capacity_for
