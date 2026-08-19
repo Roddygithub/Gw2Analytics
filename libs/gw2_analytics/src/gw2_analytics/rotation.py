@@ -960,8 +960,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     owner = ownership_resolver(event.target_agent_id, event.time_ms)
                 if owner is None:
                     owner = (
-                        spawn_owner_by_target.get(event.target_agent_id)
-                        or event.source_agent_id
+                        spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                     )
                 if owner:
                     add_instant(owner, 65418, event.time_ms)
@@ -975,8 +974,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     owner = ownership_resolver(event.target_agent_id, event.time_ms)
                 if owner is None:
                     owner = (
-                        spawn_owner_by_target.get(event.target_agent_id)
-                        or event.source_agent_id
+                        spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                     )
                 if owner:
                     add_instant(owner, 12717, event.time_ms)
@@ -991,8 +989,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     owner = ownership_resolver(event.target_agent_id, event.time_ms)
                 if owner is None:
                     owner = (
-                        spawn_owner_by_target.get(event.target_agent_id)
-                        or event.source_agent_id
+                        spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                     )
                 if owner:
                     add_instant(owner, 31568, event.time_ms)
@@ -1006,8 +1003,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     owner = ownership_resolver(event.target_agent_id, event.time_ms)
                 if owner is None:
                     owner = (
-                        spawn_owner_by_target.get(event.target_agent_id)
-                        or event.source_agent_id
+                        spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                     )
                 if owner:
                     add_instant(owner, 74314, event.time_ms)
@@ -1021,8 +1017,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     owner = ownership_resolver(event.target_agent_id, event.time_ms)
                 if owner is None:
                     owner = (
-                        spawn_owner_by_target.get(event.target_agent_id)
-                        or event.source_agent_id
+                        spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
                     )
                 if owner:
                     add_instant(owner, 12658, event.time_ms)

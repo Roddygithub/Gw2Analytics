@@ -530,13 +530,17 @@ def test_regeneration_overstack_hint_falls_back_to_the_closest_duration() -> Non
 def test_regeneration_without_a_hint_still_evicts_the_tail() -> None:
     """A hint too far from the application is not one, and the tail goes."""
     from gw2_analytics.buff_state import _capacity_for
+
     # Temporarily reduce capacity for this test to match original test design (capacity 5)
     original_capacity_for = _capacity_for
+
     def test_capacity_for(name: str) -> int:
         if name == "regeneration":
             return 5
         return original_capacity_for(name)
+
     import gw2_analytics.buff_state as bs
+
     bs._capacity_for = test_capacity_for
 
     tracker = BuffStateTracker(regen_overstacks={7: [(5, 1_000, 102)]})
