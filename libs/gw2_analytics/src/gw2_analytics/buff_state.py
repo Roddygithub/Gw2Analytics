@@ -275,16 +275,25 @@ class BuffStateTracker:
             )
             if next_expiry is None or next_expiry >= new_time_ms:
                 break
-            stack.cumulative_stack_ms += len(stack.expirations) * (next_expiry - stack.last_time_ms)
+            elapsed = next_expiry - stack.last_time_ms
+            stack.cumulative_stack_ms += len(stack.expirations) * elapsed
             stack.last_time_ms = next_expiry
+            # EI: TotalDuration = Duration + Extensions; Duration decreases,
+            # so TotalDuration also decreases by the same elapsed amount.
+            if stack.total_durations:
+                stack.total_durations = [td - elapsed for td in stack.total_durations]
             index = stack.expirations.index(next_expiry)
             stack.expirations.pop(index)
             if stack.total_durations:
                 stack.total_durations.pop(index)
             stack.stack_ids.pop(index)
             stack.healing_scores.pop(index)
-        stack.cumulative_stack_ms += len(stack.expirations) * (new_time_ms - stack.last_time_ms)
-        stack.last_time_ms = new_time_ms
+        elapsed = new_time_ms - stack.last_time_ms
+        if elapsed > 0:
+            stack.cumulative_stack_ms += len(stack.expirations) * elapsed
+            if stack.total_durations:
+                stack.total_durations = [td - elapsed for td in stack.total_durations]
+            stack.last_time_ms = new_time_ms
 
     @staticmethod
     def _advance(stack: _BuffStack, new_time_ms: int) -> None:
@@ -586,20 +595,58 @@ class BuffStateTracker:
                         target_tracker.total_durations.pop(stack_index)
                     target_tracker.stack_ids.pop(stack_index)
                     target_tracker.healing_scores.pop(stack_index)
-            elif event.stacks and target_tracker.expirations:
-                index = next(
+            elif buff_name in _OVERRIDE_LOGIC_BUFFS and target_tracker.total_durations:
+                # OverrideLogic (might, stability): stack_id primary, then TotalDuration
+                # EI matches by abs(TotalDuration - removedDuration) < 15, iterating
+                # in order (sorted by TotalDuration asc). We preserve that order
+                # match as fallback after stack_id.
+                stack_index = next(
                     (
                         i
                         for i, stack_id in enumerate(target_tracker.stack_ids)
                         if event.stack_id is not None and stack_id == event.stack_id
                     ),
-                    0,
+                    None,
                 )
-                target_tracker.expirations.pop(index)
-                if target_tracker.total_durations:
-                    target_tracker.total_durations.pop(index)
-                target_tracker.stack_ids.pop(index)
-                target_tracker.healing_scores.pop(index)
+                if stack_index is None:
+                    stack_index = next(
+                        (
+                            i
+                            for i, total_dur in enumerate(target_tracker.total_durations)
+                            if abs(total_dur - event.duration_ms) < 15
+                        ),
+                        None,
+                    )
+                if stack_index is not None:
+                    target_tracker.expirations.pop(stack_index)
+                    target_tracker.total_durations.pop(stack_index)
+                    target_tracker.stack_ids.pop(stack_index)
+                    target_tracker.healing_scores.pop(stack_index)
+            elif target_tracker.expirations:
+                # Other intensity (stability): stack_id primary, then duration
+                stack_index = next(
+                    (
+                        i
+                        for i, stack_id in enumerate(target_tracker.stack_ids)
+                        if event.stack_id is not None and stack_id == event.stack_id
+                    ),
+                    None,
+                )
+                if stack_index is None:
+                    stack_index = next(
+                        (
+                            i
+                            for i, duration in enumerate(target_tracker.expirations)
+                            if duration is not None and abs(duration - event.duration_ms) < 15
+                        ),
+                        None,
+                    )
+                if stack_index is not None:
+                    target_tracker.expirations.pop(stack_index)
+                    if target_tracker.total_durations:
+                        target_tracker.total_durations.pop(stack_index)
+                    target_tracker.stack_ids.pop(stack_index)
+                    target_tracker.healing_scores.pop(stack_index)
         elif event.kind == "remove_all":
             target_tracker.expirations.clear()
             target_tracker.total_durations.clear()

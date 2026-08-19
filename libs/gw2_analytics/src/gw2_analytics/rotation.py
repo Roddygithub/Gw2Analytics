@@ -622,7 +622,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     event_times = [event.time_ms for event in event_list]
     # GW2 build cutoff for Sand Cascade effect GUID -> skill ID change
     # GW2 build 194363 (January 2026 patch) introduced effect GUID 44092AEF... and skill ID 43448
-    _SAND_CASCADE_GW2_BUILD_CUTOFF = 194363
+    sand_cascade_gw2_build_cutoff = 194363
     weaver_attunement_groups: dict[int, list[tuple[int, list[BoonApplyEvent | BuffApplyEvent]]]] = (
         defaultdict(list)
     )
@@ -1172,13 +1172,17 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 }
                 effect_skill_id = 73116 if has_distress_buffs else None
             elif event.guid == "23613E6E374EC6429FE9A69CC893984D":
-                # Sand Cascade: effect GUID unchanged but skill ID changed in GW2 build 197490
+                # Sand Cascade: effect GUID unchanged but skill ID changed
+                # in GW2 build 197490
                 # Pre-197490: skill 62671; 197490+: skill 43448
-                effect_skill_id = 43448 if (gw2_build or 0) >= _SAND_CASCADE_GW2_BUILD_CUTOFF else 62671
+                is_post_197490 = (gw2_build or 0) >= sand_cascade_gw2_build_cutoff
+                effect_skill_id = 43448 if is_post_197490 else 62671
             elif event.guid == "44092AEF6D619F4093FEA4E9D9142D01":
-                # Sand Cascade (post-GW2 build 197490 effect GUID): same skill ID logic
+                # Sand Cascade (post-GW2 build 197490 effect GUID):
+                # same skill ID logic
                 # Pre-197490: skill 62671; 197490+: skill 43448
-                effect_skill_id = 43448 if (gw2_build or 0) >= _SAND_CASCADE_GW2_BUILD_CUTOFF else 62671
+                is_post_197490 = (gw2_build or 0) >= sand_cascade_gw2_build_cutoff
+                effect_skill_id = 43448 if is_post_197490 else 62671
             else:
                 effect_skill_id = (
                     _EFFECT_CASTS_BY_DST.get(event.guid)

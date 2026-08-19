@@ -142,7 +142,13 @@ class TestBuffStateTracker:
             _boon_apply(skill_id=might_id, target=1, time_ms=0, duration_ms=100000, stacks=5)
         )
         tracker.process(
-            _boon_apply(skill_id=might_id, target=1, time_ms=50000, kind="remove_single")
+            _boon_apply(
+                skill_id=might_id,
+                target=1,
+                time_ms=50000,
+                duration_ms=100000,
+                kind="remove_single",
+            )
         )
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=100000)
         # 5 stacks for 50s + 4 stacks for 50s averages 4.5 stacks.
