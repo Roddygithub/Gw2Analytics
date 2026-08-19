@@ -595,6 +595,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     agent_id_by_instance: Mapping[int, int] | None = None,
     ownership_resolver: Callable[[int, int], int | None] | None = None,
     squad_agent_ids: Collection[int] = (),
+    gw2_build: int | None = None,
 ) -> list[SkillCast]:
     """Return completed, clipped casts ordered by fight-relative start time.
 
@@ -619,6 +620,9 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     has_effect_data = any(isinstance(e, EffectEvent) for e in event_list)
     origin = start_time_ms if start_time_ms is not None else min(e.time_ms for e in event_list)
     event_times = [event.time_ms for event in event_list]
+    # GW2 build cutoff for Sand Cascade effect GUID -> skill ID change
+    # GW2 build 194363 (January 2026 patch) introduced effect GUID 44092AEF... and skill ID 43448
+    _SAND_CASCADE_GW2_BUILD_CUTOFF = 194363
     weaver_attunement_groups: dict[int, list[tuple[int, list[BoonApplyEvent | BuffApplyEvent]]]] = (
         defaultdict(list)
     )
@@ -951,7 +955,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 and event.skill_id == 59536
                 and event.target_agent_id in siege_turtle_agent_ids
             ):
-                owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
+                owner = None
+                if ownership_resolver:
+                    owner = ownership_resolver(event.target_agent_id, event.time_ms)
+                if owner is None:
+                    owner = (
+                        spawn_owner_by_target.get(event.target_agent_id)
+                        or event.source_agent_id
+                    )
                 if owner:
                     add_instant(owner, 65418, event.time_ms)
             if (
@@ -959,7 +970,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 and event.skill_id == 59536
                 and event.target_agent_id in fern_hound_agent_ids
             ):
-                owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
+                owner = None
+                if ownership_resolver:
+                    owner = ownership_resolver(event.target_agent_id, event.time_ms)
+                if owner is None:
+                    owner = (
+                        spawn_owner_by_target.get(event.target_agent_id)
+                        or event.source_agent_id
+                    )
                 if owner:
                     add_instant(owner, 12717, event.time_ms)
             if (
@@ -968,7 +986,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 and event.duration_ms >= 1000
                 and event.target_agent_id in smokescale_agent_ids
             ):
-                owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
+                owner = None
+                if ownership_resolver:
+                    owner = ownership_resolver(event.target_agent_id, event.time_ms)
+                if owner is None:
+                    owner = (
+                        spawn_owner_by_target.get(event.target_agent_id)
+                        or event.source_agent_id
+                    )
                 if owner:
                     add_instant(owner, 31568, event.time_ms)
             if (
@@ -976,7 +1001,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 and event.skill_id == 59536
                 and event.target_agent_id in warclaw_agent_ids
             ):
-                owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
+                owner = None
+                if ownership_resolver:
+                    owner = ownership_resolver(event.target_agent_id, event.time_ms)
+                if owner is None:
+                    owner = (
+                        spawn_owner_by_target.get(event.target_agent_id)
+                        or event.source_agent_id
+                    )
                 if owner:
                     add_instant(owner, 74314, event.time_ms)
             if (
@@ -984,7 +1016,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 and event.skill_id == 59536
                 and event.target_agent_id in jungle_stalker_agent_ids
             ):
-                owner = spawn_owner_by_target.get(event.target_agent_id) or event.source_agent_id
+                owner = None
+                if ownership_resolver:
+                    owner = ownership_resolver(event.target_agent_id, event.time_ms)
+                if owner is None:
+                    owner = (
+                        spawn_owner_by_target.get(event.target_agent_id)
+                        or event.source_agent_id
+                    )
                 if owner:
                     add_instant(owner, 12658, event.time_ms)
         # Spiteful Spirit (29560) - EI has two finders:
@@ -1028,7 +1067,12 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 _MISSILE_ICD.get(event.skill_id, 50),
             )
         elif isinstance(event, SpawnEvent) and event.target_agent_id in ranger_pet_agent_ids:
-            add_instant(event.source_agent_id, -28, event.time_ms)
+            owner = None
+            if ownership_resolver:
+                owner = ownership_resolver(event.target_agent_id, event.time_ms)
+            if owner is None:
+                owner = event.source_agent_id
+            add_instant(owner, -28, event.time_ms)
         elif isinstance(event, EffectEvent):
             by_dst = event.guid in _EFFECT_CASTS_BY_DST
             effect_skill_id: int | None
@@ -1127,6 +1171,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     and other.target_agent_id == caster
                 }
                 effect_skill_id = 73116 if has_distress_buffs else None
+            elif event.guid == "23613E6E374EC6429FE9A69CC893984D":
+                # Sand Cascade: effect GUID unchanged but skill ID changed in GW2 build 197490
+                # Pre-197490: skill 62671; 197490+: skill 43448
+                effect_skill_id = 43448 if (gw2_build or 0) >= _SAND_CASCADE_GW2_BUILD_CUTOFF else 62671
+            elif event.guid == "44092AEF6D619F4093FEA4E9D9142D01":
+                # Sand Cascade (post-GW2 build 197490 effect GUID): same skill ID logic
+                # Pre-197490: skill 62671; 197490+: skill 43448
+                effect_skill_id = 43448 if (gw2_build or 0) >= _SAND_CASCADE_GW2_BUILD_CUTOFF else 62671
             else:
                 effect_skill_id = (
                     _EFFECT_CASTS_BY_DST.get(event.guid)

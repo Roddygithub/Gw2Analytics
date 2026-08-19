@@ -1445,6 +1445,7 @@ def test_post_july_sand_cascade_effect_is_deduplicated() -> None:
             duration_ms=1_000,
             start_time_ms=origin,
             professions={7: Profession.NECROMANCER},
+            gw2_build=200000,
         )
     ] == [(43448, 100)]
 
