@@ -809,6 +809,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             agent.instance_id: agent.id for agent in fight.agents if agent.instance_id
         },
         squad_agent_ids={agent.id for agent in fight.agents if agent.is_player},
+        gw2_build=header.gw2_build if header else None,
     )
     has_downed_buff_applies = any(
         isinstance(event, BoonApplyEvent) and event.kind == "apply" and event.skill_id == 770
