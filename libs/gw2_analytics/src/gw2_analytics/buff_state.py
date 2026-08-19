@@ -659,7 +659,7 @@ class BuffStateTracker:
                 event.duration_ms * event.stacks
             )
 
-    def _process_buff_apply(self, event: BuffApplyEvent) -> None:  # noqa: PLR0915
+    def _process_buff_apply(self, event: BuffApplyEvent) -> None:  # noqa: PLR0912, PLR0915
         """Process a ``BuffApplyEvent`` (CBTS_BUFFAPPLY statechange).
 
         These are initial-stack snapshots: ``skill_id`` is the buff ID,
@@ -680,18 +680,35 @@ class BuffStateTracker:
         expiry = time_ms + event.duration_ms if event.duration_ms > 0 else None
         # QueueLogic buffs (single-stack duration boons with queue behavior)
         if buff_name in _QUEUE_LOGIC_BUFFS:
-            # QueueLogic: add initial stacks as queue
-            duration = event.duration_ms if event.duration_ms > 0 else None
-            target_tracker.expirations.extend([duration] * event.stacks)
-            target_tracker.stack_ids.extend([event.stack_id] * event.stacks)
-            target_tracker.healing_scores.extend([0] * event.stacks)
-            # No total_durations for QueueLogic buffs
-            # Keep only up to capacity (drop oldest if over capacity)
-            if len(target_tracker.expirations) > _capacity_for(buff_name):
-                excess = len(target_tracker.expirations) - _capacity_for(buff_name)
-                target_tracker.expirations = target_tracker.expirations[excess:]
-                target_tracker.stack_ids = target_tracker.stack_ids[excess:]
-                target_tracker.healing_scores = target_tracker.healing_scores[excess:]
+            # QueueLogic: add initial stacks one by one, using same overflow
+            # logic as mid-combat applies (drop shortest non-front on overflow,
+            # replacing it in place to preserve queue order).
+            capacity = _capacity_for(buff_name)
+            for _ in range(event.stacks):
+                duration = event.duration_ms if event.duration_ms > 0 else None
+                if len(target_tracker.expirations) >= capacity:
+                    # Find shortest duration among non-front stacks (index >= 1)
+                    if len(target_tracker.expirations) > 1:
+                        min_idx = 1
+                        min_dur = target_tracker.expirations[1]
+                        for i in range(2, len(target_tracker.expirations)):
+                            dur = target_tracker.expirations[i]
+                            if dur is not None and (min_dur is None or dur < min_dur):
+                                min_dur = dur
+                                min_idx = i
+                        # Replace in place (EI behavior), not append
+                        target_tracker.expirations[min_idx] = duration
+                        target_tracker.stack_ids[min_idx] = event.stack_id
+                        target_tracker.healing_scores[min_idx] = 0
+                    else:
+                        # Only one stack (the front), replace it
+                        target_tracker.expirations[0] = duration
+                        target_tracker.stack_ids[0] = event.stack_id
+                        target_tracker.healing_scores[0] = 0
+                else:
+                    target_tracker.expirations.append(duration)
+                    target_tracker.stack_ids.append(event.stack_id)
+                    target_tracker.healing_scores.append(0)
 
         # Intensity buffs with max_stacks > 1 (might, stability)
         elif _max_stacks_for(buff_name) > 1:
@@ -773,7 +790,16 @@ class BuffStateTracker:
             ) + event.extended_duration_ms
             return
         if buff_name in _QUEUE_LOGIC_BUFFS and target_tracker.expirations:
-            # QueueLogic: graft extension onto stack with duration closest to old_duration
+            # QueueLogic: graft extension onto stack with matching stack_id,
+            # else fallback to closest remaining duration (EI behavior).
+            if event.stack_id is not None:
+                for i, sid in enumerate(target_tracker.stack_ids):
+                    if sid == event.stack_id:
+                        target_tracker.expirations[i] = (
+                            target_tracker.expirations[i] or 0
+                        ) + event.extended_duration_ms
+                        return
+            # Fallback: closest remaining duration
             candidates = [(i, e) for i, e in enumerate(target_tracker.expirations) if e is not None]
             if candidates:
                 index, remaining = min(candidates, key=lambda pair: abs(pair[1] - old_duration))
