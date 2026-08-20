@@ -215,7 +215,7 @@ def _hsl_hex(deg: int, s: float, lt: float) -> str:
     import colorsys
 
     r, g, b = colorsys.hls_to_rgb((deg % 360) / 360, lt, s)
-    return f"#{round(r * 255):02x}{round(g * 255):02x}{round(b * 255):02x}"
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
 def category_style(cat: str) -> tuple[str, str]:

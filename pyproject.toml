@@ -128,7 +128,6 @@ extend-exclude = [
     # BMAD framework files (third-party) - exclude from linting
     ".agents",
     "_bmad",
-    ".opencode",
 ]
 
 [tool.ruff.lint]

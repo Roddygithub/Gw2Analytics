@@ -1,21 +1,21 @@
 # Règles de session — Gw2Analytics
 
-## Compactions / résumés de session
-À CHAQUE fin de session (ou à chaque compaction), sauvegarder le résumé complet de la session dans **supermemory** :
+## Mémoire durable et confidentialité
 
-- Espace actif par défaut (ne pas en créer d'autre).
-- Format : titre `## PROJET Gw2Analytics — Résumé de session (YYYY-MM-DD)` puis sections : Objectif, État du travail (fait/en cours/bloqué), Next Move, Fichiers clés, Probes, Notes de décision.
-- Toujours inclure les diffs de parité actuels (par joueur), les mappings EI identifiés, et les IDs/GUIDs en jeu.
-- Utiliser `supermemory_add_memory` avec `action: "save"`.
-
-Ne PAS garder le résumé uniquement dans le contexte de session — il doit être persistant dans supermemory pour les sessions suivantes.
+- Le dépôt est la mémoire durable : code/tests/CI pour le comportement livré,
+  SPEC acceptées pour le contrat à construire, ADR pour les décisions et
+  `docs/agentic/` pour les checkpoints opérationnels.
+- Supermemory est un outil personnel optionnel ; il ne constitue ni une
+  dépendance, ni une source de vérité, ni une obligation de fin de session.
+- `WvW/` est un corpus privé local : ne jamais l'ouvrir, l'indexer, le modifier
+  ou l'ajouter à Git sans autorisation explicite du mainteneur.
 
 <!-- bmad:context -->
 <!-- Verified 2026-08-13 against 553b40c. Managed by bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want preserved outside the markers. -->
 
 ## Gw2Analytics
 
-Plateforme d'analyse de combats WvW. Les contrats et conventions détaillés vivent dans `README.md`, `CONTRIBUTING.md` et `docs/`; la planification BMAD vit dans `_bmad-output/`.
+Plateforme d'analyse de combats WvW. Les contrats et conventions détaillés vivent dans `README.md`, `CONTRIBUTING.md` et `docs/`; les SPEC BMAD acceptées vivent dans `_bmad-output/specs/`.
 
 ## Policy
 
@@ -27,14 +27,15 @@ Plateforme d'analyse de combats WvW. Les contrats et conventions détaillés viv
 ## Where things are
 
 - Comparaison EI canonique: `libs/gw2_analytics/src/gw2_analytics/ei_compare.py`; pilotes et corpus local: `scripts/ei-parity/`.
-- Décisions d'architecture acceptées: `docs/adr/`; contrat BMAD actif: `_bmad-output/specs/`.
+- Décisions d'architecture acceptées: `docs/adr/`; contrat BMAD actif: `_bmad-output/specs/`; checkpoints opérationnels: `docs/agentic/`.
+- Les roadmaps, backlogs, sessions et plans explicitement marqués historiques ne définissent pas la priorité. Au Level 1, une nouvelle priorité exige une proposition puis l'accord du mainteneur.
 
 ## Running and verifying
 
 - Exécuter les outils Python via `uv run`; une invocation Python nue contourne l'environnement du workspace.
 - Itérer avec les tests ciblés; la suite Python complète impose une couverture globale de 90 % et peut nécessiter les services Docker pour les tests d'intégration.
-- Les skills BMAD vivent dans `.agents/skills/bmad-*` (chargés via `skills.paths` d'`opencode.json`) et le framework dans `_bmad/`. Le noyau (`resolve_config.py`, `resolve_customization.py`, `render_skill.py`, `memlog.py`) ne dépend que de la stdlib — vérifiable via `tests/scripts/test_bmad_framework.py`.
-- opencode ne substitue aucune variable dans les skills (à la différence de Claude Code) : remplacer manuellement `{project-root}` par la racine du repo (`/home/roddy/Work/Gw2Analytics`) et `{skill-root}` par le répertoire du skill invoqué (le bloc « Base directory » de l'outil skill).
+- Les skills BMAD canoniques vivent dans `.agents/skills/bmad-*` et sont intégrés à Codex. Le framework est dans `_bmad/`. Le noyau (`resolve_config.py`, `resolve_customization.py`, `render_skill.py`, `memlog.py`) ne dépend que de la stdlib — vérifiable via `tests/scripts/test_bmad_framework.py`.
+- Régénérer une intégration BMAD par l'installeur officiel épinglé plutôt que modifier les fichiers gérés à la main. OpenCode n'est plus un harness actif ; tout fallback multi-provider exige une configuration et une validation distinctes.
 
 ## Conventions that differ from defaults
 

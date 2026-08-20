@@ -1,5 +1,9 @@
 # Session log — Elite Insights parity
 
+> **Historique — pas un état courant.** Ces notes conservent les décisions et
+> probes passés ; elles ne doivent pas piloter une nouvelle priorité sans
+> confirmation par le code, les tests, le corpus disponible et le mainteneur.
+
 Newest first. Each entry records what moved, how it was confirmed, and what was
 ruled out, so a later pass does not retrace the same ground.
 
