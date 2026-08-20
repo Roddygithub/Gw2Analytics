@@ -128,18 +128,6 @@ const HEADER_STYLE: React.CSSProperties = {
   gap: 8,
 };
 
-const BUTTON_STYLE: React.CSSProperties = {
-  fontSize: 12,
-  fontFamily: "var(--font-geist-sans), Arial, Helvetica, sans-serif",
-  padding: "4px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: 4,
-  background: "var(--background)",
-  color: "var(--foreground)",
-  cursor: "pointer",
-  fontWeight: 500,
-};
-
 const CAPTION_STYLE: React.CSSProperties = {
   fontSize: 13,
   opacity: 0.7,

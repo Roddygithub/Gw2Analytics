@@ -58,6 +58,7 @@ export async function fetchCached<T>(
           }
           if (typeof parsed.error_code === "string") errorCode = parsed.error_code;
         } catch {
+          // Non-JSON error responses retain the response text as detail.
         }
         throw new ApiError(resp.status, detail || resp.statusText || String(resp.status), errorCode);
       }

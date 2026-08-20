@@ -27,14 +27,29 @@
  * :class:`TimelineChartPoint` with just the 3 series numbers
  * + placeholder ``key``/``xLabel``/``tooltip`` strings.
  */
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+
+const { fetchFightPlayerTimelineMock } = vi.hoisted(() => ({
+  fetchFightPlayerTimelineMock: vi.fn(),
+}));
+
+vi.mock("@/lib/api/fights", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/fights")>()),
+  fetchFightPlayerTimeline: fetchFightPlayerTimelineMock,
+}));
+
+vi.mock("@/components/PerFightTimelineSection", async (importOriginal) => {
+  return await importOriginal<typeof import("@/components/PerFightTimelineSection")>();
+});
+
 import {
   PerFightTimelineChart,
   buildPerFightTimelineLayout,
   formatPerFightLogTick,
 } from "@/components/PerFightTimelineChart";
-import type { PerFightTimelinePoint } from "@/lib/api";
+import { LazyTabbedTimelineSection } from "@/components/LazyTabbedTimelineSection";
+import type { FightPlayerTimeline, FightTimeline, PerFightTimelinePoint } from "@/lib/api";
 import type { TimelineChartPoint } from "@/components/TimelineChart";
 
 function makePoint(
@@ -208,5 +223,99 @@ describe("formatPerFightLogTick", () => {
     expect(formatPerFightLogTick(1_500_000)).toBe("1.5M");
     expect(formatPerFightLogTick(1_000_000_000)).toBe("1B");
     expect(formatPerFightLogTick(1_500_000_000)).toBe("1.5B");
+  });
+});
+
+describe("LazyTabbedTimelineSection", () => {
+  it("keeps the selected per-player tab while a new window loads", async () => {
+    const timeline: FightTimeline = {
+      fight_id: "fight-1",
+      window_s: 10,
+      duration_s: 20,
+      points: THREE_BUCKETS,
+    };
+    const playerTimeline = (windowS: number): FightPlayerTimeline => ({
+      fight_id: "fight-1",
+      window_s: windowS,
+      duration_s: 20,
+      series: [{ account_name: "Player.1234", name: "Player", points: [] }],
+    });
+    let resolveSecondRequest!: (value: FightPlayerTimeline) => void;
+    const secondRequest = new Promise<FightPlayerTimeline>((resolve) => {
+      resolveSecondRequest = resolve;
+    });
+    fetchFightPlayerTimelineMock
+      .mockResolvedValueOnce(playerTimeline(10))
+      .mockReturnValueOnce(secondRequest);
+
+    const { rerender } = render(
+      <LazyTabbedTimelineSection timeline={timeline} fightId="fight-1" windowS={10} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Per-player" })).not.toBeDisabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Per-player" }));
+    expect(screen.getByText(/Showing 1 player \(10-second window/)).toBeInTheDocument();
+
+    rerender(
+      <LazyTabbedTimelineSection timeline={timeline} fightId="fight-1" windowS={20} />,
+    );
+    expect(screen.getByTestId("timeline-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText(/Showing 1 player \(10-second window/)).not.toBeInTheDocument();
+
+    resolveSecondRequest(playerTimeline(20));
+    await waitFor(() => {
+      expect(screen.getByText(/Showing 1 player \(20-second window/)).toBeInTheDocument();
+    });
+  });
+
+  it("waits for the current request when returning to a window", async () => {
+    const timeline: FightTimeline = {
+      fight_id: "fight-1",
+      window_s: 10,
+      duration_s: 20,
+      points: THREE_BUCKETS,
+    };
+    const playerTimeline = (windowS: number): FightPlayerTimeline => ({
+      fight_id: "fight-1",
+      window_s: windowS,
+      duration_s: 20,
+      series: [{ account_name: "Player.1234", name: "Player", points: [] }],
+    });
+    let resolveWindow20!: (value: FightPlayerTimeline) => void;
+    let resolveCurrentWindow10!: (value: FightPlayerTimeline) => void;
+    const window20 = new Promise<FightPlayerTimeline>((resolve) => {
+      resolveWindow20 = resolve;
+    });
+    const currentWindow10 = new Promise<FightPlayerTimeline>((resolve) => {
+      resolveCurrentWindow10 = resolve;
+    });
+    fetchFightPlayerTimelineMock
+      .mockResolvedValueOnce(playerTimeline(10))
+      .mockReturnValueOnce(window20)
+      .mockReturnValueOnce(currentWindow10);
+
+    const { rerender } = render(
+      <LazyTabbedTimelineSection timeline={timeline} fightId="fight-1" windowS={10} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Per-player" })).not.toBeDisabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Per-player" }));
+
+    rerender(
+      <LazyTabbedTimelineSection timeline={timeline} fightId="fight-1" windowS={20} />,
+    );
+    rerender(
+      <LazyTabbedTimelineSection timeline={timeline} fightId="fight-1" windowS={10} />,
+    );
+    expect(screen.getByTestId("timeline-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText(/Showing 1 player \(10-second window/)).not.toBeInTheDocument();
+
+    resolveWindow20(playerTimeline(20));
+    resolveCurrentWindow10(playerTimeline(10));
+    await waitFor(() => {
+      expect(screen.getByText(/Showing 1 player \(10-second window/)).toBeInTheDocument();
+    });
   });
 });

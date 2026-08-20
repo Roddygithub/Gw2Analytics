@@ -144,6 +144,7 @@ const CHART_W = 800;
 const CHART_H = 100;
 const CHART_PAD = 2;
 const CHART_MAX_POINTS = 200;
+const EMPTY_EVENT_WINDOWS: FightEventsSummaryRow["event_windows"] = [];
 
 function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null }) {
   const [activityOnly, setActivityOnly] = useState(false);
@@ -169,16 +170,7 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
     }
   }, []);
 
-  if (!events || events.event_windows.length === 0) {
-    return (
-      <div style={EMPTY_STYLE}>
-        Aucune donnée temporelle disponible.
-      </div>
-    );
-  }
-
-  const raw = events.event_windows;
-  const durationMin = (raw[raw.length - 1]?.end_ms ?? 0) / 60000;
+  const raw = events?.event_windows ?? EMPTY_EVENT_WINDOWS;
 
   // Count active (non-zero) windows for the toggle label
   const activeWindows = useMemo(
@@ -224,6 +216,16 @@ function TimelineMiniChart({ events }: { events: FightEventsSummaryRow | null })
     }
     return gaps;
   }, [raw, activeWindows, activityOnly]);
+
+  if (raw.length === 0) {
+    return (
+      <div style={EMPTY_STYLE}>
+        Aucune donnée temporelle disponible.
+      </div>
+    );
+  }
+
+  const durationMin = (raw[raw.length - 1]?.end_ms ?? 0) / 60000;
 
   const maxDmg = Math.max(...points.map((p) => p.dmg), 1);
   const maxHeal = Math.max(...points.map((p) => p.heal), 1);
@@ -499,34 +501,76 @@ const TAB_LABELS: Record<TableTab, string> = {
   defense: "Défense",
 };
 
+type LoadState =
+  | { status: "loading"; fightId: string | null; generation: number }
+  | {
+      status: "success";
+      fightId: string;
+      generation: number;
+      readout: FightReadoutOut;
+      positions: FightPositionsOut | null;
+      events: FightEventsSummaryRow | null;
+    }
+  | { status: "error"; fightId: string; generation: number; error: string };
+
 export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
-  const [readout, setReadout] = useState<FightReadoutOut | null>(null);
-  const [positions, setPositions] = useState<FightPositionsOut | null>(null);
-  const [events, setEvents] = useState<FightEventsSummaryRow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [request, setRequest] = useState({ fightId, generation: 0 });
+  if (request.fightId !== fightId) {
+    setRequest({
+      fightId,
+      generation: request.generation + 1,
+    });
+  }
+  const generation = request.generation;
+  const [loadState, setLoadState] = useState<LoadState>({
+    status: "loading",
+    fightId: null,
+    generation: -1,
+  });
   const [activeTableTab, setActiveTableTab] = useState<TableTab>("damage");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [r, p, e] = await Promise.all([
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
         fetchFightReadout(fightId),
         fetchFightPositions(fightId).catch(() => null),
         fetchFightEvents(fightId).catch(() => null),
-      ]);
-      setReadout(r);
-      setPositions(p);
-      setEvents(e);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load combat data");
-    } finally {
-      setLoading(false);
-    }
-  }, [fightId]);
+      ])
+      .then(([readoutData, positionsData, eventsData]) => {
+        if (!active) return;
+        setLoadState({
+          status: "success",
+          fightId,
+          generation,
+          readout: readoutData,
+          positions: positionsData,
+          events: eventsData,
+        });
+      })
+      .catch((err: unknown) => {
+        if (!active) return;
+        setLoadState({
+          status: "error",
+          fightId,
+          generation,
+          error: err instanceof Error ? err.message : "Failed to load combat data",
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [fightId, generation]);
 
-  useEffect(() => { load(); }, [load]);
+  // A previous request may complete after the fight changes. Its data stays in
+  // state only until this render, where the fight id prevents it from being
+  // displayed. Keeping the component mounted preserves local table controls.
+  const currentState =
+    loadState.fightId === fightId && loadState.generation === generation
+      ? loadState
+      : ({ status: "loading", fightId, generation } as const);
+  const readout = currentState.status === "success" ? currentState.readout : null;
+  const positions = currentState.status === "success" ? currentState.positions : null;
+  const events = currentState.status === "success" ? currentState.events : null;
 
   // Role filter — MUST be before early returns
   const players = readout?.players ?? [];
@@ -547,7 +591,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
   const boonSort = useSortedPlayers(filteredPlayers, "boon_in_might", "desc");
   const defenseSort = useSortedPlayers(filteredPlayers, "damage_taken", "desc");
 
-  if (loading) {
+  if (currentState.status === "loading") {
     return (
       <div style={{ padding: "24px 0", display: "flex", alignItems: "center", gap: 12, opacity: 0.7 }}>
         <span aria-label="Chargement">⏳</span> Chargement des données de combat…
@@ -555,10 +599,12 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
     );
   }
 
-  if (error || !readout) {
+  if (currentState.status === "error" || !readout) {
     return (
       <div style={{ padding: "16px 20px", border: "1px solid var(--accent)", borderRadius: 4, color: "var(--accent)" }} role="alert">
-        {error ?? "Impossible de charger les données de combat."}
+        {currentState.status === "error"
+          ? currentState.error
+          : "Impossible de charger les données de combat."}
       </div>
     );
   }

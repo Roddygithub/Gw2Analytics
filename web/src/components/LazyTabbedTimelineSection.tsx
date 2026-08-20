@@ -70,9 +70,9 @@ import { PerFightTimelineSection } from "@/components/PerFightTimelineSection";
 import { SectionErrorChip } from "@/components/SectionErrorChip";
 
 type State =
-  | { status: "loading" }
-  | { status: "success"; data: FightPlayerTimeline }
-  | { status: "error"; error: string };
+  | { status: "loading"; fightId: string; windowS: number; generation: number }
+  | { status: "success"; fightId: string; windowS: number; generation: number; data: FightPlayerTimeline }
+  | { status: "error"; fightId: string; windowS: number; generation: number; error: string };
 
 // Skeleton styles mirror the existing CAPTION_STYLE palette so
 // the loading state blends with the rest of the page. The fixed
@@ -100,7 +100,16 @@ export function LazyTabbedTimelineSection({
   fightId: string;
   windowS: number;
 }) {
-  const [state, setState] = useState<State>({ status: "loading" });
+  const [request, setRequest] = useState({ fightId, windowS, generation: 0 });
+  if (request.fightId !== fightId || request.windowS !== windowS) {
+    setRequest({
+      fightId,
+      windowS,
+      generation: request.generation + 1,
+    });
+  }
+  const generation = request.generation;
+  const [state, setState] = useState<State>({ status: "loading", fightId, windowS, generation });
 
   useEffect(() => {
     // The `active` flag prevents the cleanup-then-resolve race
@@ -108,24 +117,30 @@ export function LazyTabbedTimelineSection({
     // call setState on an unmounted component, which React
     // warns about).
     let active = true;
-    setState({ status: "loading" });
     fetchFightPlayerTimeline(fightId, { windowS })
       .then((data) => {
         if (active) {
-          setState({ status: "success", data });
+          setState({ status: "success", fightId, windowS, generation, data });
         }
       })
       .catch((err: unknown) => {
         if (active) {
           const message =
             err instanceof Error ? err.message : "Failed to load player timeline";
-          setState({ status: "error", error: message });
+          setState({ status: "error", fightId, windowS, generation, error: message });
         }
       });
     return () => {
       active = false;
     };
-  }, [fightId, windowS]);
+  }, [fightId, windowS, generation]);
+
+  // Keep PerFightTimelineSection mounted so its selected tab survives a
+  // window change. A response tagged for another request is never displayed.
+  const currentState =
+    state.fightId === fightId && state.windowS === windowS && state.generation === generation
+      ? state
+      : ({ status: "loading", fightId, windowS, generation } as const);
 
   // The PerFightTimelineSection is ALWAYS rendered (no display:none
   // wrapper). During loading we pass playerTimeline=null which lets
@@ -144,7 +159,7 @@ export function LazyTabbedTimelineSection({
   // per-player view failed to load.
   return (
     <>
-      {state.status === "loading" ? (
+      {currentState.status === "loading" ? (
         <div
           style={SKELETON_STYLE}
           data-testid="timeline-skeleton"
@@ -153,15 +168,15 @@ export function LazyTabbedTimelineSection({
           Loading player timeline…
         </div>
       ) : null}
-      {state.status === "error" ? (
+      {currentState.status === "error" ? (
         <SectionErrorChip
           testid="player-timeline-section-error"
-          message={state.error}
+          message={currentState.error}
         />
       ) : null}
       <PerFightTimelineSection
         timeline={timeline}
-        playerTimeline={state.status === "success" ? state.data : null}
+        playerTimeline={currentState.status === "success" ? currentState.data : null}
       />
     </>
   );

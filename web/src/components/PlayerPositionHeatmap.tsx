@@ -19,11 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import React from "react";
 
 import { fetchFightPositions, type PlayerPositionOut, type FightPositionsOut } from "@/lib/api";
-import {
-  FALLBACK_COLOR,
-  PROFESSION_COLORS,
-  professionColor,
-} from "@/lib/professionColors";
+import { PROFESSION_COLORS, professionColor } from "@/lib/professionColors";
 
 // ---------------------------------------------------------------------------
 // Canvas constants
@@ -65,26 +61,40 @@ interface PlayerPositionHeatmapProps {
 // ---------------------------------------------------------------------------
 
 export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPositionHeatmapProps) {
+  return (
+    <PlayerPositionHeatmapContent
+      key={fightId}
+      fightId={fightId}
+      positionsData={positionsData}
+    />
+  );
+}
+
+function PlayerPositionHeatmapContent({ fightId, positionsData }: PlayerPositionHeatmapProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animRef = useRef<number | null>(null);
+  const drawRef = useRef<() => void>(() => {});
+  const positionsDataRef = useRef(positionsData);
+  const autoPlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [players, setPlayers] = useState<HeatmapPlayer[]>([]);
   const [durationMs, setDurationMs] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const currentTimeRef = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // ---- data fetching --------------------------------------------------------
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
       // Use pre-fetched data when provided (avoids double-fetch).
       const data: FightPositionsOut =
-        positionsData && positionsData.players.length > 0
-          ? positionsData
+        positionsDataRef.current && positionsDataRef.current.players.length > 0
+          ? positionsDataRef.current
           : await fetchFightPositions(fightId);
       const built: HeatmapPlayer[] = data.players.map((p: PlayerPositionOut) => {
         const samples: [number, number, number][] = (p.samples ?? []).map(
@@ -98,34 +108,34 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
           samples,
         };
       });
+      if (!active) return;
       setPlayers(built);
       const maxT = Math.max(0, ...built.flatMap((p) => p.samples.map((s) => s[0])));
       setDurationMs(maxT);
+      currentTimeRef.current = 0;
       setCurrentTime(0);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load positions");
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- positionsData
-    // is stable once provided (parent guards with {positions && ...}),
-    // so it never changes after mount.
+      if (maxT > 0) {
+        setPlaying(true);
+        autoPlayTimerRef.current = setTimeout(() => {
+          setPlaying(false);
+          autoPlayTimerRef.current = null;
+        }, 2000);
+      }
+      } catch (err) {
+        if (active) {
+          setError(err instanceof Error ? err.message : "Failed to load positions");
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+      if (autoPlayTimerRef.current !== null) {
+        clearTimeout(autoPlayTimerRef.current);
+      }
+    };
   }, [fightId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // Auto-play for 2 seconds on first load so positions are immediately
-  // visible (at t=0 the canvas renders but dots may be hard to spot
-  // without movement context).
-  useEffect(() => {
-    if (players.length > 0 && durationMs > 0) {
-      setPlaying(true);
-      const timer = setTimeout(() => setPlaying(false), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [players.length, durationMs]);
 
   // ---- animation loop -------------------------------------------------------
 
@@ -135,10 +145,10 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
     const tick = (now: number) => {
       const delta = now - last;
       last = now;
-      setCurrentTime((prev) => {
-        const next = prev + delta;
-        return next >= durationMs ? durationMs : next;
-      });
+      const next = Math.min(currentTimeRef.current + delta, durationMs);
+      currentTimeRef.current = next;
+      setCurrentTime(next);
+      if (next >= durationMs) setPlaying(false);
       animRef.current = requestAnimationFrame(tick);
     };
     animRef.current = requestAnimationFrame(tick);
@@ -146,13 +156,6 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
       if (animRef.current !== null) cancelAnimationFrame(animRef.current);
     };
   }, [playing, durationMs]);
-
-  // stop playing when we hit the end
-  useEffect(() => {
-    if (currentTime >= durationMs && playing) {
-      setPlaying(false);
-    }
-  }, [currentTime, durationMs, playing]);
 
   // ---- canvas drawing (handles DPR sizing internally) -----------------------
 
@@ -176,7 +179,7 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
       const retries = (canvas as unknown as Record<string, number>)._heatmapRetries || 0;
       if (retries < 10) {
         (canvas as unknown as Record<string, number>)._heatmapRetries = retries + 1;
-        requestAnimationFrame(() => draw());
+        requestAnimationFrame(() => drawRef.current());
       }
       return;
     }
@@ -348,6 +351,7 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
   }, [players, currentTime]);
 
   useEffect(() => {
+    drawRef.current = draw;
     draw();
   }, [draw]);
 
@@ -471,7 +475,11 @@ export function PlayerPositionHeatmap({ fightId, positionsData }: PlayerPosition
           max={durationMs}
           step={100}
           value={currentTime}
-          onChange={(e) => setCurrentTime(Number(e.target.value))}
+          onChange={(e) => {
+            const nextTime = Number(e.target.value);
+            currentTimeRef.current = nextTime;
+            setCurrentTime(nextTime);
+          }}
           aria-label="Curseur temporel"
           style={{ flex: 1, minWidth: 120 }}
         />

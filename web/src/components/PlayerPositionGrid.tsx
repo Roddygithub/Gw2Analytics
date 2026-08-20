@@ -9,7 +9,7 @@
  * ``dist_to_com`` (average distance to the squad's center of mass).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { fetchFightPositions, type PlayerPositionOut } from "@/lib/api";
 
@@ -28,17 +28,21 @@ interface PlayerPositionGridProps {
 }
 
 export function PlayerPositionGrid({ fightId }: PlayerPositionGridProps) {
+  return <PlayerPositionGridContent key={fightId} fightId={fightId} />;
+}
+
+function PlayerPositionGridContent({ fightId }: PlayerPositionGridProps) {
   const [rows, setRows] = useState<PlayerPositionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadPositions = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchFightPositions(fightId);
-      setRows(
-        data.players.map((p: PlayerPositionOut) => ({
+  useEffect(() => {
+    let active = true;
+    void fetchFightPositions(fightId)
+      .then((data) => {
+        if (!active) return;
+        setRows(
+          data.players.map((p: PlayerPositionOut) => ({
           account_name: p.account_name,
           name: p.name,
           profession: p.profession,
@@ -46,18 +50,19 @@ export function PlayerPositionGrid({ fightId }: PlayerPositionGridProps) {
           stack_dist: p.stack_dist ?? null,
           dist_to_com: p.dist_to_com ?? null,
           sample_count: p.samples?.length ?? 0,
-        })),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load positions");
-    } finally {
-      setLoading(false);
-    }
+          })),
+        );
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "Failed to load positions");
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [fightId]);
-
-  useEffect(() => {
-    loadPositions();
-  }, [loadPositions]);
 
   if (loading) {
     return <p className="text-muted-foreground p-4">Loading positions…</p>;

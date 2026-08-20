@@ -67,8 +67,6 @@ import {
 
 import styles from "./CreateWebhookPanel.module.css";
 
-type Phase = "closed" | "form" | "reveal";
-
 type State =
   | { phase: "closed" }
   | {

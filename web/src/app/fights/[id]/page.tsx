@@ -66,8 +66,6 @@ import {
   type TargetHealingRow,
   type TargetBuffRemovalRow,
   type FightEventsSummaryRow,
-  type FightPlayerTimeline,
-  type FightReadoutOut,
   type FightTimeline,
   type SquadRollupRow,
 } from "@/lib/api";
@@ -85,7 +83,6 @@ import { SkillUsageTable } from "@/components/SkillUsageTable";
 import { PlayerSkillUsageTable } from "@/components/PlayerSkillUsageTable";
 import { PlayerSkillUsageFilter } from "@/components/PlayerSkillUsageFilter";
 import { LazyTabbedTimelineSection } from "@/components/LazyTabbedTimelineSection";
-import { PerFightTimelineSection } from "@/components/PerFightTimelineSection";
 import { ReplayPlayer } from "@/components/ReplayPlayer";
 // v0.10.26-pre plan 169 commit #1: per-section error indicator.
 //
@@ -107,8 +104,6 @@ import {
   FAILED_TO_LOAD_PLAYER_LIST,
   FAILED_TO_LOAD_PER_PLAYER_SKILLS,
   FAILED_TO_LOAD_FIGHT_DETAILS,
-  COMBAT_READOUT_FETCH_FAILED,
-  COMBAT_READOUT_LOADING,
   PER_PLAYER_PROMPT_PLACEHOLDER,
   NO_EVENT_DATA_TITLE,
   NO_EVENT_DATA_BODY,
