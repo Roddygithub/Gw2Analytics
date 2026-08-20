@@ -401,6 +401,13 @@ une revue humaine finale du diff, puis créer une branche/PR dédiée et un comm
 signé avec trailer DCO lorsque le mainteneur l'autorisera. Ne pas commencer la
 Phase 4 avant cette décision explicite.
 
+### Intégration
+
+La Phase 3 a été intégrée dans `main` par squash-merge de la PR #249 le
+2026-08-20. Commit d'intégration : `b7db5f82722336b241bc11ac4a43d90f7402d822`
+(`fix(web): complete phase 3 baseline (#249)`). Tous les checks requis de la PR
+étaient au vert; aucun changement CI, BMAD ou Phase 4 n'était inclus.
+
 ## Résolution autorisée des trois findings de revue — Phase 3 / Level 1
 
 Le mainteneur a autorisé exclusivement les trois corrections locales ci-dessous.
