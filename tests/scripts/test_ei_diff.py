@@ -383,6 +383,31 @@ def test_report_is_atomic_sorted_and_summarized(monkeypatch, tmp_path):
     assert replaced and replaced[0][1] == output
 
 
+def test_report_replace_oserror_preserves_destination_and_cleans_temporary(monkeypatch, tmp_path):
+    files = _certification_files(tmp_path)
+    _configure(monkeypatch, files)
+    output = tmp_path / "report.json"
+    output.write_text("existing report")
+    replacements = []
+
+    def replace(source, destination):
+        replacements.append((Path(source), Path(destination)))
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(ei_diff, "run_one", _single_result_report)
+    monkeypatch.setattr(ei_diff.os, "replace", replace)
+    monkeypatch.setattr(
+        ei_diff.sys, "argv", [str(SCRIPT), "--report-json", str(output), "--rotation-skills", "0"]
+    )
+
+    with pytest.raises(SystemExit, match="unable to write output"):
+        ei_diff.main()
+
+    assert output.read_text() == "existing report"
+    assert replacements and replacements[0][1] == output
+    assert not replacements[0][0].exists()
+
+
 def test_known_delta_rule_flips_fail_to_known_delta(monkeypatch, tmp_path):
     files = _certification_files(tmp_path)
     _configure(monkeypatch, files)
