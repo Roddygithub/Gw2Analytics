@@ -33,10 +33,7 @@ def test_project_codex_defaults_are_cost_conscious_and_bounded() -> None:
 
 
 def test_custom_agent_profiles_are_complete_and_constrained() -> None:
-    profiles = {
-        path.stem: load_toml(path)
-        for path in AGENTS_DIR.glob("*.toml")
-    }
+    profiles = {path.stem: load_toml(path) for path in AGENTS_DIR.glob("*.toml")}
 
     assert set(profiles) == set(EXPECTED_AGENTS)
     for name, (model, effort) in EXPECTED_AGENTS.items():
@@ -67,10 +64,11 @@ def test_agentic_docs_define_level_one_recovery_and_governance() -> None:
     assert required <= {path.name for path in AGENTIC_DOCS.iterdir()}
 
     assert "Level 1" in (AGENTIC_DOCS / "autonomy-policy.md").read_text()
-    assert "Git/GitHub Governance & Delivery Architecture" in (
-        AGENTIC_DOCS / "backlog.md"
-    ).read_text()
-    assert "Herdr, subagents Codex et Ultra ne sont jamais imbriqués" in (
-        AGENTIC_DOCS / "routing-policy.md"
-    ).read_text()
+    assert (
+        "Git/GitHub Governance & Delivery Architecture" in (AGENTIC_DOCS / "backlog.md").read_text()
+    )
+    assert (
+        "Herdr, subagents Codex et Ultra ne sont jamais imbriqués"
+        in (AGENTIC_DOCS / "routing-policy.md").read_text()
+    )
     assert "énumérer" in (ROOT / "AGENTS.md").read_text()
