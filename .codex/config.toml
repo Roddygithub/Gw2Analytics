@@ -1,0 +1,11 @@
+# Réglages projet Codex. Ils ne prennent effet que lorsque le dépôt est marqué
+# comme fiable par le client Codex ; fournisseurs et authentification restent
+# volontairement hors du dépôt.
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 2
+default_subagent_model = "gpt-5.6-luna"
+default_subagent_reasoning_effort = "medium"

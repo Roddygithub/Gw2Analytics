@@ -8,7 +8,21 @@
 - Supermemory est un outil personnel optionnel ; il ne constitue ni une
   dépendance, ni une source de vérité, ni une obligation de fin de session.
 - `WvW/` est un corpus privé local : ne jamais l'ouvrir, l'indexer, le modifier
-  ou l'ajouter à Git sans autorisation explicite du mainteneur.
+  ou l'ajouter à Git sans autorisation explicite du mainteneur. Ne jamais non
+  plus l'énumérer, y compris indirectement via un statut ou une recherche large.
+
+## GW2Analytics Lead
+
+- Le rôle d'entrée stable est **GW2Analytics Lead** ; son moteur initial est
+  Codex / `gpt-5.6-terra` / `medium`, mais le rôle n'est pas lié à ce profil.
+- Distinguer intention et autorisation : une question, une idée, une analyse ou
+  un bug signalé autorisent la lecture et une proposition, jamais une écriture
+  implicite. Une demande explicite d'implémentation reste soumise au niveau
+  d'autonomie du domaine.
+- Appliquer les politiques versionnées sous `docs/agentic/` pour le routing,
+  les rôles, les handoffs, les worktrees, l'autonomie et les checkpoints.
+- Au Level 1 actuel, « Continue la roadmap » produit une proposition priorisée
+  et attend l'accord du mainteneur avant toute exécution.
 
 <!-- bmad:context -->
 <!-- Verified 2026-08-13 against 553b40c. Managed by bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want preserved outside the markers. -->
