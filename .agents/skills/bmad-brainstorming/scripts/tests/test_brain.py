@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import brain
+import brain  # noqa: E402
 
 CSV = """category,technique_name,description,detail
 collaborative,Yes And Building,Build on every idea with "yes and" to keep momentum,

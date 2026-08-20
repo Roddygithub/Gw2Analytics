@@ -13,7 +13,7 @@
 [core]
 project_name = "Gw2Analytics"
 document_output_language = "French"
-output_folder = "_bmad-output"
+output_folder = "{project-root}/_bmad-output"
 
 [modules.bmm]
 planning_artifacts = "{project-root}/_bmad-output/planning-artifacts"

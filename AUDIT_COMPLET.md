@@ -1,5 +1,9 @@
 # Audit d'Architecture Complet — Gw2Analytics
 
+> **Historique — pas une source de vérité actuelle.** Audit daté du
+> 2026-07-24, préservé pour la traçabilité. Toute décision doit être réévaluée
+> contre le dépôt, les tests/CI, les ADR et les SPEC acceptées.
+
 **Date :** 2026-07-24
 **Profil :** Monorepo GW2 WvW Combat Analytics (Python 3.12 + FastAPI + Next.js + PostgreSQL)
 

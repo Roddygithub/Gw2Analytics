@@ -1,5 +1,8 @@
 # Advisor Plans (senior-advisor audit followups)
 
+> **Archive historique — pas un backlog actif.** Ces suivis sont conservés
+> pour provenance ; ils ne sont pas une autorité de priorité ou d'exécution.
+
 Senior-advisor audit (post-R1-R4 batch, 2026-07-10). Each plan is self-contained for an executor with zero context from this session. Status is updated by the executor.
 
 ## Open plans

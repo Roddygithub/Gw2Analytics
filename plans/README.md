@@ -1,5 +1,9 @@
 # Advisor Plans Index
 
+> **Archive historique — pas un backlog actif.** Ces plans décrivent des
+> cycles antérieurs. Ils servent de provenance uniquement et ne doivent pas
+> déclencher un travail sans validation contre les sources de vérité actuelles.
+
 This directory holds the forward-looking advisor audits for the GW2Analytics
 monorepo. Each audit is a senior-advisor survey (improve skill, `next`
 invocation, `quick` effort) that scopes the next cycle's direction-only

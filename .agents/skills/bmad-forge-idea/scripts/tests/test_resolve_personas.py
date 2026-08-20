@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import resolve_personas as rp
+import resolve_personas as rp  # noqa: E402
 
 AGENTS = {
     "bmad-agent-analyst": {"name": "Mary", "icon": "📊", "title": "Analyst"},
@@ -43,7 +43,7 @@ class TestBuildPool(unittest.TestCase):
         self.assertEqual(pool["morpheus"]["persona"], "riddles")
 
     def test_custom_override_lands_on_installed_slot_not_a_new_face(self):
-        pool, _, _installed, custom = rp.build_pool(
+        pool, _, installed, custom = rp.build_pool(
             AGENTS, [{"code": "analyst", "name": "Mary-Custom", "persona": "p"}])
         self.assertNotIn("analyst", pool)
         self.assertEqual(custom, [])  # an override is not a new face
@@ -69,7 +69,7 @@ class TestBuildPool(unittest.TestCase):
         self.assertEqual(brief["capabilities"], ["x"])
 
     def test_non_list_party_members_is_safe(self):
-        pool, _, _installed, custom = rp.build_pool(AGENTS, "not-a-list")
+        pool, _, installed, custom = rp.build_pool(AGENTS, "not-a-list")
         self.assertEqual(custom, [])
         self.assertEqual(set(pool), {"bmad-agent-analyst", "bmad-agent-pm"})
 
@@ -119,7 +119,7 @@ class TestOverrideMergeFallback(unittest.TestCase):
     """When party-mode isn't installed, user override TOMLs are read directly."""
 
     def test_arrays_append_scalars_override(self):
-        import tempfile
+        import tempfile, os
         with tempfile.TemporaryDirectory() as d:
             custom = Path(d) / "_bmad" / "custom"
             custom.mkdir(parents=True)

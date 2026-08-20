@@ -1,15 +1,19 @@
 # Roadmap
 
+> **Historique — pas une source de priorité actuelle.** Instantané du cycle
+> v0.14.2 (2026-07-22), conservé pour la traçabilité. Pour une décision de
+> suite : comportement livré (code/tests/CI), SPEC acceptées dans
+> `_bmad-output/specs/`, puis checkpoints `docs/agentic/`; au Level 1, faire
+> valider toute nouvelle priorité par le mainteneur.
+
 **Status:** Living document. Last refreshed AT v0.14.2 cycle
 close-out (2026-07-22) — Plan 173 COMPLETE (14 boon uptimes +
 presence % + 14 outgoing boons in Combat Readout, grouped bar
 columns, 2 hermetic backend tests, E2E mock server + Playwright test).
 
-This file is the **single source of truth** for "what's left to do" on
-the project. It supersedes any ad-hoc "what's next" list in the README
-or the CHANGELOG. It is meant to be edited at every release tag so
-that the next session can pick up exactly where the previous one left
-off.
+This file is a historical snapshot and is **not** the source of truth for
+"what's left to do" on the project. It must not supersede current SPEC,
+checkpoints, code, tests or CI.
 
 ---## Current state (post-Plan-173 v0.14.2)
 

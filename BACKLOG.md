@@ -1,5 +1,10 @@
 # Backlog — parser / Elite Insights parity
 
+> **Historique — pas une source de priorité actuelle.** Ce score et ces pistes
+> datent du 2026-08-07. Conserver comme provenance de parité, mais repartir du
+> contrat accepté, du checkpoint courant et d'une mesure reproductible avant
+> de sélectionner un travail.
+
 Measured with `uv run python scripts/ei-parity/ei_diff.py` over the 35-log corpus.
 Setup and probes: `docs/ei-parity-workbench.md`. Findings so far:
 `docs/parser-audit-2026-07-31.md`.

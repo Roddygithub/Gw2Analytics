@@ -29,7 +29,6 @@ they merge and count by their modern meaning and are reported, never reset.
 """
 
 import argparse
-import contextlib
 import hashlib
 import io
 import json
@@ -228,7 +227,7 @@ def _load_existing(path):
     if not Path(path).exists():
         return yaml, None
     try:
-        with open(path, encoding="utf-8") as fh:
+        with io.open(path, "r", encoding="utf-8") as fh:
             data = yaml.load(fh)
     except Exception as exc:
         _fail(f"existing status file is not valid YAML: {exc}", status_file=str(path))
@@ -348,8 +347,10 @@ def _atomic_write(path, payload, mode=None):
             os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
-        with contextlib.suppress(OSError):
+        try:
             os.unlink(tmp)
+        except OSError:
+            pass
         raise
 
 
@@ -447,9 +448,9 @@ def cmd_generate(args):
         payload = _dump_bytes(yaml, doc)
         _atomic_write(args.status_file, payload, original_mode)
         verify_yaml = _make_yaml()
-        with open(args.status_file, encoding="utf-8") as fh:
+        with io.open(args.status_file, "r", encoding="utf-8") as fh:
             reread = verify_yaml.load(fh)
-        if dict(reread.get("development_status") or {}) != dict(dev.items()):
+        if dict(reread.get("development_status") or {}) != {k: v for k, v in dev.items()}:
             raise ValueError("development_status mismatch after write")
         for field in ("generated", "last_updated", "project"):
             if str(reread.get(field)) != str(doc[field]):
@@ -604,7 +605,7 @@ def cmd_validate(args):
         return
     yaml = _make_yaml()
     try:
-        with open(args.status_file, encoding="utf-8") as fh:
+        with io.open(args.status_file, "r", encoding="utf-8") as fh:
             data = yaml.load(fh)
     except Exception as exc:
         print(json.dumps({
