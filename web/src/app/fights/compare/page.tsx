@@ -85,13 +85,6 @@ function FightCompareInner() {
   const fightAId = searchParams.get("a") ?? null;
   const fightBId = searchParams.get("b") ?? null;
 
-  const [readoutA, setReadoutA] = useState<FightReadoutOut | null>(null);
-  const [readoutB, setReadoutB] = useState<FightReadoutOut | null>(null);
-  const [loadingA, setLoadingA] = useState(false);
-  const [loadingB, setLoadingB] = useState(false);
-  const [errorA, setErrorA] = useState<string | null>(null);
-  const [errorB, setErrorB] = useState<string | null>(null);
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -110,52 +103,6 @@ function FightCompareInner() {
     })();
     return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => {
-    if (!fightAId) return;
-    let cancelled = false;
-    setReadoutA(null);
-    setLoadingA(true);
-    setErrorA(null);
-    (async () => {
-      try {
-        const data = await fetchFightReadout(fightAId);
-        if (!cancelled) {
-          setReadoutA(data);
-          setLoadingA(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setErrorA(err instanceof Error ? err.message : String(err));
-          setLoadingA(false);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [fightAId]);
-
-  useEffect(() => {
-    if (!fightBId) return;
-    let cancelled = false;
-    setReadoutB(null);
-    setLoadingB(true);
-    setErrorB(null);
-    (async () => {
-      try {
-        const data = await fetchFightReadout(fightBId);
-        if (!cancelled) {
-          setReadoutB(data);
-          setLoadingB(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setErrorB(err instanceof Error ? err.message : String(err));
-          setLoadingB(false);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [fightBId]);
 
   const updateFight = useCallback(
     (slot: "a" | "b", fightId: string) => {
@@ -279,42 +226,28 @@ function FightCompareInner() {
           }}
         >
           <div style={FIGHT_CARD}>
-            {loadingA && <p style={{ opacity: 0.7, fontSize: 13 }}>Loading Fight A…</p>}
-            {errorA && (
-              <p style={{ color: "var(--accent)", fontSize: 13 }}>
-                Error: {errorA}
-              </p>
-            )}
-            {!fightAId && (
-              <div style={EMPTY_STATE}>Select a fight for this slot.</div>
-            )}
-            {readoutA && (
-              <FightColumn
+            {fightAId ? (
+              <FightReadoutColumn
+                key={fightAId}
                 label="Fight A"
-                fightId={fightAId!}
-                readout={readoutA}
+                fightId={fightAId}
                 fightInfo={fightAInfo}
               />
+            ) : (
+              <div style={EMPTY_STATE}>Select a fight for this slot.</div>
             )}
           </div>
 
           <div style={FIGHT_CARD}>
-            {loadingB && <p style={{ opacity: 0.7, fontSize: 13 }}>Loading Fight B…</p>}
-            {errorB && (
-              <p style={{ color: "var(--accent)", fontSize: 13 }}>
-                Error: {errorB}
-              </p>
-            )}
-            {!fightBId && (
-              <div style={EMPTY_STATE}>Select a fight for this slot.</div>
-            )}
-            {readoutB && (
-              <FightColumn
+            {fightBId ? (
+              <FightReadoutColumn
+                key={fightBId}
                 label="Fight B"
-                fightId={fightBId!}
-                readout={readoutB}
+                fightId={fightBId}
                 fightInfo={fightBInfo}
               />
+            ) : (
+              <div style={EMPTY_STATE}>Select a fight for this slot.</div>
             )}
           </div>
         </div>
@@ -328,6 +261,44 @@ function FightCompareInner() {
       )}
     </main>
   );
+}
+
+/** Loads one comparison column. The key resets its initial loading state per fight. */
+function FightReadoutColumn({
+  label,
+  fightId,
+  fightInfo,
+}: {
+  label: string;
+  fightId: string;
+  fightInfo?: FightRow;
+}) {
+  const [readout, setReadout] = useState<FightReadoutOut | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchFightReadout(fightId)
+      .then((data) => {
+        if (!cancelled) setReadout(data);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fightId]);
+
+  if (error) {
+    return <p style={{ color: "var(--accent)", fontSize: 13 }}>Error: {error}</p>;
+  }
+  if (!readout) {
+    return <p style={{ opacity: 0.7, fontSize: 13 }}>Loading {label}…</p>;
+  }
+  return <FightColumn label={label} fightId={fightId} readout={readout} fightInfo={fightInfo} />;
 }
 
 /** One column of the side-by-side comparison. */

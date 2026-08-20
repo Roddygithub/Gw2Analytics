@@ -115,13 +115,11 @@ function ProfessionOrEliteCell({
 function SummaryPlayerRow({
   player,
   value,
-  valueFormatter,
   rank,
   onRoleFilter,
 }: {
   player: PlayerReadoutOut;
   value: string;
-  valueFormatter?: (v: number) => string;
   rank: 0 | 1 | 2;
   onRoleFilter?: (role: string) => void;
 }) {

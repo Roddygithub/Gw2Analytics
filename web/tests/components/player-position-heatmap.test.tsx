@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 
 // Unmock the component under test.
@@ -100,7 +100,7 @@ describe("PlayerPositionHeatmap", () => {
 
     // Play/pause button.
     expect(
-      screen.getByRole("button", { name: "Lecture" }),
+      screen.getByRole("button", { name: "Pause" }),
     ).toBeInTheDocument();
 
     // Time slider.
@@ -177,5 +177,44 @@ describe("PlayerPositionHeatmap", () => {
     await waitFor(() => {
       expect(container).toHaveTextContent("0:01 / 0:01");
     });
+  });
+
+  it("resumes playback from the time selected by the slider", async () => {
+    let lastFrame: FrameRequestCallback | undefined;
+    let frameId = 0;
+    const rafSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        lastFrame = callback;
+        frameId += 1;
+        return frameId;
+      });
+
+    try {
+      mockFetchFightPositions.mockResolvedValueOnce({ players: [MOCK_PLAYERS[0]] });
+      render(<PlayerPositionHeatmap fightId="test-fight" />);
+
+      const pauseButton = await screen.findByRole("button", { name: "Pause" });
+      fireEvent.click(pauseButton);
+      const slider = screen.getByRole("slider", { name: "Curseur temporel" });
+      fireEvent.change(slider, { target: { value: "500" } });
+      expect(slider).toHaveValue("500");
+
+      const previousFrameCount = rafSpy.mock.calls.length;
+      fireEvent.click(screen.getByRole("button", { name: "Lecture" }));
+      await waitFor(() => {
+        expect(rafSpy.mock.calls.length).toBeGreaterThan(previousFrameCount);
+      });
+
+      act(() => {
+        lastFrame?.(performance.now() + 100);
+      });
+      await waitFor(() => {
+        expect(Number(slider.getAttribute("value"))).toBeGreaterThan(550);
+        expect(Number(slider.getAttribute("value"))).toBeLessThan(700);
+      });
+    } finally {
+      rafSpy.mockRestore();
+    }
   });
 });

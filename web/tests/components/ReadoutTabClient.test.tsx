@@ -13,7 +13,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { MockInstance } from "vitest";
 import * as React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 // We test the components as part of the full ReadoutTabClient.
 // Mock the API fetchers so we can render the client without network.
@@ -390,5 +390,115 @@ describe("TimelineMiniChart export", () => {
     expect(clicked).toHaveLength(1);
     expect(clicked[0]?.download).toBe("timeline.svg");
     expect(clicked[0]?.href).toContain("blob:mock-timeline-export");
+  });
+});
+
+describe("ReadoutTabClient fight changes", () => {
+  it("preserves table controls while hiding data from the previous fight", async () => {
+    const firstPlayers = [
+      makePlayer({
+        name: "A Healer",
+        agent_id: 1,
+        roles: ["Heal"],
+        heal: { ...makePlayer().heal, hps: 300 },
+      }),
+      makePlayer({ name: "A DPS", agent_id: 2, roles: ["DPS"] }),
+    ];
+    const secondPlayers = [
+      makePlayer({
+        name: "B Healer high",
+        agent_id: 11,
+        roles: ["Heal"],
+        heal: { ...makePlayer().heal, hps: 300 },
+      }),
+      makePlayer({
+        name: "B Healer low",
+        agent_id: 12,
+        roles: ["Heal"],
+        heal: { ...makePlayer().heal, hps: 100 },
+      }),
+      makePlayer({ name: "B DPS", agent_id: 13, roles: ["DPS"] }),
+    ];
+    let resolveSecondReadout!: (value: FightReadoutOut) => void;
+    const secondReadout = new Promise<FightReadoutOut>((resolve) => {
+      resolveSecondReadout = resolve;
+    });
+
+    mockFetchReadout
+      .mockResolvedValueOnce(makeReadout(firstPlayers))
+      .mockReturnValueOnce(secondReadout);
+    mockFetchEvents
+      .mockResolvedValueOnce(makeEvents(1))
+      .mockResolvedValueOnce(makeEvents(1));
+
+    const { rerender } = render(<ReadoutTabClient fightId="fight-a" />);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Dégâts" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Soins" }));
+    fireEvent.click(screen.getByRole("button", { name: "Heal (1)" }));
+    fireEvent.click(screen.getByRole("columnheader", { name: /Heal \/ Barrier/ }));
+
+    rerender(<ReadoutTabClient fightId="fight-b" />);
+    expect(screen.getByLabelText("Chargement")).toBeInTheDocument();
+    expect(screen.queryByText("A Healer")).not.toBeInTheDocument();
+
+    resolveSecondReadout(makeReadout(secondPlayers));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Soins" })).toBeInTheDocument();
+    });
+    expect(screen.getByText("2/3 joueurs")).toBeInTheDocument();
+
+    const rows = within(
+      screen.getByRole("heading", { name: "Soins" }).closest("section")!,
+    ).getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("B Healer low"),
+      expect.stringContaining("B Healer high"),
+    ]);
+  });
+
+  it("waits for the current request when returning to a fight", async () => {
+    let resolveInitialA!: (value: FightReadoutOut) => void;
+    let resolveB!: (value: FightReadoutOut) => void;
+    let resolveCurrentA!: (value: FightReadoutOut) => void;
+    const initialA = new Promise<FightReadoutOut>((resolve) => {
+      resolveInitialA = resolve;
+    });
+    const pendingB = new Promise<FightReadoutOut>((resolve) => {
+      resolveB = resolve;
+    });
+    const currentA = new Promise<FightReadoutOut>((resolve) => {
+      resolveCurrentA = resolve;
+    });
+
+    mockFetchReadout
+      .mockReturnValueOnce(initialA)
+      .mockReturnValueOnce(pendingB)
+      .mockReturnValueOnce(currentA);
+    mockFetchEvents
+      .mockResolvedValueOnce(makeEvents(1))
+      .mockResolvedValueOnce(makeEvents(1))
+      .mockResolvedValueOnce(makeEvents(1));
+
+    const { rerender } = render(<ReadoutTabClient fightId="fight-a" />);
+    rerender(<ReadoutTabClient fightId="fight-b" />);
+    rerender(<ReadoutTabClient fightId="fight-a" />);
+
+    await act(async () => {
+      resolveInitialA(makeReadout([makePlayer({ name: "Old A result" })]));
+    });
+    expect(screen.getByLabelText("Chargement")).toBeInTheDocument();
+    expect(screen.queryByText("Old A result")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveCurrentA(makeReadout([makePlayer({ name: "Current A result" })]));
+      resolveB(makeReadout([makePlayer({ name: "B result" })]));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Current A result")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Old A result")).not.toBeInTheDocument();
   });
 });

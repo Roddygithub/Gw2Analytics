@@ -61,7 +61,7 @@ beforeEach(() => {
 if (typeof URL.createObjectURL !== "function") {
   URL.createObjectURL = (() => {
     let counter = 0;
-    return (obj: Blob | MediaSource): string => {
+    return (_obj: Blob | MediaSource): string => {
       counter += 1;
       return `blob:mock-${counter.toString(36)}`;
     };
@@ -352,5 +352,4 @@ vi.mock("@/components/PerFightTimelineSection", () => ({
  * wrapper (which is the actual page-level concern) and let the
  * chart be tested directly at the component level.
  */
-
 
