@@ -2,9 +2,8 @@
 
 ## Dettes de revue — Phase 5
 
-**Statut : à traiter avant toute promotion au-delà du Level 1 et à réévaluer en
-Phase 6.** Elles ne bloquent pas l'intégration de l'infrastructure minimale,
-mais restent des prérequis à une autonomie élargie.
+**Statut : ajustements Phase 6 validés.** Ils restent à réévaluer avant toute
+promotion au-delà du Level 1.
 
 1. Renforcer les tests sémantiques des garde-fous : indépendance du Reviewer,
    confidentialité `WvW/`, fallback indisponible, handoff et reprise.
@@ -12,6 +11,9 @@ mais restent des prérequis à une autonomie élargie.
    utilisation réelle.
 3. Compléter le protocole worktree avec une procédure explicite de conflit et
    d'abandon.
+4. Ajouter une assertion ciblée du checkpoint Phase 6 : un état Herdr ne permet
+   jamais seul le nettoyage ; résultat récupéré et absence de travail utile,
+   diff, commit ou artefact non intégré doivent être vérifiés indépendamment.
 
 ## Initiative prioritaire — Git/GitHub Governance & Delivery Architecture
 

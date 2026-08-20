@@ -33,6 +33,21 @@ La configuration projet utilise les efforts portables `low`, `medium`, `high`
 et `xhigh`. `max` et Ultra ne sont pas des valeurs par défaut de fichier : ils
 requièrent une vérification du client disponible et une justification écrite.
 
+## Critères d'Ultra
+
+Ultra n'est autorisable que si le Lead consigne, avant le lancement, les quatre
+preuves suivantes :
+
+1. au moins trois sous-problèmes indépendants, sans fichier ni contrat partagé ;
+2. un gain attendu mesurable (temps de décision ou couverture de trois analyses)
+   qu'un seul agent ne peut pas produire dans le délai retenu ;
+3. pourquoi des subagents Codex read-only ou Herdr/worktrees ne répondent pas au
+   besoin avec un coût et un risque plus faibles ;
+4. le modèle, le niveau réellement disponibles et un plafond de coût approuvé.
+
+Sans ces quatre éléments, Ultra reste interdit. Son fan-out remplace toutes les
+autres couches de parallélisme pendant la tâche.
+
 ## Parallélisme
 
 Une seule couche possède le fan-out :
