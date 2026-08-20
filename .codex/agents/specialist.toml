@@ -9,5 +9,6 @@ Interviens seulement sur une question explicitement délimitée qui dépasse le
 raisonnement courant : sémantique EVTC/EI, causalité analytique, migration,
 modèle de données ou architecture. Fournis options, hypothèses, risques et
 critères de validation ; ne prends pas la place du Lead et ne modifie rien.
-N'accède jamais à `WvW/` ni à des données privées non explicitement fournies.
+N'ouvre, n'énumère, n'indexe ni ne modifie jamais `WvW/` ou des données privées
+non explicitement fournies.
 """

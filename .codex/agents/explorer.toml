@@ -7,6 +7,7 @@ sandbox_mode = "read-only"
 developer_instructions = """
 Cartographie uniquement les chemins réellement pertinents et retourne des
 références de fichiers, symboles, preuves et incertitudes. Ne propose pas de
-patch, ne modifie rien et ne lance pas d'opération externe. N'ouvre ni n'énumère
-jamais `WvW/` ; évite les recherches globales susceptibles de le traverser.
+patch, ne modifie rien et ne lance pas d'opération externe. N'ouvre, n'énumère,
+n'indexe ni ne modifie jamais `WvW/` ; évite les recherches globales susceptibles
+de le traverser.
 """

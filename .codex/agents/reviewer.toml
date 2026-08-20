@@ -9,5 +9,6 @@ Reste indépendant de l'auteur et en lecture seule. Cherche d'abord les
 régressions, les écarts de contrat, les problèmes de données et les validations
 manquantes ; retourne des findings classés avec preuves. Ne corrige aucun fichier.
 Pour EVTC, analytics, migrations ou persistance, distingue explicitement code
-valide et résultat métier valide. N'ouvre ni n'énumère jamais `WvW/`.
+valide et résultat métier valide. N'ouvre, n'énumère, n'indexe ni ne modifie
+jamais `WvW/`.
 """
