@@ -1,0 +1,13 @@
+{
+  "request": {
+    "required": ["task_id", "purpose", "scope", "why_private_data", "worktree_ref", "command_profile", "requested_output", "authorization_token"],
+    "purposes": ["validation", "reproduction", "analysis"],
+    "profiles": ["parser-validation-readonly", "ei-parity-readonly", "pytest-private-fixture"],
+    "text_limits": {"task_id": 80, "why_private_data": 500, "requested_output": 200},
+    "diagnostics": {
+      "ttl_seconds": 600,
+      "stages": ["validated", "runtime-created", "source-mounted", "unit-started", "unit-failed"],
+      "categories": ["mount", "registry", "worktree", "service", "cleanup"]
+    }
+  }
+}

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
+# EXPERIMENTAL / NOT OPERATIONAL — DO NOT USE WITH REAL PRIVATE CORPUS.
 """Run the in-house parser against EI reference JSON and categorise the deltas.
 
 Usage:
     uv run python .tooling/ei_diff.py [--json out.json] [log-stem ...]
 """
+# ruff: noqa: PLR0912, PLR0915
 
 from __future__ import annotations
 
@@ -176,7 +178,7 @@ def _check_artifact(stem: str, artifact: str, path: Path, expected_sha256: objec
         _fail(f"{stem}: altered {artifact}")
 
 
-def validate_corpus() -> tuple[list[str], str, dict[str, object]]:  # noqa: PLR0912
+def validate_corpus(*, private_subset: bool = False) -> tuple[list[str], str, dict[str, object]]:
     """Validate the complete certification corpus before any log is parsed."""
     try:
         manifest_bytes = MANIFEST.read_bytes()
@@ -195,13 +197,17 @@ def validate_corpus() -> tuple[list[str], str, dict[str, object]]:  # noqa: PLR0
         _fail("invalid EI version")
     if reference["export_type"] != EXPORT_TYPE:
         _fail("invalid export type")
-    _check_artifact("corpus", "EI CLI", EI_CLI, reference["cli_sha256"])
+    if not private_subset:
+        _check_artifact("corpus", "EI CLI", EI_CLI, reference["cli_sha256"])
 
     vocabulary = manifest["tag_vocabulary"]
     if vocabulary != TAG_VOCABULARY:
         _fail("invalid tag vocabulary")
     allowed_tags = set(vocabulary)
 
+    entries = manifest["entries"]
+    if not isinstance(entries, list):
+        _fail("manifest entries must be a list")
     try:
         corpus = [
             line.strip()
@@ -209,12 +215,13 @@ def validate_corpus() -> tuple[list[str], str, dict[str, object]]:  # noqa: PLR0
             if line.strip()
         ]
     except (OSError, UnicodeDecodeError):
-        _fail("invalid corpus.txt")
+        if not private_subset:
+            _fail("invalid corpus.txt")
+        corpus = [entry.get("stem") for entry in entries if isinstance(entry, dict)]
     corpus = [_validate_stem(stem) for stem in corpus]
-    if len(corpus) != 35 or len(corpus) != len(set(corpus)):
-        _fail("corpus.txt must contain 35 unique stems")
-    entries = manifest["entries"]
-    if not isinstance(entries, list) or len(entries) != len(corpus):
+    if len(corpus) != len(set(corpus)) or (not private_subset and len(corpus) != 35):
+        _fail("invalid corpus selection")
+    if len(entries) != len(corpus):
         _fail("manifest must contain exactly one entry per corpus stem")
 
     seen: set[str] = set()
@@ -283,7 +290,7 @@ def _write_atomic(destination: Path, content: str) -> None:
         _fail("unable to write output")
 
 
-def _validate_known_deltas(data: object) -> list[dict[str, object]]:  # noqa: PLR0912
+def _validate_known_deltas(data: object) -> list[dict[str, object]]:
     if not isinstance(data, dict):
         _fail("known-deltas.json must be a mapping")
     if set(data) != KNOWN_DELTAS_KEYS:
@@ -564,7 +571,8 @@ def _validate_report_destination(path: Path, corpus: list[str]) -> Path:
     return destination
 
 
-def main() -> int:  # noqa: PLR0912, PLR0915
+def main() -> int:
+    global CORPUS, EI_OUT, LOGS, MANIFEST  # noqa: PLW0603
     ap = argparse.ArgumentParser()
     ap.add_argument("stems", nargs="*")
     ap.add_argument("--json", dest="json_out")
@@ -582,9 +590,29 @@ def main() -> int:  # noqa: PLR0912, PLR0915
         help="include rotation skills already proven noisy or regressive",
     )
     ap.add_argument("--show", default=None, help="print raw diffs whose bucket matches this regex")
+    ap.add_argument("--private-subset", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--corpus-dir", type=Path, help=argparse.SUPPRESS)
+    ap.add_argument("--manifest", type=Path, help=argparse.SUPPRESS)
+    ap.add_argument("--runtime-dir", type=Path, help=argparse.SUPPRESS)
     args = ap.parse_args()
 
-    corpus, manifest_sha256, reference = validate_corpus()
+    if args.private_subset:
+        if args.corpus_dir is None or args.manifest is None or args.runtime_dir is None:
+            _fail("private subset requires injected inputs and runtime")
+        if not args.corpus_dir.is_dir() or not args.runtime_dir.is_dir():
+            _fail("invalid private runtime or input")
+        MANIFEST = args.manifest
+        CORPUS = MANIFEST.parent / "corpus.txt"
+        LOGS = args.corpus_dir / "logs"
+        EI_OUT = args.corpus_dir / "ei-out"
+        if not LOGS.is_dir():
+            LOGS = args.corpus_dir
+        if not EI_OUT.is_dir():
+            EI_OUT = args.corpus_dir
+    elif any(value is not None for value in (args.corpus_dir, args.manifest, args.runtime_dir)):
+        _fail("injected inputs require private subset")
+
+    corpus, manifest_sha256, reference = validate_corpus(private_subset=args.private_subset)
     if len(args.stems) != len(set(args.stems)):
         _fail("duplicate positional stem")
     for stem in args.stems:
@@ -592,18 +620,26 @@ def main() -> int:  # noqa: PLR0912, PLR0915
     unknown_stems = set(args.stems) - set(corpus)
     if unknown_stems:
         _fail("requested stem is not in corpus.txt")
-    if args.json_out and args.stems:
+    if args.json_out and args.stems and not args.private_subset:
         _fail("baseline output requires the complete corpus")
     json_out = (
         _validate_baseline_destination(Path(args.json_out), corpus) if args.json_out else None
     )
-    if args.report_out and args.stems:
+    if args.report_out and args.stems and not args.private_subset:
         _fail("report output requires the complete corpus")
     report_out = (
         _validate_report_destination(Path(args.report_out), corpus) if args.report_out else None
     )
     if json_out is not None and report_out is not None and json_out == report_out:
         _fail("json and report destinations must differ")
+    if args.private_subset:
+        runtime = args.runtime_dir.resolve()
+        for destination in (json_out, report_out):
+            if destination is not None and runtime not in destination.parents:
+                _fail("private output must remain in runtime")
+        if report_out is None:
+            report_out = runtime / "ei-parity-report.json"
+        print("private subset diagnostic: not an EI certification run", flush=True)
     stems = args.stems or corpus
     reports = []
     grand: Counter[str] = Counter()

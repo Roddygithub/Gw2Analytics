@@ -40,6 +40,16 @@ Supermemory n'est pas une source opérationnelle. `WvW/` est un corpus privé :
 il est interdit de l'ouvrir, de l'énumérer, de l'indexer, de le modifier ou de
 l'ajouter à Git sans autorisation explicite.
 
+## Prérequis de l'environnement `gw2agent`
+
+- `uv` fait partie des prérequis de l'environnement `gw2agent`. La version
+  épinglée est `0.12.5`, fournie par `mise` ; les outils Python du dépôt sont
+  exécutés via `uv run`.
+- Le sandbox Codex peut refuser l'accès au socket Herdr. Les contrôles
+  read-only de disponibilité de Herdr sont alors réalisés hors sandbox sous
+  `gw2agent` ; ce refus ne constitue pas une anomalie Herdr ni une autorisation
+  d'écriture.
+
 ## Documents opérationnels
 
 - [Architecture](architecture.md) — composants et frontières.
@@ -49,3 +59,6 @@ l'ajouter à Git sans autorisation explicite.
 - [Worktrees et Herdr](worktrees-herdr.md) — flux macro indépendants.
 - [Backlog agentique](backlog.md) — initiatives à traiter ultérieurement.
 - [État courant](current-state.md) — reprise après interruption.
+- [Checkpoint final Phase 8](phase8-final-checkpoint-2026-08-21.md) —
+  prérequis, confidentialité, repli humain et statut expérimental de
+  l'exécuteur privé.
