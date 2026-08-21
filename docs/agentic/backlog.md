@@ -29,3 +29,29 @@ pour commit, push, PR, merge et release aux Levels 1/2/3.
 Elle doit inventorier l'état réel, proposer les changements avant de les faire,
 et aligner code, CI, documentation et règles GitHub sans les modifier pendant
 la Phase 5.
+
+## Dette technique — Exécuteur privé Phase 8
+
+> **EXPERIMENTAL / NOT OPERATIONAL — DO NOT USE WITH REAL PRIVATE CORPUS**
+
+**Statut : EXPERIMENTAL / NOT OPERATIONAL, reportée.** Ne pas autoriser le
+corpus réel via l'exécuteur tant que les validations live synthétiques ne sont
+pas concluantes. Reprise uniquement après accord explicite, en commençant par
+l'observabilité redacted `systemd-start` / `sandbox-bind` / `tool-exec` /
+`profile-exit`, puis namespace, bind UV root-owned, `.venv`, cache, lecture
+seule, nettoyage et reboot. Le repli humain `roddy` demeure le mécanisme
+temporaire autorisé par tâche.
+
+Avant toute intégration opérationnelle, traiter aussi : autorisation par tâche
+matérialisée, redaction sans champ libre persistant, cause primaire préservée
+au cleanup, contrôle du groupe à chaque demande, sockets locaux, worktree
+mutable, sous-ensemble qui résout vers la racine, binaires système absolus et
+purge autonome des diagnostics.
+
+### Private Corpus Executor Finalization — GPT-5.6 Sol / High
+
+Tâche système dédiée, explicitement non bloquante pour GW2Analytics. Le Lead
+demande `GPT-5.6 Sol / High` à chaque reprise et, lors de tout `codex exec
+resume`, réapplique explicitement modèle et reasoning effort avant diagnostic.
+Il contrôle le runtime observé ; toute divergence impose l'arrêt avant
+diagnostic et une demande d'instruction.

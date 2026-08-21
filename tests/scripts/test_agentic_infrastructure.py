@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CODEX_DIR = ROOT / ".codex"
 AGENTS_DIR = CODEX_DIR / "agents"
 AGENTIC_DOCS = ROOT / "docs" / "agentic"
+PRIVATE_CORPUS_OPS = ROOT / "ops" / "private-corpus"
 
 EXPECTED_AGENTS = {
     "gw2analytics_lead": ("gpt-5.6-terra", "medium"),
@@ -180,3 +181,74 @@ def test_agentic_guardrails_cover_fallback_handoff_and_ultra() -> None:
         assert stage in recovery
     assert "référence" in recovery
     assert "Herdr" in recovery and "preuve suffisante" in recovery
+
+
+def test_private_corpus_executor_is_documented_and_has_only_closed_profiles() -> None:
+    documentation = (AGENTIC_DOCS / "private-corpus-executor.md").read_text()
+    wrapper = (PRIVATE_CORPUS_OPS / "executor.py").read_text()
+    unit = (PRIVATE_CORPUS_OPS / "gw2analytics-private-corpus@.service").read_text()
+    installer = (ROOT / "tools" / "install-private-corpus-executor.sh").read_text()
+
+    assert "/run/gw2analytics-private" in documentation
+    assert "WvW/" not in wrapper
+    assert "shell=True" not in wrapper
+    assert "parser-validation-readonly" in wrapper
+    assert "ei-parity-readonly" in wrapper
+    assert "pytest-private-fixture" in wrapper
+    assert "User=gw2agent" in unit
+    assert "PrivateMounts=yes" in unit
+    assert "BindReadOnlyPaths=/run/gw2analytics-private/%i/source:" in unit
+    assert "NoNewPrivileges=yes" in unit
+    assert "IPAddressDeny=any" in unit
+    assert "Environment=UV_CACHE_DIR=/run/gw2analytics-private/%i/uv-cache" in unit
+    assert "/home/gw2agent" not in unit
+    assert "/usr/local/lib/gw2analytics-private/uv/0.12.5/uv" in unit
+    assert "/srv/gw2analytics/repo" not in unit
+    assert "chown root:gw2analytics-private-readers" in installer
+    assert "gw2agent must not be a permanent member" in installer
+    assert "install -D -o root -g root -m 0511" in installer
+    assert "installed uv integrity verification failed" in installer
+    for target in (
+        "/usr/local/sbin/gw2analytics-private-corpus-executor",
+        "/etc/systemd/system/gw2analytics-private-corpus@.service",
+        "/etc/sudoers.d/gw2analytics-private-corpus",
+    ):
+        assert target in installer
+
+
+def test_phase8_checkpoint_keeps_private_executor_experimental() -> None:
+    current_state = (AGENTIC_DOCS / "current-state.md").read_text()
+    checkpoint = (AGENTIC_DOCS / "phase8-final-checkpoint-2026-08-21.md").read_text()
+
+    for document in (current_state, checkpoint):
+        assert "EXPERIMENTAL / NOT OPERATIONAL" in document
+        assert "repli humain `roddy`" in document
+        assert "WvW/" in document
+    assert "systemd-start" in checkpoint
+    assert "sandbox-bind" in checkpoint
+    assert "tool-exec" in checkpoint
+    assert "profile-exit" in checkpoint
+
+
+def test_phase8_private_corpus_documents_carry_the_operational_warning() -> None:
+    warning = "EXPERIMENTAL / NOT OPERATIONAL — DO NOT USE WITH REAL PRIVATE CORPUS"
+    documents = (
+        AGENTIC_DOCS / "current-state.md",
+        AGENTIC_DOCS / "phase8-environment-prerequisites-2026-08-20.md",
+        AGENTIC_DOCS / "phase8-final-checkpoint-2026-08-21.md",
+        AGENTIC_DOCS / "private-corpus-executor.md",
+        ROOT / "ops/private-corpus/README.md",
+        ROOT / "_bmad-output/implementation-artifacts/spec-phase8-private-corpus-executor.md",
+        ROOT / "_bmad-output/specs/spec-private-corpus-access/SPEC.md",
+        ROOT / "_bmad-output/specs/spec-private-corpus-access/private-access-protocol.md",
+        ROOT / "_bmad-output/specs/spec-private-corpus-access/verification-and-git-guardrails.md",
+    )
+    assert all(warning in document.read_text(encoding="utf-8") for document in documents)
+
+
+def test_phase8_integration_manifest_excludes_private_and_runtime_artifacts() -> None:
+    manifest = (AGENTIC_DOCS / "phase8-integration-manifest.md").read_text(encoding="utf-8")
+    assert "WvW/" in manifest
+    assert ".memlog.md" in manifest
+    assert "Private Corpus Executor Finalization — GPT-5.6 Sol / High" in manifest
+    assert "codex exec\nresume" in manifest

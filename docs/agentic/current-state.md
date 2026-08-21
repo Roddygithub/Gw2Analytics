@@ -1,50 +1,63 @@
 # État courant agentique
 
-## Phase 6 — Validation réelle de l'infrastructure
+> **EXPERIMENTAL / NOT OPERATIONAL — DO NOT USE WITH REAL PRIVATE CORPUS**
 
-- **Statut :** corrections des findings Phase 6 réalisées ; livrable candidat
-  à une seconde review indépendante. Phase 7 interdite sans accord.
-- **Base :** `72ec29fd4eb71c41f02ff2bf1ccbff7c4468dc9c` sur `main`.
-- **Objectif :** démontrer les profils et politiques dans Codex/Herdr réels,
-  sans développement fonctionnel.
-- **Profil Lead initial :** Codex / `gpt-5.6-terra` / `medium`.
-- **Autonomie :** Level 1 pour tous les domaines.
-- **Fallback :** non configuré et non déclaré opérationnel.
-- **Confidentialité :** `WvW/` interdit à toute lecture, énumération,
-  indexation, modification ou ajout Git sans autorisation explicite.
-- **Prérequis utilisateur local :** l'entrée de confiance Codex du dépôt est
-  présente et valide dans la configuration utilisateur ; son contenu hors de
-  cette entrée ne fait pas partie du dépôt.
+## Phase 8 — clôture Level 1
 
-## Dettes acceptées de la revue Phase 5
+- **Statut :** décision Phase 8 clôturée au Level 1 ; l'implémentation de
+  l'exécuteur privé reste en review expérimentale, **EXPERIMENTAL / NOT
+  OPERATIONAL**, et ne doit jamais être utilisée avec `WvW/` réel.
+- **Autonomie :** Level 1 pour tous les domaines, inchangé.
+- **Confidentialité :** `WvW/` n'a pas été ouvert, énuméré, indexé, déplacé,
+  modifié ou ajouté à Git. `gw2agent`, Herdr et les worktrees n'ont aucun
+  accès permanent au corpus.
+- **Mécanisme temporaire autorisé :** repli humain `roddy`, par tâche
+  explicitement approuvée : `subset` par défaut, `full` après confirmation
+  distincte, commande précise exécutée sous `roddy`, résultat redacted seul
+  partagé avec les agents, puis nettoyage des temporaires.
 
-Ajustements réalisés, en attente de seconde review indépendante avant toute
-promotion au-delà du Level 1 : tests sémantiques des garde-fous (Reviewer,
-`WvW/`, fallback, handoff et reprise), critères objectivables pour Ultra, et
-procédure worktree de conflit ou d'abandon.
+## Findings consolidés
 
-## Validations
+| Domaine | Statut | Décision opérationnelle |
+| --- | --- | --- |
+| Routing et rôles | PASS | Lead stable ; séparation intention/autorisation conservée. |
+| Worktrees persistants | PASS | Worktrees séparés du corpus ; aucun montage privé persistant. |
+| Confidentialité | PASS | Corpus privé absent des accès par défaut et du dépôt. |
+| `uv` | PASS | `uv 0.12.5` via Mise est un prérequis `gw2agent`; Python passe par `uv run`. |
+| Herdr | PASS avec limite connue | Le socket peut être refusé par le sandbox Codex ; contrôles read-only hors sandbox sous `gw2agent`. |
+| Exécuteur privé avancé | EXPERIMENTAL / NOT OPERATIONAL | Sources, contrats et tests synthétiques conservés ; aucun accès réel autorisé. |
+| Stash `codex-pre-phase7-main-sync` | ABSENT / NON APPLIQUÉ | Aucun ref `stash` n'est présent lors de ce checkpoint ; aucun patch n'a été appliqué ni inspecté. |
 
-- PASS — `uv run pytest tests/scripts/test_agentic_infrastructure.py
-  tests/scripts/test_bmad_framework.py` : 11 tests.
-- PASS — Ruff ciblé sur les deux tests d'infrastructure.
-- PASS — Codex réel : Lead `gpt-5.6-terra` / `medium`, interaction read-only,
-  profils custom et handoff Explorer → Reviewer validés.
-- PASS — Herdr 0.8.0 : socket, pane temporaire, Codex read-only, état et
-  résultat récupérés, puis pane supprimé.
-- PASS — reprise fresh-context : une session Codex éphémère reconstruit Phase
-  6, Level 1, confidentialité, fallback, dettes et prochaine action depuis les
-  documents versionnés.
-- PASS — interfaces Codex/Herdr : CLI Codex 0.148.0 ; Herdr 0.8.0 expose les
-  commandes d'intégration et de worktrees documentées.
-- PASS — résolveurs `resolve_config.py` et `resolve_customization.py` BMAD.
-- PASS — `git diff --check`.
-- BLOCKED — spawn dans `codex exec --ephemeral` : ce mode ne fournit pas de
-  thread parent au routeur. Le même test persistant read-only est passé.
-- NOT RUN — worktree temporaire : non requis pour le flux Herdr sans écriture.
+## Validations Phase 8
 
-## Reprise
+- PASS — prérequis `uv 0.12.5`, tests d'infrastructure agentique et framework
+  BMAD ; voir `phase8-environment-prerequisites-2026-08-20.md`.
+- PASS — tests de contrat de l'exécuteur synthétique, garde-fous documentaires,
+  Ruff, formatage, syntaxe Bash et `git diff --check`.
+- PASS — diagnostics synthétiques root-owned : création atomique, redaction,
+  TTL et lecture fermée sous `roddy`.
+- PASS — demandes synthétiques `subset` et `full` validées jusqu'à l'étape
+  service ; les jetons sont à usage unique.
+- NOT OPERATIONAL — l'unité retourne encore `unit-failed/service` pour les
+  deux scopes. Son code retour effectif n'est pas suffisamment observé pour
+  justifier une nouvelle correction.
 
-Faire la seconde review indépendante read-only des ajustements Phase 6. Ne pas
-créer de worktree d'écriture, modifier les niveaux d'autonomie ou configurer un
-fallback sans accord explicite.
+## Dette et reprise
+
+Ne pas reprendre le debug systemd sans accord humain explicite. La reprise doit
+d'abord ajouter une observabilité fermée distinguant `systemd-start`,
+`sandbox-bind`, `tool-exec` et `profile-exit`, avec seulement
+`ExecMainStatus`, code retour et profil logique redacted. Elle devra ensuite
+prouver en live synthétique namespace, bind UV root-owned, `.venv`, cache,
+lecture seule, nettoyage succès/échec/interruption et reboot avant tout accès
+réel.
+
+Les artefacts expérimentaux ne sont pas recommandés pour intégration
+opérationnelle tant que les tests live et les garde-fous de l'exécuteur ne sont
+pas satisfaits. Leur présence non suivie est volontaire à ce stade : une future
+décision d'intégration devra examiner explicitement leur inventaire et les
+findings de review.
+
+Le checkpoint détaillé est
+`phase8-final-checkpoint-2026-08-21.md`. Git/GitHub Governance & Delivery
+Architecture reste non commencée.

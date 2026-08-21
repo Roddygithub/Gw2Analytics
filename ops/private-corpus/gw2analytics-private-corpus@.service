@@ -1,0 +1,24 @@
+# EXPERIMENTAL / NOT OPERATIONAL — DO NOT USE WITH REAL PRIVATE CORPUS.
+[Unit]
+Description=Gw2Analytics private corpus execution %i
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=gw2agent
+SupplementaryGroups=gw2analytics-private-readers
+PrivateMounts=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+IPAddressDeny=any
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/run/gw2analytics-private/%i
+BindReadOnlyPaths=/run/gw2analytics-private/%i/source:/run/gw2analytics-private/%i/input
+BindReadOnlyPaths=/usr/local/lib/gw2analytics-private/uv/0.12.5/uv:/run/gw2analytics-private/%i/toolchain/uv
+Environment=GW2_PRIVATE_RUNTIME=/run/gw2analytics-private/%i
+Environment=GW2_PRIVATE_INPUT=/run/gw2analytics-private/%i/input
+Environment=UV_CACHE_DIR=/run/gw2analytics-private/%i/uv-cache
+ExecStart=/usr/local/sbin/gw2analytics-private-corpus-executor --run-unit %i
+TimeoutStartSec=15min
+KillMode=control-group
