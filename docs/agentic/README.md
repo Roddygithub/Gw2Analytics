@@ -1,64 +1,24 @@
-# GW2Analytics Lead
+# Travailler sur GW2Analytics
 
-## Point d'entrée quotidien
+Herdr + Codex sont le workflow principal. Démarrez la session à la racine puis dites
+`Continue GW2Analytics`. Herdr conserve la session; Codex est le Lead, choisit la
+prochaine tâche sûre, délègue, valide et garde un handoff court (objectif, chemins,
+contraintes, validation, résultat). OpenCode n'est pas un second orchestrateur.
 
-Parlez au rôle **GW2Analytics Lead** depuis la racine du dépôt. Il est stable ;
-le profil initial est Codex / `gpt-5.6-terra` / `medium`, mais peut évoluer sans
-changer votre point d'entrée.
+Chaque sous-tâche est reclassifiée : Luna (`none`/`low`) pour recherche, tests et
+travail mécanique; Terra (`medium`, puis `high`/`xhigh`) pour développement normal;
+Sol seulement pour architecture ou risque exceptionnel. Les efforts réels sont
+`none`, `low`, `medium`, `high`, `xhigh`, `max`; `pro` est distinct. On augmente
+d'abord le reasoning, puis le modèle si nécessaire, et on redescend immédiatement
+pour la tâche suivante. BMAD est optionnel, réservé aux changements transverses.
 
-Exemples naturels :
+Les protections restent normales : pas de secrets ni de données locales dans Git,
+pas de root arbitraire, pas d'opération destructive non confirmée. `WvW/` peut être
+analysé localement dans le dépôt mais jamais versionné ou exfiltré. Les executors
+Private Corpus et Root Admin ont été retirés. Reprenez le produit via
+`docs/ROADMAP.md`, les SPEC actives et les tests/CI.
 
-- « J'ai une idée de feature. »
-- « J'ai trouvé un bug. »
-- « Pourquoi cette statistique fonctionne comme ça ? »
-- « Implémente cette story validée. »
-- « Continue la roadmap. »
-
-Vous ne choisissez normalement ni modèle, ni reasoning, ni worker, ni
-worktree, ni Reviewer. Le Lead lit l'état canonique, classe l'intention et le
-risque, puis propose ou exécute seulement ce qui est autorisé.
-
-## Discussion n'est pas exécution
-
-| Formulation | Réponse attendue au Level 1 |
-| --- | --- |
-| question, idée, analyse, bug signalé | investigation et proposition ; aucune écriture implicite |
-| décision validée + demande d'implémentation | exécution bornée, validations et review selon le risque |
-| « Continue la roadmap » | prochaine proposition priorisée ; attente de votre accord avant écriture |
-
-En cas de doute, le Lead continue l'analyse mais s'arrête avant toute mutation.
-
-## Sources de vérité
-
-1. code, tests et CI : comportement livré ;
-2. SPEC acceptées sous `_bmad-output/specs/` : contrat à construire ;
-3. `docs/adr/` : décisions d'architecture ;
-4. ce dossier : politique agentique et checkpoints assainis ;
-5. Git/GitHub : historique et état d'intégration.
-
-Supermemory n'est pas une source opérationnelle. `WvW/` est un corpus privé :
-il est interdit de l'ouvrir, de l'énumérer, de l'indexer, de le modifier ou de
-l'ajouter à Git sans autorisation explicite.
-
-## Prérequis de l'environnement `gw2agent`
-
-- `uv` fait partie des prérequis de l'environnement `gw2agent`. La version
-  épinglée est `0.12.5`, fournie par `mise` ; les outils Python du dépôt sont
-  exécutés via `uv run`.
-- Le sandbox Codex peut refuser l'accès au socket Herdr. Les contrôles
-  read-only de disponibilité de Herdr sont alors réalisés hors sandbox sous
-  `gw2agent` ; ce refus ne constitue pas une anomalie Herdr ni une autorisation
-  d'écriture.
-
-## Documents opérationnels
-
-- [Architecture](architecture.md) — composants et frontières.
-- [Routing](routing-policy.md) — modèle, reasoning, risque et parallélisme.
-- [Communication](communication-protocol.md) — délégation et handoff.
-- [Autonomie](autonomy-policy.md) — Level 1 à 3 et rétrogradation.
-- [Worktrees et Herdr](worktrees-herdr.md) — flux macro indépendants.
-- [Backlog agentique](backlog.md) — initiatives à traiter ultérieurement.
-- [État courant](current-state.md) — reprise après interruption.
-- [Checkpoint final Phase 8](phase8-final-checkpoint-2026-08-21.md) —
-  prérequis, confidentialité, repli humain et statut expérimental de
-  l'exécuteur privé.
+Le Lead applique **Continuous Execution** : un checkpoint n'est pas une fin de
+mission. Tant qu'une étape sûre reste exécutable, il enchaîne automatiquement la
+suivante; il ne rend la main que pour un blocage démontré, une permission/TTY
+inaccessible ou une décision destructive/externe.

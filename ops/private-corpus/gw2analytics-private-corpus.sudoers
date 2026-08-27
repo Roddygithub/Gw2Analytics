@@ -1,3 +1,0 @@
-# EXPERIMENTAL / NOT OPERATIONAL — DO NOT USE WITH REAL PRIVATE CORPUS.
-roddy ALL=(root) NOPASSWD: /usr/local/sbin/gw2analytics-private-corpus-executor --request-stdin
-roddy ALL=(root) NOPASSWD: /usr/local/sbin/gw2analytics-private-corpus-executor --read-diagnostic-stdin

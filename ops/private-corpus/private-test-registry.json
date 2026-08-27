@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "note": "Synthetic test fixture only. Production registry is root-owned and outside the repository.",
-  "synthetic": true,
-  "allowed_purposes": ["validation"],
-  "corpus_root": "/var/lib/gw2analytics/private-corpus-synthetic",
-  "worktrees": {"synthetic-private-tests": "/srv/gw2analytics/repo"},
-  "selections": {"synthetic-subset-token": "fixture-a"}
-}

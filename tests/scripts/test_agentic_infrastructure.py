@@ -1,254 +1,37 @@
-import re
+"""Contracts for the intentionally small Codex/Herdr project integration."""
+
 import tomllib
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parents[2]
-CODEX_DIR = ROOT / ".codex"
-AGENTS_DIR = CODEX_DIR / "agents"
-AGENTIC_DOCS = ROOT / "docs" / "agentic"
-PRIVATE_CORPUS_OPS = ROOT / "ops" / "private-corpus"
-
-EXPECTED_AGENTS = {
-    "gw2analytics_lead": ("gpt-5.6-terra", "medium"),
-    "explorer": ("gpt-5.6-luna", "medium"),
-    "implementer": ("gpt-5.6-terra", "medium"),
-    "reviewer": ("gpt-5.6-terra", "high"),
-    "specialist": ("gpt-5.6-sol", "high"),
-}
-
-PRIVATE_CORPUS_ACTIONS = {
-    "lecture": (r"ouvr", r"lecture", r"accèd"),
-    "énumération": (r"énum",),
-    "indexation": (r"index",),
-    "modification": (r"modifi",),
-}
-REQUIRED_HANDOFF_FIELDS = {
-    "task_id",
-    "intent",
-    "risk",
-    "objective",
-    "acceptance",
-    "context_refs",
-    "allowed_paths",
-    "forbidden",
-    "validation",
-    "output",
-}
 
 
-def section(document: str, heading: str) -> str:
-    match = re.search(
-        rf"^## {re.escape(heading)}\n(.*?)(?=^## |\Z)", document, re.MULTILINE | re.DOTALL
-    )
-    assert match, f"Section absente : {heading}"
-    return match.group(1)
-
-
-def handoff_fields(document: str) -> dict[str, str]:
-    match = re.search(r"```yaml\n(.*?)```", document, re.DOTALL)
-    assert match, "Enveloppe YAML de handoff absente"
-    return {
-        key: value.strip()
-        for key, value in re.findall(r"^(\w+):\s*(.+)$", match.group(1), re.MULTILINE)
-    }
-
-
-def load_toml(path: Path) -> dict:
-    return tomllib.loads(path.read_text())
-
-
-def test_project_codex_defaults_are_cost_conscious_and_bounded() -> None:
-    config = load_toml(CODEX_DIR / "config.toml")
-
+def test_codex_defaults_are_economic_and_agentic() -> None:
+    config = tomllib.loads((ROOT / ".codex/config.toml").read_text())
     assert config["model"] == "gpt-5.6-terra"
     assert config["model_reasoning_effort"] == "medium"
-    assert config["agents"] == {
-        "enabled": True,
-        "max_concurrent_threads_per_session": 2,
-        "default_subagent_model": "gpt-5.6-luna",
-        "default_subagent_reasoning_effort": "medium",
-    }
+    assert config["agents"]["enabled"] is True
+    assert config["agents"]["default_subagent_model"] == "gpt-5.6-luna"
+    assert config["agents"]["default_subagent_reasoning_effort"] == "low"
 
 
-def test_custom_agent_profiles_are_complete_and_constrained() -> None:
-    profiles = {path.stem: load_toml(path) for path in AGENTS_DIR.glob("*.toml")}
-
-    assert set(profiles) == set(EXPECTED_AGENTS)
-    for name, (model, effort) in EXPECTED_AGENTS.items():
-        profile = profiles[name]
-        assert profile["name"] == name
-        assert profile["description"]
-        assert profile["developer_instructions"]
-        assert profile["model"] == model
-        assert profile["model_reasoning_effort"] == effort
-
-    assert profiles["explorer"]["sandbox_mode"] == "read-only"
-    assert profiles["reviewer"]["sandbox_mode"] == "read-only"
-    assert profiles["specialist"]["sandbox_mode"] == "read-only"
-    assert profiles["implementer"]["sandbox_mode"] == "workspace-write"
-
-    for name, profile in profiles.items():
-        instructions = profile["developer_instructions"]
-        assert "WvW/" in instructions, name
-        for action, patterns in PRIVATE_CORPUS_ACTIONS.items():
-            assert any(re.search(pattern, instructions, re.IGNORECASE) for pattern in patterns), (
-                f"{name} doit interdire {action} du corpus privé"
-            )
-
-    assert (
-        "ne transforme jamais une discussion en écriture"
-        in profiles["gw2analytics_lead"]["developer_instructions"]
-    )
-    assert "Reste indépendant de l'auteur" in profiles["reviewer"]["developer_instructions"]
-    assert "Ne corrige aucun fichier" in profiles["reviewer"]["developer_instructions"]
-    assert profiles["reviewer"]["sandbox_mode"] != profiles["implementer"]["sandbox_mode"]
+def test_only_normal_local_data_protection_remains() -> None:
+    agents = (ROOT / "AGENTS.md").read_text()
+    assert "ni token, ni sudoers, ni executor dédié" in agents
+    assert not (ROOT / "ops/private-corpus").exists()
+    assert not (ROOT / "ops/admin").exists()
+    assert not (ROOT / "tools/install-private-corpus-executor.sh").exists()
+    assert not (ROOT / "tools/install-gw2analytics-admin.sh").exists()
 
 
-def test_agentic_docs_define_level_one_recovery_and_governance() -> None:
-    required = {
-        "README.md",
-        "architecture.md",
-        "routing-policy.md",
-        "communication-protocol.md",
-        "autonomy-policy.md",
-        "worktrees-herdr.md",
-        "backlog.md",
-        "current-state.md",
-    }
-    assert required <= {path.name for path in AGENTIC_DOCS.iterdir()}
-
-    assert "Level 1" in (AGENTIC_DOCS / "autonomy-policy.md").read_text()
-    assert (
-        "Git/GitHub Governance & Delivery Architecture" in (AGENTIC_DOCS / "backlog.md").read_text()
-    )
-    assert (
-        "Herdr, subagents Codex et Ultra ne sont jamais imbriqués"
-        in (AGENTIC_DOCS / "routing-policy.md").read_text()
-    )
-    assert "énumérer" in (ROOT / "AGENTS.md").read_text()
+def test_single_agentic_guide_defines_routing_handoffs_and_bmad() -> None:
+    guide = (ROOT / "docs/agentic/README.md").read_text()
+    for phrase in ("Herdr + Codex", "Luna", "Terra", "Sol", "reasoning", "BMAD", "handoff"):
+        assert phrase in guide
 
 
-def test_agentic_guardrails_cover_fallback_handoff_and_ultra() -> None:
-    config = load_toml(CODEX_DIR / "config.toml")
-    profiles = {path.stem: load_toml(path) for path in AGENTS_DIR.glob("*.toml")}
-    architecture = (AGENTIC_DOCS / "architecture.md").read_text()
-    communication = (AGENTIC_DOCS / "communication-protocol.md").read_text()
-    routing = (AGENTIC_DOCS / "routing-policy.md").read_text()
-    worktrees = (AGENTIC_DOCS / "worktrees-herdr.md").read_text()
-
-    # Les protections documentaires complètent les modes sandbox ; elles ne
-    # remplacent pas les essais live read-only de la Phase 6.
-    assert "Aucun fallback n'est configuré" in architecture
-    assert set(config) == {"model", "model_reasoning_effort", "agents"}
-    assert {profile["model"] for profile in profiles.values()} <= {
-        "gpt-5.6-luna",
-        "gpt-5.6-terra",
-        "gpt-5.6-sol",
-    }
-
-    handoff = handoff_fields(communication)
-    assert set(handoff) >= REQUIRED_HANDOFF_FIELDS
-    assert handoff["forbidden"].startswith("WvW")
-    assert all(handoff[field] for field in REQUIRED_HANDOFF_FIELDS)
-    assert "jamais un dump" in communication
-    assert "done`, `idle` ou `unknown` exigent toujours diff, validations et" in communication
-    assert "review avant changement d'état canonique" in communication
-
-    ultra = section(routing, "Critères d'Ultra")
-    criteria = re.findall(r"^([1-4])\.\s+(.+?)(?=\n\d\. |\n\n|\Z)", ultra, re.MULTILINE | re.DOTALL)
-    assert [number for number, _ in criteria] == ["1", "2", "3", "4"]
-    assert "sous-problèmes indépendants" in criteria[0][1]
-    assert "gain attendu mesurable" in criteria[1][1]
-    assert "subagents Codex read-only ou Herdr/worktrees" in criteria[2][1]
-    assert "plafond de coût approuvé" in criteria[3][1]
-    assert "Ultra reste interdit" in ultra
-    assert re.search(r"fan-out remplace toutes les\s+autres couches", ultra)
-
-    parallelism = section(routing, "Parallélisme")
-    strategies = [
-        strategy.strip() for strategy in re.findall(r"^\d\.\s+([^:]+):", parallelism, re.MULTILINE)
-    ]
-    assert strategies == [
-        "tâche simple",
-        "exploration ou review réellement indépendantes",
-        "deux flux d'écriture réellement indépendants",
-        "Ultra exceptionnel",
-    ]
-    assert "ne sont jamais imbriqués" in parallelism
-
-    recovery = section(worktrees, "Conflit, abandon et récupération")
-    for stage in ("**Conflit :**", "**Abandon :**", "**Récupération :**", "**Nettoyage sûr :**"):
-        assert stage in recovery
-    assert "référence" in recovery
-    assert "Herdr" in recovery and "preuve suffisante" in recovery
-
-
-def test_private_corpus_executor_is_documented_and_has_only_closed_profiles() -> None:
-    documentation = (AGENTIC_DOCS / "private-corpus-executor.md").read_text()
-    wrapper = (PRIVATE_CORPUS_OPS / "executor.py").read_text()
-    unit = (PRIVATE_CORPUS_OPS / "gw2analytics-private-corpus@.service").read_text()
-    installer = (ROOT / "tools" / "install-private-corpus-executor.sh").read_text()
-
-    assert "/run/gw2analytics-private" in documentation
-    assert "WvW/" not in wrapper
-    assert "shell=True" not in wrapper
-    assert "parser-validation-readonly" in wrapper
-    assert "ei-parity-readonly" in wrapper
-    assert "pytest-private-fixture" in wrapper
-    assert "User=gw2agent" in unit
-    assert "PrivateMounts=yes" in unit
-    assert "BindReadOnlyPaths=/run/gw2analytics-private/%i/source:" in unit
-    assert "NoNewPrivileges=yes" in unit
-    assert "IPAddressDeny=any" in unit
-    assert "Environment=UV_CACHE_DIR=/run/gw2analytics-private/%i/uv-cache" in unit
-    assert "/home/gw2agent" not in unit
-    assert "/usr/local/lib/gw2analytics-private/uv/0.12.5/uv" in unit
-    assert "/srv/gw2analytics/repo" not in unit
-    assert "chown root:gw2analytics-private-readers" in installer
-    assert "gw2agent must not be a permanent member" in installer
-    assert "install -D -o root -g root -m 0511" in installer
-    assert "installed uv integrity verification failed" in installer
-    for target in (
-        "/usr/local/sbin/gw2analytics-private-corpus-executor",
-        "/etc/systemd/system/gw2analytics-private-corpus@.service",
-        "/etc/sudoers.d/gw2analytics-private-corpus",
-    ):
-        assert target in installer
-
-
-def test_phase8_checkpoint_keeps_private_executor_experimental() -> None:
-    current_state = (AGENTIC_DOCS / "current-state.md").read_text()
-    checkpoint = (AGENTIC_DOCS / "phase8-final-checkpoint-2026-08-21.md").read_text()
-
-    for document in (current_state, checkpoint):
-        assert "EXPERIMENTAL / NOT OPERATIONAL" in document
-        assert "repli humain `roddy`" in document
-        assert "WvW/" in document
-    assert "systemd-start" in checkpoint
-    assert "sandbox-bind" in checkpoint
-    assert "tool-exec" in checkpoint
-    assert "profile-exit" in checkpoint
-
-
-def test_phase8_private_corpus_documents_carry_the_operational_warning() -> None:
-    warning = "EXPERIMENTAL / NOT OPERATIONAL — DO NOT USE WITH REAL PRIVATE CORPUS"
-    documents = (
-        AGENTIC_DOCS / "current-state.md",
-        AGENTIC_DOCS / "phase8-environment-prerequisites-2026-08-20.md",
-        AGENTIC_DOCS / "phase8-final-checkpoint-2026-08-21.md",
-        AGENTIC_DOCS / "private-corpus-executor.md",
-        ROOT / "ops/private-corpus/README.md",
-        ROOT / "_bmad-output/implementation-artifacts/spec-phase8-private-corpus-executor.md",
-        ROOT / "_bmad-output/specs/spec-private-corpus-access/SPEC.md",
-        ROOT / "_bmad-output/specs/spec-private-corpus-access/private-access-protocol.md",
-        ROOT / "_bmad-output/specs/spec-private-corpus-access/verification-and-git-guardrails.md",
-    )
-    assert all(warning in document.read_text(encoding="utf-8") for document in documents)
-
-
-def test_phase8_integration_manifest_excludes_private_and_runtime_artifacts() -> None:
-    manifest = (AGENTIC_DOCS / "phase8-integration-manifest.md").read_text(encoding="utf-8")
-    assert "WvW/" in manifest
-    assert ".memlog.md" in manifest
-    assert "Private Corpus Executor Finalization — GPT-5.6 Sol / High" in manifest
-    assert "codex exec\nresume" in manifest
+def test_lead_persists_continuous_execution() -> None:
+    lead = (ROOT / ".codex/agents/gw2analytics_lead.toml").read_text()
+    assert "CONTINUOUS EXECUTION" in lead
+    assert "sans rendre la main" in lead
