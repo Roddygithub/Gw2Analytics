@@ -1,5 +1,9 @@
 # GW2Analytics Web (`web/`)
 
+The canonical frontend package manager is the exact pnpm version declared in
+`package.json` (`packageManager`); Corepack, CI, and the production Docker build
+use that same version. `pnpm-lock.yaml` is the only frontend lockfile.
+
 Next.js 16 frontend for the GW2Analytics monorepo — Server Components
 fetch the FastAPI gateway, Client Components render AG&nbsp;Grid
 Community and the API-key resolve form.
@@ -8,7 +12,7 @@ Community and the API-key resolve form.
 
 ```bash
 # 1. Install deps (pnpm workspace, lockfile committed)
-pnpm install
+pnpm install --frozen-lockfile
 
 # 2. Configure the gateway URL
 cp .env.example .env.local   # then edit API_BASE_URL if non-default

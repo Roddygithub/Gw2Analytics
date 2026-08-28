@@ -90,7 +90,7 @@ class Log:
     """One corpus log, parsed once and indexed for every rule."""
 
     def __init__(self, stem: str) -> None:
-        raw = read_zevtc_archive(ROOT / "zevtc files" / f"{stem}.zevtc")
+        raw = read_zevtc_archive(ROOT / "WvW" / f"{stem}.zevtc")
         parser = PythonEvtcParser()
         self.stem = stem
         self.fight = next(parser.parse(raw))

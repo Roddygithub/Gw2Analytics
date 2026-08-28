@@ -8,7 +8,8 @@ from gw2_analytics.ei_compare import compare_elite_insights
 from gw2_core import CombatOutcomeEvent, DownEvent, UpEvent
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
-_CORPUS = Path("/home/roddy/Projects/WvW/WvW (1)/Sshim Daath")
+_ROOT = Path(__file__).resolve().parents[3]
+_CORPUS = Path(os.environ.get("GW2ANALYTICS_WVW_CORPUS", _ROOT / "WvW" / "Sshim Daath"))
 _EI_CORPUS = os.environ.get("GW2ANALYTICS_EI_CORPUS")
 
 
@@ -30,7 +31,7 @@ def test_evtc_2025_multilog_corpus(
     outcomes: int,
 ) -> None:
     path = _CORPUS / name
-    if not path.exists():
+    if not path.is_file() or not os.access(path, os.R_OK):
         pytest.skip("optional local EVTC corpus unavailable")
 
     raw = read_zevtc_archive(path)
@@ -63,7 +64,12 @@ def test_elite_insights_multilog_alignment_does_not_regress(
         pytest.skip("set GW2ANALYTICS_EI_CORPUS to official EI JSON exports")
     log_path = _CORPUS / log_name
     ei_path = Path(_EI_CORPUS) / ei_name
-    if not log_path.exists() or not ei_path.exists():
+    if (
+        not log_path.is_file()
+        or not os.access(log_path, os.R_OK)
+        or not ei_path.is_file()
+        or not os.access(ei_path, os.R_OK)
+    ):
         pytest.skip("optional EVTC/EI corpus unavailable")
 
     raw = read_zevtc_archive(log_path)

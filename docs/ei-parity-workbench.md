@@ -20,8 +20,11 @@ curl -sSL -o /tmp/dotnet-install.sh https://dot.net/v1/dotnet-install.sh && chmo
 mkdir -p .tooling && curl -sL -o .tooling/GW2EICLI.zip https://github.com/baaron4/GW2-Elite-Insights-Parser/releases/download/v3.26.0.0/GW2EICLI.zip && unzip -oq .tooling/GW2EICLI.zip -d .tooling/GW2EICLI
 ```
 
-`.tooling/` and `zevtc files/` are gitignored: the vendored CLI, the raw logs
+`.tooling/` and `WvW/` are gitignored: the vendored CLI, the raw logs
 and the reference JSON are all local artefacts.
+
+`WvW/` is authorized for local development, tests, and validation. Use it
+directly; no token, executor, sudo rule, or special runtime is involved.
 
 `scripts/ei-parity/corpus-manifest.json` is the versioned, non-personal
 inventory that attests EI `3.26.0.0`, the SHA-256 of
@@ -54,7 +57,7 @@ reimplemented rather than transliterated.
 of a summary, and `RawTimelineArrays=true`.
 
 ```bash
-export PATH="$HOME/.dotnet:$PATH" && cd .tooling/GW2EICLI && while read -r stem; do dotnet GuildWars2EliteInsights-CLI.dll -c ../../scripts/ei-parity/ei.conf "../../zevtc files/${stem}.zevtc"; done < ../../scripts/ei-parity/corpus.txt
+export PATH="$HOME/.dotnet:$PATH" && cd .tooling/GW2EICLI && while read -r stem; do dotnet GuildWars2EliteInsights-CLI.dll -c ../../scripts/ei-parity/ei.conf "../../WvW/${stem}.zevtc"; done < ../../scripts/ei-parity/corpus.txt
 ```
 
 Output lands in `.tooling/ei-out/<stem>_detailed_wvw_kill.json`.

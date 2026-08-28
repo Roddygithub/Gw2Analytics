@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Shell started by panes in the explicit GW2Analytics Herdr session.
+#
+# Herdr deliberately respawns a pane when its shell exits. For this dedicated
+# session, an explicit `exit` means "leave GW2Analytics": stop the named
+# session so its attached client returns to the shell that invoked `gw2a`.
+set -u
+
+readonly session_name="${GW2A_SESSION_NAME:-gw2analytics}"
+readonly exit_marker="${GW2A_EXIT_MARKER:-${XDG_RUNTIME_DIR:-/tmp}/gw2analytics-exit-requested}"
+
+# Do not leak the lifecycle-only $SHELL value into the user's interactive shell
+# or programs it launches.
+export SHELL="/bin/bash"
+
+set +e
+bash --login
+shell_status=$?
+set -e
+
+# Tell the entry wrapper this was the deliberate `exit` path before stopping
+# the server. Herdr reports that shutdown to its client as status 1, which the
+# entry wrapper can now distinguish from an actual client error.
+umask 077
+: > "$exit_marker"
+
+# If the stop request cannot be accepted, this is not the clean explicit-exit
+# path. Remove the marker so a later unrelated client failure is not masked.
+if ! herdr session stop "$session_name" >/dev/null 2>&1; then
+    rm -f "$exit_marker"
+fi
+exit "$shell_status"

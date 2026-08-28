@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Lifecycle Herdr exécuté sous gw2agent, sans rattachement implicite.
+set -euo pipefail
+
+# Reserved for isolated lifecycle validation. It is not passed through sudo by
+# the public wrapper, so production always retains the fixed gw2analytics name.
+readonly session_name="${GW2A_TEST_SESSION_NAME:-gw2analytics}"
+readonly repo_root="${GW2A_TEST_REPO_ROOT:-/srv/gw2analytics/repo}"
+export HOME="/home/gw2agent"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_STATE_HOME="$HOME/.local/state"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export PATH="/home/gw2agent/.local/bin:/usr/local/bin:/usr/bin:/bin"
+readonly exit_marker="${GW2A_EXIT_MARKER:-$XDG_RUNTIME_DIR/gw2analytics-exit-requested}"
+# Herdr uses $SHELL when terminal.default_shell is unset (the normal
+# configuration). Its panes therefore start our lifecycle-aware shell, while
+# unrelated Herdr invocations keep their normal shell.
+export SHELL="${GW2A_PANE_SHELL:-/usr/local/libexec/gw2a-pane-shell}"
+export GW2A_SESSION_NAME="$session_name"
+export GW2A_EXIT_MARKER="$exit_marker"
+
+cd "$repo_root"
+
+session_is_running() {
+    local sessions jq_status=0
+
+    if ! sessions="$(herdr session list --json)"; then
+        echo "Unable to inspect the GW2Analytics Herdr session." >&2
+        return 2
+    fi
+
+    jq -e --arg name "$session_name" \
+        '.sessions[] | select(.name == $name) | .running' \
+        <<<"$sessions" >/dev/null || jq_status=$?
+
+    case "$jq_status" in
+        0) return 0 ;;
+        1) return 1 ;;
+        4) return 3 ;;
+        *)
+            echo "Unable to parse the GW2Analytics Herdr session state." >&2
+            return 2
+            ;;
+    esac
+}
+
+start_session() {
+    local session_status
+
+    if session_is_running; then
+        echo "GW2Analytics is already active; use 'gw2a status' or 'gw2a restart'." >&2
+        return 1
+    else
+        session_status=$?
+        if [[ "$session_status" -ne 1 && "$session_status" -ne 3 ]]; then
+            return "$session_status"
+        fi
+    fi
+
+    run_session_client
+}
+
+run_session_client() {
+    local client_status
+
+    rm -f "$exit_marker"
+    if herdr --session "$session_name"; then
+        return 0
+    else
+        client_status=$?
+    fi
+
+    # Herdr reports a server shutdown to its client as exit status 1.  The
+    # marker is created only by the dedicated pane shell before its explicit
+    # `exit` stops this named session, so normalize only that expected path.
+    if [[ -f "$exit_marker" ]]; then
+        rm -f "$exit_marker"
+        return 0
+    fi
+
+    return "$client_status"
+}
+
+case "${1:-start}" in
+    start)
+        start_session
+        ;;
+    restart)
+        if session_is_running; then
+            herdr session stop "$session_name"
+        else
+            session_status=$?
+            if [[ "$session_status" -ne 1 && "$session_status" -ne 3 ]]; then
+                exit "$session_status"
+            fi
+        fi
+        run_session_client
+        ;;
+    stop)
+        if session_is_running; then
+            herdr session stop "$session_name"
+        else
+            session_status=$?
+            if [[ "$session_status" -eq 1 || "$session_status" -eq 3 ]]; then
+                echo "No active GW2Analytics session."
+            else
+                exit "$session_status"
+            fi
+        fi
+        ;;
+    status)
+        echo "Herdr:"
+        herdr session list --json
+        echo "Identity and groups:"
+        id
+        if docker info >/dev/null 2>&1; then
+            echo "Docker: available"
+        else
+            echo "Docker: unavailable" >&2
+        fi
+        ;;
+    *)
+        echo "Usage: gw2a [status|stop|restart]" >&2
+        exit 2
+        ;;
+esac

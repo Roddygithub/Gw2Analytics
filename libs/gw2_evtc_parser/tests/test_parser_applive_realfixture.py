@@ -27,13 +27,12 @@ record).
 OFF-REPO FIXTURE POLICY
 -----------------------
 
-The 12 real WvW ``.zevtc`` fixtures used by the F1 calibration (2026-07-11)
-live OFF the repo at ``/home/roddy/WvW_Analytics/uploads/`` to keep the
-fixture sizes + the arcdps-game-data licensing out of the repo. The test
-looks for the fixture at ``$WVW_ANALYTICS_DIR/uploads/5b161ec0*.zevtc``
-(defaulting to ``/home/roddy/WvW_Analytics``), gracefully ``pytest.skip``
-if the path is missing (so CI devs without the WvW sink still see green),
-and exercises BOTH branches when the file is available.
+The real WvW ``.zevtc`` fixture used by the F1 calibration (2026-07-11) lives
+off the repository to keep user-uploaded combat data out of Git. The test
+looks for it at ``$WVW_ANALYTICS_DIR/uploads/5b161ec0*.zevtc`` (defaulting to
+the repository-local, gitignored ``WvW/`` directory), gracefully
+``pytest.skip``s when it is absent or unreadable, and exercises BOTH branches
+when the file is available.
 
 Fixture choice: ``5b161ec03d544b0c96eeb6689590ece4.zevtc`` (75 KB compressed
 -> 380 KB inner EVTC, 1,702 events). This is the F1-pilot outlier
@@ -89,20 +88,22 @@ from gw2_core import (
 )
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
-#: Path to the F1-pilot fixture. Default points at the user's local
-#: ``WVW_ANALYTICS_DIR``; overridable via env var (``WVW_ANALYTICS_DIR``)
-#: for testing against a different corpus on a different host. The test
-#: cleanly ``pytest.skip``s when the file is missing -- offline CI without
-#: the WvW sink still green.
-_FIXTURE_DIR = Path(os.environ.get("WVW_ANALYTICS_DIR", "/home/roddy/WvW_Analytics"))
+#: Path to the F1-pilot fixture. ``WVW_ANALYTICS_DIR`` remains an override for
+#: a separately mounted corpus; the default is portable across clones.
+_ROOT = Path(__file__).resolve().parents[3]
+_FIXTURE_DIR = Path(os.environ.get("WVW_ANALYTICS_DIR", _ROOT / "WvW"))
 _FIXTURE_PATH = _FIXTURE_DIR / "uploads" / "5b161ec03d544b0c96eeb6689590ece4.zevtc"
 
 
+def _fixture_is_readable() -> bool:
+    return _FIXTURE_PATH.is_file() and os.access(_FIXTURE_PATH, os.R_OK)
+
+
 @pytest.mark.skipif(
-    not _FIXTURE_PATH.exists(),
+    not _fixture_is_readable(),
     reason=(
-        f"F1-pilot fixture not found at {_FIXTURE_PATH}. Set WVW_ANALYTICS_DIR "
-        f"or symlink the WvW sink to enable the real-fixture anchor. The "
+        f"F1-pilot fixture unavailable at {_FIXTURE_PATH}. Set WVW_ANALYTICS_DIR "
+        f"to a readable local corpus to enable the real-fixture anchor. The "
         f"test cleanly skips otherwise."
     ),
 )
@@ -265,8 +266,8 @@ def test_real_fixture_dual_channel_emit_contract() -> None:
 
 
 @pytest.mark.skipif(
-    not _FIXTURE_PATH.exists(),
-    reason=(f"F1-pilot fixture not found at {_FIXTURE_PATH}. Set WVW_ANALYTICS_DIR."),
+    not _fixture_is_readable(),
+    reason=(f"F1-pilot fixture unavailable at {_FIXTURE_PATH}. Set WVW_ANALYTICS_DIR."),
 )
 def test_real_fixture_emit_preserves_record_order() -> None:
     """The parser preserves the cbtevent record order on the emit side.

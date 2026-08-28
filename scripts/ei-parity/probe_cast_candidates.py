@@ -39,7 +39,7 @@ def main() -> int:
     expected_casts = 0
 
     for stem, account in pairs:
-        raw = read_zevtc_archive(ROOT / "zevtc files" / f"{stem}.zevtc")
+        raw = read_zevtc_archive(ROOT / "WvW" / f"{stem}.zevtc")
         parser = PythonEvtcParser()
         fight = next(parser.parse(raw))
         events = list(parser.parse_events(raw))

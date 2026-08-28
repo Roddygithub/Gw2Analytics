@@ -16,6 +16,7 @@ The 5-second threshold for large files accommodates the 2.7 MB fixture
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -23,8 +24,11 @@ import pytest
 
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
-#: Root directory containing all WvW log subdirectories.
-WVW_DIR = Path("/home/roddy/Projects/WvW/WvW (1)")
+#: Root directory containing all WvW log subdirectories.  The environment
+#: override permits a local corpus outside the clone without hard-coding a
+#: maintainer-specific path.
+_ROOT = Path(__file__).resolve().parents[3]
+WVW_DIR = Path(os.environ.get("GW2ANALYTICS_WVW_CORPUS", _ROOT / "WvW"))
 
 #: (relative_path, label, event_count_floor, time_limit_s)
 FIXTURES: list[tuple[str, str, int, float]] = [
@@ -52,7 +56,7 @@ FIXTURES: list[tuple[str, str, int, float]] = [
 def _load_and_decompress(path: str) -> bytes:
     """Read and decompress a .zevtc archive, returning raw EVTC bytes."""
     full_path = WVW_DIR / path
-    if not full_path.exists():
+    if not full_path.is_file() or not os.access(full_path, os.R_OK):
         pytest.skip(f"Fixture {path!r} not found at {full_path}")
     return read_zevtc_archive(full_path)
 

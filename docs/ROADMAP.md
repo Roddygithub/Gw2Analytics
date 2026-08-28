@@ -1,21 +1,92 @@
 # Roadmap
 
-> **Historique — pas une source de priorité actuelle.** Instantané du cycle
-> v0.14.2 (2026-07-22), conservé pour la traçabilité. Pour une décision de
-> suite : comportement livré (code/tests/CI), SPEC acceptées dans
-> `_bmad-output/specs/`, puis checkpoints `docs/agentic/`; au Level 1, faire
-> valider toute nouvelle priorité par le mainteneur.
+> **Source canonique de la roadmap active.** Rafraîchie le 2026-08-28 après
+> consolidation. Le comportement livré reste prouvé par le code, les tests et
+> la CI; les SPEC acceptées précisent les prochains changements. Les anciennes
+> roadmaps ci-dessous sont une archive, pas une seconde liste de priorités.
 
-**Status:** Living document. Last refreshed AT v0.14.2 cycle
-close-out (2026-07-22) — Plan 173 COMPLETE (14 boon uptimes +
-presence % + 14 outgoing boons in Combat Readout, grouped bar
-columns, 2 hermetic backend tests, E2E mock server + Playwright test).
+## État actuel et prochaine décision
 
-This file is a historical snapshot and is **not** the source of truth for
-"what's left to do" on the project. It must not supersede current SPEC,
-checkpoints, code, tests or CI.
+**Baseline produit validée :** parser-stream v2, Skills DB, Combat Readout et
+ses quatre tables sont livrés. La chaîne versionnée upload → parse → API → UI
+est couverte de façon hermétique; l'E2E réel avec le fixture EVTC versionné
+répond `200`. Ce fixture ne contient aucun joueur : les métriques réelles non
+vides n'ont donc pas été revalidées depuis la disparition du corpus local
+`WvW/` (qui reste autorisé localement et ignoré par Git).
 
----## Current state (post-Plan-173 v0.14.2)
+**Phase active :** aucune. Cette consolidation clôt l'infrastructure; la
+prochaine tranche produit doit être choisie explicitement parmi les candidats
+ci-dessous, à partir d'un besoin produit et d'une SPEC proportionnée.
+
+| Candidat restant | État | Décision nécessaire |
+|---|---|---|
+| Guild features + comparaison multi-combats | historique, non démarré | Reprioriser ou abandonner formellement |
+| Real-time DPS pendant le parse | non démarré | Cycle dédié (auth, reconnexion, résultats partiels) |
+| Multi-tenant scoping | non démarré | Seulement si le produit cesse d'être mono-utilisateur |
+| Mobile-first `/fights/[id]` | non démarré | Seulement si l'usage mobile le justifie |
+| Rust/PyO3 parser | non démarré | Seulement après mesure d'un goulot réel |
+
+GraphQL subscriptions restent **non prévues** (ADR 001); l'export PNG/SVG de
+timeline est livré (v0.15.1). Aucun de ces candidats n'est engagé par cette
+roadmap à lui seul.
+
+## Roadmaps historiques reconstituées
+
+Les numéros de phase appartiennent à **trois plans indépendants**. Ils ne
+forment pas une séquence unique et ne doivent pas être aplatis.
+
+### Fondations produit originales
+
+| Phase | Nom original | Objectif original | Preuve historique | État actuel |
+|---|---|---|---|---|
+| 0 | Monorepo/tooling scaffold | Socle de développement | `3fef890` | IMPLEMENTED |
+| 1 | EVTC V1.3 parser | Parser derrière `EvtcParser` Protocol | `1c89b7c`, `2a08411` | IMPLEMENTED |
+| 2 | FastAPI/Alembic/MinIO + core schemas | Stockage et API combat | `c4ba2ad` | IMPLEMENTED |
+| 3 | Single/MultiFight analytics | Agrégats de combat | `08b1e5d`, `6bcbb9c` | IMPLEMENTED |
+| 4 | Next.js/AG Grid/OpenAPI | Surface frontend | README historique | IMPLEMENTED |
+| 5 | Account/world + upload UX | Enrichissement et import | `12b58e9`, `3eb641e` | IMPLEMENTED |
+| 6 | Event aggregators/CI | Agrégation et CI | `aafc139` | IMPLEMENTED |
+| 7 | Parser event stream | Events hybrides, dégâts puis soins | `40b9211`, `7284ace` | SUPERSEDED par parser-stream v2 |
+| 8 | BuffRemovalEvent E2E | Événement de retrait de buff | `b660a31` | IMPLEMENTED |
+| 9 | Backend player-centric / UI web | Surface joueur, puis UI | README `7d05b510`, `b6cb829` | IMPLEMENTED |
+
+### Continuation produit historique
+
+Source : `plans/AI-CONTINUATION-PLAN.md` à `e329f9a`. Ce plan déclare les
+phases 1–4 livrées et la phase 5 future; il a été archivé pendant le jalon
+v0.13.0 (`2b3ae8f`).
+
+| Phase | Nom original | Objectif original | Preuve historique | État actuel |
+|---|---|---|---|---|
+| 1 | Boon uptime/outgoing boons | Uptime et boons sortants | `4a25164`, `c6492eb` | IMPLEMENTED |
+| 2 | Strips/cleanses | Retraits de boons et cleanses | `32fd1bc` | IMPLEMENTED |
+| 3 | Detected roles/tags | Rôles/tags API + web | `237a4fe` | IMPLEMENTED |
+| 4 | Position heatmap | Carte de positions | `0708f68` | IMPLEMENTED |
+| 5 | Guild features + multi-fight comparison | Fonctionnalités guildes et comparaison | `e329f9a` | NOT STARTED — candidat, pas priorité active |
+
+### Phases agentiques administratives (non produit)
+
+| Phase | Nom original | Objectif original | Preuve historique | État actuel |
+|---|---|---|---|---|
+| 3 | Baseline validation | Vérifier la baseline | `b7db5f8`, checkpoint Phase 3 | IMPLEMENTED |
+| 4 | BMAD cleanup | Réduire BMAD | `7a347f5` | IMPLEMENTED |
+| 5 | Lead/Codex minimal | Point d'entrée Lead | `72ec29f` | IMPLEMENTED |
+| 6 | Codex/Herdr live validation | Valider l'orchestration | `cca199c` | IMPLEMENTED |
+| 7 | Atomic OSError pilot | Pilote d'autonomie | `175f1f7` | IMPLEMENTED |
+| 8 | Private Corpus Executor | Isolation expérimentale WvW | checkpoint Phase 8 | SUPERSEDED — retiré par `83505d7` |
+
+Les anciens niveaux d'autonomie 1/2/3 étaient une politique agentique, non des
+phases produit. Seul le Level 1 historique est attesté; la politique actuelle
+est l'exécution continue sûre décrite dans `AGENTS.md` et
+`docs/agentic/README.md`.
+
+## Archive v0.14.2 (conservée pour la traçabilité)
+
+L'instantané ci-dessous était la roadmap du cycle v0.14.2 au 2026-07-22. Il
+conserve les détails de livraison et décisions prises à l'époque; il ne définit
+pas la priorité actuelle.
+
+### État archivé post-Plan-173 v0.14.2
 
 **Plan 173 COMPLETE** — 1 feature release, Combat Readout enriched with per-player boon uptimes, outgoing boons, and presence percentage. **WAVE-8** (v0.11.0→v0.11.4, 8/8 Event subclasses dispatched) was already complete prior.
 
@@ -123,6 +194,8 @@ notes).
   Postgres + MinIO. Pre-flight grep across `apps/`, `libs/`, `web/`
   confirmed no functional consumer (`import redis`, no `Settings.redis_url`,
   no Redis URL in any `pyproject.toml`).
+  This is historical: Redis was reintroduced later as the required Arq broker;
+  the current `docker-compose.yml` is authoritative.
 - **DST boundary tests for `?tz=` (v0.8.9 followup)** — shipped
   v0.9.0 close-out. Two e2e tests added to
   `apps/api/tests/test_uploads_e2e.py`:
@@ -192,7 +265,7 @@ notes).
 
 ---
 
-## 4. Update protocol
+## Archive update protocol
 
 At each release tag (`v0.X.Y`):
 

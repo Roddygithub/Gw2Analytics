@@ -15,6 +15,8 @@ demande l'humain seulement pour une vraie frontière. Ne commite, pousse, crée 
 ou ne merge sans autorisation explicite. `WvW/` est une donnée personnelle locale:
 ne pas l'ajouter à Git ni l'exfiltrer, mais ne pas créer de coffre-fort, token,
 sudoers ou procédure spéciale pour l'analyser localement dans le périmètre du dépôt.
+Son accès local pour le développement, les tests et les validations est permanent
+et ne constitue jamais HUMAN ACTION REQUIRED.
 
 CONTINUOUS EXECUTION : tant qu'une étape sûre et exécutable de la mission courante
 reste ouverte, enchaîne audit, plan, implémentation, handoff, tests, review et

@@ -26,16 +26,22 @@ from gw2_core import (
 )
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
-_DEFAULT_LOG = Path("/home/roddy/Projects/WvW/WvW (1)/Ess Kitable/20250928-230925.zevtc")
+_ROOT = Path(__file__).resolve().parents[3]
+_DEFAULT_LOG = _ROOT / "WvW" / "20250928-230925.zevtc"
 
 
 def _golden_log_path() -> Path:
     return Path(os.environ.get("GW2ANALYTICS_GOLDEN_LOG", str(_DEFAULT_LOG)))
 
 
+def _golden_log_is_readable() -> bool:
+    path = _golden_log_path()
+    return path.is_file() and os.access(path, os.R_OK)
+
+
 @pytest.mark.skipif(
-    not _golden_log_path().exists(),
-    reason="golden WvW log unavailable; set GW2ANALYTICS_GOLDEN_LOG",
+    not _golden_log_is_readable(),
+    reason="golden WvW log unavailable or unreadable; set GW2ANALYTICS_GOLDEN_LOG",
 )
 def test_dps_report_20250928_230925_metadata_matches_parser() -> None:  # noqa: PLR0915
     """Golden metadata from dps.report upload 9wGp-20250928-230925."""

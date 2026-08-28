@@ -143,6 +143,25 @@ test("full user journey (small + medium + large .zevtc)", async ({ page }) => {
         /* section absent (e.g. error page) — captured in diag */
       }
     }
+
+    // The analyst's primary result is the four-table Combat Readout.  The
+    // real-stack journey used to stop at the overview, leaving this final
+    // parser → API → client projection unexercised for real uploaded logs.
+    await page.getByTestId("page-tab-readout").click();
+    for (const [button, heading] of [
+      ["Dégâts", "Dégâts"],
+      ["Soins", "Soins"],
+      ["Boons", "Boons"],
+      ["Défense", "Défense & Positionnement"],
+    ]) {
+      await page.getByRole("button", { name: button, exact: true }).click();
+      const section = page.locator("section").filter({
+        has: page.getByRole("heading", { name: heading, exact: true }),
+      });
+      await expect.soft(section).toBeVisible();
+      await expect.soft(section.getByRole("table")).toBeVisible();
+    }
+    await shot(`${prefix}-fight-readout`);
   };
 
   await test.step("01 landing", async () => {

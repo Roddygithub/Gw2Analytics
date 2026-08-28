@@ -9,7 +9,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-LOGS = ROOT / "zevtc files"
+LOGS = ROOT / "WvW"
 EI_OUT = ROOT / ".tooling" / "ei-out"
 
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive  # noqa: E402

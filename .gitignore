@@ -44,6 +44,10 @@ next-env.d.ts
 data/
 logs/
 
+# Private local combat corpus. It is authorized for local development and
+# validation, but must never become a Git, release, or CI artifact.
+/WvW/
+
 # Skills catalog NDJSON shipped inside apps/api for the inline skills route.
 !apps/api/src/gw2analytics_api/data/
 !apps/api/src/gw2analytics_api/data/*.ndjson
@@ -126,6 +130,11 @@ web/screenshots/
 /real_fight.zevtc
 /.playwright-mcp/
 web/.pnpm-store/
+
+# Next.js 16 writes these local compatibility notices beside node_modules when
+# its dev server starts. The repository-level AGENTS.md is canonical.
+web/AGENTS.md
+web/CLAUDE.md
 
 # ---------------------------------------------------------------------------
 # Local EI-alignment workbench (v0.16.x parser/EI parity work).
