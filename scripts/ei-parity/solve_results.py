@@ -15,7 +15,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-LOGS = ROOT / "zevtc files"
+LOGS = ROOT / "WvW"
 EI_OUT = ROOT / ".tooling" / "ei-out"
 
 from gw2_core import DamageEvent  # noqa: E402

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Entrée explicite dans la session Herdr dédiée à GW2Analytics.
+set -euo pipefail
+
+if [[ "$(id -un)" == "gw2agent" ]]; then
+    echo "Already inside GW2Analytics"
+    exit 0
+fi
+
+case "${1:-start}" in
+    start | status | stop | restart)
+        # Do not replace roddy's interactive shell.  A detached or completed
+        # Herdr client must return to the shell that launched `gw2a`.
+        sudo -n -u gw2agent -- /usr/local/libexec/gw2a-attach "${1:-start}"
+        ;;
+    *)
+        echo "Usage: gw2a [status|stop|restart]" >&2
+        exit 2
+        ;;
+esac

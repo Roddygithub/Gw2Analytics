@@ -212,7 +212,7 @@ def _clear_blob_caches() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_test_state() -> None:
+def _isolate_test_state() -> Generator[None, None, None]:
     """Bulk-delete from state-accumulating tables + reset rate limiter before each test.
 
     The cleanup is hermetic to the apps/api test database only
@@ -228,23 +228,35 @@ def _isolate_test_state() -> None:
     limiter accumulates state across tests and the 6th cumulative
     upload in the suite gets 429.
     """
+
+    def purge() -> None:
+        with _get_sessionmaker_factory()() as db:
+            # Order: children before parents. ``OrmFight`` has SQLAlchemy
+            # relationship cascades to ``OrmFightAgent`` + ``OrmFightSkill``
+            # so those are auto-cleaned; we delete the others explicitly
+            # so the cleanup contract is self-documenting.
+            db.execute(delete(OrmFightPlayerSummary))
+            db.execute(delete(OrmWebhookDelivery))
+            db.execute(delete(OrmWebhookDlq))
+            db.execute(delete(OrmWebhookSubscription))
+            # v0.13.6: clean Guild + GuildMember tables so guilds
+            # tests and any future guild-seeding tests are hermetic.
+            db.execute(delete(GuildMember))
+            db.execute(delete(Guild))
+            db.execute(delete(OrmFight))
+            db.execute(delete(Upload))
+            db.commit()
+
     limiter.reset()
-    with _get_sessionmaker_factory()() as db:
-        # Order: children before parents. ``OrmFight`` has SQLAlchemy
-        # relationship cascades to ``OrmFightAgent`` + ``OrmFightSkill``
-        # so those are auto-cleaned; we delete the others explicitly
-        # so the cleanup contract is self-documenting.
-        db.execute(delete(OrmFightPlayerSummary))
-        db.execute(delete(OrmWebhookDelivery))
-        db.execute(delete(OrmWebhookDlq))
-        db.execute(delete(OrmWebhookSubscription))
-        # v0.13.6: clean Guild + GuildMember tables so guilds
-        # tests and any future guild-seeding tests are hermetic.
-        db.execute(delete(GuildMember))
-        db.execute(delete(Guild))
-        db.execute(delete(OrmFight))
-        db.execute(delete(Upload))
-        db.commit()
+    purge()
+    try:
+        yield
+    finally:
+        # Several legacy modules retain a module-level TestClient.  Their
+        # state must not survive into a function-scoped client in a later
+        # module, even when an assertion aborts the current test early.
+        limiter.reset()
+        purge()
 
 
 @pytest.fixture(autouse=True)

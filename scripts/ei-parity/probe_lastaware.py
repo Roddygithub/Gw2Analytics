@@ -28,7 +28,7 @@ def main() -> int:
     stem = sys.argv[1]
     wanted = set(sys.argv[2:])
 
-    raw = read_zevtc_archive(ROOT / "zevtc files" / f"{stem}.zevtc")
+    raw = read_zevtc_archive(ROOT / "WvW" / f"{stem}.zevtc")
     parser = PythonEvtcParser()
     fight = next(parser.parse(raw))
     events = list(parser.parse_events(raw))

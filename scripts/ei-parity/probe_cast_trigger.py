@@ -26,7 +26,7 @@ def main() -> int:
     stem, account, skill_id = sys.argv[1], sys.argv[2], int(sys.argv[3])
     window = int(sys.argv[4]) if len(sys.argv) > 4 else 30
 
-    raw = read_zevtc_archive(ROOT / "zevtc files" / f"{stem}.zevtc")
+    raw = read_zevtc_archive(ROOT / "WvW" / f"{stem}.zevtc")
     parser = PythonEvtcParser()
     fight = next(parser.parse(raw))
     events = list(parser.parse_events(raw))

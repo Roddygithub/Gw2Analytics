@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-LOGS = ROOT / "zevtc files"
+LOGS = ROOT / "WvW"
 EI_OUT = ROOT / ".tooling" / "ei-out"
 CORPUS = Path(__file__).resolve().parent / "corpus.txt"
 
