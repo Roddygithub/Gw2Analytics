@@ -555,3 +555,96 @@ def test_regeneration_without_a_hint_still_evicts_the_tail() -> None:
 
     # Restore
     bs._capacity_for = original_capacity_for
+
+
+def test_queue_logic_overflow_replaces_shortest_stack_in_place() -> None:
+    """EI QueueLogic.FindLowestValue replaces the shortest non-front stack
+    in place (stacks[IndexOf(toRemove)] = toAdd), preserving queue order.
+
+    The old port popped the victim and appended the new stack at the end,
+    rotating the queue and changing which stack fronts next.
+    """
+    protection_id = TRACKED_BUFFS["protection"]
+    tracker = BuffStateTracker()
+    # Fill to capacity (15) with durations so the shortest non-front stack
+    # (200 ms) sits at index 5, not at the tail.
+    durations = [5_000, 1_000, 900, 300, 400, 200, 700, 800, 600, 550, 650, 750, 850, 950, 999]
+    for index, duration in enumerate(durations):
+        tracker.process(
+            BoonApplyEvent(
+                time_ms=0,
+                source_agent_id=1,
+                target_agent_id=7,
+                skill_id=protection_id,
+                duration_ms=duration,
+                stacks=1,
+                stack_id=100 + index,
+            )
+        )
+    stack = tracker._agent_buffs[7]["protection"]
+    assert len(stack.expirations) == 15
+
+    # Overflow apply: EI replaces the 200 ms stack at index 5 in place.
+    tracker.process(
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=protection_id,
+            duration_ms=9_999,
+            stacks=1,
+            stack_id=999,
+        )
+    )
+    assert len(stack.expirations) == 15
+    assert stack.expirations[5] == 9_999  # replaced in place, not appended
+    assert stack.expirations[0] == 5_000  # front untouched
+    assert stack.expirations[6] == 700  # tail order preserved
+
+
+def test_queue_logic_added_active_moves_stack_to_front() -> None:
+    """EI BuffSimulator.Add calls _logic.Activate on addedActive, which moves
+    the new stack to the front of the queue.
+    """
+    protection_id = TRACKED_BUFFS["protection"]
+    tracker = BuffStateTracker()
+    tracker.process(
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=protection_id,
+            duration_ms=5_000,
+            stacks=1,
+            stack_id=11,
+        )
+    )
+    tracker.process(
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=protection_id,
+            duration_ms=8_000,
+            stacks=1,
+            stack_id=22,
+        )
+    )
+    stack = tracker._agent_buffs[7]["protection"]
+    assert stack.expirations == [5_000, 8_000]
+
+    # The new stack is flagged active -> it fronts the queue immediately.
+    tracker.process(
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=protection_id,
+            duration_ms=3_000,
+            stacks=1,
+            stack_id=33,
+            added_active=True,
+        )
+    )
+    assert stack.stack_ids == [33, 11, 22]
+    assert stack.expirations == [3_000, 5_000, 8_000]
