@@ -642,7 +642,11 @@ class PythonEvtcParser:
                     lifecycle.append((_stime, s_src, statechange))
                 if _srest[4] == 1:
                     buff_remove_all.add((_stime, s_src, _ssid))
-                if statechange == 46:
+                # EI only admits ID-to-GUID records whose ContentLocal is
+                # Effect (the low byte of OverstackValue).  Marker, Skill and
+                # other metadata can share the numeric ID and must not mask a
+                # true effect GUID discovered earlier in the file.
+                if statechange == 46 and (_sovers & 0xFF) == 0:
                     effect_guids[_ssid] = (
                         (s_src.to_bytes(8, "little") + s_dst.to_bytes(8, "little")).hex().upper()
                     )
@@ -899,7 +903,7 @@ class PythonEvtcParser:
                     skill_id=skill_id,
                 )
                 continue
-            if is_statechange == 46:
+            if is_statechange == 46 and (overstack & 0xFF) == 0:
                 effect_guids[skill_id] = (
                     (event_src_agent.to_bytes(8, "little") + dst_agent.to_bytes(8, "little"))
                     .hex()

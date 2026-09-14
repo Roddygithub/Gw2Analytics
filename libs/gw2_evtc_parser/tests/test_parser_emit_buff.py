@@ -431,6 +431,141 @@ def test_parse_events_emits_weapon_swap_and_late_mapped_effect() -> None:
     assert events[1].guid == guid.hex().upper()
 
 
+@pytest.mark.parametrize(
+    ("skill_id", "effect_guid"),
+    [
+        (835, "DC1C8A043ADCD24B9458688A792B04BA"),  # Rewinder
+        (2096, "9242D10B4F04274EB6E9EBCDB2262181"),  # Dismiss Cyclone Bow
+        (5586, "FB066A1F03294D4D850D22B26650FFA9"),  # Sovereign of Light Model
+        (9111, "C4E8DD3234E0C647993857940ED79AC1"),  # Spiteful Spirit
+        (21761, "E4002B7AD7DF024394D0184B47A316E7"),  # Thousand Cuts
+        (42756, "44092AEF6D619F4093FEA4E9D9142D01"),  # Sand Cascade
+    ],
+)
+def test_parse_events_effect_guid_ignores_later_same_id_skill_metadata(
+    skill_id: int, effect_guid: str
+) -> None:
+    """Only ContentLocal.Effect may map an effect ID, as in EI 3.26."""
+    effect = bytes.fromhex(effect_guid)
+    skill_metadata = bytes.fromhex("66AAA86BDA56484BA223131A9F1C8AC3")
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        events=[
+            # Effect before metadata locks forward pre-scan resolution.
+            _build_event_record_2025(1_000, 1, 0, 0, skill_id, is_statechange=60),
+            _build_event_record_2025(
+                0,
+                int.from_bytes(effect[:8], "little"),
+                int.from_bytes(effect[8:], "little"),
+                0,
+                skill_id,
+                is_statechange=46,
+                overstack=0,  # ContentLocal.Effect
+            ),
+            _build_event_record_2025(
+                0,
+                int.from_bytes(skill_metadata[:8], "little"),
+                int.from_bytes(skill_metadata[8:], "little"),
+                0,
+                skill_id,
+                is_statechange=46,
+                overstack=2,  # ContentLocal.Skill -- must not overwrite.
+            ),
+        ],
+    )
+
+    (parsed,) = [
+        event for event in PythonEvtcParser().parse_events(evtc) if isinstance(event, EffectEvent)
+    ]
+    assert parsed.guid == effect_guid
+
+
+def test_parse_events_keeps_shattered_aegis_outcomes_out_of_damage_events() -> None:
+    """Shattered Aegis outcome markers remain typed outcomes, never damage."""
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True), (2, 2, 2, "Dst", False)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(1_000, 1, 2, 0, 22499, result=8),
+            _build_event_record_2025(1_010, 1, 2, 0, 22499, result=9),
+            _build_event_record_2025(1_028, 1, 2, 860, 22499, result=0),
+            _build_event_record_2025(1_100, 1, 2, 100, 42, result=0),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+    damages = [event for event in events if isinstance(event, DamageEvent)]
+    assert [(event.skill_id, event.damage, event.result, event.connected) for event in damages] == [
+        (22499, 860, 0, True),
+        (42, 100, 0, True),
+    ]
+    assert sum(event.damage for event in damages) == 960
+    assert [
+        (event.skill_id, event.outcome, event.time_ms)
+        for event in events
+        if isinstance(event, CombatOutcomeEvent)
+    ] == [(22499, "killed", 1_000), (22499, "downed", 1_010)]
+
+
+def test_parse_events_non_effect_guid_metadata_neither_creates_nor_overwrites_mapping() -> None:
+    """Marker/Skill ID-to-GUID records are not EffectEvent metadata."""
+    effect_guid = bytes.fromhex("C4E8DD3234E0C647993857940ED79AC1")
+    skill_guid = bytes.fromhex("66AAA86BDA56484BA223131A9F1C8AC3")
+    only_skill = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(1_000, 1, 0, 0, 9111, is_statechange=60),
+            _build_event_record_2025(
+                0,
+                int.from_bytes(skill_guid[:8], "little"),
+                int.from_bytes(skill_guid[8:], "little"),
+                0,
+                9111,
+                is_statechange=46,
+                overstack=2,
+            ),
+        ],
+    )
+    assert not any(
+        isinstance(event, EffectEvent) for event in PythonEvtcParser().parse_events(only_skill)
+    )
+
+    # Among true Effect records EI keeps the last mapping for the numeric ID.
+    two_effects = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        build="20250925",
+        events=[
+            _build_event_record_2025(1_000, 1, 0, 0, 9111, is_statechange=60),
+            _build_event_record_2025(
+                0,
+                int.from_bytes(effect_guid[:8], "little"),
+                int.from_bytes(effect_guid[8:], "little"),
+                0,
+                9111,
+                is_statechange=46,
+                overstack=0,
+            ),
+            _build_event_record_2025(
+                0,
+                int.from_bytes(skill_guid[:8], "little"),
+                int.from_bytes(skill_guid[8:], "little"),
+                0,
+                9111,
+                is_statechange=46,
+                overstack=0,
+            ),
+        ],
+    )
+    (parsed,) = [
+        event
+        for event in PythonEvtcParser().parse_events(two_effects)
+        if isinstance(event, EffectEvent)
+    ]
+    assert parsed.guid == skill_guid.hex().upper()
+
+
 def test_parse_events_keeps_blood_moon_on_its_stone_spirit_caster() -> None:
     """A Stone Spirit's Blood Moon stays credited to the spirit, not its owner.
 

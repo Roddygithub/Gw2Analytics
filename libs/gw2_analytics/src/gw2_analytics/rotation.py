@@ -12,6 +12,7 @@ from gw2_core import (
     ActivationType,
     BoonApplyEvent,
     BuffApplyEvent,
+    CombatOutcomeEvent,
     DamageEvent,
     EffectEvent,
     EliteSpec,
@@ -129,6 +130,10 @@ _BUFF_GAIN_CASTS = {
     72996: 72906,  # Shale Storm buff -> Shale Storm skill
     79373: 72906,  # Shale Storm Secondary Attack buff -> Shale Storm skill
 }
+_BUFF_GAIN_EXPECTED_DURATIONS = {
+    # RangerHelper: Lesser Signet of Stone accepts 5 s +/- ServerDelayConstant.
+    883: (5_000, 9),
+}
 _BUFF_LOSS_CASTS = {
     29446: 30961,
     790: 10585,
@@ -206,6 +211,7 @@ _DAMAGE_CASTS = {
     76315: 50,  # Bloodstone Explosion
 }
 _DAMAGE_CASTS_BY_DAMAGE = {40071: 44428, 46808: 40813}
+_BREAKBAR_DAMAGE_CASTS = {12815: 50}  # Lightning Leap Combo
 _HEALING_CASTS = {
     12542,
     12631,
@@ -337,20 +343,17 @@ _INSTANT_CASTS_BY_EFFECT = {
     "2BC033D40C0AEB40A77EEF28D51AE263": 69855,
     "3D01B04C5700904BA279E9F135A3FAB3": -21,
     "8F0C77784AFD7F40B27446617DC05CDC": -20,
-    "86CC98C9D9D2B64689F8993AB02B09E5": -23,
     "5B488D552E316045AD99C4A98EEDDB1E": 10238,
     "98E9E5F26FF76F449A181654E4F39695": 77003,
     "A8FA2AFABB3FC840893E441F47693524": 76732,
     "81146A66FCE3A342B00D4D2EB2A7643E": 76602,
-    "2DD44AFA1B4A6947AD63CB785CF9B172": 77178,
-    "69ACA314CE3DB04D9B5A67324E6F0A57": 76611,
+    "EBC45B862D299143B4D63CB6CAEC26ED": 77178,
     "87B761200637AC48B71469F553BA6F60": 62597,
     "E4002B7AD7DF024394D0184B47A316E7": 24755,
     "75EF160EAFC0394CACC436CF89819148": 14404,
     "42C2B92716D9174EBC43420D1D55FB92": 76769,
     "44092AEF6D619F4093FEA4E9D9142D01": 43448,
     "23613E6E374EC6429FE9A69CC893984D": 43448,  # Sand Cascade, post-July 2026 effect
-    "885B7AAA68F09E48A926BFFE488DB5AD": -37,
     "19C4FA17A38E7E4780722799B48BF2BE": 31406,
     "98C9834C6381204A85DC67C375D135E4": 13677,
     "13D0B65D73B5334D80824EE17B5C257E": 13677,
@@ -437,6 +440,10 @@ _MECHANIST_SHIFT_SIGNET_EFFECT = "E1C1DD7F866B4149A1BADD216C9AA69D"
 _MECHANIST_SHIFT_SIGNET_SELF_EFFECT = "DB22850AE209B34BBD11372F56D42D43"
 _MECHANIST_CRISIS_ZONE_EFFECT = "956450E1260FB94B8691BC1378086250"
 _MECHANIST_MECH_EYE_GLOW_EFFECT = "CDF749672C01964BAEF64CCB3D431DEE"
+_ENGINEER_MINE_EXPLOSION_PRIMARY = "885B7AAA68F09E48A926BFFE488DB5AD"
+_ENGINEER_MINE_EXPLOSION_SECONDARY = "1B3ACEE36F61DE42AB1C24BD33B5B5AD"
+_ENGINEER_MINE_FIELD = "997750CA2636154E9FFBFEE4AA51A970"
+_ENGINEER_THROW_MINE_INACTIVE = "2EE26B8656BD424B9BF9A7EA4CB0AA06"
 _FLOWING_RESOLVE_SKILL = 62603
 _FLOWING_RESOLVE_BUFF = 62632
 #: ``UsingDstBaseSpecChecker``: the effect must sit on its destination, and
@@ -459,9 +466,20 @@ _EFFECT_SOURCE_SPEC_GATE = {
     "3E33C9645D62CF4DBC208511BB3D12F1": Profession.GUARDIAN,  # Detonate Jurisdiction
     "29F6AADDF5E75348854123B956E4BF0E": Profession.GUARDIAN,  # Detonate Jurisdiction
 }
+_EFFECT_SOURCE_ELITE_GATE = {
+    "E4002B7AD7DF024394D0184B47A316E7": EliteSpec.VIRTUOSO,  # Thousand Cuts
+}
 _EFFECT_ELITE_GATE = {
     "418A090D719AB44AAF1C4AD1473068C4": EliteSpec.HOLOSMITH,  # Flash Spark
     "9C06D9D9B0E22247A1752C426808CD80": EliteSpec.HARBINGER,
+}
+_EFFECT_DST_ELITE_GATE = {
+    "A8E0E4C48848424D85503B674015D247": EliteSpec.FIREBRAND,
+}
+_EFFECT_MIN_GW2_BUILD = {
+    # Firebrand's Portent of Freedom symbol was introduced by the pinned
+    # February 2023 balance boundary in Elite Insights.
+    "A8E0E4C48848424D85503B674015D247": 141374,
 }
 _AEGIS_BUFF = 743
 _STABILITY_BUFF = 1122
@@ -491,6 +509,7 @@ _EFFECT_CASTS_BY_DST = {
     "D7F8FA5695F8714B99A5C3EE72EF6E178": 14413,  # Dolyak Signet (variant)
     "68F2C378E6C80548B5A3C89870C5DD86": 9085,  # "Save Yourselves!"
     "8D36806A690A5442A983308EDCECB018": 63195,  # Unnatural Traversal
+    "A8E0E4C48848424D85503B674015D247": -23,  # Portent of Freedom
 }
 _SECONDARY_EFFECTS = {
     _MECHANIST_SHIFT_SIGNET_EFFECT: (_MECHANIST_SHIFT_SIGNET_SELF_EFFECT,),
@@ -597,6 +616,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     ownership_resolver: Callable[[int, int], int | None] | None = None,
     squad_agent_ids: Collection[int] = (),
     gw2_build: int | None = None,
+    shambling_horror_agent_ids: Collection[int] = (),
 ) -> list[SkillCast]:
     """Return completed, clipped casts ordered by fight-relative start time.
 
@@ -879,6 +899,11 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 if event.kind == "apply"
                 else _BUFF_LOSS_CASTS.get(event.skill_id)
             )
+            expected_duration = _BUFF_GAIN_EXPECTED_DURATIONS.get(event.skill_id)
+            if expected_duration is not None and event.kind == "apply":
+                duration_ms, epsilon_ms = expected_duration
+                if abs(event.duration_ms - duration_ms) > epsilon_ms:
+                    mapped = None
             if event.kind == "apply" and event.skill_id == 40052:
                 mapped = 44663 if event.duration_ms >= 5_000 else 54870
             if event.kind == "remove_all" and event.skill_id == 10686:
@@ -1022,6 +1047,14 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                     )
                 if owner:
                     add_instant(owner, 12658, event.time_ms)
+        # EI represents a Shattered Aegis killing-blow marker as a non-damage
+        # event. It remains cast evidence while never entering damage stats.
+        elif (
+            isinstance(event, CombatOutcomeEvent)
+            and event.skill_id == 22499
+            and event.outcome == "killed"
+        ):
+            add_instant(event.source_agent_id, event.skill_id, event.time_ms)
         # Spiteful Spirit (29560) - EI has two finders:
         # 1. DamageCastFinder: disabled when effect data exists
         #    (UsingDisableWithEffectData)
@@ -1046,6 +1079,17 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 _DAMAGE_CASTS_BY_DAMAGE[event.skill_id],
                 event.time_ms,
             )
+        elif (
+            isinstance(event, DamageEvent)
+            and event.skill_id in _BREAKBAR_DAMAGE_CASTS
+            and event.result == 10
+        ):
+            add_instant(
+                event.source_agent_id,
+                event.skill_id,
+                event.time_ms,
+                _BREAKBAR_DAMAGE_CASTS[event.skill_id],
+            )
         elif (isinstance(event, HealingEvent) and event.skill_id in _HEALING_CASTS) or (
             isinstance(event, MissileEvent) and event.skill_id in _MISSILE_CASTS
         ):
@@ -1069,12 +1113,52 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
             if owner is None:
                 owner = event.source_agent_id
             add_instant(owner, -28, event.time_ms)
+        elif isinstance(event, SpawnEvent) and event.target_agent_id in shambling_horror_agent_ids:
+            owner = (
+                ownership_resolver(event.target_agent_id, event.time_ms)
+                if ownership_resolver
+                else event.source_agent_id
+            )
+            if owner is not None and elite_specs.get(owner) is EliteSpec.REAPER:
+                add_instant(owner, 30772, event.time_ms)
         elif isinstance(event, EffectEvent):
             by_dst = event.guid in _EFFECT_CASTS_BY_DST
             effect_skill_id: int | None
             caster = (
                 event.target_agent_id if by_dst else event.source_agent_id or event.target_agent_id
             )
+            # EngineerHelper has three same-source effect finders for this one
+            # primary mine-explosion GUID. The second explosion effect is
+            # required; a dynamic mine end selects the known Mine Field or
+            # Throw Mine detonation, while no such end is the generic -37.
+            if event.guid == _ENGINEER_MINE_EXPLOSION_PRIMARY:
+                has_secondary = any(
+                    isinstance(other, EffectEvent)
+                    and other is not event
+                    and other.guid == _ENGINEER_MINE_EXPLOSION_SECONDARY
+                    and other.source_agent_id == caster
+                    and abs(other.time_ms - event.time_ms) < 10
+                    for other in nearby_events(event.time_ms, 9)
+                )
+                if not has_secondary:
+                    continue
+                mine_end_guids = {
+                    other.guid
+                    for other in event_list
+                    if isinstance(other, EffectEvent)
+                    and other.source_agent_id == caster
+                    and other.dynamic_end_time_ms is not None
+                    and abs(other.dynamic_end_time_ms - event.time_ms) < 10
+                }
+                if _ENGINEER_MINE_FIELD in mine_end_guids:
+                    add_instant(caster, 6166, event.time_ms)
+                if _ENGINEER_THROW_MINE_INACTIVE in mine_end_guids:
+                    add_instant(caster, 6162, event.time_ms)
+                if not mine_end_guids.intersection(
+                    {_ENGINEER_MINE_FIELD, _ENGINEER_THROW_MINE_INACTIVE}
+                ):
+                    add_instant(caster, -37, event.time_ms)
+                continue
             # Spiteful Spirit: shares GUID with Unholy Burst, necromancer only,
             # excluded by desert shroud loss within 50ms or nearby Unholy Burst hit.
             if event.guid == "C4E8DD3234E0C647993857940ED79AC1":
@@ -1203,9 +1287,27 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 source_gate = _EFFECT_SOURCE_SPEC_GATE.get(event.guid)
                 if source_gate is not None and professions.get(caster) is not source_gate:
                     continue
+                source_elite_gate = _EFFECT_SOURCE_ELITE_GATE.get(event.guid)
+                if (
+                    source_elite_gate is not None
+                    and elite_specs.get(caster) is not source_elite_gate
+                ):
+                    continue
                 elite_gate = _EFFECT_ELITE_GATE.get(event.guid)
                 if elite_gate is not None and (
                     not event.is_around_dst or elite_specs.get(caster) is not elite_gate
+                ):
+                    continue
+                destination_elite_gate = _EFFECT_DST_ELITE_GATE.get(event.guid)
+                if destination_elite_gate is not None and (
+                    elite_specs.get(caster) is not destination_elite_gate
+                ):
+                    continue
+                minimum_build = _EFFECT_MIN_GW2_BUILD.get(event.guid)
+                if (
+                    minimum_build is not None
+                    and gw2_build is not None
+                    and gw2_build < minimum_build
                 ):
                     continue
                 needs_related = by_dst or event.guid in _SECONDARY_EFFECTS

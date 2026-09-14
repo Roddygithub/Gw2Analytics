@@ -5,6 +5,7 @@ from gw2_core import (
     ActivationType,
     BoonApplyEvent,
     BuffApplyEvent,
+    CombatOutcomeEvent,
     DamageEvent,
     EffectEvent,
     EliteSpec,
@@ -1374,6 +1375,265 @@ def test_gunsaber_mode_books_enter_and_exit_before_swap() -> None:
     ] == [(62745, 99), (62861, 499)]
 
 
+def test_rotation_finders_match_pinned_ei_rules() -> None:
+    """Regression controls for the four EI 3.26 rotation mechanisms."""
+    origin = 42_000_000
+
+    def casts(events: list[Event]) -> list[tuple[int, int]]:
+        return [
+            (cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(events, duration_ms=2_000, start_time_ms=origin)
+        ]
+
+    # Lesser Signet of Stone: 5,000 ms +/- EI's 9 ms server delay.
+    assert casts(
+        [
+            BoonApplyEvent(
+                time_ms=origin + 100,
+                source_agent_id=7,
+                target_agent_id=7,
+                skill_id=883,
+                duration_ms=5_009,
+                stacks=1,
+            ),
+        ]
+    ) == [(42470, 100)]
+    assert (
+        casts(
+            [
+                BoonApplyEvent(
+                    time_ms=origin + 100,
+                    source_agent_id=7,
+                    target_agent_id=7,
+                    skill_id=883,
+                    duration_ms=5_010,
+                    stacks=1,
+                ),
+            ]
+        )
+        == []
+    )
+
+    # Lightning Leap Combo is a BreakbarDamageCastFinder, not a health hit finder.
+    assert casts(
+        [
+            DamageEvent(
+                time_ms=origin + 200,
+                source_agent_id=7,
+                target_agent_id=8,
+                skill_id=12815,
+                damage=0,
+                result=10,
+            ),
+            DamageEvent(
+                time_ms=origin + 300,
+                source_agent_id=7,
+                target_agent_id=8,
+                skill_id=12815,
+                damage=100,
+                result=0,
+            ),
+        ]
+    ) == [(12815, 200)]
+
+    # Shattered Aegis' zero-damage record remains an instant-cast trigger.
+    assert casts(
+        [
+            DamageEvent(
+                time_ms=origin + 300,
+                source_agent_id=7,
+                target_agent_id=8,
+                skill_id=22499,
+                damage=0,
+                result=0,
+            ),
+        ]
+    ) == [(22499, 300)]
+
+    # TroubadourHelper binds the Valiant Marshal to this EI 3.26 effect GUID.
+    assert casts(
+        [
+            EffectEvent(
+                time_ms=origin + 400,
+                source_agent_id=7,
+                target_agent_id=7,
+                skill_id=0,
+                guid="EBC45B862D299143B4D63CB6CAEC26ED",
+            ),
+        ]
+    ) == [(77178, 400)]
+
+
+def test_engineer_mine_detonation_matches_ei_secondary_and_dynamic_end_rules() -> None:
+    """EngineerHelper's three mine-explosion finders are mutually exclusive."""
+    origin = 42_000_000
+    primary = "885B7AAA68F09E48A926BFFE488DB5AD"
+    secondary = "1B3ACEE36F61DE42AB1C24BD33B5B5AD"
+    mine_field = "997750CA2636154E9FFBFEE4AA51A970"
+    throw_mine = "2EE26B8656BD424B9BF9A7EA4CB0AA06"
+
+    def effect(
+        guid: str,
+        time: int,
+        source: int = 7,
+        dynamic_end_time_ms: int | None = None,
+    ) -> EffectEvent:
+        return EffectEvent(
+            time_ms=origin + time,
+            source_agent_id=source,
+            target_agent_id=0,
+            skill_id=0,
+            guid=guid,
+            dynamic_end_time_ms=dynamic_end_time_ms,
+        )
+
+    def casts(events: list[Event]) -> list[tuple[int, int]]:
+        return [
+            (cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(events, duration_ms=2_000, start_time_ms=origin)
+        ]
+
+    # The primary effect alone was the certified false-positive mechanism.
+    assert casts([effect(primary, 100)]) == []
+    # EI requires the paired secondary effect to have the same source.
+    assert casts([effect(primary, 100), effect(secondary, 101, source=8)]) == []
+    # A valid pair with no dynamic mine end is EI's generic unknown-source cast.
+    assert casts([effect(primary, 100), effect(secondary, 109)]) == [(-37, 100)]
+    # The strict EI server-delay boundary is < 10 ms, not <= 10 ms.
+    assert casts([effect(primary, 100), effect(secondary, 110)]) == []
+    # A matching dynamic end selects the concrete Mine Field finder, not -37.
+    assert casts(
+        [
+            effect(primary, 200),
+            effect(secondary, 201),
+            effect(mine_field, 150, dynamic_end_time_ms=origin + 209),
+        ]
+    ) == [(6166, 200)]
+    # Throw Mine follows the corresponding EI finder and emits no duplicate -37.
+    assert casts(
+        [
+            effect(primary, 300),
+            effect(secondary, 301),
+            effect(throw_mine, 250, dynamic_end_time_ms=origin + 291),
+        ]
+    ) == [(6162, 300)]
+
+
+def test_rotation_shattered_aegis_uses_killed_outcome_without_duplicate() -> None:
+    """The typed non-damage marker triggers EI's 50 ms DamageCastFinder ICD."""
+    origin = 42_000_000
+    casts = build_skill_rotation(
+        [
+            CombatOutcomeEvent(
+                time_ms=origin + 300,
+                source_agent_id=7,
+                target_agent_id=8,
+                skill_id=22499,
+                outcome="killed",
+            ),
+            DamageEvent(
+                time_ms=origin + 328,
+                source_agent_id=7,
+                target_agent_id=8,
+                skill_id=22499,
+                damage=860,
+                result=0,
+            ),
+            DamageEvent(
+                time_ms=origin + 400,
+                source_agent_id=7,
+                target_agent_id=8,
+                skill_id=50,
+                damage=100,
+                result=0,
+            ),
+        ],
+        duration_ms=2_000,
+        start_time_ms=origin,
+    )
+    assert [(cast.skill_id, cast.time_ms) for cast in casts] == [(22499, 300)]
+
+
+def test_rotation_non_shattered_aegis_outcomes_never_create_casts() -> None:
+    origin = 42_000_000
+    casts = build_skill_rotation(
+        [
+            CombatOutcomeEvent(
+                time_ms=origin + 100,
+                source_agent_id=7,
+                target_agent_id=8,
+                skill_id=50,
+                outcome="killed",
+            ),
+            CombatOutcomeEvent(
+                time_ms=origin + 200,
+                source_agent_id=7,
+                target_agent_id=8,
+                skill_id=22499,
+                outcome="downed",
+            ),
+        ],
+        duration_ms=2_000,
+        start_time_ms=origin,
+    )
+    assert casts == []
+
+
+def test_rotation_thousand_cuts_requires_virtuoso_source_spec() -> None:
+    """EI's EffectCastFinder accepts Thousand Cuts only from a Virtuoso."""
+    origin = 42_000_000
+    effect = EffectEvent(
+        time_ms=origin + 100,
+        source_agent_id=7,
+        target_agent_id=8,
+        skill_id=0,
+        guid="E4002B7AD7DF024394D0184B47A316E7",
+        is_around_dst=True,
+    )
+
+    def cast_ids(spec: EliteSpec) -> list[tuple[int, int]]:
+        return [
+            (cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(
+                [effect],
+                duration_ms=2_000,
+                start_time_ms=origin,
+                elite_specs={7: spec},
+            )
+        ]
+
+    assert cast_ids(EliteSpec.VIRTUOSO) == [(24755, 100)]
+    assert cast_ids(EliteSpec.MIRAGE) == []
+    assert cast_ids(EliteSpec.CHRONOMANCER) == []
+
+
+def test_rotation_tale_of_honorable_rogue_uses_only_ei_guid() -> None:
+    """The obsolete local GUID must not be interpreted as Tale of the Honorable Rogue."""
+    origin = 42_000_000
+
+    def cast_ids(guid: str) -> list[tuple[int, int]]:
+        return [
+            (cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(
+                [
+                    EffectEvent(
+                        time_ms=origin + 100,
+                        source_agent_id=7,
+                        target_agent_id=7,
+                        skill_id=0,
+                        guid=guid,
+                    )
+                ],
+                duration_ms=2_000,
+                start_time_ms=origin,
+            )
+        ]
+
+    assert cast_ids("DBECB5867D11264FA19FFCDC487A410E") == [(76611, 100)]
+    assert cast_ids("69ACA314CE3DB04D9B5A67324E6F0A57") == []
+    assert cast_ids("00000000000000000000000000000000") == []
+
+
 def test_buff_give_casts_are_deduplicated_per_source_skill() -> None:
     origin = 42_000_000
     events = [
@@ -1514,6 +1774,82 @@ def _symbol_cast(origin: int, offset: int, activation: ActivationType) -> SkillA
         duration_ms=0,
         expected_duration_ms=0,
     )
+
+
+def test_rise_minion_spawn_finder_matches_ei_owner_and_icd_rules() -> None:
+    origin = 42_000_000
+
+    def rise(
+        events: list[Event], *, owner_spec: EliteSpec, minion_ids: set[int]
+    ) -> list[tuple[int, int]]:
+        return [
+            (cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(
+                events,
+                duration_ms=1_000,
+                start_time_ms=origin,
+                elite_specs={7: owner_spec},
+                shambling_horror_agent_ids=minion_ids,
+            )
+            if cast.skill_id == 30772
+        ]
+
+    def spawn(offset: int, target: int = 9) -> SpawnEvent:
+        return SpawnEvent(
+            time_ms=origin + offset,
+            source_agent_id=7,
+            target_agent_id=target,
+            skill_id=0,
+        )
+
+    assert rise([spawn(100)], owner_spec=EliteSpec.REAPER, minion_ids={9}) == [(30772, 100)]
+    assert rise([spawn(100)], owner_spec=EliteSpec.BASE, minion_ids={9}) == []
+    assert rise([spawn(100, target=10)], owner_spec=EliteSpec.REAPER, minion_ids={9}) == []
+    assert rise([spawn(100), spawn(120)], owner_spec=EliteSpec.REAPER, minion_ids={9}) == [
+        (30772, 100)
+    ]
+    assert rise([spawn(100), spawn(150)], owner_spec=EliteSpec.REAPER, minion_ids={9}) == [
+        (30772, 100),
+        (30772, 150),
+    ]
+
+
+def test_portent_of_freedom_uses_ei_symbol_destination_and_build_rules() -> None:
+    origin = 42_000_000
+    symbol = "A8E0E4C48848424D85503B674015D247"
+    old_cone = "86CC98C9D9D2B64689F8993AB02B09E5"
+
+    def effect(guid: str, target: int = 8) -> EffectEvent:
+        return EffectEvent(
+            time_ms=origin + 100,
+            source_agent_id=7,
+            target_agent_id=target,
+            skill_id=0,
+            guid=guid,
+        )
+
+    def casts(
+        events: list[Event], *, target_spec: EliteSpec, build: int | None
+    ) -> list[tuple[int, int]]:
+        return [
+            (cast.skill_id, cast.time_ms)
+            for cast in build_skill_rotation(
+                events,
+                duration_ms=1_000,
+                start_time_ms=origin,
+                elite_specs={8: target_spec},
+                gw2_build=build,
+            )
+            if cast.skill_id == -23
+        ]
+
+    assert casts([effect(symbol)], target_spec=EliteSpec.FIREBRAND, build=141374) == [(-23, 100)]
+    assert casts([effect(old_cone)], target_spec=EliteSpec.FIREBRAND, build=141374) == []
+    assert casts([effect(symbol)], target_spec=EliteSpec.BASE, build=141374) == []
+    assert casts([effect(symbol)], target_spec=EliteSpec.FIREBRAND, build=141373) == []
+    assert casts(
+        [effect(symbol), effect(symbol)], target_spec=EliteSpec.FIREBRAND, build=141374
+    ) == [(-23, 100)]
 
 
 def test_symbol_trait_is_not_booked_while_the_real_skill_is_being_cast() -> None:
