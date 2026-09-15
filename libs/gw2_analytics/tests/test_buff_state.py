@@ -486,6 +486,29 @@ def test_initial_regeneration_active_stack_starts_at_front() -> None:
     assert tracker._healing_no_sort is True
 
 
+def test_regeneration_added_active_does_not_activate_or_stop_sorting() -> None:
+    tracker = BuffStateTracker()
+    first = BoonApplyEvent(
+        time_ms=0,
+        source_agent_id=1,
+        target_agent_id=7,
+        skill_id=718,
+        duration_ms=1_000,
+        stacks=1,
+        stack_id=11,
+    )
+    added_active = first.model_copy(
+        update={"duration_ms": 5_000, "stack_id": 22, "added_active": True}
+    )
+
+    tracker.process(first)
+    tracker.process(added_active)
+
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.stack_ids == [11, 22]
+    assert tracker._healing_no_sort is False
+
+
 def _regen_apply(time_ms: int, duration_ms: int, stack_id: int) -> BoonApplyEvent:
     return BoonApplyEvent(
         time_ms=time_ms,

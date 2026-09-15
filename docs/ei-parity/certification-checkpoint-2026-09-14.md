@@ -34,10 +34,12 @@ il remplace les checkpoints d'orchestration supprimés.
   pré-scan GUID est falsifiée et ne doit pas être réintroduite.
 - La fenêtre sémantique de `29560` (10 ms locale contre 50 ms EI) est prouvée
   mais ne change pas ce corpus : la traiter séparément.
-- Les résidus restants concernent surtout les uptimes de boons, puis rotation,
-  groupe, down contribution et CC. La prochaine investigation est limitée aux
-  23 `FAIL` de rotation, sans toucher identité, propriété, uptime, groupe,
-  down contribution ou CC.
+- La profondeur de file Régénération `15 → 5` est sans effet sur les 35
+  journaux ; aucune modification de capacité n'est justifiée par ce corpus.
+- Les résidus restants concernent surtout les uptimes de boons (190 `FAIL`
+  atomiques), puis rotation, groupe, down contribution et CC. Les résultats de
+  tranche dont les comptes et `firstAware` coïncident sont maintenant distincts
+  dans le diff ; ce défaut d'observabilité n'affectait pas le calcul du parser.
 
 ## Validation de référence
 
