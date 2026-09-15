@@ -222,6 +222,36 @@ def test_compare_elite_insights_keeps_team_on_last_same_character_slice_only() -
     assert result["differences"] == {}
 
 
+def test_compare_elite_insights_does_not_overwrite_same_start_slice_differences() -> None:
+    fight = Fight(
+        id="fight",
+        agents=[
+            Agent(
+                id=1,
+                name="Player",
+                profession=Profession.GUARDIAN,
+                elite=EliteSpec.FIREBRAND,
+                is_player=True,
+                account_name=":Player.1234",
+                instance_id=1111,
+            )
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {"account": "Player.1234", "instanceID": 1111, "firstAware": 0, "group": 1},
+            {"account": "Player.1234", "instanceID": 1111, "firstAware": 0, "group": 2},
+        ]
+    }
+
+    result = compare_elite_insights(fight, expected, [])
+
+    assert result["differences"] == {
+        "players[Player.1234@0].group": {"expected": 1, "actual": 0},
+        "players[Player.1234@0].2.group": {"expected": 2, "actual": 0},
+    }
+
+
 def test_compare_elite_insights_does_not_merge_shared_instance_buffs() -> None:
     fight = Fight(
         id="fight",

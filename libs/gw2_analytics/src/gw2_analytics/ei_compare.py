@@ -868,6 +868,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     # Split accounts repeat the same whole-fight buff diff on every slice
     # entry; report it once per (account, buff).
     reported_buff_diffs: set[tuple[str, int]] = set()
+    reported_prefixes: Counter[str] = Counter()
 
     for player in expected_players:
         if not isinstance(player, dict) or not isinstance(player.get("account"), str):
@@ -896,6 +897,9 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             if account_entry_count[account] < 2
             else f"players[{account}@{player.get('firstAware')}]"
         )
+        reported_prefixes[prefix] += 1
+        if reported_prefixes[prefix] > 1:
+            prefix = f"{prefix}.{reported_prefixes[prefix]}"
         player_dims: dict[str, object] = {"account": account, "slice": player.get("firstAware")}
         anonymous = agent.account_name is None
         agent_ids = player_agent_ids(agent, slice_lo, slice_hi)
