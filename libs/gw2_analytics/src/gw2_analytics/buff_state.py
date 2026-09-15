@@ -521,7 +521,16 @@ class BuffStateTracker:
                     target_tracker.expirations.append(new_duration)
                     target_tracker.stack_ids.append(event.stack_id)
                     target_tracker.healing_scores.append(new_healing)
-                if not self._healing_no_sort:
+                if isinstance(event, BuffApplyEvent) and event.added_active:
+                    # EI's initial snapshot carries the active regeneration
+                    # stack in ``is_shields``; BuffApplyEvent.UpdateSimulator
+                    # activates it immediately, unlike a normal apply.
+                    index = target_tracker.stack_ids.index(event.stack_id)
+                    target_tracker.expirations.insert(0, target_tracker.expirations.pop(index))
+                    target_tracker.stack_ids.insert(0, target_tracker.stack_ids.pop(index))
+                    target_tracker.healing_scores.insert(0, target_tracker.healing_scores.pop(index))
+                    self._healing_no_sort = True
+                elif not self._healing_no_sort:
                     pairs = sorted(
                         zip(
                             target_tracker.expirations,
@@ -790,6 +799,8 @@ class BuffStateTracker:
                 target_tracker.expirations.insert(0, target_tracker.expirations.pop(index))
                 target_tracker.stack_ids.insert(0, target_tracker.stack_ids.pop(index))
                 target_tracker.healing_scores.insert(0, target_tracker.healing_scores.pop(index))
+                if buff_name == "regeneration":
+                    self._healing_no_sort = True
 
     def _process_buff_extension(self, event: BuffExtensionEvent) -> None:
         buff_name = _get_buff_name(event.skill_id)

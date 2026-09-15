@@ -481,7 +481,9 @@ def test_initial_regeneration_active_stack_starts_at_front() -> None:
         )
     )
 
-    assert tracker.compute_player_uptimes(7, 3_000)["regeneration"] == 100.0
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.stack_ids == [22, 11]
+    assert tracker._healing_no_sort is True
 
 
 def _regen_apply(time_ms: int, duration_ms: int, stack_id: int) -> BoonApplyEvent:
