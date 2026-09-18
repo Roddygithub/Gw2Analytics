@@ -348,6 +348,8 @@ class EventType(StrEnum):
     HEALTH_UPDATE = "HEALTH_UPDATE"
     UP = "UP"
     COMBAT_OUTCOME = "COMBAT_OUTCOME"
+    TEAM_CHANGE = "TEAM_CHANGE"
+    ENTER_COMBAT = "ENTER_COMBAT"
 
 
 class ActivationType(IntEnum):
@@ -995,6 +997,40 @@ class DespawnEvent(BaseEvent):
     event_type: Literal[EventType.DESPAWN] = EventType.DESPAWN
 
 
+class TeamChangeEvent(BaseEvent):
+    """One team/subgroup change event (arcdps statechange byte 22).
+
+    The ``subgroup`` field carries the new subgroup number from
+    arcdps's ``DstAgent`` field in the TeamChange statechange record.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.TEAM_CHANGE] = EventType.TEAM_CHANGE
+    time_ms: int = Field(..., ge=0)
+    source_agent_id: int = Field(..., ge=0, description="Player whose subgroup changed.")
+    target_agent_id: int = Field(..., ge=0, description="Always 0 for TeamChange.")
+    skill_id: int = Field(default=0, ge=0, description="Unused; always 0.")
+    subgroup: int = Field(..., ge=0, le=255, description="New subgroup number (1-8, 0 if unknown).")
+
+
+class EnterCombatEvent(BaseEvent):
+    """One enter combat event (arcdps statechange byte 1).
+
+    The ``subgroup`` field carries the subgroup number from
+    arcdps's ``DstAgent`` field in the EnterCombat statechange record.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_type: Literal[EventType.ENTER_COMBAT] = EventType.ENTER_COMBAT
+    time_ms: int = Field(..., ge=0)
+    source_agent_id: int = Field(..., ge=0, description="Player entering combat.")
+    target_agent_id: int = Field(default=0, ge=0)
+    skill_id: int = Field(default=0, ge=0)
+    subgroup: int = Field(..., ge=0, le=255, description="Subgroup number (1-8, 0 if unknown).")
+
+
 _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.DAMAGE: DamageEvent,
     EventType.HEALING: HealingEvent,
@@ -1023,6 +1059,8 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.HEALTH_UPDATE: HealthUpdateEvent,
     EventType.UP: UpEvent,
     EventType.COMBAT_OUTCOME: CombatOutcomeEvent,
+    EventType.TEAM_CHANGE: TeamChangeEvent,
+    EventType.ENTER_COMBAT: EnterCombatEvent,
 }
 
 

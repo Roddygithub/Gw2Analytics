@@ -759,7 +759,7 @@ def test_parse_events_emit_buff_statechange_record_filters_upstream() -> None:
 
     Companion test: ``test_parse_events_emit_buff_apply_statechange_marker``
     covers the canonical CBTS_BUFFAPPLY statechange marker
-    (``is_statechange=1, is_buffremove=0``) which is the dual of
+    (``is_statechange=99, is_buffremove=0``) which is the dual of
     the REMOVE case here.
     """
     evtc = _build_minimal_evtc(
@@ -771,7 +771,7 @@ def test_parse_events_emit_buff_statechange_record_filters_upstream() -> None:
                 src_agent=1,
                 dst_agent=2,
                 value=100,
-                is_statechange=1,  # filtered upstream
+                is_statechange=99,  # Unmapped statechange byte
                 is_buffremove=2,  # REMOVE_SINGLE
             ),
         ],
@@ -783,7 +783,7 @@ def test_parse_events_emit_buff_statechange_record_filters_upstream() -> None:
 
 
 def test_parse_events_emit_buff_apply_statechange_marker() -> None:
-    """``is_statechange=1, is_buffremove=0`` (CBTS_BUFFAPPLY) yields no events.
+    """``is_statechange=99, is_buffremove=0`` (CBTS_BUFFAPPLY) yields no events.
 
     Companion to ``test_parse_events_emit_buff_statechange_record_filters_upstream``
     -- locks the canonical buff-APPLY statechange marker. arcdps
@@ -810,7 +810,7 @@ def test_parse_events_emit_buff_apply_statechange_marker() -> None:
                 src_agent=1,
                 dst_agent=2,
                 value=100,
-                is_statechange=1,  # CBTS_BUFFAPPLY marker
+                is_statechange=99,  # Unmapped statechange byte
                 is_buffremove=0,  # arcdps cbtbuffremove = NONE for APPLY statechange
             ),
         ],
@@ -1044,7 +1044,7 @@ def test_parse_events_emit_apply_statechange_filtered_upstream() -> None:
                 src_agent=1,
                 dst_agent=2,
                 value=0,
-                is_statechange=1,  # CBTS_BUFFAPPLY-style marker (NOT mid-combat APPLY)
+                is_statechange=99,  # Unmapped statechange byte
                 ev_buff=42,  # would-be APPLY buff ID
             ),
         ],

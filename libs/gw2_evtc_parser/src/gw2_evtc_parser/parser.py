@@ -1025,6 +1025,7 @@ class PythonEvtcParser:
                     dst_agent=dst_agent,
                     value=value,
                     skill_id=skill_id,
+                    build_int=build_int,
                 )
                 if statechange_event is not None:
                     yield statechange_event
@@ -1752,6 +1753,9 @@ def _iter_fights(data: bytes) -> Iterator[Fight]:
     if is_evtc_2025:
         event_offset = records_offset + actual_skill_count * SKILL_RECORD_SIZE
         agents = _enrich_evtc2025_agents(data, agents, event_offset)
+    else:
+        event_offset = records_offset + actual_skill_count * SKILL_RECORD_SIZE
+    agents = _enrich_agents_with_subgroup(data, agents, event_offset, is_evtc_2025)
 
     # v0.11.0: CompleteAgents step (matching GW2EI's CompleteAgents()).
     # Scan the event stream for agent IDs referenced in src_agent or
@@ -1830,6 +1834,31 @@ def _enrich_evtc2025_agents(data: bytes, agents: list[Agent], event_offset: int)
                 "instance_id": instance_ids.get(agent.id, 0),
                 "team_id": team_ids.get(agent.id, 0),
             }
+        )
+        for agent in agents
+    ]
+
+
+def _enrich_agents_with_subgroup(data: bytes, agents: list[Agent], event_offset: int, is_evtc_2025: bool) -> list[Agent]:
+    """Enrich agents with subgroup info from EnterCombat (statechange 1) and TeamChange (statechange 22).
+    Only accepts valid subgroups (1-8). Preserves agent's original subgroup if statechange gives garbage."""
+    by_id = {agent.id: agent for agent in agents}
+    subgroup_by_agent: dict[int, int] = {}
+    for cursor in range(event_offset, len(data) - EVENT_SIZE + 1, EVENT_SIZE):
+        event = _EVENT_STRUCT_2025.unpack_from(data, cursor) if is_evtc_2025 else _EVENT_STRUCT_EVENTS.unpack_from(data, cursor)
+        src_agent = int(event[1])
+        if src_agent not in by_id:
+            continue
+        statechange = int(event[16] if is_evtc_2025 else event[11])
+        dst_val = int(event[2])
+        # Only accept valid subgroups (1-8) from statechange events
+        if statechange == 1 and 1 <= dst_val <= 8:  # EnterCombat
+            subgroup_by_agent[src_agent] = dst_val
+        elif statechange == 22 and 1 <= dst_val <= 8:  # TeamChange
+            subgroup_by_agent[src_agent] = dst_val
+    return [
+        agent.model_copy(
+            update={"subgroup": str(subgroup_by_agent.get(agent.id, int(agent.subgroup or 0)))}
         )
         for agent in agents
     ]
@@ -2265,18 +2294,37 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
 
     # The 68-byte name buffer uses the same combo-string convention as
     # the legacy layout: ``char\0account\0subgroup\0``.
+    # However, EVTC2025+ name buffers may have leading padding bytes.
+    # Robustly extract by finding the account name (starts with ':').
     parts = name_buf.split(b"\x00")
-
-    char_name = parts[0].decode("utf-8", errors="replace") if parts else ""
-
-    raw_account = parts[1] if len(parts) >= 2 else b""
-    raw_subgroup = parts[2] if len(parts) >= 3 else b""
-    is_player = bool(raw_account or raw_subgroup)
+    # Find the account name part (starts with ':')
+    account_idx = -1
+    for i, part in enumerate(parts):
+        if part.startswith(b":"):
+            account_idx = i
+            break
+    if account_idx >= 1:
+        char_name = parts[account_idx - 1].decode("utf-8", errors="replace")
+    else:
+        char_name = parts[0].decode("utf-8", errors="replace") if parts else ""
+    raw_account = parts[account_idx] if account_idx >= 0 else b""
+    # Subgroup is the next non-empty part after account
+    raw_subgroup = b""
+    for part in parts[account_idx + 1:]:
+        if part:
+            raw_subgroup = part
+            break
+    # Only treat as player if account looks like a real account (contains '.')
+    # and subgroup is numeric (1-8)
+    is_player = False
     account_name: str | None = None
     subgroup: str | None = None
-    if is_player:
-        account_name = raw_account.decode("utf-8", errors="replace") if raw_account else None
-        subgroup = raw_subgroup.decode("utf-8", errors="replace")
+    if raw_account and b"." in raw_account:
+        raw_subgroup_str = raw_subgroup.decode("utf-8", errors="replace") if raw_subgroup else ""
+        if raw_subgroup_str.isdigit() and 1 <= int(raw_subgroup_str) <= 8:
+            is_player = True
+            account_name = raw_account.decode("utf-8", errors="replace")
+            subgroup = raw_subgroup_str
 
     try:
         profession = Profession(prof_raw)

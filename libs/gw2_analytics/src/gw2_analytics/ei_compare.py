@@ -28,11 +28,13 @@ from gw2_core import (
     DodgeEvent,
     DownEvent,
     EliteSpec,
+    EnterCombatEvent,
     Event,
     Fight,
     HealthUpdateEvent,
     InterruptEvent,
     Profession,
+    TeamChangeEvent,
     UpEvent,
     spec_display_name,
 )
@@ -530,6 +532,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     health_events = [event for event in event_list if isinstance(event, HealthUpdateEvent)]
     up_events = [event for event in event_list if isinstance(event, UpEvent)]
     outcome_events = [event for event in event_list if isinstance(event, CombatOutcomeEvent)]
+
     down_rows = DownContributionAggregator().aggregate(
         actor_damage_events,
         down_events,
@@ -906,6 +909,9 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         # has replaced their character name with the *localized* spec
         # string. EI labels them "<English spec> pl-<instanceID>", so the
         # label has to be rebuilt from the profession/elite IDs rather
+        # Use the agent's final subgroup (from agent table) for all slices
+        # This matches EI's final subgroup; EI uses slice-time subgroup which we don't fully track
+        subgroup = int(agent.subgroup or 0)
         # than echoed from the name buffer.
         values: dict[str, object] = {
             "name": (
@@ -913,7 +919,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 if anonymous
                 else agent.name
             ),
-            "group": 51 if anonymous else int(agent.subgroup or 0),
+            "group": 51 if anonymous else subgroup,
             "instanceID": agent.instance_id,
             "teamID": _team_for_entry(
                 len(account_names[account]) > 1

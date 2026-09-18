@@ -60,6 +60,14 @@ STATE_CHANGE_DEATH: Final[int] = 4
 #: ``parser.py`` alongside bytes 4 and 6.  See ``STATE_CHANGE_DEATH``.
 STATE_CHANGE_DOWN: Final[int] = 5
 
+#: arcdps statechange byte for EnterCombat events (per statechange-ids.md).
+#: The EnterCombat statechange carries the subgroup in DstAgent.
+STATE_CHANGE_ENTER_COMBAT: Final[int] = 1
+
+#: arcdps statechange byte for TeamChange events (per statechange-ids.md).
+#: The TeamChange statechange carries the new subgroup in DstAgent.
+STATE_CHANGE_TEAM_CHANGE: Final[int] = 22
+
 
 def _emit_stun_break(
     time_ms: int,
@@ -67,6 +75,7 @@ def _emit_stun_break(
     _dst_agent: int,
     _value: int,
     _skill_id: int,
+    _build_int: int = 0,
 ) -> Event:
     """Emit a :class:`StunBreakEvent` for arcdps byte 56.
 
@@ -91,6 +100,7 @@ def _emit_barrier_update(
     dst_agent: int,
     _value: int,
     skill_id: int,
+    _build_int: int = 0,
 ) -> Event:
     """Emit a :class:`BarrierEvent` for arcdps byte 38.
 
@@ -117,6 +127,7 @@ def _emit_death(
     _dst_agent: int,
     _value: int,
     _skill_id: int,
+    _build_int: int = 0,
 ) -> Event:
     """Emit a :class:`DeathEvent` for arcdps byte 4 (ChangeDead).
 
@@ -141,6 +152,7 @@ def _emit_down(
     _dst_agent: int,
     _value: int,
     _skill_id: int,
+    _build_int: int = 0,
 ) -> Event:
     """Emit a :class:`DownEvent` for arcdps byte 5 (ChangeDown).
 
@@ -154,6 +166,55 @@ def _emit_down(
         source_agent_id=src_agent,
         target_agent_id=0,
         skill_id=0,
+    )
+
+
+def _emit_team_change(
+    time_ms: int,
+    src_agent: int,
+    dst_agent: int,
+    value: int,
+    _skill_id: int,
+    build_int: int = 0,
+) -> Event:
+    """Emit a :class:`TeamChangeEvent` for arcdps byte 22 (TeamChange).
+
+    The player whose subgroup changed is ``source_agent_id``.
+    For builds >= 20240612 (TeamChangeOnDespawn), the subgroup is in ``value``.
+    For older builds, the subgroup is in ``dst_agent``.
+    """
+    from gw2_core import TeamChangeEvent
+    # TeamChangeOnDespawn = 20240612
+    subgroup = value if build_int >= 20240612 else dst_agent
+    return TeamChangeEvent(
+        time_ms=time_ms,
+        source_agent_id=src_agent,
+        target_agent_id=0,
+        skill_id=0,
+        subgroup=subgroup,
+    )
+
+
+def _emit_enter_combat(
+    time_ms: int,
+    src_agent: int,
+    dst_agent: int,
+    _value: int,
+    _skill_id: int,
+    _build_int: int = 0,
+) -> Event:
+    """Emit an :class:`EnterCombatEvent` for arcdps byte 1 (EnterCombat).
+
+    The player entering combat is ``source_agent_id``.
+    The subgroup is carried in ``dst_agent`` (arcdps DstAgent).
+    """
+    from gw2_core import EnterCombatEvent
+    return EnterCombatEvent(
+        time_ms=time_ms,
+        source_agent_id=src_agent,
+        target_agent_id=0,
+        skill_id=0,
+        subgroup=dst_agent,
     )
 
 
@@ -184,7 +245,7 @@ def _emit_buff_info(
 #:
 #: The constructor signature is uniform across all emit functions::
 #:
-#:     (time_ms: int, src_agent: int, dst_agent: int, value: int, skill_id: int) -> Event
+#:     (time_ms: int, src_agent: int, dst_agent: int, value: int, skill_id: int, build_int: int = 0) -> Event
 #:
 #: so the :func:`dispatch_statechange` wrapper can pass through the
 #: unpacked cbtevent tuple fields 1:1. Future A.4.3 emit functions
@@ -198,11 +259,13 @@ def _emit_buff_info(
 #: Exposed at module level (NOT underscored) so the F1 calibration
 #: pilot + the parser emit-side diagnostic logger can introspect the
 #: wired kinds via ``statechange_dispatch.STATECHANGE_MAP.keys()``.
-STATECHANGE_MAP: Final[dict[int, Callable[[int, int, int, int, int], Event]]] = {
+STATECHANGE_MAP: Final[dict[int, Callable[[int, int, int, int, int, int], Event]]] = {
     STATE_CHANGE_STUN_BREAK: _emit_stun_break,
     STATE_CHANGE_BARRIER_UPDATE: _emit_barrier_update,
     STATE_CHANGE_DEATH: _emit_death,
     STATE_CHANGE_DOWN: _emit_down,
+    
+    STATE_CHANGE_ENTER_COMBAT: _emit_enter_combat,
 }
 
 
@@ -213,6 +276,7 @@ def dispatch_statechange(
     dst_agent: int,
     value: int,
     skill_id: int,
+    build_int: int = 0,
 ) -> Event | None:
     """Dispatch an arcdps statechange record to a domain event instance.
 
@@ -226,9 +290,9 @@ def dispatch_statechange(
     handler = STATECHANGE_MAP.get(is_statechange)
     if handler is None:
         return None
-    # mypy narrows the Callable[[int, int, int, int, int], Event]
+    # mypy narrows the Callable[[int, int, int, int, int, int], Event]
     # return type straight through: no redundant cast needed.
-    result = handler(time_ms, src_agent, dst_agent, value, skill_id)
+    result = handler(time_ms, src_agent, dst_agent, value, skill_id, build_int)
     # F1-calibration pilot instrumentation: surface the byte -> Event
     # dispatch via DEBUG so a maintainer running the pilot at
     # ``logging.DEBUG`` can see which kinds are mapped vs unmapped
@@ -248,5 +312,6 @@ __all__ = [
     "STATE_CHANGE_DEATH",
     "STATE_CHANGE_DOWN",
     "STATE_CHANGE_STUN_BREAK",
+    "STATE_CHANGE_TEAM_CHANGE",
     "dispatch_statechange",
 ]
