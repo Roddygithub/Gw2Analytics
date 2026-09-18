@@ -412,13 +412,14 @@ class BuffStateTracker:
             # are handled separately even though they have max_stacks=1.
             if buff_name in _QUEUE_LOGIC_BUFFS:
                 # QueueLogic (EI): capacity 9, only front stack counts.
-                # Add new stack to end; if at capacity, drop shortest (not front).
+                # Add new stack; on overflow EI FindLowestValue replaces the
+                # shortest non-front stack IN PLACE (stacks[IndexOf(toRemove)]
+                # = toAdd), preserving queue order -- not pop+append, which
+                # would rotate the queue and change which stack fronts next.
                 duration = event.duration_ms if event.duration_ms > 0 else None
                 if len(target_tracker.expirations) >= _capacity_for(buff_name):
-                    # Find shortest duration (excluding front which is active)
-                    # EI drops the shortest duration stack, not the front
                     if len(target_tracker.expirations) > 1:
-                        # Find shortest among non-front stacks
+                        # Find shortest among non-front stacks (index >= 1)
                         min_idx = 1
                         min_dur = target_tracker.expirations[1]
                         for i in range(2, len(target_tracker.expirations)):
@@ -426,19 +427,33 @@ class BuffStateTracker:
                             if dur is not None and (min_dur is None or dur < min_dur):
                                 min_dur = dur
                                 min_idx = i
-                        target_tracker.expirations.pop(min_idx)
-                        target_tracker.stack_ids.pop(min_idx)
-                        target_tracker.healing_scores.pop(min_idx)
+                        target_tracker.expirations[min_idx] = duration
+                        target_tracker.stack_ids[min_idx] = event.stack_id
+                        target_tracker.healing_scores[min_idx] = self._healing_by_agent.get(
+                            event.source_agent_id, 0
+                        )
                     else:
-                        # Only one stack, replace it
-                        target_tracker.expirations.pop(0)
-                        target_tracker.stack_ids.pop(0)
-                        target_tracker.healing_scores.pop(0)
-                target_tracker.expirations.append(duration)
-                target_tracker.stack_ids.append(event.stack_id)
-                target_tracker.healing_scores.append(
-                    self._healing_by_agent.get(event.source_agent_id, 0)
-                )
+                        # Only one stack (the front), replace it
+                        target_tracker.expirations[0] = duration
+                        target_tracker.stack_ids[0] = event.stack_id
+                        target_tracker.healing_scores[0] = self._healing_by_agent.get(
+                            event.source_agent_id, 0
+                        )
+                else:
+                    target_tracker.expirations.append(duration)
+                    target_tracker.stack_ids.append(event.stack_id)
+                    target_tracker.healing_scores.append(
+                        self._healing_by_agent.get(event.source_agent_id, 0)
+                    )
+                if event.added_active and event.stack_id in target_tracker.stack_ids:
+                    # EI BuffSimulator.Add calls _logic.Activate on addedActive,
+                    # which moves the new stack to the front of the queue.
+                    index = target_tracker.stack_ids.index(event.stack_id)
+                    target_tracker.expirations.insert(0, target_tracker.expirations.pop(index))
+                    target_tracker.stack_ids.insert(0, target_tracker.stack_ids.pop(index))
+                    target_tracker.healing_scores.insert(
+                        0, target_tracker.healing_scores.pop(index)
+                    )
             elif _max_stacks_for(buff_name) > 1:
                 if buff_name in _OVERRIDE_LOGIC_BUFFS:
                     # OverrideLogic (EI): sort by TotalDuration (shortest first),
@@ -709,6 +724,13 @@ class BuffStateTracker:
                     target_tracker.expirations.append(duration)
                     target_tracker.stack_ids.append(event.stack_id)
                     target_tracker.healing_scores.append(0)
+            if event.added_active and event.stack_id in target_tracker.stack_ids:
+                # EI BuffApplyEvent.UpdateSimulator passes addedActive ->
+                # BuffSimulator.Add -> _logic.Activate: move to front.
+                index = target_tracker.stack_ids.index(event.stack_id)
+                target_tracker.expirations.insert(0, target_tracker.expirations.pop(index))
+                target_tracker.stack_ids.insert(0, target_tracker.stack_ids.pop(index))
+                target_tracker.healing_scores.insert(0, target_tracker.healing_scores.pop(index))
 
         # Intensity buffs with max_stacks > 1 (might, stability)
         elif _max_stacks_for(buff_name) > 1:
