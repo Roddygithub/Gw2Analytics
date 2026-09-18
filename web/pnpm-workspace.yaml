@@ -21,3 +21,5 @@ overrides:
   js-yaml: ^4.3.2
   browserslist: ">=4.28.7"
   baseline-browser-mapping: ">=2.11.0"
+  vitest: ">=4.1.11"
+  "@vitest/mocker": ">=4.1.11"
