@@ -178,7 +178,7 @@ jobs:
             -p 9000:9000 -p 9001:9001 \
             -e MINIO_ROOT_USER=gw2analytics \
             -e MINIO_ROOT_PASSWORD=gw2analytics-secret \
-            minio/minio:latest server /data --console-address :9001
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data --console-address :9001
           echo "Waiting for MinIO to be ready..."
           for i in $(seq 1 15); do
             if curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1; then
@@ -548,7 +548,7 @@ jobs:
             -p 9000:9000 -p 9001:9001 \
             -e MINIO_ROOT_USER=gw2analytics \
             -e MINIO_ROOT_PASSWORD=gw2analytics-secret \
-            minio/minio:latest server /data --console-address :9001
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data --console-address :9001
           echo "Waiting for MinIO to be ready..."
           for i in $(seq 1 15); do
             if curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1; then
