@@ -1858,7 +1858,7 @@ def _enrich_agents_with_subgroup(data: bytes, agents: list[Agent], event_offset:
             subgroup_by_agent[src_agent] = dst_val
     return [
         agent.model_copy(
-            update={"subgroup": str(subgroup_by_agent.get(agent.id, int(agent.subgroup or 0)))}
+            update={"subgroup": str(subgroup_by_agent[agent.id]) if agent.id in subgroup_by_agent else agent.subgroup}
         )
         for agent in agents
     ]
@@ -2308,29 +2308,41 @@ def _decode_agent_2025(data: bytes, offset: int) -> Agent:
     else:
         char_name = parts[0].decode("utf-8", errors="replace") if parts else ""
     raw_account = parts[account_idx] if account_idx >= 0 else b""
-    # Subgroup is the next non-empty part after account
+    # Subgroup is the next non-empty part after account (only if account found)
     raw_subgroup = b""
-    for part in parts[account_idx + 1:]:
-        if part:
-            raw_subgroup = part
-            break
-    # Only treat as player if account looks like a real account (contains '.')
-    # and subgroup is numeric (1-8)
-    is_player = False
+    if account_idx >= 0:
+        for part in parts[account_idx + 1:]:
+            if part:
+                raw_subgroup = part
+                break
+    # Parse account name if present (starts with ':')
     account_name: str | None = None
     subgroup: str | None = None
-    if raw_account and b"." in raw_account:
-        raw_subgroup_str = raw_subgroup.decode("utf-8", errors="replace") if raw_subgroup else ""
+    has_valid_account = raw_account and b"." in raw_account
+    has_valid_subgroup = False
+    if raw_subgroup:
+        raw_subgroup_str = raw_subgroup.decode("utf-8", errors="replace")
         if raw_subgroup_str.isdigit() and 1 <= int(raw_subgroup_str) <= 8:
-            is_player = True
-            account_name = raw_account.decode("utf-8", errors="replace")
+            has_valid_subgroup = True
             subgroup = raw_subgroup_str
+        else:
+            subgroup = raw_subgroup_str
+    else:
+        subgroup = "" if has_valid_account else None
+
+    if has_valid_account:
+        account_name = raw_account.decode("utf-8", errors="replace")
 
     try:
         profession = Profession(prof_raw)
     except ValueError:
         profession = Profession.UNKNOWN
-    is_player = is_player or (profession != Profession.UNKNOWN and elite_raw != 0xFFFFFFFF)
+    # Player if: valid account with valid subgroup, OR valid profession
+    is_player = (has_valid_account and has_valid_subgroup) or (profession != Profession.UNKNOWN and elite_raw != 0xFFFFFFFF)
+
+    # For NPCs, subgroup should be None
+    if not is_player:
+        subgroup = None
 
     # v0.16.3-api: cross-validate elite spec against profession.
     # EVTC2025+ logs use official GW2 v2 API IDs natively.

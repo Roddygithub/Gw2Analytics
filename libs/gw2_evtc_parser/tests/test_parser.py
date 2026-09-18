@@ -1409,7 +1409,7 @@ def test_parse_events_filters_statechange_skips_damage() -> None:
                 src_agent=1,
                 dst_agent=2,
                 value=99,
-                is_statechange=1,
+                is_statechange=99,  # unmapped statechange byte (filtered)
             ),  # filtered (state change)
             _build_event_record(
                 time_ms=2_000,
@@ -1441,7 +1441,7 @@ def test_parse_events_skips_statechange_records() -> None:
                 src_agent=1,
                 dst_agent=2,
                 value=999,
-                is_statechange=1,
+                is_statechange=99,  # unmapped statechange byte (filtered)
             ),
         ],
     )
@@ -1600,7 +1600,7 @@ def test_parse_events_skips_statechange_for_healing() -> None:
                 dst_agent=2,
                 value=9_999,
                 is_nondamage=1,
-                is_statechange=1,
+                is_statechange=99,  # unmapped statechange byte (filtered)
             ),
         ],
     )
@@ -1625,7 +1625,7 @@ def test_parse_events_skips_statechange_for_damage() -> None:
                 dst_agent=2,
                 value=9_999,
                 is_nondamage=0,
-                is_statechange=1,
+                is_statechange=99,  # unmapped statechange byte (filtered)
             ),
         ],
     )
@@ -1899,7 +1899,7 @@ def test_parse_events_skips_statechange_for_buff_strip() -> None:
                 value=8_500,
                 buff_dmg=2_250,
                 is_nondamage=1,
-                is_statechange=1,
+                is_statechange=99,  # unmapped statechange byte (filtered)
                 skill_id=101,
             ),
         ],

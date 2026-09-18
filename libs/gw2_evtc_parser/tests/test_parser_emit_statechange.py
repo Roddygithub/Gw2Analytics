@@ -436,7 +436,7 @@ def test_parse_events_dispatch_unmapped_statechange_yields_no_event() -> None:
                 src_agent=1,
                 dst_agent=2,
                 value=100,
-                is_statechange=1,  # Unmapped CBTS kind
+                is_statechange=99,  # Unmapped CBTS kind (was 1=EnterCombat, now mapped)
             ),
         ],
     )
