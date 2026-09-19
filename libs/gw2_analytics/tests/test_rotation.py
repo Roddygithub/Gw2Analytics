@@ -1936,3 +1936,69 @@ def test_berserk_loss_is_booked_as_berserk_end() -> None:
     )
     assert casts(gain) == [30435]
     assert casts(gain, end) == [30435, -41]
+
+
+def test_spiteful_spirit_damage_path_disabled_when_unholy_burst_effect_present() -> None:
+    """EI disables Spiteful Spirit's DamageCastFinder via UsingDisableWithEffectData()
+    when UnholyBurst effect data exists. A 29560 damage event nearby a UnholyBurst
+    effect must NOT produce a cast (the EffectCastFinder handles it at the effect time)."""
+    origin = 42_000_000
+    base = {"source_agent_id": 7, "target_agent_id": 0}
+    events = [
+        DamageEvent(
+            time_ms=origin + 100,
+            skill_id=29560,
+            damage=500,
+            **base,
+        ),
+        EffectEvent(
+            time_ms=origin + 90,
+            skill_id=8553,
+            guid="C4E8DD3234E0C647993857940ED79AC1",
+            **base,
+        ),
+    ]
+    casts = build_skill_rotation(
+        events,
+        duration_ms=1_000,
+        start_time_ms=origin,
+        professions={7: Profession.NECROMANCER},
+    )
+    # With UnholyBurst effect data present, the damage path must be disabled:
+    # only the EffectCastFinder (at the effect time) may emit, NOT the damage
+    # event. Exactly one 29560 cast from the effect path (rel 90) is expected,
+    # not a second one from the damage event (rel 100).
+    many = [cast for cast in casts if cast.skill_id == 29560]
+    assert len(many) == 1, f"expected exactly 1 Spiteful Spirit cast, got {len(many)}: {[(c.time_ms,c.duration_ms) for c in many]}"
+
+
+def test_spiteful_spirit_desert_shroud_global_check() -> None:
+    """EI's EffectCastFinder suppresses the cast if ANY DesertShroudBuff remove_all
+    occurs within 50ms, regardless of who applied it (source=0 environment)."""
+    origin = 42_000_000
+    base = {"source_agent_id": 7, "target_agent_id": 0}
+    events = [
+        EffectEvent(
+            time_ms=origin + 100,
+            skill_id=8553,
+            guid="C4E8DD3234E0C647993857940ED79AC1",
+            **base,
+        ),
+        # DesertShroud remove_all from source 0 (environment), within 50ms
+        BoonApplyEvent(
+            time_ms=origin + 130,
+            source_agent_id=0,
+            target_agent_id=7,
+            skill_id=40052,
+            kind="remove_all",
+            duration_ms=0,
+            stacks=0,
+        ),
+    ]
+    casts = build_skill_rotation(
+        events,
+        duration_ms=1_000,
+        start_time_ms=origin,
+        professions={7: Profession.NECROMANCER},
+    )
+    assert all(cast.skill_id != 29560 for cast in casts)

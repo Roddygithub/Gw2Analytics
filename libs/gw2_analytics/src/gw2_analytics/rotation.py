@@ -1049,61 +1049,18 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         ):
             add_instant(event.source_agent_id, event.skill_id, event.time_ms)
         # Spiteful Spirit (29560) - EI has two finders:
-        # 1. DamageCastFinder: disabled when effect data exists (UsingDisableWithEffectData)
-        # 2. EffectCastFinder for UnholyBurst: triggers on effect with
-        # DesertShroud/related hit checks
+        # 1. DamageCastFinder(SpitefulSpirit).UsingDisableWithEffectData(): only active
+        #    when NO effect data exists in the fight. Never emits at the damage time
+        #    when any effect data is present (the EffectCastFinder handles it).
+        # 2. EffectCastFinder via UnholyBurst effect GUID (handled in EffectEvent path).
         elif isinstance(event, DamageEvent) and event.skill_id == 29560:
             source_is_necro = (
                 not professions or professions.get(event.source_agent_id) is Profession.NECROMANCER
             )
-            if not source_is_necro:
-                continue
-
-            # Check if there's any UnholyBurst effect in the fight (global check)
-            has_unholy_burst_in_fight = any(
-                isinstance(other, EffectEvent) and other.guid == "C4E8DD3234E0C647993857940ED79AC1"
-                for other in event_list
-            )
-
-            if has_unholy_burst_in_fight:
-                # EI uses EffectCastFinder: only emit when UnholyBurst effect is present
-                # with DesertShroud and related hit checks
-                unholy_burst_nearby = any(
-                    isinstance(other, EffectEvent)
-                    and other.guid == "C4E8DD3234E0C647993857940ED79AC1"
-                    and other.source_agent_id == event.source_agent_id
-                    and abs(other.time_ms - event.time_ms) < 100
-                    for other in nearby_events(event.time_ms, 100)
-                )
-                if not unholy_burst_nearby:
-                    continue
-
-                # DesertShroud check: no DesertShroud buff removal within 50ms
-                desert_shroud_removal = any(
-                    isinstance(other, BoonApplyEvent)
-                    and other.kind == "remove_all"
-                    and other.skill_id == 40052  # DesertShroudBuff
-                    and other.source_agent_id == event.source_agent_id
-                    and abs(other.time_ms - event.time_ms) < 50
-                    for other in nearby_events(event.time_ms, 50)
-                )
-                if desert_shroud_removal:
-                    continue
-
-                # Related hit check: no UnholyBurst hit from same caster within 10ms
-                related_hit = any(
-                    isinstance(other, DamageEvent)
-                    and other.source_agent_id == event.source_agent_id
-                    and other.skill_id == 38767  # UnholyBurst
-                    and abs(other.time_ms - event.time_ms) < 10
-                    for other in nearby_events(event.time_ms, 10)
-                )
-                if related_hit:
-                    continue
-
-                add_instant(event.source_agent_id, event.skill_id, event.time_ms)
-            else:
-                # No UnholyBurst effect data in fight: use DamageCastFinder
+            # EI's UsingDisableWithEffectData(): damage finder is disabled when any
+            # effect data exists, even if no UnholyBurst GUID is present. The
+            # EffectCastFinder path (EffectEvent handler) owns emission in that case.
+            if source_is_necro and not has_effect_data:
                 add_instant(event.source_agent_id, event.skill_id, event.time_ms)
         elif isinstance(event, DamageEvent) and event.skill_id in _DAMAGE_CASTS:
             add_instant(
@@ -1405,12 +1362,13 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 # EI's EffectCastFinder for Spiteful Spirit triggers on UnholyBurst effect
                 # with DesertShroud and related hit checks
                 if event.guid == "C4E8DD3234E0C647993857940ED79AC1":
-                    # DesertShroud check: no DesertShroud buff removal within 50ms
+                    # DesertShroud check: EI suppresses if ANY DesertShroudBuff
+                    # remove_all occurs within 50ms (source-agnostic, incl. src=0
+                    # environment apply). Do NOT filter by source == caster.
                     desert_shroud_removal = any(
                         isinstance(other, BoonApplyEvent)
                         and other.kind == "remove_all"
                         and other.skill_id == 40052  # DesertShroudBuff
-                        and other.source_agent_id == caster
                         and abs(other.time_ms - event.time_ms) < 50
                         for other in nearby_events(event.time_ms, 50)
                     )
