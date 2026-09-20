@@ -1103,7 +1103,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                     break
             if primary_id is None:
                 primary_id = agent.id
-            
+
             # Compute uptime for primary agent
             alias_uptime = tracker.compute_player_uptimes(
                 primary_id,
@@ -1126,7 +1126,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 ]
             else:
                 instance_recycled = []
-            
+
             if instance_recycled:
                 merged = tracker.compute_merged_uptimes(
                     instance_recycled,
