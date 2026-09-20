@@ -1826,6 +1826,8 @@ def _enrich_evtc2025_agents(data: bytes, agents: list[Agent], event_offset: int)
             instance_ids.setdefault(src_agent, src_inst)
         if dst_agent in by_id and dst_inst:
             instance_ids.setdefault(dst_agent, dst_inst)
+        # TeamChange (byte 22): TeamIDInto = DstAgent, TeamIDComingFrom = Value (build >= 20240612)
+        # EI teamID matches TeamIDComingFrom (Value), not TeamIDInto (DstAgent)
         if statechange == 22 and src_agent in by_id:
             team_ids[src_agent] = int(event[3])
     return [
@@ -1849,7 +1851,7 @@ def _enrich_agents_with_subgroup(data: bytes, agents: list[Agent], event_offset:
         src_agent = int(event[1])
         if src_agent not in by_id:
             continue
-        statechange = int(event[16] if is_evtc_2025 else event[11])
+        statechange = int(event[19] if is_evtc_2025 else event[11])
         dst_val = int(event[2])
         # Only accept valid subgroups (1-8) from statechange events
         if statechange == 1 and 1 <= dst_val <= 8:  # EnterCombat
@@ -2603,8 +2605,8 @@ _AWARENESS_EXCLUDED_STATECHANGES: Final[frozenset[int]] = frozenset(
 
 #: arcdps statechange codes for agent lifecycle.
 #: 0 = Spawn (agent enters combat log), 1 = Despawn (agent leaves combat log).
-_SPAWN_STATECHANGE: Final[int] = 0
-_DESPAWN_STATECHANGE: Final[int] = 1
+_SPAWN_STATECHANGE: Final[int] = 6
+_DESPAWN_STATECHANGE: Final[int] = 7
 #: Statechange 22 = TeamChange (used in EVTC2025+ agent enrichment).
 _TEAMCHANGE_STATECHANGE_2025: Final[int] = 22
 
