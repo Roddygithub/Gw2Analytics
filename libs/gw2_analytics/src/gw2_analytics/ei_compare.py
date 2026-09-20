@@ -1086,20 +1086,58 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             # the whole-fight expected value is their sum -- see
             # ``account_buff_uptime`` above.
             uptime = dict.fromkeys(TRACKED_BUFFS, 0.0)
-            # Stop each alias's simulation at its own last-aware. A player
-            # who drops off the log mid-fight keeps whatever boons were up
-            # at that moment, and running them to the end of the fight adds
-            # exactly the absence window to every one of them -- the
-            # signature was several buffs on one actor all overcounting by
-            # the identical amount.
-            for alias_id in player_agent_ids(agent, slice_lo, slice_hi):
-                alias_uptime = tracker.compute_player_uptimes(
-                    alias_id,
+            # EI semantics: player buffUptimes reflects only the player's own agent,
+            # NOT owned pets/minions. Instance-recycled agents (same instance_id,
+            # no master, no account) are merged into a single entity.
+            # We use the primary agent for the player, and merge instance-recycled
+            # agents via compute_merged_uptimes.
+            agent_by_id = {agent.id: agent for agent in fight.agents}
+            primary_agent_ids = player_agent_ids(agent, slice_lo, slice_hi)
+            # Filter to only the primary player agent (not owned pets/minions)
+            # The primary agent is the one with an account name
+            primary_id = None
+            for aid in primary_agent_ids:
+                a = agent_by_id.get(aid)
+                if a and a.account_name is not None:
+                    primary_id = aid
+                    break
+            if primary_id is None:
+                primary_id = agent.id
+            
+            # Compute uptime for primary agent
+            alias_uptime = tracker.compute_player_uptimes(
+                primary_id,
+                duration_ms,
+                active_duration_ms=_awareness_bound(agent_awareness, primary_id, duration_ms),
+            )
+            for name, value in alias_uptime.items():
+                uptime[name] += value
+
+            # Merge instance-recycled agents (same instance_id, no master, no account)
+            # These are non-squad players sharing the same instance_id (anonymous)
+            # Owned pets/minions are excluded entirely per EI semantics
+            if agent.instance_id:
+                instance_recycled = [
+                    aid for aid in primary_agent_ids
+                    if aid != primary_id
+                    and agent_by_id.get(aid) is not None
+                    and agent_by_id[aid].account_name is None
+                    and agent_by_id[aid].instance_id == agent.instance_id
+                ]
+            else:
+                instance_recycled = []
+            
+            if instance_recycled:
+                merged = tracker.compute_merged_uptimes(
+                    instance_recycled,
                     duration_ms,
-                    active_duration_ms=_awareness_bound(agent_awareness, alias_id, duration_ms),
+                    slice_lo,
+                    slice_hi,
+                    agent_awareness,
                 )
-                for name, value in alias_uptime.items():
+                for name, value in merged.items():
                     uptime[name] += value
+
             for name, value in uptime.items():
                 if name not in MAX_STACKS:
                     uptime[name] = min(100.0, value)
