@@ -591,9 +591,9 @@ def test_queue_logic_overflow_replaces_shortest_stack_in_place() -> None:
     """
     protection_id = TRACKED_BUFFS["protection"]
     tracker = BuffStateTracker()
-    # Fill to capacity (15) with durations so the shortest non-front stack
-    # (200 ms) sits at index 5, not at the tail.
-    durations = [5_000, 1_000, 900, 300, 400, 200, 700, 800, 600, 550, 650, 750, 850, 950, 999]
+    # Fill to capacity (5 per EI 3.26) with durations so the shortest non-front stack
+    # (300 ms) sits at index 3, not at the tail.
+    durations = [5_000, 1_000, 900, 300, 400]
     for index, duration in enumerate(durations):
         tracker.process(
             BoonApplyEvent(
@@ -607,9 +607,9 @@ def test_queue_logic_overflow_replaces_shortest_stack_in_place() -> None:
             )
         )
     stack = tracker._agent_buffs[7]["protection"]
-    assert len(stack.expirations) == 15
+    assert len(stack.expirations) == 5
 
-    # Overflow apply: EI replaces the 200 ms stack at index 5 in place.
+    # Overflow apply: EI replaces the 300 ms stack at index 3 in place.
     tracker.process(
         BoonApplyEvent(
             time_ms=0,
@@ -621,10 +621,10 @@ def test_queue_logic_overflow_replaces_shortest_stack_in_place() -> None:
             stack_id=999,
         )
     )
-    assert len(stack.expirations) == 15
-    assert stack.expirations[5] == 9_999  # replaced in place, not appended
+    assert len(stack.expirations) == 5
+    assert stack.expirations[3] == 9_999  # replaced in place, not appended
     assert stack.expirations[0] == 5_000  # front untouched
-    assert stack.expirations[6] == 700  # tail order preserved
+    assert stack.expirations[4] == 400  # tail order preserved
 
 
 def test_queue_logic_added_active_moves_stack_to_front() -> None:
