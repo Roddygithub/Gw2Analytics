@@ -459,9 +459,11 @@ class HealingEvent(BaseEvent):
     )
     src_is_peer: bool = Field(
         default=False,
-        description="True when the arcdps offcycle SrcPeer bit (0x80) is set; "
-        "mirrors GW2EIEvtcParser EXTHealingExtensionEvent.SrcIsPeer used by "
-        "SanitizeForSrc in EXTHealingCastFinder.",
+        description="EXT healing extension SrcIsPeer per EI 3.26: True when the "
+        "arcdps offcycle SrcPeer bit (0x80) is set OR neither peer bit is set "
+        "(0x00 is normalised to peer); False only for DstIsPeer-only records "
+        "(0x40). Mirrors GW2EIEvtcParser EXTHealingExtensionEvent.SrcIsPeer used "
+        "by SanitizeForSrc in EXTHealingCastFinder / EXTBarrierCastFinder.",
     )
 
 

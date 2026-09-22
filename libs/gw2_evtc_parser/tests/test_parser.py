@@ -43,7 +43,12 @@ import pytest
 # below that target `parser_mod.MAX_EVTC_BYTES`).
 import gw2_evtc_parser.parser as parser_mod
 from gw2_core import BuffRemovalEvent, DamageEvent, EliteSpec, HealingEvent, Profession
-from gw2_evtc_parser import EvtcParseError, PythonEvtcParser, read_zevtc_bytes
+from gw2_evtc_parser import (
+    EvtcParseError,
+    PythonEvtcParser,
+    read_zevtc_bytes,
+    scan_ownership_intervals,
+)
 from gw2_evtc_parser.parser import (
     AGENT_COUNT_OFFSET,
     AGENT_NAME_SIZE,
@@ -236,6 +241,8 @@ def _build_event_record_2025(
     buff: int = 0,
     src_inst: int = 0,
     dst_inst: int = 0,
+    src_master_instid: int = 0,
+    dst_master_instid: int = 0,
     is_shields: int = 0,
     is_offcycle: int = 0,
     pad: int = 0,
@@ -270,8 +277,8 @@ def _build_event_record_2025(
         skill_id,
         src_inst,
         dst_inst,
-        0,  # src_master_instid
-        0,  # dst_master_instid
+        src_master_instid,
+        dst_master_instid,
         *flags,
     )
 
@@ -1062,6 +1069,76 @@ def test_parse_events_2025_healing_extension_combat_round_trips() -> None:
         (13980, 1_337, 0),
         (72115, 0, 2_000),
     ]
+
+
+def test_parse_events_2025_healing_extension_src_is_peer_matches_ei_326() -> None:
+    """EXT heal ``src_is_peer`` must reproduce EI 3.26 exactly.
+
+    EI 3.26 ``EXTHealingExtensionEvent`` derives (bit 6 = DstPeerMask,
+    bit 7 = SrcPeerMask):
+
+        SrcIsPeer = (IsOffcycle & 0x80) > 0
+        if !SrcIsPeer && !DstIsPeer: SrcIsPeer = true
+
+    so of the four relevant ``is_offcycle`` patterns:
+
+        0x00 -> SrcIsPeer TRUE  (neither bit set: normalised to peer)
+        0x40 -> SrcIsPeer FALSE (DstIsPeer-only)
+        0x80 -> SrcIsPeer TRUE  (SrcPeerMask set)
+        0xC0 -> SrcIsPeer TRUE  (both bits set)
+
+    The former ``bool(is_offcycle & 0x80)`` mapping emitted nothing for
+    0x00 records, silently dropping EI-valid peer heals (regression from
+    the pre-51fe749 derivation).
+    """
+
+    def build(offcycle: int) -> bytes:
+        return _build_minimal_evtc(
+            [
+                (1, Profession.RANGER.value, EliteSpec.DRUID.value, "Src", True),
+                (2, Profession.GUARDIAN.value, EliteSpec.FIREBRAND.value, "Dst", True),
+            ],
+            build="20250925",
+            skills=[(13980, "Windborne Notes")],
+            events=[
+                _build_event_record_2025(
+                    42_500,
+                    1,
+                    2,
+                    -1_337,
+                    13980,
+                    is_statechange=49,
+                    pad=0x9C9B3C99,
+                    is_offcycle=offcycle,
+                )
+            ],
+        )
+
+    events_by_pattern = {
+        offcycle: list(PythonEvtcParser().parse_events(build(offcycle)))
+        for offcycle in (0x00, 0x40, 0x80, 0xC0)
+    }
+
+    # 0x00: neither peer bit set -> EI normalises to SrcIsPeer=true; the
+    # event must be emitted with src_is_peer=True.
+    assert [e.src_is_peer for e in events_by_pattern[0x00]] == [True]  # type: ignore[attr-defined]
+    # 0x40: DstIsPeer-only -> SrcIsPeer stays False, but EI still records
+    # the EXT event (it is only excluded from source-side stats); the
+    # event stream must keep it with src_is_peer=False.
+    assert [e.src_is_peer for e in events_by_pattern[0x40]] == [False]  # type: ignore[attr-defined]
+    # 0x80: SrcPeerMask set -> peer.
+    assert [e.src_is_peer for e in events_by_pattern[0x80]] == [True]  # type: ignore[attr-defined]
+    # 0xC0: both bits set -> SrcIsPeer wins.
+    assert [e.src_is_peer for e in events_by_pattern[0xC0]] == [True]  # type: ignore[attr-defined]
+
+    # The heal magnitude itself must round-trip for every pattern.
+    for offcycle, events in events_by_pattern.items():
+        assert [
+            (type(e).__name__, e.healing, e.barrier)  # type: ignore[attr-defined]
+            for e in events
+        ] == [("HealingEvent", 1_337, 0)], (
+            f"is_offcycle=0x{offcycle:02X} must keep the EXT heal event"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2181,3 +2258,849 @@ def test_max_evtc_bytes_matches_zip_bomb_defense() -> None:
     # binary MiB matching the byte counts in arcdps / GW2 tooling).
     assert parser_mod._MAX_ZIP_ENTRY_UNCOMPRESSED_SIZE == 500 * 1024 * 1024
     assert parser_mod.MAX_EVTC_BYTES == 500 * 1024 * 1024
+
+
+# ---------------------------------------------------------------------------
+# scan_ownership_intervals -- fight-end semantics
+# ---------------------------------------------------------------------------
+
+
+def _ownership_evtc(
+    events: list[bytes],
+    agents: list[tuple[int, int, int, str, bool]] | None = None,
+) -> bytes:
+    """Build a minimal EVTC2025 log for ownership-scanner tests.
+
+    Default agents: 1 = player master, 2 = minion-like agent. Pass extra
+    agents to exercise several simultaneously open intervals.
+    """
+    if agents is None:
+        agents = [
+            (1, Profession.NECROMANCER.value, EliteSpec.HARBINGER.value, "Master", True),
+            (2, 0, 0, "Spirit Weapon", False),
+        ]
+    return _build_minimal_evtc(
+        agents,
+        build="20250925",
+        events=events,
+    )
+
+
+def test_ownership_interval_open_at_fight_end_closes_at_last_event() -> None:
+    """One interval still open at fight end must close at the last event time.
+
+    Regression: the scanner used to close open intervals at
+    ``max(start_ms of open intervals)`` -- the fight end was approximated
+    from the data being closed, truncating the interval.
+    """
+    # Spawn at fight-relative 0 (time 42_500, origin 42_500); the only
+    # later event ends the log at 5_000 ms fight-relative.
+    evtc = _ownership_evtc(
+        [
+            _build_event_record_2025(
+                42_500,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=12,
+                src_master_instid=10,
+            ),
+            _build_event_record_2025(
+                47_500,
+                2,
+                1,
+                0,
+                is_statechange=8,
+                src_inst=11,
+                dst_inst=12,
+            ),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert len(intervals) == 1
+    interval = intervals[0]
+    assert interval.agent_id == 2
+    assert interval.start_ms == 0
+    # Closed at the true fight end (last event, 5_000 ms after origin),
+    # not at the interval's own start (0), which would have produced 0.
+    assert interval.end_ms == 5_000
+
+
+def test_ownership_multiple_open_intervals_with_different_starts() -> None:
+    """Several open intervals close at the same fight end, none disappear.
+
+    The old ``max(start_ms)`` fight end erased the latest-starting interval
+    entirely (its ``fight_end > start`` guard failed) and truncated the
+    others to their own start times.
+    """
+    evtc = _ownership_evtc(
+        [
+            # First spirit weapon spawns at fight-relative 1_000.
+            _build_event_record_2025(
+                43_500,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                src_master_instid=10,
+            ),
+            # Second spirit weapon spawns at fight-relative 3_000, still
+            # open when the log ends at 8_000.
+            _build_event_record_2025(
+                45_500,
+                3,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=12,
+                src_master_instid=10,
+            ),
+            # Log ends at 8_000 fight-relative.
+            _build_event_record_2025(
+                50_500,
+                2,
+                1,
+                0,
+                is_statechange=8,
+                src_inst=11,
+            ),
+        ],
+        agents=[
+            (1, Profession.NECROMANCER.value, EliteSpec.HARBINGER.value, "Master", True),
+            (2, 0, 0, "Spirit Weapon A", False),
+            (3, 0, 0, "Spirit Weapon B", False),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert len(intervals) == 2
+    # Origin = first event (43_500). Both intervals close at the true
+    # fight end (last event, 7_000 ms after origin) -- under the old
+    # max(start)-based fight end, B would have been dropped entirely and
+    # A truncated to its own start.
+    assert [(iv.start_ms, iv.end_ms) for iv in intervals] == [
+        (0, 7_000),
+        (2_000, 7_000),
+    ]
+
+
+def test_ownership_latest_open_interval_does_not_disappear() -> None:
+    """An interval starting after an earlier one closed must survive.
+
+    With the old fight end (``max start of open intervals``), the
+    latest-starting open interval was the only one still open at scan end
+    and was dropped by the ``fight_end > start`` guard because start and
+    fight end were the same value.
+    """
+    evtc = _ownership_evtc(
+        [
+            # Early spawn, despawned before the end.
+            _build_event_record_2025(
+                43_000,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                src_master_instid=10,
+            ),
+            _build_event_record_2025(
+                44_000,
+                2,
+                1,
+                0,
+                is_statechange=7,
+                src_inst=11,
+            ),
+            # Late spawn still open when the log ends at 10_000.
+            _build_event_record_2025(
+                52_000,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                src_master_instid=10,
+            ),
+            _build_event_record_2025(
+                60_000,
+                2,
+                1,
+                0,
+                is_statechange=8,
+                src_inst=11,
+            ),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    # Origin = first event (43_000).
+    assert [(iv.start_ms, iv.end_ms) for iv in intervals] == [
+        (0, 1_000),
+        (9_000, 17_000),
+    ]
+    # The late interval reaches the true fight end, not its own start.
+    assert intervals[-1].end_ms == 17_000 > intervals[-1].start_ms
+
+
+# ---------------------------------------------------------------------------
+# scan_ownership_intervals -- ownership identity (EVTC2025 struct layout)
+#
+# The fight-end tests above only assert timing, so they can pass while
+# every ``owner_agent_id`` stays ``None``. The tests below assert the
+# ownership identity itself: a minion's interval must carry the real
+# master ``Agent.id`` resolved from ``src_master_instid``/``dst_master_instid``
+# at the TRUE struct tuple positions (9/10 = bytes 44-45/46-47), mirroring
+# Elite Insights' ``FindAgentMaster`` → ``GetAgentByInstID(instid, time)``
+# linking (candidate must be aware at the linking time). Each test fails
+# against the pre-repair implementation, which read tuple indices 14/15
+# (the is_activation/is_buffremove flag bytes) and built
+# ``instance_to_agent`` from an agent table whose ``Agent.id``/``instance_id``
+# were never populated.
+# ---------------------------------------------------------------------------
+
+
+def test_ownership_minion_resolves_real_master_agent_id() -> None:
+    """A minion with a valid master instid resolves the real master Agent.id.
+
+    The minion (agent 2) spawns carrying ``src_master_instid=10``; the
+    master (agent 1) appears as the spawn record's dst with its own
+    instid 10, so the scanner's event-stream instid capture links the
+    master (EI ``UpdateAgentData`` + ``GetAgentByInstID``).
+    """
+    evtc = _ownership_evtc(
+        [
+            _build_event_record_2025(
+                42_500,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=10,
+                src_master_instid=10,
+            ),
+            _build_event_record_2025(
+                54_500,
+                2,
+                1,
+                0,
+                is_statechange=8,
+                src_inst=11,
+                dst_inst=10,
+            ),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert len(intervals) == 1
+    interval = intervals[0]
+    assert interval.agent_id == 2
+    # The owner must be the real master agent's table id, not None.
+    assert interval.owner_agent_id == 1
+    assert interval.instance_id == 11
+    # Natural fight end: closed at the last event, 12_000 ms after origin.
+    assert interval.end_ms == 12_000
+
+
+def test_ownership_master_change_updates_owner_at_timestamp() -> None:
+    """A master change flips ``owner_agent_id`` at the transition timestamp.
+
+    The minion spawns owned by master A (instid 10 → agent 1); a later
+    minion record carries master B's instid 20 → agent 3, closing the
+    A interval at the change and opening a B interval that stays open
+    until the natural fight end (half-open ``[start_ms, end_ms)``).
+    """
+    evtc = _ownership_evtc(
+        [
+            # Spawn owned by master A at fight-relative 0.
+            _build_event_record_2025(
+                42_500,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=10,
+                src_master_instid=10,
+            ),
+            # Master change at fight-relative 2_500: the minion's own
+            # record now carries master B's instid (dst side captures it).
+            _build_event_record_2025(
+                45_000,
+                2,
+                3,
+                0,
+                is_statechange=0,
+                iff=1,
+                src_inst=11,
+                dst_inst=20,
+                src_master_instid=20,
+            ),
+            # Log ends at 12_000 fight-relative; B interval still open.
+            _build_event_record_2025(
+                54_500,
+                2,
+                1,
+                0,
+                is_statechange=8,
+                src_inst=11,
+            ),
+        ],
+        agents=[
+            (1, Profession.NECROMANCER.value, EliteSpec.HARBINGER.value, "Master A", True),
+            (2, 0, 0, "Spirit Weapon", False),
+            (3, Profession.RANGER.value, EliteSpec.DRUID.value, "Master B", True),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert [(iv.start_ms, iv.end_ms, iv.owner_agent_id) for iv in intervals] == [
+        (0, 2_500, 1),
+        (2_500, 12_000, 3),
+    ]
+    # The latest naturally-open interval remains valid until true fight end.
+    assert intervals[-1].end_ms == 12_000 > intervals[-1].start_ms
+
+
+def test_ownership_master_instid_read_at_real_struct_position() -> None:
+    """Master instids must be read at bytes 44-45/46-47, not the flag bytes.
+
+    Control: the same instid value packed into the is_activation flag byte
+    (byte 51 = struct tuple index 14 — the position the pre-repair scanner
+    misread as ``src_master_instid``) must NOT attribute ownership. Under
+    the broken reading the first record resolved no owner while the control
+    record produced a garbage one.
+    """
+    flags = bytearray(16)
+    flags[3] = 10  # old misread position: struct tuple index 14
+    control = struct.pack(
+        "<QQQiiIIHHHH16B",
+        45_000,
+        2,
+        1,
+        0,
+        0,
+        0,  # overstack
+        42,  # skillid
+        11,  # src_instid
+        10,  # dst_instid
+        0,  # src_master_instid (REAL position — deliberately zero)
+        0,  # dst_master_instid (REAL position — deliberately zero)
+        *flags,
+    )
+    evtc = _ownership_evtc(
+        [
+            # Master instid at the REAL wire position (bytes 44-45).
+            _build_event_record_2025(
+                42_500,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=10,
+                src_master_instid=10,
+            ),
+            control,
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    # Exactly one interval: the spawn's real-position master instid
+    # resolved; the flag-byte control did not open a second interval.
+    assert len(intervals) == 1
+    assert intervals[0].agent_id == 2
+    assert intervals[0].owner_agent_id == 1
+    assert intervals[0].start_ms == 0
+    # The control record (fight-relative 2_500) is the last event, so the
+    # spawn interval closes at the true fight end.
+    assert intervals[0].end_ms == 2_500
+
+
+def test_ownership_unknown_master_remains_none() -> None:
+    """An unresolvable master instid stays ``None`` rather than being guessed.
+
+    The minion spawns carrying master instid 777, which no agent in the
+    log ever carries in the event stream (EI ``GetAgentByInstID`` returns
+    its unknown sentinel). No synthetic identifier may be fabricated.
+    """
+    evtc = _ownership_evtc(
+        [
+            _build_event_record_2025(
+                42_500,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=10,
+                src_master_instid=777,
+            ),
+            _build_event_record_2025(
+                54_500,
+                2,
+                1,
+                0,
+                is_statechange=8,
+                src_inst=11,
+            ),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert len(intervals) == 1
+    assert intervals[0].owner_agent_id is None
+    assert intervals[0].master_evidence == "unresolved"
+
+
+def test_ownership_owner_disappears_before_minion() -> None:
+    """An unresolved later link does not erase EI's prior SetMaster link.
+
+    ``FindAgentMaster`` skips an unaware master and ``SetMaster`` is never
+    called, so the direct temporal owner remains master A. The evidence is
+    still reproducibly distinguishable from a no-master interval.
+    """
+    evtc = _ownership_evtc(
+        [
+            _build_event_record_2025(
+                42_500,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=10,
+                src_master_instid=10,
+            ),
+            _build_event_record_2025(
+                45_000,
+                2,
+                0,
+                0,
+                is_statechange=0,
+                iff=1,
+                src_inst=11,
+                src_master_instid=10,
+            ),
+            _build_event_record_2025(
+                54_500,
+                2,
+                0,
+                0,
+                is_statechange=8,
+                src_inst=11,
+            ),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert [(iv.start_ms, iv.end_ms, iv.owner_agent_id) for iv in intervals] == [
+        (0, 12_000, 1),
+    ]
+    assert intervals[0].master_evidence == "resolved"
+
+
+def test_ownership_instance_id_reuse_resolves_same_master() -> None:
+    """Instance-id reuse across minions resolves the same master per interval.
+
+    Two different minion agents sequentially reuse instid 11; the
+    time-scoped instance lookup (EI ``GetAgentByInstID`` + ``InAwareTimes``)
+    must attribute both intervals to the same master without assuming
+    instance ids are globally unique.
+    """
+    evtc = _ownership_evtc(
+        [
+            # Minion A spawns (instid 11) with the master.
+            _build_event_record_2025(
+                42_500,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=10,
+                src_master_instid=10,
+            ),
+            # Minion A despawns.
+            _build_event_record_2025(
+                44_000,
+                2,
+                1,
+                0,
+                is_statechange=7,
+                src_inst=11,
+                dst_inst=10,
+            ),
+            # Minion B spawns later REUSING instid 11 with the same master.
+            _build_event_record_2025(
+                52_000,
+                3,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=10,
+                src_master_instid=10,
+            ),
+            _build_event_record_2025(
+                54_500,
+                3,
+                1,
+                0,
+                is_statechange=8,
+                src_inst=11,
+            ),
+        ],
+        agents=[
+            (1, Profession.NECROMANCER.value, EliteSpec.HARBINGER.value, "Master", True),
+            (2, 0, 0, "Spirit Weapon A", False),
+            (3, 0, 0, "Spirit Weapon B", False),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert [(iv.agent_id, iv.start_ms, iv.end_ms, iv.owner_agent_id) for iv in intervals] == [
+        (2, 0, 1_500, 1),
+        (3, 9_500, 12_000, 1),
+    ]
+
+
+def test_ownership_valid_until_actual_fight_end() -> None:
+    """Ownership must remain resolvable for the whole open interval.
+
+    The interval is still open at fight end; a resolver query at any time
+    in ``[start_ms, fight_end)`` must find the owner -- including times
+    after the old broken end (= interval start) would have returned None.
+    """
+    evtc = _ownership_evtc(
+        [
+            _build_event_record_2025(
+                42_500,
+                2,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                src_master_instid=10,
+            ),
+            # ... nothing until fight end at 12_000 ...
+            _build_event_record_2025(
+                54_500,
+                2,
+                1,
+                0,
+                is_statechange=8,
+                src_inst=11,
+            ),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert len(intervals) == 1
+    assert intervals[0].start_ms == 0
+    assert intervals[0].end_ms == 12_000
+    # Half-open semantics: valid at every queried point below.
+    assert intervals[0].start_ms <= 6_000 < intervals[0].end_ms
+    assert intervals[0].start_ms <= 11_999 < intervals[0].end_ms
+    # ... and no longer valid at the exclusive end.
+    assert not (intervals[0].start_ms <= 12_000 < intervals[0].end_ms)
+
+
+# ---------------------------------------------------------------------------
+# scan_ownership_intervals -- source AND destination master linking
+# ---------------------------------------------------------------------------
+
+
+def test_ownership_links_both_sides_of_a_record_carrying_two_masters() -> None:
+    """A record with masters on BOTH sides must link both agents.
+
+    Elite Insights runs ``FindAgentMaster`` over the source and the
+    destination of every combat item independently, in that order
+    (``EvtcParser.cs``: ``c.SrcIsAgent() && c.SrcMasterInstid != 0`` then
+    ``c.DstIsAgent() && c.DstMasterInstid != 0``). A record may therefore
+    name a master on each side and both agents keep theirs. The scanner's
+    previous mutual exclusion (``not (src_agent and src_master_inst)``)
+    dropped the destination link whenever the source also carried a master,
+    and an agent whose only ownership evidence is on the destination side
+    then produced no interval at all.
+    """
+    evtc = _ownership_evtc(
+        [
+            # Instid discovery: agent 1 carries 10, agent 2 carries 20.
+            _build_event_record_2025(42_500, 1, 2, 0, src_inst=10, dst_inst=20),
+            # Minion X spawns owned by master A (instid 10).
+            _build_event_record_2025(
+                42_600,
+                3,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=10,
+                src_master_instid=10,
+            ),
+            # BOTH sides carry a master: X stays with A, Y joins master B.
+            _build_event_record_2025(
+                42_700,
+                3,
+                4,
+                0,
+                src_inst=11,
+                dst_inst=12,
+                src_master_instid=10,
+                dst_master_instid=20,
+            ),
+            # Both masters stay aware across the linking instant.
+            _build_event_record_2025(42_750, 1, 2, 0, src_inst=10, dst_inst=20),
+            # Log ends at fight-relative 12_000.
+            _build_event_record_2025(54_500, 3, 0, 0, is_statechange=8, src_inst=11),
+        ],
+        agents=[
+            (1, Profession.NECROMANCER.value, EliteSpec.HARBINGER.value, "Master A", True),
+            (2, Profession.RANGER.value, EliteSpec.DRUID.value, "Master B", True),
+            (3, 0, 0, "Minion X", False),
+            (4, 0, 0, "Minion Y", False),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert [(iv.agent_id, iv.owner_agent_id, iv.start_ms, iv.end_ms) for iv in intervals] == [
+        (3, 1, 100, 12_000),
+        (4, 2, 200, 12_000),
+    ]
+
+
+def test_ownership_same_agent_on_both_sides_processes_both_links() -> None:
+    """One record naming the same agent on both sides applies both links.
+
+    EI processes source first and destination second; the destination master
+    is therefore the final direct link at that timestamp.
+    """
+    evtc = _ownership_evtc(
+        [
+            _build_event_record_2025(42_500, 1, 2, 0, src_inst=10, dst_inst=20),
+            # Minion X spawns owned by master A (instid 10).
+            _build_event_record_2025(
+                42_600,
+                3,
+                1,
+                0,
+                is_statechange=6,
+                src_inst=11,
+                dst_inst=10,
+                src_master_instid=10,
+            ),
+            # Same agent as source and destination, with two resolvable
+            # masters: the source side (instid 10 -> agent 1) wins.
+            _build_event_record_2025(
+                42_700,
+                3,
+                3,
+                0,
+                src_inst=11,
+                dst_inst=11,
+                src_master_instid=10,
+                dst_master_instid=20,
+            ),
+            _build_event_record_2025(42_750, 1, 2, 0, src_inst=10, dst_inst=20),
+            _build_event_record_2025(54_500, 3, 0, 0, is_statechange=8, src_inst=11),
+        ],
+        agents=[
+            (1, Profession.NECROMANCER.value, EliteSpec.HARBINGER.value, "Master A", True),
+            (2, Profession.RANGER.value, EliteSpec.DRUID.value, "Master B", True),
+            (3, 0, 0, "Minion X", False),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert [(iv.agent_id, iv.owner_agent_id, iv.start_ms, iv.end_ms) for iv in intervals] == [
+        (3, 1, 100, 200),
+        (3, 2, 200, 12_000),
+    ]
+
+
+def test_ownership_same_agent_falls_back_to_the_destination_when_source_unresolved() -> None:
+    """The destination side still applies when the source link cannot resolve.
+
+    Same-agent records whose source master instid is never seen in the stream
+    would otherwise lose their only resolvable ownership evidence, so the
+    skip only applies once the source side actually named an owner.
+    """
+    evtc = _ownership_evtc(
+        [
+            _build_event_record_2025(42_500, 1, 2, 0, src_inst=10, dst_inst=20),
+            # 777 is carried by no agent: the source link resolves to None,
+            # so the destination link (instid 20 -> agent 2) must still apply.
+            _build_event_record_2025(
+                42_700,
+                3,
+                3,
+                0,
+                src_inst=11,
+                dst_inst=11,
+                src_master_instid=777,
+                dst_master_instid=20,
+            ),
+            _build_event_record_2025(42_750, 1, 2, 0, src_inst=10, dst_inst=20),
+            _build_event_record_2025(54_500, 3, 0, 0, is_statechange=8, src_inst=11),
+        ],
+        agents=[
+            (1, Profession.NECROMANCER.value, EliteSpec.HARBINGER.value, "Master A", True),
+            (2, Profession.RANGER.value, EliteSpec.DRUID.value, "Master B", True),
+            (3, 0, 0, "Minion X", False),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert [(iv.agent_id, iv.owner_agent_id, iv.start_ms, iv.end_ms) for iv in intervals] == [
+        (3, 2, 200, 12_000)
+    ]
+    assert intervals[0].master_evidence == "resolved"
+
+
+def test_ownership_legacy_reader_uses_ei_master_offsets() -> None:
+    """Revision-0 ownership uses EI's pre-2025 field order."""
+
+    def record(
+        time_ms: int,
+        src: int,
+        dst: int,
+        src_inst: int = 0,
+        dst_inst: int = 0,
+        master_inst: int = 0,
+        statechange: int = 0,
+    ) -> bytes:
+        flags = bytearray(12)
+        flags[8] = statechange
+        return struct.pack(
+            "<QQQiiHHHHH9x12B1x",
+            time_ms,
+            src,
+            dst,
+            0,
+            0,
+            0,
+            42,
+            src_inst,
+            dst_inst,
+            master_inst,
+            *flags,
+        )
+
+    evtc = _build_minimal_evtc(
+        [(1, 0, 0, "Master", False), (2, 0, 0, "Minion", False)],
+        build="20240925",
+        events=[
+            record(42_500, 1, 2, 10, 20),
+            record(42_600, 2, 1, 20, 10, 10, 6),
+            record(54_500, 2, 0, 20, statechange=8),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    assert [(iv.owner_agent_id, iv.final_master_agent_id) for iv in intervals] == [(1, 1)]
+
+
+def test_ownership_set_master_chain_keeps_temporal_and_final_master_distinct() -> None:
+    """A direct temporal owner may itself resolve to a final master."""
+    evtc = _ownership_evtc(
+        [
+            _build_event_record_2025(42_500, 1, 2, 0, src_inst=10, dst_inst=20),
+            _build_event_record_2025(42_550, 1, 2, 0, src_inst=10, dst_inst=20),
+            _build_event_record_2025(42_600, 1, 2, 0, src_inst=10, dst_inst=20),
+            _build_event_record_2025(
+                42_610,
+                2,
+                3,
+                0,
+                is_statechange=6,
+                src_inst=20,
+                dst_inst=30,
+                src_master_instid=10,
+            ),
+            _build_event_record_2025(42_690, 1, 2, 0, src_inst=10, dst_inst=20),
+            _build_event_record_2025(
+                42_700,
+                3,
+                2,
+                0,
+                is_statechange=6,
+                src_inst=30,
+                dst_inst=20,
+                src_master_instid=20,
+            ),
+            _build_event_record_2025(54_500, 3, 0, 0, is_statechange=8, src_inst=30),
+        ],
+        agents=[
+            (1, 0, 0, "Root", False),
+            (2, 0, 0, "Middle", False),
+            (3, 0, 0, "Leaf", False),
+        ],
+    )
+
+    intervals = scan_ownership_intervals(evtc)
+
+    leaf = next(interval for interval in intervals if interval.agent_id == 3)
+    assert (leaf.owner_agent_id, leaf.final_master_agent_id) == (2, 1)
+
+
+def test_ownership_set_master_rejects_self_and_cycle() -> None:
+    """SetMaster must not create self-ownership or a closed master cycle."""
+    self_link = _ownership_evtc(
+        [
+            _build_event_record_2025(
+                42_500,
+                2,
+                2,
+                0,
+                is_statechange=6,
+                src_inst=20,
+                src_master_instid=20,
+            ),
+            _build_event_record_2025(54_500, 2, 0, 0, is_statechange=8, src_inst=20),
+        ],
+        agents=[(1, 0, 0, "Unused", False), (2, 0, 0, "Self", False)],
+    )
+    self_intervals = scan_ownership_intervals(self_link)
+    assert self_intervals[0].owner_agent_id is None
+    assert self_intervals[0].master_evidence == "rejected"
+
+    cycle = _ownership_evtc(
+        [
+            _build_event_record_2025(42_500, 1, 2, 0, src_inst=10, dst_inst=20),
+            _build_event_record_2025(
+                42_600, 2, 1, 0, is_statechange=6, src_inst=20, dst_inst=10, src_master_instid=10
+            ),
+            _build_event_record_2025(
+                42_700, 1, 2, 0, is_statechange=6, src_inst=10, dst_inst=20, src_master_instid=20
+            ),
+            _build_event_record_2025(54_500, 1, 0, 0, is_statechange=8, src_inst=10),
+        ],
+        agents=[
+            (1, 0, 0, "A", False),
+            (2, 0, 0, "B", False),
+        ],
+    )
+    cycle_intervals = scan_ownership_intervals(cycle)
+    a = next(interval for interval in cycle_intervals if interval.agent_id == 1)
+    assert a.owner_agent_id is None
+    assert a.master_evidence == "rejected"

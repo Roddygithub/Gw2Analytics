@@ -231,12 +231,89 @@ _HEALING_CASTS = {
 }
 _MISSILE_CASTS = {26261, 29889, 42163, 5780}
 _MISSILE_ICD = {5780: 900}
-# Healing skills whose EI finder (EXTHealingCastFinder) groups by caster and
-# drops the whole group via SanitizeForSrc unless the caster is a squad peer.
-# Mirror that by only booking the instant cast when a squad set is available
-# and the caster is in it; without a squad set, fall back to the historical
-# "emit every ICD tick" behaviour.
-_HEALING_CASTS_SQUAD_ONLY = {71356, 13980}
+#: Skills whose EI 3.26 instant-cast finder is an EXTHealingCastFinder
+#: or EXTBarrierCastFinder. EI routes every one of them through
+#: ``HealingStatsExtensionHandler.SanitizeForSrc``, grouped by source
+#: (``GroupBy(x => x.From)``), so a cast can only be emitted from a
+#: source-peer EXT event: a group containing any peer event keeps only
+#: its peer members, and an all-non-peer group is dropped whole. Because
+#: every surviving event is a cast candidate, per-event peer filtering
+#: (``event.src_is_peer``) reproduces EI's emitted cast set exactly.
+#:
+#: EI 3.26 registrations (``ProfHelper.cs``, profession helpers; skill ID
+#: == damage/heal skill ID for all entries except Sand Cascade):
+#:   10213 Mantra of Recovery (Mesmer)          13594 Selfless Daring (Guardian)
+#:   13629 Glacial Heart heal (Guardian)        13863 Spiteful Renewal (Necro)
+#:   14282 Mending Might (Warrior)              20462 Wave of Healing (Sup. Sigil of Renewal)
+#:   24060 Healing Ripple (Elem, PvE)           24061 Healing Ripple WvW (Elem)
+#:   24299 Flow Like Water heal (Elem)          33022 Superior Sigil of Draining
+#:   41714 Mantra of Solace (Firebrand)         46847 Call of the Centaur (Revenant)
+#:   30784 Invigorating Bond (Druid)            14016 Evasive Purity (Druid)
+#:   13980 Windborne Notes (Druid)              70001 Relic of the Defender heal
+#:   70765 Relic of the Flock heal              71356 Relic of Karakosa heal
+#:   71382 Relic of Nayos heal                  9293 Wave of Healing (Minor Sigil of Renewal)
+#:   20461 Wave of Healing (Major Sigil of Renewal)
+#:   24241/24242/24244 Wave of Healing (Superior/Minor/Major Sigil of Water)
+#:   9298/9413 Major/Superior Sigil of Restoration
+#:   9288/9457/9458 Minor/Major/Superior Sigil of Blood
+#:   12825/12836 Water Blast Combo, 12826 Water Leap Combo
+#:   43759 Sand Cascade barrier (EXTBarrierCastFinder, disabled with effect data)
+#:   72115 Relic of the Flock barrier           72548 Relic of the Founding barrier
+#:   12631 Protect Me! barrier (Ranger)
+#:
+#: Only the subset present in ``_HEALING_CASTS`` below is observable on
+#: this corpus; the rest is listed for exact mapping back to the pinned
+#: source.
+_EXT_PEER_GATED_HEALS: frozenset[int] = frozenset(
+    _HEALING_CASTS
+    & {
+        10213,  # Mantra of Recovery (Mesmer)
+        13594,  # Selfless Daring (Guardian)
+        13629,  # Glacial Heart heal (Guardian)
+        13863,  # Spiteful Renewal (Necromancer)
+        14282,  # Mending Might (Warrior)
+        20461,  # Wave of Healing (Major Sigil of Renewal)
+        20462,  # Wave of Healing (Superior Sigil of Renewal)
+        24060,  # Healing Ripple (Elementalist, PvE ID)
+        24061,  # Healing Ripple WvW (Elementalist)
+        24241,  # Wave of Healing (Superior Sigil of Water)
+        24242,  # Wave of Healing (Minor Sigil of Water)
+        24244,  # Wave of Healing (Major Sigil of Water)
+        24299,  # Flow Like Water heal (Elementalist)
+        33022,  # Superior Sigil of Draining
+        41714,  # Mantra of Solace (Firebrand)
+        46847,  # Call of the Centaur (Revenant)
+        30784,  # Invigorating Bond (Druid)
+        14016,  # Evasive Purity (Druid)
+        13980,  # Windborne Notes (Druid)
+        70001,  # Relic of the Defender heal
+        70765,  # Relic of the Flock heal
+        71356,  # Relic of Karakosa heal
+        71382,  # Relic of Nayos heal
+        9288,  # Minor Sigil of Blood
+        9293,  # Wave of Healing (Minor Sigil of Renewal)
+        9298,  # Major Sigil of Restoration
+        9413,  # Superior Sigil of Restoration
+        9457,  # Major Sigil of Blood
+        9458,  # Superior Sigil of Blood
+        12825,  # Water Blast Combo (2)
+        12836,  # Water Blast Combo (1)
+        12826,  # Water Leap Combo
+    }
+)
+#: Barrier-side EXT finders (EXTBarrierCastFinder). All of EI 3.26's
+#: registrations are gated the same way as the heal finders; 43448 is
+#: disabled when effect data exists (the effect finder owns emission
+#: then), which per-event peer gating preserves.
+_EXT_PEER_GATED_BARRIERS: frozenset[int] = frozenset(
+    _HEALING_CASTS & {43448, 72115, 72548, 12631}
+)
+#: Union used by the rotation handler: every skill whose EI path applies
+#: SanitizeForSrc. Unrelated rotation finders (12542 Signet of the Hunt,
+#: missile casts, damage casts) are deliberately absent.
+_HEALING_CASTS_PEER_GATED: frozenset[int] = _EXT_PEER_GATED_HEALS | _EXT_PEER_GATED_BARRIERS
+
+_MISSILE_CASTS = {26261, 29889, 42163, 5780}
 _PENDING_EXPECTED_DURATION_SKILLS = {
     1066,
     1097,
@@ -631,9 +708,10 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
     (CAP-4). When provided, it takes precedence over ``agent_id_by_instance``
     for minion cast attribution.
 
-    ``squad_agent_ids`` was removed; peer healing is now gated exclusively
-    on ``HealingEvent.src_is_peer`` (mirroring EI's EXTHealingCastFinder
-    SanitizeForSrc).
+    ``squad_agent_ids`` was removed; EXT healing/barrier peer gating applies
+    exclusively on ``HealingEvent.src_is_peer`` for the skills listed in
+    ``_HEALING_CASTS_PEER_GATED`` (mirroring EI's SanitizeForSrc applied to
+    every EXTHealingCastFinder / EXTBarrierCastFinder registration).
     """
     event_list = list(events)
     professions = professions or {}
@@ -1091,7 +1169,7 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
         ):
             if (
                 isinstance(event, HealingEvent)
-                and event.skill_id in _HEALING_CASTS_SQUAD_ONLY
+                and event.skill_id in _HEALING_CASTS_PEER_GATED
                 and not event.src_is_peer
             ):
                 continue
@@ -1109,6 +1187,17 @@ def build_skill_rotation(  # noqa: PLR0912, PLR0915
                 owner = event.source_agent_id
             add_instant(owner, -28, event.time_ms)
         elif isinstance(event, SpawnEvent) and event.target_agent_id in shambling_horror_agent_ids:
+            # EI's ``MinionSpawnCastFinder(Rise, ShamblingHorror)`` credits a
+            # minion's spawn to the minion's FINAL master (``GetFinalMaster()``
+            # over the whole fight) and stamps it with the spawn record's own
+            # time. When the spawn record does not already carry the master
+            # instid, that link arrives tens of milliseconds LATER, so a
+            # temporally scoped query at the spawn instant legitimately finds
+            # no owner. The temporal resolver is consulted first (it is the
+            # authority when instance ids are reused), and the parser's
+            # post-hoc owner -- that final master, resolved against the
+            # completed instance table -- is supplied by the resolver, exactly
+            # as EI's GetFinalMaster-based finder requires.
             owner = (
                 ownership_resolver(event.target_agent_id, event.time_ms)
                 if ownership_resolver

@@ -16,9 +16,14 @@ _EI_CORPUS = os.environ.get("GW2ANALYTICS_EI_CORPUS")
 @pytest.mark.parametrize(
     ("name", "duration_ms", "agents", "events", "downs", "ups", "outcomes"),
     [
-        ("20251205-211525.zevtc", 69_097, 119, 46_846, 1, 1, 2),
-        ("20251207-225200.zevtc", 151_791, 323, 112_909, 47, 34, 19),
-        ("20251208-230823.zevtc", 74_837, 115, 21_245, 12, 5, 17),
+        # events: 2026-09-21 EI 3.26 src_is_peer correction -- EXT heal
+        # records with only the DstPeer bit (is_offcycle 0x40) are now kept
+        # on the event stream (SrcIsPeer=False, per EI 3.26
+        # EXTHealingExtensionEvent) instead of being dropped; the previous
+        # counts predate that change (+160/+141/+104 kept records).
+        ("20251205-211525.zevtc", 69_097, 119, 47_496, 1, 1, 2),
+        ("20251207-225200.zevtc", 151_791, 323, 113_416, 47, 34, 19),
+        ("20251208-230823.zevtc", 74_837, 115, 21_689, 12, 5, 17),
     ],
 )
 def test_evtc_2025_multilog_corpus(

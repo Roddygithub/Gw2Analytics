@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from gw2_analytics.buff_state import MAX_STACKS, TRACKED_BUFFS, BuffStateTracker
@@ -556,6 +556,17 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             agents=fight.agents,
         )
 
+    # ``build_skill_rotation`` mirrors EI finders that credit minion events to
+    # ``GetFinalMaster()``. The parser still exposes ``owner_at`` for temporal
+    # identity, but this callback deliberately selects the final-master
+    # projection. Both APIs use fight-relative intervals; rotation events use
+    # absolute times, so the one origin bridge stays here.
+    ownership_resolver: Callable[[int, int], int | None] | None = (
+        (lambda agent_id, time_ms: resolver.final_master_at(agent_id, time_ms - origin))
+        if resolver is not None
+        else None
+    )
+
     # A split account's entries each carry their own slice of the fight, and
     # EI's down-contribution counters follow that split -- for
     # krill le faucheur.1679 on 20260125-194936 the three slices report 0 /
@@ -713,24 +724,19 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     def player_agent_ids(agent: Agent, slice_lo: int = 0, slice_hi: int = 0) -> set[int]:
         """Return all agent_ids belonging to this entity at the given slice.
 
-        Uses temporal ownership to include pets/minions owned during the slice.
-        Also includes agents sharing the same instance_id whose awareness
-        overlaps the slice window (for instance ID recycling). Falls back to
-        static instance_id grouping when resolver unavailable.
+        Includes agents sharing the same instance_id whose awareness
+        overlaps the slice window (for instance recycling). Owned minions
+        are added separately only for EI's all-statistics damage path below;
+        rotation, skills, defenses, and uptime remain actor-only. Falls back
+        to static instance_id grouping when resolver unavailable.
         """
         if resolver:
-            # Owned pets/minions at slice midpoint
-            # slice_lo/slice_hi are absolute; convert to fight-relative for awareness checks
-            slice_lo_rel = slice_lo - origin if origin else slice_lo
-            slice_hi_rel = slice_hi - origin if origin else slice_hi
-            mid = (
-                (slice_lo_rel + slice_hi_rel) // 2 if slice_hi_rel > slice_lo_rel else slice_lo_rel
-            )
-            owned = resolver.owned_agents_at(agent.id, mid)
-            result = {agent.id} | set(owned)
+            result: set[int] = {agent.id}
             # Instance recycling: other agents with same instance_id whose
             # awareness spans overlap the slice window [slice_lo_rel, slice_hi_rel]
             if agent.instance_id:
+                slice_lo_rel = slice_lo - origin if origin else slice_lo
+                slice_hi_rel = slice_hi - origin if origin else slice_hi
                 for other_id, first, last in resolver.awareness_by_instance(agent.instance_id):
                     if other_id != agent.id and not (last < slice_lo_rel or first > slice_hi_rel):
                         result.add(other_id)
@@ -811,6 +817,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         agent_id_by_instance={
             agent.instance_id: agent.id for agent in fight.agents if agent.instance_id
         },
+        ownership_resolver=ownership_resolver,
         gw2_build=header.gw2_build if header else None,
         shambling_horror_agent_ids={
             agent.id for agent in fight.agents if agent.species_id == 15314
@@ -902,6 +909,11 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         player_dims: dict[str, object] = {"account": account, "slice": player.get("firstAware")}
         anonymous = agent.account_name is None
         agent_ids = player_agent_ids(agent, slice_lo, slice_hi)
+        # EI 3.26's SingleActor.InitDamageEvents/Minions feeds dpsAll and
+        # statsAll with the actor's owned minions. Other fields below remain
+        # actor-only (the entity/alias set is deliberately not widened).
+        # Ownership is resolved per event through EI's final-master projection;
+        # a slice midpoint is not sufficient when ownership changes mid-slice.
 
         whole_fight_slice = slice_lo <= origin and slice_hi >= origin + duration_ms
 
@@ -954,6 +966,29 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             and event.source_agent_id != event.target_agent_id
             and in_slice(event)
         ]
+        def belongs_to_stats(
+            event: DamageEvent,
+            _agent_ids: set[int] = agent_ids,
+            _resolver: TemporalIdentityResolver | None = resolver,
+            _origin: int = origin,
+            _agent_id: int = agent.id,
+        ) -> bool:
+            if event.source_agent_id in _agent_ids:
+                return True
+            if _resolver is None:
+                return False
+            return (
+                _resolver.final_master_at(event.source_agent_id, event.time_ms - _origin)
+                == _agent_id
+            )
+
+        stats_damage = [
+            event
+            for event in damage_events
+            if event.source_agent_id != event.target_agent_id
+            and in_slice(event)
+            and belongs_to_stats(event)
+        ]
         actor_damage = [event for event in source_damage if event.src_master_instid == 0]
         source_interrupts = {
             event.skill_id
@@ -961,14 +996,24 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             if event.source_agent_id in agent_ids and in_slice(event)
         }
         source_cc = [
-            event for event in cc_events if event.source_agent_id in agent_ids and in_slice(event)
+            event
+            for event in cc_events
+            if in_slice(event)
+            and (
+                event.source_agent_id in agent_ids
+                or (
+                    resolver is not None
+                    and resolver.final_master_at(event.source_agent_id, event.time_ms - origin)
+                    == agent.id
+                )
+            )
         ]
 
         dps_all = player.get("dpsAll")
         if isinstance(dps_all, list) and dps_all and isinstance(dps_all[0], dict):
-            damage = sum(event.damage for event in source_damage)
+            damage = sum(event.damage for event in stats_damage)
             condition = sum(
-                _condition_damage(event, condition_skill_ids) for event in source_damage
+                _condition_damage(event, condition_skill_ids) for event in stats_damage
             )
             dps_values = {
                 "damage": damage,
@@ -1058,7 +1103,7 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         stats_all = player.get("statsAll")
         if isinstance(stats_all, list) and stats_all and isinstance(stats_all[0], dict):
             stats_values = _damage_stats(
-                actor_damage,
+                stats_damage,
                 source_cc,
                 (
                     down_by_source if whole_fight_slice else down_rows_for_slice(slice_lo, slice_hi)

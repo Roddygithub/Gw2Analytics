@@ -105,6 +105,25 @@ class TemporalIdentityResolver:
                 return iv.owner_agent_id
         return None
 
+    def final_master_at(self, agent_id: int, time_ms: int) -> int | None:
+        """Return EI's post-parse final master for an agent at ``time_ms``.
+
+        This is deliberately separate from ``owner_at``: EI's
+        ``GetFinalMaster()`` is a post-parse projection and may attribute an
+        early spawn through a link discovered later, while ``owner_at`` must
+        remain a timestamp-bounded direct-owner query.
+        """
+        interval = self.ownership_interval_at(agent_id, time_ms)
+        if interval is not None and interval.final_master_agent_id is not None:
+            return interval.final_master_agent_id
+        # A scanner may expose the late master link in a later interval while
+        # the spawn interval itself has no direct owner. Use only the explicit
+        # final-master projection; never ask owner_at() for a future owner.
+        for candidate in self._by_agent.get(agent_id, ()):
+            if candidate.final_master_agent_id is not None:
+                return candidate.final_master_agent_id
+        return interval.owner_agent_id if interval is not None else None
+
     def owned_agents_at(self, owner_agent_id: int, time_ms: int) -> list[int]:
         """All agent_ids owned by master at time_ms."""
         result: list[int] = []

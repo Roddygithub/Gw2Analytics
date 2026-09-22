@@ -443,8 +443,14 @@ def test_build_skill_rotation_infers_ei_instant_casts() -> None:
         DamageEvent(time_ms=origin + 50, skill_id=29604, damage=1, **base),
         DamageEvent(time_ms=origin + 60, skill_id=45534, damage=1, **base),
         DamageEvent(time_ms=origin + 61, skill_id=46808, damage=1, **base),
-        HealingEvent(time_ms=origin + 70, skill_id=13594, healing=1, barrier=0, **base),
-        HealingEvent(time_ms=origin + 80, skill_id=14282, healing=1, barrier=0, **base),
+        # EI's EXT healing finders emit casts only from source-peer events
+        # (SanitizeForSrc); the fixtures must therefore be peer events.
+        HealingEvent(
+            time_ms=origin + 70, skill_id=13594, healing=1, barrier=0, src_is_peer=True, **base
+        ),
+        HealingEvent(
+            time_ms=origin + 80, skill_id=14282, healing=1, barrier=0, src_is_peer=True, **base
+        ),
         MissileEvent(time_ms=origin + 90, skill_id=29889, **base),
         EffectEvent(
             time_ms=origin + 100,
@@ -2002,3 +2008,79 @@ def test_spiteful_spirit_desert_shroud_global_check() -> None:
         professions={7: Profession.NECROMANCER},
     )
     assert all(cast.skill_id != 29560 for cast in casts)
+
+
+# ---------------------------------------------------------------------------
+# EXT healing/barrier peer gating (EI 3.26 SanitizeForSrc)
+# ---------------------------------------------------------------------------
+
+
+def _heal(peer: bool, skill_id: int, at: int) -> HealingEvent:
+    """Build an EXT healing event for peer-gate tests."""
+    return HealingEvent(
+        time_ms=at,
+        skill_id=skill_id,
+        healing=1_000,
+        barrier=0,
+        src_is_peer=peer,
+        source_agent_id=7,
+        target_agent_id=8,
+    )
+
+
+def test_ext_heal_finder_rejects_ei_invalid_non_peer_event() -> None:
+    """An EXT finder must not emit a cast from a non-source-peer event.
+
+    EI groups EXT heal data per source and runs SanitizeForSrc before the
+    ICD loop; a non-peer event can never survive that path, so the cast
+    must be rejected here too.
+    """
+    origin = 42_000_000
+    events = [_heal(False, 71356, origin + 100)]
+
+    casts = build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+
+    assert casts == []
+
+
+def test_ext_heal_finder_retains_ei_valid_peer_event() -> None:
+    """A source-peer EXT heal event emits its instant cast."""
+    origin = 42_000_000
+    events = [_heal(True, 71356, origin + 100)]
+
+    casts = build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+
+    assert [(cast.skill_id, cast.time_ms) for cast in casts] == [(71356, 100)]
+
+
+def test_ext_peer_gate_applies_beyond_legacy_pair() -> None:
+    """Skills outside the old {71356, 13980} pair are peer-gated as well.
+
+    EI 3.26 applies SanitizeForSrc to every EXTHealingCastFinder /
+    EXTBarrierCastFinder registration, so 14282 (Mending Might) and
+    72115 (Relic of the Flock barrier) must reject non-peer events.
+    """
+    origin = 42_000_000
+    events = [
+        _heal(False, 14282, origin + 100),
+        _heal(False, 72115, origin + 200),
+    ]
+
+    casts = build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+
+    assert casts == []
+
+
+def test_unrelated_rotation_finder_not_peer_gated() -> None:
+    """12542 (Signet of the Hunt) is not an EXT finder and must stay ungated.
+
+    EI resolves 12542 through an effect-by-dst finder, not
+    SanitizeForSrc -- the skill id only appears in _EFFECT_CASTS_BY_DST,
+    and a non-peer-flagged healing event must still emit its cast.
+    """
+    origin = 42_000_000
+    events = [_heal(False, 12542, origin + 100)]
+
+    casts = build_skill_rotation(events, duration_ms=1_000, start_time_ms=origin)
+
+    assert [(cast.skill_id, cast.time_ms) for cast in casts] == [(12542, 100)]

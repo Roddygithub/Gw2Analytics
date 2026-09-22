@@ -269,6 +269,13 @@ _EVENT_STRUCT: Final[struct.Struct] = struct.Struct("<QQQiiIIHHHbbbbbbbbIIbb")
 #: per event in the hot loop.
 _EVENT_STRUCT_EVENTS: Final[struct.Struct] = struct.Struct("<QQQii 4x I 7x bbb b b b 11x")
 
+# EI 3.26's revision-0 reader places the legacy ownership fields before
+# the nine garbage bytes. Keep this separate from the hot parse tuple,
+# which intentionally omits them.
+_EVENT_STRUCT_OWNERSHIP_LEGACY: Final[struct.Struct] = struct.Struct(
+    "<QQQiiHHHHH9x12B1x"
+)
+
 #: Standard arcdps cbtevent struct for EVTC2025+ builds.  arcdps
 #: reverted to the documented ``arcdps.h`` layout for 2025+ logs:
 #: time(Q)+src(Q)+dst(Q)+value(i)+buff_dmg(i)+overstack(I)+
@@ -864,8 +871,20 @@ class PythonEvtcParser:
                     if _ev_buff != 0 and value == 0 and buff_dmg < 0
                     else 0
                 )
-                src_is_peer = bool(is_offcycle & 0x80)
-                if magnitude > 0 and src_is_peer:
+                # EI 3.26 EXTHealingExtensionEvent (statechange 49,
+                # pad == ExtensionCombat marker): is_offcycle carries the
+                # HealingExtensionOffcycleBits peer flags on byte 11 --
+                # bit 6 (0x40) DstPeerMask, bit 7 (0x80) SrcPeerMask. EI
+                # then normalises: a record with neither peer bit set is
+                # treated as source-peer. Reproduce that exact derivation
+                # (bit7 set OR neither bit set); a DstIsPeer-only record
+                # (0x40) stays src_is_peer=False. The former
+                # ``bool(is_offcycle & 0x80)`` derivation (commit 51fe749)
+                # both misclassified 0x00 records and dropped them (and
+                # every non-peer record) from the stream entirely, while
+                # EI keeps every EXT record on its event list.
+                src_is_peer = bool(is_offcycle & 0x80) or not bool(is_offcycle & 0x40)
+                if magnitude > 0:
                     yield HealingEvent(
                         time_ms=time_ms,
                         source_agent_id=src_agent,
@@ -2249,7 +2268,11 @@ def _complete_agents(
             break
         src_agent = ev[1]
         dst_agent = ev[2]
-        is_statechange = ev[14] if is_evtc_2025 else ev[7]
+        # ponytail: with _EVENT_STRUCT_EVENTS_2025 the statechange byte (56)
+        # lands on tuple slot 16; slot 14 is the is_activation flag byte.
+        # Reading slot 14 made every EVTC2025 record look like a non-combat
+        # metadata record and mis-suppressed dst-agent collection.
+        is_statechange = ev[16] if is_evtc_2025 else ev[7]
         if src_agent != 0 and src_agent not in known_ids:
             missing_ids.add(src_agent)
         if is_statechange != 19 and dst_agent != 0 and dst_agent not in known_ids:
@@ -2604,7 +2627,8 @@ _AWARENESS_EXCLUDED_STATECHANGES: Final[frozenset[int]] = frozenset(
 
 
 #: arcdps statechange codes for agent lifecycle.
-#: 0 = Spawn (agent enters combat log), 1 = Despawn (agent leaves combat log).
+#: 6 = Spawn (agent enters the combat log), 7 = Despawn (agent leaves it),
+#: per Elite Insights 3.26 ``ArcDPSEnums.StateChange``.
 _SPAWN_STATECHANGE: Final[int] = 6
 _DESPAWN_STATECHANGE: Final[int] = 7
 #: Statechange 22 = TeamChange (used in EVTC2025+ agent enrichment).
@@ -2615,9 +2639,25 @@ _TEAMCHANGE_STATECHANGE_2025: Final[int] = 22
 class OwnershipInterval:
     """Temporal ownership of an agent by a master.
 
-    ``owner_agent_id`` is ``None`` when the agent is uncontrolled
-    (e.g. environmental gadget, unclaimed minion). The interval is
-    half-open: ``[start_ms, end_ms)`` fight-relative.
+    The interval is half-open: ``[start_ms, end_ms)`` fight-relative.
+
+    ``owner_agent_id is None`` is DELIBERATELY OVERLOADED and means either:
+
+    a) the agent has no master at all — the scanner opens an interval for
+       every spawned agent (players, squad members, enemy players, NPCs and
+       gadgets included), and only a record carrying a non-zero
+       ``src_master_instid`` / ``dst_master_instid`` establishes ownership; or
+    b) a master relationship was declared but could not be resolved from the
+       EVTC data — the instid was never seen in the event stream, or no
+       agent carrying it was aware at the linking time (EI
+       ``GetAgentByInstID`` → ``InAwareTimes``).
+
+    Distinguish the two by asking whether the agent ever emits a non-zero
+    master instid; consumers that only care about real ownership (the
+    ``owned_agents_at`` / ``owner_at`` queries) are unaffected by the
+    overload because an interval with ``None`` simply never matches. Corpus
+    certification must therefore report MINION-restricted resolution
+    separately from the resolution over all intervals.
     """
 
     agent_id: int
@@ -2627,6 +2667,16 @@ class OwnershipInterval:
     start_ms: int
     end_ms: int
     is_player: bool
+    # ``owner_agent_id`` is the temporal direct master observed at the
+    # interval boundary. EI's consumers often use the post-parse final master
+    # instead, so keep that projection explicit rather than overloading the
+    # temporal field.
+    final_master_agent_id: int | None = None
+    # Classification of the evidence that established this interval:
+    # ``none`` (no master instid), ``resolved`` (accepted SetMaster link),
+    # ``unresolved`` (non-zero instid did not resolve), or ``rejected``
+    # (resolved instid rejected by SetMaster: self/cycle/player).
+    master_evidence: str = "none"
 
 
 def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval]:  # noqa: PLR0912,PLR0915
@@ -2634,19 +2684,39 @@ def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval
 
     An ownership interval captures the period during which an agent
     (minion, pet, gadget) is owned by a master agent. The master is
-    identified by ``owner_agent_id`` — the agent whose ``instance_id``
-    matches the event's ``src_master_instid`` or ``dst_master_instid``.
+    identified by ``owner_agent_id`` — the agent whose event-stream
+    ``instance_id`` matches the record's ``src_master_instid`` (or
+    ``dst_master_instid``) at that time, mirroring Elite Insights'
+    ``FindAgentMaster`` → ``GetAgentByInstID(instid, time)`` linking:
+    instid is captured per agent first-non-zero-wins, and a candidate
+    master must be aware at the linking time (``InAwareTimes``).
 
     The scan derives ownership from:
-    - **Spawn** (statechange 0): agent enters with a ``src_master_instid``
+    - **Spawn** (statechange 6): agent enters with a ``src_master_instid``
       (or ``dst_master_instid``) indicating its master at that moment.
-    - **Despawn** (statechange 1): ends the current ownership interval.
-    - **Master change**: any event where ``src_master_instid`` differs
-      from the current owner starts a new interval.
+    - **Despawn** (statechange 7): ends the current ownership interval.
+    - **Master link / change**: every combat item whose source OR
+      destination carries a non-zero master instid links that side's agent
+      to the resolved owner, starting a new interval when the owner differs
+      from the currently tracked one. EI runs the two sides independently
+      (source first), so a record naming masters on both sides links both
+      agents.
+
+    An interval is opened for EVERY spawned agent, not only for minions, so
+    ``owner_agent_id is None`` is overloaded — see
+    :class:`OwnershipInterval`. Certification must report minion-restricted
+    resolution separately from resolution over all intervals.
 
     Instance ID recycling (same ``instance_id`` on a different ``agent_id``)
-    is handled by closing the old interval at the previous agent's despawn
-    and opening a new one for the new agent.
+    is handled by time-scoping the instance lookup to the candidate's
+    awareness span, not by assuming instance ids are globally unique.
+
+    Intervals still open at the end of the log are closed at the fight end,
+    defined as the timestamp of the last fight event in the stream (the
+    same authoritative end EI derives from the final timed combat item).
+    The interval stays half-open, so ownership covers
+    ``[start_ms, fight_end)`` — valid up to the true end of the fight, not
+    merely until the last interval start.
 
     Times are fight-relative (origin = first event with ``time_ms > 0``).
     """
@@ -2654,50 +2724,168 @@ def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval
     data = _read_all(source)
     build_str = data[BUILD_OFFSET : BUILD_OFFSET + 8].decode("ascii", errors="replace")
     is_evtc_2025 = _build_version_from_build_str(build_str) >= 2025_00_00
-    unpack = (
-        _EVENT_STRUCT_EVENTS_2025.unpack_from if is_evtc_2025 else _EVENT_STRUCT_EVENTS.unpack_from
-    )
-    # ponytail: is_statechange tuple index differs between the 2025 and legacy
-    # structs (16 vs 7). The exclusion set is the same either way.
-    _statechange_index = 16 if is_evtc_2025 else 7
-    _src_inst_index = 7 if is_evtc_2025 else 3  # legacy: byte 3=src_instid, 2025: byte 7
-    _dst_inst_index = 8 if is_evtc_2025 else 4
-    _src_master_inst_index = 14 if is_evtc_2025 else 5  # legacy: 5, 2025: 14
-    _dst_master_inst_index = 15 if is_evtc_2025 else 6  # legacy: 6, 2025: 15
+    if is_evtc_2025:
+        unpack = _EVENT_STRUCT_EVENTS_2025.unpack_from
+        # _EVENT_STRUCT_EVENTS_2025 tuple slots (verified against EI 3.26
+        # ``ReadCombatItemRev1``): 7/8 are instids and 9/10 are masters.
+        _statechange_index, _src_inst_index = 16, 7
+        _dst_inst_index, _src_master_inst_index, _dst_master_inst_index = 8, 9, 10
+    else:
+        unpack = _EVENT_STRUCT_OWNERSHIP_LEGACY.unpack_from
+        # EI 3.26 ``ReadCombatItem``: src/dst instids and src master are
+        # tuple slots 7/8/9; revision 0 has no destination master field.
+        _statechange_index, _src_inst_index = 18, 7
+        _dst_inst_index, _src_master_inst_index, _dst_master_inst_index = 8, 9, None
 
     cursor = _compute_post_skills_offset(data, is_evtc_2025=is_evtc_2025)
     end = len(data)
 
     # First pass: collect agent metadata (species_id, is_player) from agent table.
-    # We need the raw agent list. Reuse the parser's agent parsing logic.
     agents = list(_parse_agents_raw(data, is_evtc_2025))
     agent_meta: dict[int, tuple[int | None, bool]] = {}  # agent_id -> (species_id, is_player)
     for agent in agents:
         agent_meta[agent.id] = (agent.species_id, agent.is_player)
 
-    # Build instance_id -> agent_id mapping from agent table (first seen wins).
-    # Instance IDs can be recycled; we track the current agent per instance_id.
-    instance_to_agent: dict[int, int] = {}
-    for agent in agents:
-        if agent.instance_id:
-            instance_to_agent.setdefault(agent.instance_id, agent.id)
+    # This is the state that EI's SetMaster mutates during its linking pass.
+    # ``owner_agent_id`` below remains the temporal direct master; this map is
+    # only used to project each interval to EI's post-parse GetFinalMaster().
+    final_master_by_agent: dict[int, int] = {}
+
+    # Second pass (EI ``FindAgentMaster`` model): walk the raw stream
+    # chronologically, capture each agent's instid (first non-zero wins,
+    # EI ``UpdateAgentData``) and awareness span, THEN resolve master
+    # instids against candidates aware at the linking time
+    # (EI ``GetAgentByInstID(instid, time)`` → ``InAwareTimes``).
+    # A master instid is meaningless before its owner has been seen, so
+    # resolution cannot be a single static table: a minion spawning at t
+    # must resolve against the master state as of t. Instance ids may be
+    # recycled by different agents over the log; the awareness span
+    # disambiguates the reuse instead of assuming global uniqueness.
+    #
+    # On the first pass we only record identities; on the second we scan
+    # ownership with the completed tables. Master resolution uses the
+    # first candidate whose awareness contains the event time (EI keeps
+    # the aware-at-time agent; ties resolve to the earliest-instid agent,
+    # which for players equals chronological first spawn).
+    # agent_id -> instid (first non-zero wins, EI UpdateAgentData)
+    agent_instid: dict[int, int] = {}
+    agent_aware_abs: dict[int, tuple[int, int]] = {}
+
+    scan_cursor = cursor
+    while scan_cursor + EVENT_SIZE <= end:
+        ev = unpack(data, scan_cursor)
+        scan_cursor += EVENT_SIZE
+        ev_time = ev[0]
+        if ev_time <= 0:
+            continue
+        src = ev[1]
+        dst = ev[2]
+        if src:
+            span = agent_aware_abs.get(src)
+            agent_aware_abs[src] = (
+                (ev_time, ev_time)
+                if span is None
+                else (min(span[0], ev_time), max(span[1], ev_time))
+            )
+        if dst:
+            span = agent_aware_abs.get(dst)
+            agent_aware_abs[dst] = (
+                (ev_time, ev_time)
+                if span is None
+                else (min(span[0], ev_time), max(span[1], ev_time))
+            )
+        src_inst = ev[_src_inst_index]
+        dst_inst = ev[_dst_inst_index]
+        if src and src_inst:
+            agent_instid.setdefault(src, src_inst)
+        if dst and dst_inst:
+            agent_instid.setdefault(dst, dst_inst)
+
+    # Group agents by their single assigned instid (EI ``Refresh``:
+    # ``GroupBy(x => x.InstID)``), each with its full awareness span.
+    # instid -> [(agent_id, first_abs, last_abs)]
+    inst_candidates: dict[int, list[tuple[int, int, int]]] = {}
+    for agent_id, instid in agent_instid.items():
+        first_abs, last_abs = agent_aware_abs.get(agent_id, (0, 0))
+        inst_candidates.setdefault(instid, []).append((agent_id, first_abs, last_abs))
+    for candidates in inst_candidates.values():
+        # AgentData.GetAgentByInstID returns the first aware candidate after
+        # sorting same-address slices by FirstAware.
+        candidates.sort(key=lambda candidate: (candidate[1], candidate[0]))
 
     origin: int | None = None
-    # Active ownership: agent_id -> (owner_agent_id, instance_id, start_ms)
-    active: dict[int, tuple[int | None, int, int]] = {}
+    # Active ownership: agent_id ->
+    # (temporal direct owner, instance_id, start_ms, evidence).
+    active: dict[int, tuple[int | None, int, int, str]] = {}
     intervals: list[OwnershipInterval] = []
+
+    def final_master(agent_id: int | None) -> int | None:
+        """Return EI's final master while guarding malformed chains."""
+        if agent_id is None:
+            return None
+        seen: set[int] = set()
+        current = agent_id
+        while current in final_master_by_agent and current not in seen:
+            seen.add(current)
+            current = final_master_by_agent[current]
+        return current
+
+    def close_interval(agent_id: int, end_ms: int) -> None:
+        current = active.pop(agent_id, None)
+        if current is None:
+            return
+        owner, inst, start, evidence = current
+        if end_ms <= start:
+            return
+        species_id, is_player = agent_meta.get(agent_id, (None, False))
+        intervals.append(
+            OwnershipInterval(
+                agent_id=agent_id,
+                owner_agent_id=owner,
+                instance_id=inst,
+                species_id=species_id,
+                start_ms=start,
+                end_ms=end_ms,
+                is_player=is_player,
+                final_master_agent_id=final_master(owner),
+                master_evidence=evidence,
+            )
+        )
+    # Fight end = timestamp of the last fight event in the stream. This is
+    # the authoritative log end: the same value EI derives by keeping the
+    # time of the final timed combat item. It must NOT be approximated from
+    # the start times of still-open ownership intervals -- that truncates
+    # every open interval and erases the latest-starting one entirely.
+    last_event_fight_time: int | None = None
+
+    def resolve_owner(master_inst: int, when_abs: int) -> int | None:
+        """Agent id owning ``master_instid`` at absolute time ``when_abs``.
+
+        Returns the first candidate whose awareness covers ``when_abs``
+        (EI ``GetAgentByInstID``), or ``None`` when the instid is 0,
+        unseen, or only carried by agents unaware at that time — an
+        unresolvable owner stays ``None`` rather than being guessed.
+        """
+        if not master_inst:
+            return None
+        for agent_id, first_abs, last_abs in inst_candidates.get(master_inst, ()):
+            if first_abs <= when_abs <= last_abs:
+                return agent_id
+        return None
 
     while cursor + EVENT_SIZE <= end:
         unpacked = unpack(data, cursor)
         cursor += EVENT_SIZE
         time_ms = unpacked[0]
         src_agent = unpacked[1]
-        unpacked[2]
+        dst_agent = unpacked[2]
         is_statechange = unpacked[_statechange_index]
-        src_inst = unpacked[_src_inst_index] if is_evtc_2025 else 0
-        dst_inst = unpacked[_dst_inst_index] if is_evtc_2025 else 0
-        src_master_inst = unpacked[_src_master_inst_index] if is_evtc_2025 else 0
-        dst_master_inst = unpacked[_dst_master_inst_index] if is_evtc_2025 else 0
+        src_inst = unpacked[_src_inst_index]
+        dst_inst = unpacked[_dst_inst_index]
+        src_master_inst = unpacked[_src_master_inst_index]
+        dst_master_inst = (
+            unpacked[_dst_master_inst_index] if _dst_master_inst_index is not None else 0
+        )
 
         if time_ms <= 0:
             continue
@@ -2705,129 +2893,143 @@ def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval
             origin = time_ms
 
         fight_time = time_ms - (origin or 0)
+        last_event_fight_time = fight_time
 
-        def resolve_owner(master_inst: int) -> int | None:
-            if not master_inst:
-                return None
-            return instance_to_agent.get(master_inst)
-
-        # Handle spawn/despawn statechanges for ownership lifecycle.
+        # Open before linking so a spawn's master evidence belongs to the
+        # interval starting at that same timestamp. Close after linking so a
+        # master field on a despawn cannot create a post-despawn interval.
         if is_statechange == _SPAWN_STATECHANGE and src_agent:
-            # Agent spawns: establish initial ownership from master_instid.
-            owner = resolve_owner(src_master_inst or dst_master_inst)
-            inst = src_inst or dst_inst
-            species_id, is_player = agent_meta.get(src_agent, (None, False))
-            active[src_agent] = (owner, inst, fight_time)
+            active[src_agent] = (None, src_inst or dst_inst, fight_time, "none")
 
-        elif is_statechange == _DESPAWN_STATECHANGE and src_agent:
-            # Agent despawns: close any active ownership interval.
-            if src_agent in active:
-                owner, inst, start = active.pop(src_agent)
-                species_id, is_player = agent_meta.get(src_agent, (None, False))
-                intervals.append(
-                    OwnershipInterval(
-                        agent_id=src_agent,
-                        owner_agent_id=owner,
-                        instance_id=inst,
-                        species_id=species_id,
-                        start_ms=start,
-                        end_ms=fight_time,
-                        is_player=is_player,
-                    )
-                )
+        # Master linking. With the correct indices (9/10) this fires on real
+        # minion records: every combat event a minion emits carries its
+        # master's instid, so a change from the currently tracked owner opens
+        # a new interval at that timestamp.
+        def link_owner(
+            agent_id: int, master_inst: int, inst: int, at_abs: int, at_fight: int
+        ) -> int | None:
+            """Apply one EI ``FindAgentMaster`` + ``SetMaster`` operation.
 
-        # Master change detection: any event where src_master_instid
-        # differs from current owner starts a new interval.
+            ``SetMaster`` ignores players, self-links, and links that would
+            close a master chain back onto the minion. An unknown or unaware
+            master is also a no-op; importantly, it does not erase a master
+            already assigned by an earlier valid combat item.
+            """
+            candidate = resolve_owner(master_inst, at_abs)
+            if candidate is None:
+                if agent_id in active and active[agent_id][0] is None:
+                    owner, cur_inst, start, _ = active[agent_id]
+                    active[agent_id] = (owner, cur_inst or inst, start, "unresolved")
+                return None
+
+            _species_id, is_player = agent_meta.get(agent_id, (None, False))
+            rejected = is_player or candidate == agent_id
+            if not rejected:
+                cursor_agent = candidate
+                seen: set[int] = {agent_id}
+                while True:
+                    if cursor_agent in seen:
+                        rejected = True
+                        break
+                    seen.add(cursor_agent)
+                    next_master = final_master_by_agent.get(cursor_agent)
+                    if next_master is None:
+                        break
+                    cursor_agent = next_master
+
+            if rejected:
+                if agent_id in active and active[agent_id][0] is None:
+                    owner, cur_inst, start, _ = active[agent_id]
+                    active[agent_id] = (owner, cur_inst or inst, start, "rejected")
+                return candidate
+
+            # This is the direct link EI stores. Its final-master projection
+            # is deliberately computed only after all links have run.
+            final_master_by_agent[agent_id] = candidate
+            current = active.get(agent_id)
+            if current is None:
+                active[agent_id] = (candidate, inst, at_fight, "resolved")
+            else:
+                cur_owner, cur_inst, start, _evidence = current
+                if candidate != cur_owner:
+                    close_interval(agent_id, at_fight)
+                    active[agent_id] = (candidate, inst or cur_inst, at_fight, "resolved")
+                else:
+                    active[agent_id] = (cur_owner, cur_inst or inst, start, "resolved")
+            return candidate
+
+        # EI's ``EvtcParser`` runs ``FindAgentMaster`` over every combat item
+        # for the SOURCE (``c.SrcIsAgent() && c.SrcMasterInstid != 0``) and the
+        # DESTINATION (``c.DstIsAgent() && c.DstMasterInstid != 0``)
+        # independently, in that order, resolving each side against the agent
+        # table as it stands at the item's time. A record may therefore carry
+        # masters on both sides and links BOTH agents: a minion's own record
+        # names itself as source and its target as destination, and
+        # pets/minions that only ever appear as the target of their master's
+        # records used to be dropped by the removed mutual-exclusion guard.
+        #
+        # EI processes source and destination independently, even when they
+        # name the same agent. The destination link therefore may replace the
+        # source link at the same timestamp; only empty intervals are omitted.
         if src_agent and src_master_inst:
-            new_owner = resolve_owner(src_master_inst)
-            if src_agent in active:
-                cur_owner, inst, start = active[src_agent]
-                if new_owner != cur_owner:
-                    species_id, is_player = agent_meta.get(src_agent, (None, False))
-                    intervals.append(
-                        OwnershipInterval(
-                            agent_id=src_agent,
-                            owner_agent_id=cur_owner,
-                            instance_id=inst,
-                            species_id=species_id,
-                            start_ms=start,
-                            end_ms=fight_time,
-                            is_player=is_player,
-                        )
-                    )
-                    active[src_agent] = (new_owner, inst, fight_time)
-            elif src_agent not in active:
-                # First sighting with a master — start interval.
-                species_id, is_player = agent_meta.get(src_agent, (None, False))
-                inst = src_inst or dst_inst
-                active[src_agent] = (new_owner, inst, fight_time)
+            link_owner(src_agent, src_master_inst, src_inst or dst_inst, time_ms, fight_time)
+        if dst_agent and dst_master_inst:
+            link_owner(dst_agent, dst_master_inst, dst_inst or src_inst, time_ms, fight_time)
 
-    # Close any remaining open intervals at fight end.
-    if origin is not None:
-        fight_end = max((fight_time for _aid, (_o, _i, fight_time) in active.items()), default=0)
-        for agent_id, (owner, inst, start) in active.items():
-            if fight_end > start:
-                species_id, is_player = agent_meta.get(agent_id, (None, False))
-                intervals.append(
-                    OwnershipInterval(
-                        agent_id=agent_id,
-                        owner_agent_id=owner,
-                        instance_id=inst,
-                        species_id=species_id,
-                        start_ms=start,
-                        end_ms=fight_end,
-                        is_player=is_player,
-                    )
-                )
+        if is_statechange == _DESPAWN_STATECHANGE and src_agent:
+            close_interval(src_agent, fight_time)
+
+    # Close any remaining open intervals at the true fight end.
+    if origin is not None and last_event_fight_time is not None:
+        fight_end = last_event_fight_time
+        for agent_id in list(active):
+            close_interval(agent_id, fight_end)
+
+    # SetMaster stores a mutable direct link, while EI's finders call
+    # GetFinalMaster() after the complete linking pass. Re-project every
+    # temporal interval after the final graph is known.
+    for index, interval in enumerate(intervals):
+        intervals[index] = OwnershipInterval(
+            agent_id=interval.agent_id,
+            owner_agent_id=interval.owner_agent_id,
+            instance_id=interval.instance_id,
+            species_id=interval.species_id,
+            start_ms=interval.start_ms,
+            end_ms=interval.end_ms,
+            is_player=interval.is_player,
+            final_master_agent_id=final_master(interval.owner_agent_id),
+            master_evidence=interval.master_evidence,
+        )
 
     intervals.sort(key=lambda iv: (iv.start_ms, iv.agent_id))
     return intervals
 
 
-def _parse_agents_raw(data: bytes, _is_evtc_2025: bool) -> Iterator[Agent]:
-    """Parse the agent table from raw EVTC data (used by ownership scan)."""
+def _parse_agents_raw(data: bytes, is_evtc_2025: bool) -> Iterator[Agent]:
+    """Parse the agent table from raw EVTC data (used by ownership scan).
+
+    Decodes the same 96-byte records as :func:`_iter_agents` through the
+    same per-version decoders (:func:`_decode_agent_2025` /
+    :func:`_decode_agent`), so ``Agent.id`` is the real arcdps agent
+    address from the table's leading uint64. The only behavioural
+    difference is lenient truncation: a record that would run past the
+    buffer ends the scan instead of raising, so the ownership scanner
+    can walk partially damaged tables.
+
+    The ownership scanner needs ``Agent.id`` to resolve
+    ``src_master_instid`` to a master agent, matching Elite Insights'
+    ``FindAgentMaster`` → ``GetAgentByInstID`` linking. Instance IDs are
+    NOT taken from the table (arcdps does not store them there); the
+    scanner enriches them from the event stream itself.
+    """
 
     agent_count = int.from_bytes(data[AGENT_COUNT_OFFSET : AGENT_COUNT_OFFSET + 4], "little")
-    cursor = HEADER_SIZE
-    cursor + agent_count * AGENT_SIZE
+    cursor = _AGENTS_OFFSET_2025 if is_evtc_2025 else AGENTS_OFFSET
+    decode = _decode_agent_2025 if is_evtc_2025 else _decode_agent
     for _ in range(agent_count):
         if cursor + AGENT_SIZE > len(data):
             break
-        name_bytes = data[cursor : cursor + AGENT_NAME_SIZE]
-        name = name_bytes.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
-        prof_raw = int.from_bytes(
-            data[cursor + AGENT_NAME_SIZE : cursor + AGENT_NAME_SIZE + 4], "little"
-        )
-        elite_raw = int.from_bytes(
-            data[cursor + AGENT_NAME_SIZE + 4 : cursor + AGENT_NAME_SIZE + 8], "little"
-        )
-        is_player = prof_raw == 0xFFFF and elite_raw != 0xFFFFFFFF
-        is_gadget = elite_raw == 0xFFFFFFFF and (prof_raw >> 16) == 0xFFFF
-        species_id = prof_raw & 0xFFFF if not is_player and not is_gadget else None
-        account_name = None
-        subgroup = None
-        if is_player:
-            parts = name.split("\x00")
-            if len(parts) >= 3:
-                name, account_name, subgroup = parts[0], parts[1], parts[2]
-        try:
-            elite = EliteSpec(elite_raw & 0xFFFFFFFF)
-        except ValueError:
-            elite = EliteSpec.UNKNOWN
-        yield Agent(
-            id=0,  # filled later by _parse_agents
-            name=name,
-            profession=Profession(prof_raw & 0xFFFF if is_player else 0),
-            elite=elite,
-            elite_raw=elite_raw,
-            species_id=species_id,
-            is_player=is_player,
-            is_gadget=is_gadget,
-            account_name=account_name,
-            subgroup=subgroup,
-            instance_id=0,  # filled by _enrich_evtc2025_agents
-            team_id=0,
-        )
+        yield decode(data, cursor)
         cursor += AGENT_SIZE
 
 
