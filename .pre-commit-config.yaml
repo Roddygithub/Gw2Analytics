@@ -1,19 +1,18 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # v0.10.5 dep-cycle: aligned to pyproject.toml dev group's
-    # "ruff>=0.15.21" pin so local pre-commit == CI == dev-install.
+    # Keep the hook on the exact Ruff version resolved in uv.lock.
     #
     # CO-EVOLUTION CONTRACT: when bumping the ruff dep in
     # pyproject.toml, bump this `rev:` in the SAME commit. These
     # three sources of truth MUST stay synchronized:
-    #   1. pyproject.toml dev = ["ruff>=X.Y.Z", ...]
+    #   1. pyproject.toml dev = ["ruff>=X.Y.Z,<X+1", ...]
     #   2. THIS FILE: rev: vX.Y.Z
-    #   3. CI uv.lock: resolved ruff version
+    #   3. uv.lock: resolved ruff version
     # dependabot's github-actions updater handles (2) automatically
     # only when CI bumps it via dependabot/github_actions; if you
     # bump ruff via dependabot/python:uv, you MUST update (2) here
     # manually.
-    rev: v0.15.21
+    rev: v0.16.7
     hooks:
       - id: ruff
         args: [--fix]
@@ -68,7 +67,11 @@ repos:
     rev: v1.5.0
     hooks:
       - id: detect-secrets
-        args: ["--baseline", ".secrets.baseline"]
+        args:
+          - --baseline
+          - .secrets.baseline
+          - --exclude-files
+          - (^|/)(\.venv|\.pytest_cache|\.ruff_cache)(/|$)
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

@@ -14,7 +14,7 @@
 # Uses local composite actions (.github/actions/setup-*) to keep
 # setup blocks DRY.
 #
-# pytest-env injects the docker-compose dev credentials at session
+# pytest.ini injects the docker-compose dev credentials at session
 # startup, so this workflow does not need any GitHub repository
 # secrets. A ``postgres`` service runs alongside the test-python job
 # so the end-to-end ``apps/api/tests/test_uploads_e2e.py`` test can
@@ -133,19 +133,18 @@ jobs:
       S3_SECRET_KEY: "gw2analytics-secret"
       S3_BUCKET: "gw2analytics"
       # NOTE: SECRETS_KEK is hardcoded to the deterministic
-      # test-fixture value (matches pyproject.toml
-      # ``[tool.pytest_env]``). Rationale:
-      #   (a) pytest-env injects this DURING pytest runtime, but
+      # test-fixture value (also defined in pytest.ini). Rationale:
+      #   (a) pytest.ini injects this DURING pytest runtime, but
       #       the alembic ``env.py`` instantiates Settings()
       #       which requires SECRETS_KEK -- and alembic runs
       #       BEFORE pytest, so the env block MUST provide it
-      #       explicitly. pytest-env alone is insufficient.
+      #       explicitly. pytest.ini alone is insufficient.
       #   (b) ``${{ secrets.SECRETS_KEK }}`` would BREAK fork
       #       PRs (GitHub strips secrets from forks -> empty
       #       string -> Fernet crashes with ``ValueError: Fernet
       #       key must be 32 url-safe base64-encoded bytes.``).
-      #   (c) The dummy value is already public in
-      #       pyproject.toml (# ``base64.urlsafe_b64encode(b"a"*32)``),
+      #   (c) The dummy value is public test configuration
+      #       (``base64.urlsafe_b64encode(b"a"*32)``),
       #       so hardcoding here leaks no additional information.
       SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
 
@@ -196,7 +195,9 @@ jobs:
         run: uv run python -m gw2analytics_api.scripts.health_gate --save-baseline /tmp/health_baseline.json
 
       - name: Script tests
-        run: uv run pytest tests/scripts/ --tb=line -q
+        # The repository-wide coverage gate runs in the full pytest step below;
+        # this focused smoke suite should not replace its denominator.
+        run: uv run pytest tests/scripts/ --tb=line -q --no-cov
 
       - name: Pytest
         # --cov-report=xml generates coverage.xml for Codecov ingestion.
@@ -505,7 +506,7 @@ jobs:
       S3_SECRET_KEY: "gw2analytics-secret"
       S3_BUCKET: "gw2analytics"
       # See test-python env block above for the full rationale.
-      # pytest-env alone cannot satisfy the alembic-pre-pytest
+      # pytest.ini alone cannot satisfy the alembic-pre-pytest
       # injection window, so the test-fixture value is hardcoded
       # here too.
       SECRETS_KEK: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="

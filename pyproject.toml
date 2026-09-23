@@ -184,27 +184,6 @@ quote-style = "double"
 indent-style = "space"
 
 # ---------------------------------------------------------------------------
-# pytest-env: inject docker-compose dev credentials into os.environ at
-# session startup, so the test suite never depends on a hand-rolled
-# .env file. Values mirror the credentials declared in docker-compose.yml
-# for the postgres + minio services.
-# ---------------------------------------------------------------------------
-
-[tool.pytest_env]
-DATABASE_URL = "postgresql+psycopg://gw2analytics:gw2analytics@localhost:5432/gw2analytics"
-S3_ENDPOINT = "localhost:9000"
-S3_ACCESS_KEY = "gw2analytics"
-S3_SECRET_KEY = "gw2analytics-secret"
-S3_BUCKET = "gw2analytics"
-# v0.10.0 plan 031: webhook secret at rest encryption (Fernet envelope).
-# 44 chars = 32 random bytes base64-url encoded (Fernet key format).
-# Deterministic test KEK = base64.urlsafe_b64encode(b"a"*32); re-runs
-# always decrypt the same plaintext regardless of Fernet timestamp.
-# NEVER use this KEK in production; generate via
-# `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
-SECRETS_KEK = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
-
-# ---------------------------------------------------------------------------
 # Mypy: project-wide type-check config. Per-package overrides live in
 # each member's pyproject.toml.
 #
@@ -247,17 +226,3 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["locust"]
 ignore_missing_imports = true
-
-# ---------------------------------------------------------------------------
-# pytest: strict asyncio mode. Async tests need an explicit
-# ``@pytest.mark.asyncio`` decorator (keeps the existing fast / sync
-# test suites from being silently rewired onto the asyncio loop).
-# ---------------------------------------------------------------------------
-
-[tool.pytest.ini_options]
-asyncio_mode = "strict"
-# Coverage gate: enforce a 90% line-coverage floor across the
-# Python source surface. The flags are applied to every pytest
-# invocation (local + CI) so regressions are caught early.
-addopts = "--cov=apps/api/src --cov=libs --cov-report=term-missing --cov-fail-under=90"
-filterwarnings = []
