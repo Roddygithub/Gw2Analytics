@@ -179,6 +179,7 @@ class _BuffStack:
         self.healing_scores: list[int] = []
         self.last_time_ms: int = 0
         self.cumulative_stack_ms: int = 0
+        self.uptime_segments: list[tuple[int, int, int]] = []
         self.name: str = name
 
 
@@ -252,15 +253,21 @@ class BuffStateTracker:
     def _advance_single(stack: _BuffStack, new_time_ms: int) -> None:
         """Accumulate stack-time for single-stack (max_stacks=1) through expirations."""
         elapsed = new_time_ms - stack.last_time_ms
+        interval_start = stack.last_time_ms
         while elapsed > 0 and stack.expirations:
             remaining = stack.expirations[0]
             if remaining is None:
+                stack.uptime_segments.append((interval_start, new_time_ms, 1))
                 stack.cumulative_stack_ms += elapsed
                 break
             active = min(elapsed, remaining)
+            active_end = interval_start + active
+            if active:
+                stack.uptime_segments.append((interval_start, active_end, 1))
             stack.cumulative_stack_ms += active
             elapsed -= active
             remaining -= active
+            interval_start = active_end
             if remaining == 0:
                 stack.expirations.pop(0)
                 if stack.total_durations:
@@ -288,6 +295,10 @@ class BuffStateTracker:
             if next_expiry is None or next_expiry >= new_time_ms:
                 break
             elapsed = next_expiry - stack.last_time_ms
+            if elapsed:
+                stack.uptime_segments.append(
+                    (stack.last_time_ms, next_expiry, len(stack.expirations))
+                )
             stack.cumulative_stack_ms += len(stack.expirations) * elapsed
             stack.last_time_ms = next_expiry
             # EI: TotalDuration = Duration + Extensions; Duration decreases,
@@ -302,6 +313,7 @@ class BuffStateTracker:
             stack.healing_scores.pop(index)
         elapsed = new_time_ms - stack.last_time_ms
         if elapsed > 0:
+            stack.uptime_segments.append((stack.last_time_ms, new_time_ms, len(stack.expirations)))
             stack.cumulative_stack_ms += len(stack.expirations) * elapsed
             if stack.total_durations:
                 stack.total_durations = [td - elapsed for td in stack.total_durations]
@@ -896,6 +908,27 @@ class BuffStateTracker:
                 )
         return result
 
+    def _merged_stack_uptime(self, stack: _BuffStack, start_ms: int, end_ms: int) -> int:
+        """Return stack-time in a fight-relative interval without rewinding state."""
+        total = sum(
+            max(0, min(end_ms, segment_end) - max(start_ms, segment_start)) * stacks
+            for segment_start, segment_end, stacks in stack.uptime_segments
+        )
+        if end_ms <= stack.last_time_ms:
+            return total
+
+        snapshot = _BuffStack(stack.name)
+        snapshot.expirations = stack.expirations.copy()
+        snapshot.total_durations = stack.total_durations.copy()
+        snapshot.stack_ids = stack.stack_ids.copy()
+        snapshot.healing_scores = stack.healing_scores.copy()
+        snapshot.last_time_ms = stack.last_time_ms
+        snapshot.cumulative_stack_ms = stack.cumulative_stack_ms
+        self._advance(snapshot, max(start_ms, stack.last_time_ms))
+        before_end = snapshot.cumulative_stack_ms
+        self._advance(snapshot, end_ms)
+        return total + snapshot.cumulative_stack_ms - before_end
+
     def compute_merged_uptimes(
         self,
         agent_ids: list[int],
@@ -913,7 +946,7 @@ class BuffStateTracker:
         ``slice_lo_ms``, ``slice_hi_ms``, and awareness spans are fight-relative.
         For each agent, uptime is computed over its awareness span intersected
         with the slice window [slice_lo_ms, slice_hi_ms). The merged uptime is
-        the sum of cumulative_stack_ms across all agents, divided by duration_ms.
+        the sum of stack-time across all agents, divided by duration_ms.
         """
         if duration_ms <= 0:
             return {}
@@ -923,58 +956,34 @@ class BuffStateTracker:
 
         result: dict[str, float] = {}
         for name in TRACKED_BUFFS:
-            total_cumulative_stack_ms = 0
+            total_stack_ms = 0
 
             for aid in agent_ids:
-                agent = self._agent_buffs.get(aid, {})
-                stack = agent.get(name)
+                stack = self._agent_buffs.get(aid, {}).get(name)
                 if stack is None:
                     continue
 
-                # Determine the time window for this agent within the slice
-                agent_start = 0
-                agent_end = duration_ms
+                agent_start = max(0, slice_lo_ms)
+                agent_end = min(duration_ms, slice_hi_ms)
                 if awareness_spans and aid in awareness_spans:
                     span = awareness_spans[aid]
-                    # Awareness spans, slice bounds, and tracker state are fight-relative.
-                    agent_start = max(0, span[0], slice_lo_ms)
-                    agent_end = min(duration_ms, span[1], slice_hi_ms)
-                    if agent_end <= agent_start:
-                        continue
+                    agent_start = max(agent_start, span[0])
+                    agent_end = min(agent_end, span[1])
+                if agent_end <= agent_start:
+                    continue
 
-                # Compute uptime for this agent bounded by its effective window
-                snapshot = _BuffStack(name)
-                snapshot.expirations = stack.expirations.copy()
-                snapshot.stack_ids = stack.stack_ids.copy()
-                snapshot.healing_scores = stack.healing_scores.copy()
-                snapshot.last_time_ms = stack.last_time_ms
-                snapshot.cumulative_stack_ms = stack.cumulative_stack_ms
-                self._advance(snapshot, agent_end)
-                # Subtract uptime before agent_start
-                if agent_start > 0:
-                    snapshot_start = _BuffStack(name)
-                    snapshot_start.expirations = stack.expirations.copy()
-                    snapshot_start.stack_ids = stack.stack_ids.copy()
-                    snapshot_start.healing_scores = stack.healing_scores.copy()
-                    snapshot_start.last_time_ms = stack.last_time_ms
-                    snapshot_start.cumulative_stack_ms = stack.cumulative_stack_ms
-                    self._advance(snapshot_start, agent_start)
-                    total_cumulative_stack_ms += (
-                        snapshot.cumulative_stack_ms - snapshot_start.cumulative_stack_ms
-                    )
-                else:
-                    total_cumulative_stack_ms += snapshot.cumulative_stack_ms
+                total_stack_ms += self._merged_stack_uptime(stack, agent_start, agent_end)
 
-            if total_cumulative_stack_ms == 0:
+            if total_stack_ms == 0:
                 result[name] = 0.0
                 continue
 
             if _max_stacks_for(name) > 1:
-                result[name] = total_cumulative_stack_ms / duration_ms
+                result[name] = total_stack_ms / duration_ms
             else:
                 result[name] = min(
                     100.0,
-                    (total_cumulative_stack_ms / duration_ms) * 100.0,
+                    (total_stack_ms / duration_ms) * 100.0,
                 )
         return result
 

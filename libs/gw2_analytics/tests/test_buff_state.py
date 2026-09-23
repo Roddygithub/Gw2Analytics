@@ -422,6 +422,39 @@ class TestBuffStateTracker:
         )
         assert tracker.compute_player_uptimes(1, 10_000)["fury"] == pytest.approx(50.0)
 
+    def test_merged_uptime_keeps_late_recycled_slice_after_despawn(self) -> None:
+        fury_id = TRACKED_BUFFS["fury"]
+        origin = 1_000_000
+        tracker = BuffStateTracker(start_time_ms=origin)
+        tracker.process(
+            _boon_apply(
+                skill_id=fury_id,
+                target=1,
+                time_ms=origin,
+                duration_ms=4_000,
+            )
+        )
+        tracker.end_agent(1, origin + 4_000)
+        tracker.process(
+            _boon_apply(
+                skill_id=fury_id,
+                target=2,
+                time_ms=origin + 6_000,
+                duration_ms=4_000,
+            )
+        )
+        tracker.end_agent(2, origin + 10_000)
+
+        merged = tracker.compute_merged_uptimes(
+            [1, 2],
+            duration_ms=10_000,
+            slice_lo_ms=0,
+            slice_hi_ms=10_000,
+            awareness_spans={1: (0, 4_000), 2: (6_000, 10_000)},
+        )
+
+        assert merged["fury"] == pytest.approx(80.0)
+
     def test_buff_extension_extends_active_duration_stack(self) -> None:
         protection_id = TRACKED_BUFFS["protection"]
         tracker = BuffStateTracker()
