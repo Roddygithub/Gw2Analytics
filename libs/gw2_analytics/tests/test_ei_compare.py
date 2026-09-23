@@ -3,12 +3,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, cast
 
+import pytest
+
 from gw2_analytics.ei_compare import _skill_stats, compare_elite_insights
 from gw2_analytics.rotation import build_skill_rotation
 from gw2_core import (
     ActivationType,
     Agent,
     BoonApplyEvent,
+    BuffInfoEvent,
     CombatOutcomeEvent,
     DamageEvent,
     DeathEvent,
@@ -590,6 +593,65 @@ def test_compare_elite_insights_emits_buff_uptime_tolerance_result() -> None:
     assert row["status"] == "PASS"
     assert row["rule"] == "buff-uptime-tolerance"
     assert row["dimensions"] == {"account": "Player.1234", "slice": 0, "buff_id": 1187}
+
+
+@pytest.mark.parametrize("buff_id", [717, 873])
+def test_compare_elite_insights_preloads_late_buffinfo_metadata(buff_id: int) -> None:
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(build_version="20260224", agent_count=1, duration_ms=6_000),
+        agents=[
+            Agent(
+                id=1,
+                name="Player",
+                profession=Profession.GUARDIAN,
+                elite=EliteSpec.FIREBRAND,
+                is_player=True,
+                account_name=":Player.1234",
+                instance_id=1111,
+            )
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Player.1234",
+                "instanceID": 1111,
+                "firstAware": 0,
+                "buffUptimes": [{"id": buff_id, "buffData": [{"uptime": 100.0}]}],
+            }
+        ]
+    }
+    events = [
+        BoonApplyEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=1,
+            skill_id=buff_id,
+            duration_ms=1_000,
+            stacks=1,
+            kind="apply",
+        )
+        for _ in range(6)
+    ]
+    events.extend(
+        [
+            BuffInfoEvent(time_ms=2_000, skill_id=buff_id, max_stacks=99),
+            BoonApplyEvent(
+                time_ms=6_000,
+                source_agent_id=1,
+                target_agent_id=1,
+                skill_id=buff_id,
+                duration_ms=0,
+                stacks=1,
+                kind="remove_all",
+            ),
+        ]
+    )
+
+    result = compare_elite_insights(fight, expected, events)
+
+    assert result["differences"] == {}
 
 
 def test_compare_elite_insights_emits_per_cast_rotation_results() -> None:

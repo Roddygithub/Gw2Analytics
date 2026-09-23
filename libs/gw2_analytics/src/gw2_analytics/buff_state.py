@@ -32,7 +32,13 @@ from collections import defaultdict
 
 from pydantic import BaseModel, ConfigDict
 
-from gw2_core import BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent, BuffStackActiveEvent
+from gw2_core import (
+    BoonApplyEvent,
+    BuffApplyEvent,
+    BuffExtensionEvent,
+    BuffInfoEvent,
+    BuffStackActiveEvent,
+)
 
 #: The 14 tracked boons: name → arcdps skill_id.
 #: Source: WvW_Analytics TRACKED_BUFFS mapping.
@@ -213,6 +219,7 @@ class BuffStateTracker:
             lambda: defaultdict(_OutgoingAccumulator),
         )
         self._start_time_ms = start_time_ms
+        self._capacities: dict[str, int] = {}
         self._healing_by_agent = healing_by_agent or {}
         # Elite Insights keeps its HealingLogic on a single shared instance,
         # so the first stack-active record anywhere in the log latches its
@@ -229,6 +236,10 @@ class BuffStateTracker:
         # once, since applications arrive in order.
         self._regen_overstacks = regen_overstacks or {}
         self._regen_hint_cursor: dict[int, int] = {}
+
+    def _capacity_for(self, name: str) -> int:
+        """Return EI's capacity override, or the existing fallback."""
+        return self._capacities.get(name, _capacity_for(name))
 
     def _get_stack(self, agent_id: int, buff_name: str) -> _BuffStack:
         """Get or create the stack tracker for (agent, buff)."""
@@ -357,7 +368,13 @@ class BuffStateTracker:
 
     def process(  # noqa: PLR0912, PLR0915
         self,
-        event: BoonApplyEvent | BuffApplyEvent | BuffExtensionEvent | BuffStackActiveEvent,
+        event: (
+            BoonApplyEvent
+            | BuffApplyEvent
+            | BuffExtensionEvent
+            | BuffInfoEvent
+            | BuffStackActiveEvent
+        ),
     ) -> None:
         """Process one ``BoonApplyEvent`` or ``BuffApplyEvent`` and update state.
 
@@ -365,8 +382,13 @@ class BuffStateTracker:
         Untracked buff IDs (not in ``TRACKED_BUFFS``) are silently ignored.
 
         Raises:
-            TypeError: if ``event`` is not a ``BoonApplyEvent`` or ``BuffApplyEvent``.
+            TypeError: if ``event`` is not a supported buff event.
         """
+        if isinstance(event, BuffInfoEvent):
+            buff_name = _get_buff_name(event.skill_id)
+            if buff_name is not None and event.max_stacks > 0:
+                self._capacities[buff_name] = event.max_stacks
+            return
         if isinstance(event, BuffStackActiveEvent):
             buff_name = _get_buff_name(event.skill_id)
             if buff_name != "regeneration":
@@ -418,7 +440,7 @@ class BuffStateTracker:
                 # = toAdd), preserving queue order -- not pop+append, which
                 # would rotate the queue and change which stack fronts next.
                 duration = event.duration_ms if event.duration_ms > 0 else None
-                if len(target_tracker.expirations) >= _capacity_for(buff_name):
+                if len(target_tracker.expirations) >= self._capacity_for(buff_name):
                     if len(target_tracker.expirations) > 1:
                         # Find shortest among non-front stacks (index >= 1)
                         min_idx = 1
@@ -471,7 +493,7 @@ class BuffStateTracker:
                             else:
                                 lo = mid + 1
                         insert_idx = lo
-                        if len(target_tracker.total_durations) >= _capacity_for(buff_name):
+                        if len(target_tracker.total_durations) >= self._capacity_for(buff_name):
                             # Remove shortest TotalDuration (index 0)
                             target_tracker.expirations.pop(0)
                             target_tracker.total_durations.pop(0)
@@ -500,7 +522,7 @@ class BuffStateTracker:
                             strict=True,
                         )
                     )
-                    pairs = pairs[-_capacity_for(buff_name) :]
+                    pairs = pairs[-self._capacity_for(buff_name) :]
                     target_tracker.expirations = [expiry for expiry, _, _ in pairs]
                     target_tracker.stack_ids = [stack_id for _, stack_id, _ in pairs]
                     target_tracker.healing_scores = [healing for _, _, healing in pairs]
@@ -513,7 +535,7 @@ class BuffStateTracker:
                 # the active stack outright when it has <50 ms left).
                 new_duration = event.duration_ms or None
                 new_healing = self._healing_by_agent.get(event.source_agent_id, 0)
-                if len(target_tracker.expirations) >= _capacity_for(buff_name):
+                if len(target_tracker.expirations) >= self._capacity_for(buff_name):
                     victim = self._regen_eviction_index(target_tracker, event)
                     target_tracker.expirations[victim] = new_duration
                     target_tracker.stack_ids[victim] = event.stack_id
@@ -551,9 +573,9 @@ class BuffStateTracker:
                 target_tracker.healing_scores.append(
                     self._healing_by_agent.get(event.source_agent_id, 0)
                 )
-                del target_tracker.expirations[_capacity_for(buff_name) :]
-                del target_tracker.stack_ids[_capacity_for(buff_name) :]
-                del target_tracker.healing_scores[_capacity_for(buff_name) :]
+                del target_tracker.expirations[self._capacity_for(buff_name) :]
+                del target_tracker.stack_ids[self._capacity_for(buff_name) :]
+                del target_tracker.healing_scores[self._capacity_for(buff_name) :]
         elif event.kind == "remove_single":
             if buff_name in _QUEUE_LOGIC_BUFFS and target_tracker.expirations:
                 # QueueLogic: find stack by stack_id or closest duration
@@ -690,7 +712,7 @@ class BuffStateTracker:
             # QueueLogic: add initial stacks one by one, using same overflow
             # logic as mid-combat applies (drop shortest non-front on overflow,
             # replacing it in place to preserve queue order).
-            capacity = _capacity_for(buff_name)
+            capacity = self._capacity_for(buff_name)
             for _ in range(event.stacks):
                 duration = event.duration_ms if event.duration_ms > 0 else None
                 if len(target_tracker.expirations) >= capacity:
@@ -744,7 +766,7 @@ class BuffStateTracker:
                     ),
                     key=lambda pair: pair[1],
                 )
-                pairs = pairs[-_capacity_for(buff_name) :]
+                pairs = pairs[-self._capacity_for(buff_name) :]
                 target_tracker.expirations = [e for e, _, _, _ in pairs]
                 target_tracker.total_durations = [td for _, td, _, _ in pairs]
                 target_tracker.stack_ids = [sid for _, _, sid, _ in pairs]
@@ -764,7 +786,7 @@ class BuffStateTracker:
                         strict=True,
                     )
                 )
-                stability_pairs = stability_pairs[-_capacity_for(buff_name) :]
+                stability_pairs = stability_pairs[-self._capacity_for(buff_name) :]
                 target_tracker.expirations = [expiry for expiry, _, _ in stability_pairs]
                 target_tracker.stack_ids = [stack_id for _, stack_id, _ in stability_pairs]
                 target_tracker.healing_scores = [healing for _, _, healing in stability_pairs]
@@ -774,9 +796,9 @@ class BuffStateTracker:
             target_tracker.expirations.append(event.duration_ms or None)
             target_tracker.stack_ids.append(event.stack_id)
             target_tracker.healing_scores.append(0)
-            del target_tracker.expirations[_capacity_for(buff_name) :]
-            del target_tracker.stack_ids[_capacity_for(buff_name) :]
-            del target_tracker.healing_scores[_capacity_for(buff_name) :]
+            del target_tracker.expirations[self._capacity_for(buff_name) :]
+            del target_tracker.stack_ids[self._capacity_for(buff_name) :]
+            del target_tracker.healing_scores[self._capacity_for(buff_name) :]
             if event.added_active and event.stack_id in target_tracker.stack_ids:
                 index = target_tracker.stack_ids.index(event.stack_id)
                 target_tracker.expirations.insert(0, target_tracker.expirations.pop(index))
@@ -822,7 +844,7 @@ class BuffStateTracker:
                 target_tracker.expirations[index] = remaining + event.extended_duration_ms
             return
         if target_tracker.expirations and (
-            old_duration > 0 or len(target_tracker.expirations) >= _capacity_for(buff_name)
+            old_duration > 0 or len(target_tracker.expirations) >= self._capacity_for(buff_name)
         ):
             # EI BuffSimulatorIntensity.Extend grafts the extension onto the
             # stack whose remaining duration is closest to oldValue, not the
@@ -835,9 +857,9 @@ class BuffStateTracker:
         target_tracker.expirations.append(event.new_duration_ms)
         target_tracker.stack_ids.append(event.stack_id)
         target_tracker.healing_scores.append(self._healing_by_agent.get(event.source_agent_id, 0))
-        del target_tracker.expirations[_capacity_for(buff_name) :]
-        del target_tracker.stack_ids[_capacity_for(buff_name) :]
-        del target_tracker.healing_scores[_capacity_for(buff_name) :]
+        del target_tracker.expirations[self._capacity_for(buff_name) :]
+        del target_tracker.stack_ids[self._capacity_for(buff_name) :]
+        del target_tracker.healing_scores[self._capacity_for(buff_name) :]
 
     def compute_player_uptimes(
         self, agent_id: int, duration_ms: int, active_duration_ms: int | None = None

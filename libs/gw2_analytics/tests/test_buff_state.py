@@ -16,6 +16,7 @@ from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
     BuffExtensionEvent,
+    BuffInfoEvent,
     BuffStackActiveEvent,
 )
 
@@ -66,6 +67,28 @@ class TestBuffStateTracker:
         tracker.process(_boon_apply(skill_id=fury_id, target=1, time_ms=50000, kind="remove_all"))
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=100000)
         assert uptimes["fury"] == pytest.approx(50.0, rel=0.01)
+
+    @pytest.mark.parametrize("buff_name", TRACKED_BUFFS)
+    def test_buffinfo_capacity_applies_to_every_tracked_buff(self, buff_name: str) -> None:
+        """Positive EI MaxStacks metadata overrides the fallback for tracked buffs."""
+        tracker = BuffStateTracker()
+        tracker.process(
+            BuffInfoEvent(time_ms=0, skill_id=TRACKED_BUFFS[buff_name], max_stacks=99)
+        )
+
+        assert tracker._capacity_for(buff_name) == 99
+
+    def test_buffinfo_zero_capacity_keeps_five_stack_fallback(self) -> None:
+        """Missing EI capacity keeps the existing five-entry fallback."""
+        skill_id = TRACKED_BUFFS["protection"]
+        tracker = BuffStateTracker()
+        tracker.process(BuffInfoEvent(time_ms=0, skill_id=skill_id, max_stacks=0))
+        for _ in range(6):
+            tracker.process(_boon_apply(skill_id=skill_id, time_ms=0, duration_ms=1000))
+
+        tracker.process(_boon_apply(skill_id=skill_id, time_ms=6000, kind="remove_all"))
+        uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=6000)
+        assert uptimes["protection"] == pytest.approx(83.3333333333)
 
     def test_might_stacking(self) -> None:
         """Intensity boons report average stacks, matching Elite Insights."""

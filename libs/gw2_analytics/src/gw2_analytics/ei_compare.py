@@ -19,6 +19,7 @@ from gw2_core import (
     BoonApplyEvent,
     BuffApplyEvent,
     BuffExtensionEvent,
+    BuffInfoEvent,
     BuffStackActiveEvent,
     CCEvent,
     CombatOutcomeEvent,
@@ -786,6 +787,12 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
         regen_overstacks=regen_overstacks,
     )
     for tracked_event in event_list:
+        if isinstance(tracked_event, BuffInfoEvent):
+            tracker.process(tracked_event)
+
+    for tracked_event in event_list:
+        if isinstance(tracked_event, BuffInfoEvent):
+            continue
         if isinstance(
             tracked_event,
             (BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent, BuffStackActiveEvent),
