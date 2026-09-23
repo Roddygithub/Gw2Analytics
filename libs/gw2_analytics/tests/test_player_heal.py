@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from gw2_analytics.player_heal import PlayerHealAggregator, PlayerHealRow
-from gw2_core import HealingEvent
+from gw2_core import HealingEvent, StunBreakEvent
 
 
 def _healing(
@@ -29,6 +29,10 @@ def _healing(
         skill_id=43,
         healing=healing,
     )
+
+
+def _stun(source: int) -> StunBreakEvent:
+    return StunBreakEvent(time_ms=0, source_agent_id=source, target_agent_id=0, skill_id=0)
 
 
 class TestPlayerHealAggregator:
@@ -134,3 +138,30 @@ class TestPlayerHealAggregator:
         assert rows[0].hps == 12.0
         assert rows[0].barrier_total == 30
         assert rows[0].barrier_ps == 3.0
+
+
+def test_stun_break_only_input_creates_zero_heal_row() -> None:
+    rows = PlayerHealAggregator().aggregate([], 10.0, stun_break_events=[_stun(7)])
+    assert rows[0].source_agent_id == 7
+    assert rows[0].total_healing == 0
+    assert rows[0].stun_breaks == 1
+
+
+def test_stun_breaks_are_counted_by_source_agent() -> None:
+    rows = PlayerHealAggregator().aggregate(
+        [], 10.0, stun_break_events=[_stun(2), _stun(1), _stun(2)]
+    )
+    assert [(row.source_agent_id, row.stun_breaks) for row in rows] == [(1, 1), (2, 2)]
+
+
+def test_zero_duration_barrier_getter_keeps_rates_zero() -> None:
+    rows = PlayerHealAggregator().aggregate(
+        [_healing(7, 120)], 0.0, barrier_portion_getter=lambda event: 30
+    )
+    assert rows[0].barrier_total == 30
+    assert rows[0].hps == rows[0].barrier_ps == 0.0
+
+
+def test_heal_name_map_preserves_explicit_none() -> None:
+    rows = PlayerHealAggregator().aggregate([_healing(7, 1)], 1.0, name_map={7: None})
+    assert rows[0].name is None

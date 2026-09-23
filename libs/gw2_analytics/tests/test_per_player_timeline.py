@@ -39,7 +39,7 @@ from gw2_analytics.per_player_timeline import (
     PerPlayerTimelinePoint,
     PerPlayerTimelineSeries,
 )
-from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent
+from gw2_core import BuffRemovalEvent, DamageEvent, Event, HealingEvent, PositionEvent
 
 # ---------------------------------------------------------------------------
 # Minimal in-memory agent stand-in (avoids the SQLAlchemy ORM
@@ -452,3 +452,66 @@ def test_aggregate_fails_fast_on_non_normalized_time_ms() -> None:
     events: list[Event] = [_dmg(18_302_628_885_633_695_000, 1, 100)]
     with pytest.raises(ValueError, match="would produce"):
         PerPlayerTimelineAggregator().aggregate(events, agents, window_s=5)
+
+
+def test_event_at_window_boundary_starts_next_bucket() -> None:
+    agents = [_FakeAgent(1, ":a.1", True)]
+    series = PerPlayerTimelineAggregator().aggregate(
+        [_dmg(1_000, 1, 7), _heal(2_000, 1, 9)], agents, window_s=1
+    )
+    assert [p.total_damage for p in series[0].points] == [0, 7, 0]
+    assert [p.total_healing for p in series[0].points] == [0, 0, 9]
+
+
+def test_agent_without_agent_id_is_ignored() -> None:
+    class _NoId:
+        is_player = True
+        account_name = ":missing"
+        name = "Missing"
+
+    series = PerPlayerTimelineAggregator().aggregate([_dmg(1, 1, 1)], [_NoId()])
+    assert series == []
+
+
+def test_agent_without_name_uses_empty_series_name() -> None:
+    class _NoName:
+        agent_id = 1
+        account_name = ":a.1"
+        is_player = True
+
+    series = PerPlayerTimelineAggregator().aggregate([_dmg(1, 1, 1)], [_NoName()])
+    assert series[0].name == ""
+
+
+def test_duplicate_agent_id_uses_last_identity_slice() -> None:
+    agents = [
+        _FakeAgent(1, ":old", True, "Old"),
+        _FakeAgent(1, ":new", True, "New"),
+    ]
+    series = PerPlayerTimelineAggregator().aggregate([_dmg(1, 1, 1)], agents)
+    assert [(s.account_name, s.name) for s in series] == [(":new", "New")]
+
+
+def test_non_combat_events_create_zero_timeline_values() -> None:
+    agents = [_FakeAgent(1, ":a.1", True)]
+    event = PositionEvent(time_ms=2_000, source_agent_id=1, target_agent_id=0, skill_id=0, x=1, y=2)
+    series = PerPlayerTimelineAggregator().aggregate([event], agents, window_s=1)
+    assert len(series) == 1
+    assert all(point.total_damage == 0 for point in series[0].points)
+
+
+def test_large_valid_window_keeps_bucket_grid_contiguous() -> None:
+    agents = [_FakeAgent(1, ":a.1", True)]
+    series = PerPlayerTimelineAggregator().aggregate([_dmg(600_000, 1, 4)], agents, window_s=600)
+    assert len(series[0].points) == 2
+    assert series[0].points[1].total_damage == 4
+    assert series[0].points[0].window_end_ms == series[0].points[1].window_start_ms
+
+
+def test_healing_and_strip_totals_survive_separate_buckets() -> None:
+    agents = [_FakeAgent(1, ":a.1", True)]
+    series = PerPlayerTimelineAggregator().aggregate(
+        [_heal(0, 1, 3), _strip(2_000, 1, 5)], agents, window_s=1
+    )
+    assert sum(p.total_healing for p in series[0].points) == 3
+    assert series[0].points[2].total_buff_removal == 5

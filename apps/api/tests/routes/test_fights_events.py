@@ -85,3 +85,43 @@ def test_events_window_s_param() -> None:
     assert custom_resp.status_code == 200, custom_resp.text
     custom_buckets = len(custom_resp.json()["event_windows"])
     assert custom_buckets < default_buckets
+
+
+def test_events_window_bounds_are_rejected() -> None:
+    fight_id, _ = _post_fight_and_events(1)
+    for window_s in (0, 601):
+        resp = client.get(f"/api/v1/fights/{fight_id}/events", params={"window_s": window_s})
+        assert resp.status_code == 422
+
+
+def test_events_one_second_window_preserves_each_second_bucket() -> None:
+    fight_id, _ = _post_fight_and_events(4)
+    resp = client.get(f"/api/v1/fights/{fight_id}/events", params={"window_s": 1})
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert [bucket["start_ms"] for bucket in payload["event_windows"]] == list(
+        range(0, 8_000, 1_000)
+    )
+    assert [bucket["event_count"] for bucket in payload["event_windows"]] == [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+    ]
+
+
+def test_events_maximum_window_collapses_short_fight() -> None:
+    fight_id, _ = _post_fight_and_events(4)
+    resp = client.get(f"/api/v1/fights/{fight_id}/events", params={"window_s": 600})
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["event_windows"]) == 1
+
+
+def test_events_non_integer_window_is_rejected() -> None:
+    fight_id, _ = _post_fight_and_events(1)
+    resp = client.get(f"/api/v1/fights/{fight_id}/events", params={"window_s": "five"})
+    assert resp.status_code == 422

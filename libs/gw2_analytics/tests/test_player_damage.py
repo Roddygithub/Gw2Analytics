@@ -136,3 +136,29 @@ class TestPlayerDamageAggregator:
         assert rows[0].dps == 10.0
         assert rows[0].dps_condi == 5.0
         assert rows[0].dps_power == 5.0
+
+
+def test_split_conserves_damage_across_multiple_sources() -> None:
+    def split(event: DamageEvent) -> tuple[int, int]:
+        return event.damage // 4, event.damage - event.damage // 4
+
+    rows = PlayerDamageAggregator().aggregate(
+        [_damage(2, 80), _damage(1, 40)], duration_s=2.0, dps_split_getter=split
+    )
+    assert [(r.source_agent_id, r.dps, r.dps_condi + r.dps_power) for r in rows] == [
+        (2, 40.0, 40.0),
+        (1, 20.0, 20.0),
+    ]
+
+
+def test_zero_duration_still_applies_split_totals_without_rates() -> None:
+    rows = PlayerDamageAggregator().aggregate(
+        [_damage(1, 20)], duration_s=0.0, dps_split_getter=lambda e: (5, 15)
+    )
+    assert rows[0].dps == rows[0].dps_condi == rows[0].dps_power == 0.0
+    assert rows[0].total_damage == 20
+
+
+def test_empty_name_map_is_same_as_missing_name_map() -> None:
+    rows = PlayerDamageAggregator().aggregate([_damage(1, 1)], 1.0, name_map={})
+    assert rows[0].name is None

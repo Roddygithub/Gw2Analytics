@@ -34,7 +34,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.tests.routes._evtc_builder import build_2025_string
-from gw2_core import DamageEvent, DeathEvent, DownEvent, HealingEvent, PositionEvent, StunBreakEvent
+from gw2_core import (
+    BuffRemovalEvent,
+    CCEvent,
+    DamageEvent,
+    DeathEvent,
+    DownEvent,
+    HealingEvent,
+    PositionEvent,
+    StunBreakEvent,
+)
 from gw2analytics_api.routes.fights.fight_aggregators import (
     make_barrier_portion_getter,
     make_dps_split_getter,
@@ -1235,3 +1244,155 @@ def test_readout_dist_to_commander_with_commander() -> None:
     assert player_row.dist_to_commander == pytest.approx(750.0, abs=1.0), (
         f"expected dist≈750.0, got {player_row.dist_to_commander}"
     )
+
+
+def _readout_identity(agent_id: int, *, account: str | None = "acct") -> AgentIdentity:
+    return AgentIdentity(
+        agent_id=agent_id,
+        name=f"Player {agent_id}",
+        subgroup=1,
+        account_name=account,
+        profession="Warrior",
+        elite_spec="Berserker",
+        is_player=True,
+        is_commander=False,
+    )
+
+
+def _readout_damage(
+    source: int, target: int = 2, value: int = 100, time_ms: int = 1_000
+) -> DamageEvent:
+    return DamageEvent(
+        time_ms=time_ms,
+        source_agent_id=source,
+        target_agent_id=target,
+        skill_id=1,
+        damage=value,
+    )
+
+
+def test_readout_empty_event_stream_has_no_projection_rows() -> None:
+    out = aggregate_combat_readout(
+        [], agent_id_to_identity_map={1: _readout_identity(1)}, duration_s=10.0, fight_id="empty"
+    )
+    assert out.players == []
+
+
+def test_readout_healing_only_player_gets_zero_damage_projection() -> None:
+    event = HealingEvent(
+        time_ms=1_000, source_agent_id=1, target_agent_id=2, skill_id=1, healing=80
+    )
+    out = aggregate_combat_readout(
+        [event], agent_id_to_identity_map={1: _readout_identity(1)}, duration_s=2.0
+    )
+    row = out.players[0]
+    assert row.roles == ["Heal"]
+    assert row.damage.dps_total == 0.0
+    assert row.heal.heal_total == 80
+
+
+def test_readout_damage_and_defense_use_opposite_identity_axes() -> None:
+    out = aggregate_combat_readout(
+        [_readout_damage(1, target=2, value=90)],
+        agent_id_to_identity_map={1: _readout_identity(1), 2: _readout_identity(2)},
+        duration_s=1.0,
+    )
+    by_id = {row.agent_id: row for row in out.players}
+    assert by_id[1].damage.dps_total == 90.0
+    assert by_id[2].defense.damage_taken == 90
+
+
+def test_readout_unknown_event_source_is_not_projected() -> None:
+    out = aggregate_combat_readout(
+        [_readout_damage(99)], agent_id_to_identity_map={1: _readout_identity(1)}, duration_s=1.0
+    )
+    assert out.players == []
+
+
+def test_readout_position_events_do_not_create_combat_rows() -> None:
+    event = PositionEvent(time_ms=1_000, source_agent_id=1, target_agent_id=0, skill_id=0, x=1, y=2)
+    out = aggregate_combat_readout(
+        [event], agent_id_to_identity_map={1: _readout_identity(1)}, duration_s=1.0
+    )
+    assert out.players == []
+
+
+def test_readout_zero_duration_keeps_rates_zero() -> None:
+    out = aggregate_combat_readout(
+        [_readout_damage(1, value=50)],
+        agent_id_to_identity_map={1: _readout_identity(1)},
+        duration_s=0.0,
+    )
+    assert out.players[0].damage.dps_total == 0.0
+
+
+def test_readout_cc_only_player_gets_cc_role_and_counter() -> None:
+    events = [
+        CCEvent(time_ms=i, source_agent_id=1, target_agent_id=2, skill_id=1, cc_value=1)
+        for i in range(4)
+    ]
+    out = aggregate_combat_readout(
+        events, agent_id_to_identity_map={1: _readout_identity(1)}, duration_s=1.0
+    )
+    assert out.players[0].roles == ["CC"]
+    assert out.players[0].damage.cc_applied == 4
+
+
+def test_readout_strip_only_player_gets_strip_role() -> None:
+    event = BuffRemovalEvent(
+        time_ms=1_000, source_agent_id=1, target_agent_id=2, skill_id=1, buff_removal=1, buff_id=740
+    )
+    out = aggregate_combat_readout(
+        [event], agent_id_to_identity_map={1: _readout_identity(1)}, duration_s=1.0
+    )
+    assert out.players[0].roles == ["Strip"]
+    assert out.players[0].damage.strips == 1
+
+
+def test_readout_many_condition_removals_get_cleanser_role() -> None:
+    events = [
+        BuffRemovalEvent(
+            time_ms=i, source_agent_id=1, target_agent_id=2, skill_id=1, buff_removal=1, buff_id=736
+        )
+        for i in range(11)
+    ]
+    out = aggregate_combat_readout(
+        events, agent_id_to_identity_map={1: _readout_identity(1)}, duration_s=1.0
+    )
+    assert out.players[0].roles == ["Cleanser"]
+    assert out.players[0].heal.cleanses == 11
+
+
+def test_readout_death_only_player_gets_defense_row() -> None:
+    event = DeathEvent(time_ms=1_000, source_agent_id=1, target_agent_id=0, skill_id=0)
+    out = aggregate_combat_readout(
+        [event], agent_id_to_identity_map={1: _readout_identity(1)}, duration_s=1.0
+    )
+    assert out.players[0].defense.deaths == 1
+
+
+def test_readout_down_time_is_exposed_on_defense_projection() -> None:
+    event = DownEvent(
+        time_ms=1_000, source_agent_id=1, target_agent_id=0, skill_id=0, downtime_ms=250
+    )
+    out = aggregate_combat_readout(
+        [event, _readout_damage(1)],
+        agent_id_to_identity_map={1: _readout_identity(1)},
+        duration_s=1.0,
+    )
+    assert out.players[0].defense.time_downed_ms == 250
+
+
+def test_readout_uptimes_and_commander_distance_pass_through() -> None:
+    uptime = {"might": 75.0, "outgoing_might": 12}
+    out = aggregate_combat_readout(
+        [_readout_damage(1)],
+        agent_id_to_identity_map={1: _readout_identity(1)},
+        duration_s=1.0,
+        boon_uptimes_by_account={"acct": uptime},
+        dist_to_commander_by_account={"acct": 42.5},
+    )
+    row = out.players[0]
+    assert row.boons.might_uptime == 75.0
+    assert row.boons.outgoing_might == 12
+    assert row.defense.dist_to_commander == 42.5

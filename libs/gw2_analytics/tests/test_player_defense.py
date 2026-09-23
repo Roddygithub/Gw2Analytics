@@ -217,3 +217,37 @@ class TestPlayerDefenseAggregator:
         assert len(rows) == 1
         assert rows[0].damage_taken == 100
         assert rows[0].barrier_absorbed == 50
+
+
+def test_cc_and_death_events_create_rows_without_damage() -> None:
+    rows = PlayerDefenseAggregator().aggregate(
+        [], [_cc(7, 4)], [_death(9)], name_map={7: "CC", 9: "Dead"}
+    )
+    assert [(r.agent_id, r.cc_taken, r.deaths, r.name) for r in rows] == [
+        (7, 4, 0, "CC"),
+        (9, 0, 1, "Dead"),
+    ]
+
+
+def test_barrier_getter_is_summed_per_target() -> None:
+    rows = PlayerDefenseAggregator().aggregate(
+        [_damage(7, 40), _damage(7, 60)], [], [], barrier_portion_getter=lambda e: e.damage // 2
+    )
+    assert rows[0].damage_taken == 100
+    assert rows[0].barrier_absorbed == 50
+
+
+def test_defense_event_streams_keep_actor_and_target_attribution_separate() -> None:
+    rows = PlayerDefenseAggregator().aggregate(
+        [_damage(7, 10, source=9)],
+        [_cc(7, 2, source=9)],
+        [_death(9)],
+        dodge_events=[_dodge(9)],
+        block_events=[_block(7)],
+        interrupt_events=[_interrupt(9, target=7)],
+    )
+    by_id = {row.agent_id: row for row in rows}
+    assert by_id[7].damage_taken == 10
+    assert by_id[7].cc_taken == 2
+    assert by_id[7].blocks == 1
+    assert by_id[9].deaths == by_id[9].dodges == by_id[9].interrupts == 1
