@@ -1183,8 +1183,8 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
                 merged = tracker.compute_merged_uptimes(
                     instance_recycled,
                     duration_ms,
-                    slice_lo,
-                    slice_hi,
+                    slice_lo - origin,
+                    slice_hi - origin,
                     agent_awareness,
                 )
                 for name, value in merged.items():

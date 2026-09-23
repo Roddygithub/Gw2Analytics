@@ -910,6 +910,7 @@ class BuffStateTracker:
         where EI reports a single uptime across all recycled agents over the
         full slice duration.
 
+        ``slice_lo_ms``, ``slice_hi_ms``, and awareness spans are fight-relative.
         For each agent, uptime is computed over its awareness span intersected
         with the slice window [slice_lo_ms, slice_hi_ms). The merged uptime is
         the sum of cumulative_stack_ms across all agents, divided by duration_ms.
@@ -935,11 +936,9 @@ class BuffStateTracker:
                 agent_end = duration_ms
                 if awareness_spans and aid in awareness_spans:
                     span = awareness_spans[aid]
-                    # Awareness spans are fight-relative; convert to slice-relative
-                    abs_start = max(span[0], slice_lo_ms)
-                    abs_end = min(span[1], slice_hi_ms) if slice_hi_ms is not None else span[1]
-                    agent_start = max(0, abs_start - slice_lo_ms)
-                    agent_end = min(duration_ms, abs_end - slice_lo_ms)
+                    # Awareness spans, slice bounds, and tracker state are fight-relative.
+                    agent_start = max(0, span[0], slice_lo_ms)
+                    agent_end = min(duration_ms, span[1], slice_hi_ms)
                     if agent_end <= agent_start:
                         continue
 

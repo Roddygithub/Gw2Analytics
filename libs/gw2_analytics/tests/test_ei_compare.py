@@ -327,6 +327,70 @@ def test_compare_elite_insights_does_not_merge_shared_instance_buffs() -> None:
     assert result["differences"] == {}
 
 
+def test_compare_elite_insights_merges_late_anonymous_slice_boon() -> None:
+    """A boon applied only by a recycled later slice must be reported."""
+    origin = 1_000_000
+    fight = Fight(
+        id="fight",
+        header=EvtcHeader(
+            build_version="20260224",
+            agent_count=2,
+            duration_ms=10_000,
+            start_time_ms=origin,
+        ),
+        agents=[
+            Agent(
+                id=1,
+                name="First anonymous slice",
+                profession=Profession.ENGINEER,
+                elite=EliteSpec.SCRAPPER,
+                is_player=True,
+                instance_id=1111,
+            ),
+            Agent(
+                id=2,
+                name="Later anonymous slice",
+                profession=Profession.ENGINEER,
+                elite=EliteSpec.SCRAPPER,
+                is_player=True,
+                instance_id=1111,
+            ),
+        ],
+    )
+    expected: dict[str, Any] = {
+        "players": [
+            {
+                "account": "Non Squad Player 1",
+                "instanceID": 1111,
+                "name": "Scrapper pl-1111",
+                "firstAware": 5_000,
+                "lastAware": 10_000,
+                "buffUptimes": [{"id": 1187, "buffData": [{"uptime": 20.0}]}],
+            }
+        ]
+    }
+    events = [
+        BoonApplyEvent(
+            time_ms=origin + 6_000,
+            source_agent_id=0,
+            target_agent_id=2,
+            skill_id=1187,
+            duration_ms=2_000,
+            stacks=1,
+            kind="apply",
+        )
+    ]
+
+    result = compare_elite_insights(
+        fight,
+        expected,
+        events,
+        agent_awareness={1: (0, 4_000), 2: (6_000, 10_000)},
+    )
+
+    assert result["differences"] == {}
+
+
 def test_compare_elite_insights_prefers_outcome_downs_for_named_players() -> None:
     fight = Fight(
         id="fight",
