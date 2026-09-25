@@ -173,17 +173,38 @@ jobs:
       - uses: ./.github/actions/setup-python
 
       - name: Start MinIO
+        # CI-infra only: neither registry source is usable anonymously any more.
+        # quay.io/minio/minio now refuses anonymous pull (JWT grant returns an
+        # empty action list -> 401), and minio/minio was deleted from Docker Hub
+        # on 2026-09-11. MinIO Community Edition is source-only since the
+        # upstream repo was archived (2026-04-25) and dl.min.io/server/ now 410s,
+        # but github.com/minio/minio GitHub Releases still serves the official
+        # binary for this exact tag. MINIO_SHA256 pins the content so the
+        # download stays integrity-checked independently of that endpoint.
+        env:
+          MINIO_RELEASE: "RELEASE.2025-09-07T16-13-09Z"
+          MINIO_SHA256: "7c5bd8512c6e966455b1d198209358b2d191c77a83ab377c4073281065fb855f"
         run: |
-          docker run -d --name minio \
-            -p 9000:9000 -p 9001:9001 \
-            -e MINIO_ROOT_USER=gw2analytics \
-            -e MINIO_ROOT_PASSWORD=gw2analytics-secret \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data --console-address :9001
+          curl -fLsS --retry 3 -o "$RUNNER_TEMP/minio" \
+            "https://github.com/minio/minio/releases/download/${MINIO_RELEASE}/minio.linux-amd64.${MINIO_RELEASE}"
+          echo "${MINIO_SHA256}  $RUNNER_TEMP/minio" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/minio"
+          mkdir -p "$RUNNER_TEMP/minio-data"
+          MINIO_ROOT_USER=gw2analytics \
+          MINIO_ROOT_PASSWORD=gw2analytics-secret \
+            nohup "$RUNNER_TEMP/minio" server "$RUNNER_TEMP/minio-data" \
+              --console-address :9001 \
+              > "$RUNNER_TEMP/minio.log" 2>&1 &
           echo "Waiting for MinIO to be ready..."
           for i in $(seq 1 15); do
             if curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1; then
               echo "MinIO is ready!"
               break
+            fi
+            if [ "$i" -eq 15 ]; then
+              echo "::error::MinIO did not become ready within 30s"
+              cat "$RUNNER_TEMP/minio.log"
+              exit 1
             fi
             sleep 2
           done
@@ -543,17 +564,38 @@ jobs:
       - uses: ./.github/actions/setup-python
 
       - name: Start MinIO
+        # CI-infra only: neither registry source is usable anonymously any more.
+        # quay.io/minio/minio now refuses anonymous pull (JWT grant returns an
+        # empty action list -> 401), and minio/minio was deleted from Docker Hub
+        # on 2026-09-11. MinIO Community Edition is source-only since the
+        # upstream repo was archived (2026-04-25) and dl.min.io/server/ now 410s,
+        # but github.com/minio/minio GitHub Releases still serves the official
+        # binary for this exact tag. MINIO_SHA256 pins the content so the
+        # download stays integrity-checked independently of that endpoint.
+        env:
+          MINIO_RELEASE: "RELEASE.2025-09-07T16-13-09Z"
+          MINIO_SHA256: "7c5bd8512c6e966455b1d198209358b2d191c77a83ab377c4073281065fb855f"
         run: |
-          docker run -d --name minio \
-            -p 9000:9000 -p 9001:9001 \
-            -e MINIO_ROOT_USER=gw2analytics \
-            -e MINIO_ROOT_PASSWORD=gw2analytics-secret \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data --console-address :9001
+          curl -fLsS --retry 3 -o "$RUNNER_TEMP/minio" \
+            "https://github.com/minio/minio/releases/download/${MINIO_RELEASE}/minio.linux-amd64.${MINIO_RELEASE}"
+          echo "${MINIO_SHA256}  $RUNNER_TEMP/minio" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/minio"
+          mkdir -p "$RUNNER_TEMP/minio-data"
+          MINIO_ROOT_USER=gw2analytics \
+          MINIO_ROOT_PASSWORD=gw2analytics-secret \
+            nohup "$RUNNER_TEMP/minio" server "$RUNNER_TEMP/minio-data" \
+              --console-address :9001 \
+              > "$RUNNER_TEMP/minio.log" 2>&1 &
           echo "Waiting for MinIO to be ready..."
           for i in $(seq 1 15); do
             if curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1; then
               echo "MinIO is ready!"
               break
+            fi
+            if [ "$i" -eq 15 ]; then
+              echo "::error::MinIO did not become ready within 30s"
+              cat "$RUNNER_TEMP/minio.log"
+              exit 1
             fi
             sleep 2
           done
