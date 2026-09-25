@@ -32,7 +32,14 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    # Built from docker/minio/Dockerfile: the upstream minio/minio image is no
+    # longer pullable (Docker Hub repo deleted, quay.io denies anonymous pull),
+    # so this pins the official GitHub Release binary and verifies its SHA-256
+    # at build time. See docker/minio/Dockerfile for the upgrade procedure.
+    image: gw2a-minio:RELEASE.2025-09-07T16-13-09Z
+    build:
+      context: .
+      dockerfile: docker/minio/Dockerfile
     container_name: gw2a-minio
     command: server /data --console-address ":9001"
     environment:
