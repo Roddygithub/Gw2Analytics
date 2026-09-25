@@ -16,7 +16,13 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # Same image and build as docker-compose.yml: official GitHub Release
+    # binary, SHA-256 verified at build time. Still intentionally unpublished
+    # -- MinIO stays on the internal compose network here.
+    image: gw2a-minio:RELEASE.2025-09-07T16-13-09Z
+    build:
+      context: .
+      dockerfile: docker/minio/Dockerfile
     container_name: gw2a-minio-prod
     command: server /data --console-address ":9001"
     environment:
