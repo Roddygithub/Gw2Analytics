@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from gw2_analytics.ei_compare import compare_elite_insights
-from gw2_core import CombatOutcomeEvent, DownEvent, UpEvent
+from gw2_core import BuffStackDeactiveEvent, CombatOutcomeEvent, DownEvent, UpEvent
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -48,7 +48,11 @@ def test_evtc_2025_multilog_corpus(
     assert fight.header.build_version == "20251123"
     assert fight.header.duration_ms == duration_ms
     assert len(fight.agents) == agents
-    assert len(parsed) == events
+    deactive_count = sum(isinstance(event, BuffStackDeactiveEvent) for event in parsed)
+    # Keep the historical total as the baseline for all pre-deactivation
+    # event types; statechange 28 is an additional parsed vocabulary item.
+    assert len(parsed) - deactive_count == events
+    assert deactive_count > 0
     assert sum(isinstance(event, DownEvent) for event in parsed) == downs
     assert sum(isinstance(event, UpEvent) for event in parsed) == ups
     assert sum(isinstance(event, CombatOutcomeEvent) for event in parsed) == outcomes

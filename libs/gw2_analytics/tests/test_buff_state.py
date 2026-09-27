@@ -18,6 +18,7 @@ from gw2_core import (
     BuffExtensionEvent,
     BuffInfoEvent,
     BuffStackActiveEvent,
+    BuffStackDeactiveEvent,
 )
 
 
@@ -49,6 +50,25 @@ class TestBuffStateTracker:
         tracker = BuffStateTracker()
         uptimes = tracker.compute_all_uptimes(duration_s=100.0)
         assert uptimes == {}
+
+    def test_zero_active_duration_does_not_fall_back_to_full_fight(self) -> None:
+        tracker = BuffStateTracker()
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["fury"],
+                target=1,
+                time_ms=0,
+                duration_ms=1000,
+            )
+        )
+
+        uptimes = tracker.compute_player_uptimes(
+            agent_id=1,
+            duration_ms=1000,
+            active_duration_ms=0,
+        )
+
+        assert uptimes["fury"] == 0.0
 
     def test_single_boon_apply_full_fight(self) -> None:
         """A boon applied at t=0 that lasts the whole fight → 100% uptime."""
@@ -169,7 +189,7 @@ class TestBuffStateTracker:
                 skill_id=might_id,
                 target=1,
                 time_ms=50000,
-                duration_ms=100000,
+                duration_ms=50000,
                 kind="remove_single",
             )
         )
@@ -266,6 +286,7 @@ class TestBuffStateTracker:
                 source_agent_id=0,
                 target_agent_id=1,
                 skill_id=fury_id,
+                duration_ms=10_000,
             )
         )
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=10000)
@@ -282,6 +303,7 @@ class TestBuffStateTracker:
                 source_agent_id=0,
                 target_agent_id=2,
                 skill_id=fury_id,
+                duration_ms=5_000,
             )
         )
         # untracked skill_id should be ignored without affecting tracked state
@@ -306,6 +328,7 @@ class TestBuffStateTracker:
                 source_agent_id=0,
                 target_agent_id=1,
                 skill_id=fury_id,
+                duration_ms=2_000,
             )
         )
         tracker.process(_boon_apply(skill_id=fury_id, target=1, time_ms=3000, kind="remove_all"))
@@ -315,6 +338,7 @@ class TestBuffStateTracker:
                 source_agent_id=0,
                 target_agent_id=1,
                 skill_id=fury_id,
+                duration_ms=4_000,
             )
         )
         # Active 1000..3000 and 6000..10000 = 6000ms out of 10000ms
@@ -331,10 +355,28 @@ class TestBuffStateTracker:
                 source_agent_id=0,
                 target_agent_id=1,
                 skill_id=might_id,
+                duration_ms=5_000,
             )
         )
         uptimes = tracker.compute_player_uptimes(agent_id=1, duration_ms=5000)
         assert uptimes["might"] == pytest.approx(1.0, rel=0.01)
+
+    def test_equal_duration_might_stacks_match_ei_midpoint_insertion(self) -> None:
+        tracker = BuffStateTracker()
+        for stack_id in (1, 2, 3):
+            tracker.process(
+                BuffApplyEvent(
+                    time_ms=0,
+                    source_agent_id=0,
+                    target_agent_id=1,
+                    skill_id=TRACKED_BUFFS["might"],
+                    duration_ms=5_000,
+                    stack_id=stack_id,
+                )
+            )
+
+        # EI's midpoint+1 insertion yields this non-stable equal-duration order.
+        assert tracker._get_stack(1, "might").stack_ids == [1, 3, 2]
 
     def test_buff_apply_snapshots_preserve_all_initial_stacks(self) -> None:
         tracker = BuffStateTracker()
@@ -350,6 +392,319 @@ class TestBuffStateTracker:
             )
 
         assert tracker.compute_player_uptimes(1, 10_000)["fury"] == pytest.approx(50.0)
+
+    @pytest.mark.parametrize("skill_id", [TRACKED_BUFFS["protection"], 718])
+    def test_zero_duration_queue_and_regeneration_expire_over_positive_fight(
+        self, skill_id: int
+    ) -> None:
+        tracker = BuffStateTracker()
+        tracker.process(_boon_apply(skill_id=skill_id, target=1, time_ms=0, duration_ms=0))
+        buff = "regeneration" if skill_id == 718 else "protection"
+        assert tracker.compute_player_uptimes(1, 1_000)[buff] == 0
+
+    @pytest.mark.parametrize("skill_id", [TRACKED_BUFFS["protection"], 718])
+    def test_max_duration_queue_and_regeneration_remain_active(self, skill_id: int) -> None:
+        tracker = BuffStateTracker()
+        tracker.process(
+            _boon_apply(skill_id=skill_id, target=1, time_ms=0, duration_ms=2**31 - 1)
+        )
+        buff = "regeneration" if skill_id == 718 else "protection"
+        assert tracker.compute_player_uptimes(1, 1_000)[buff] == 100
+
+    def test_intensity_expiry_at_event_time_is_removed_before_new_apply(self) -> None:
+        might_id = TRACKED_BUFFS["might"]
+        tracker = BuffStateTracker()
+        tracker.process(
+            _boon_apply(skill_id=might_id, target=1, time_ms=0, duration_ms=100)
+        )
+
+        tracker.process(
+            _boon_apply(skill_id=might_id, target=1, time_ms=100, duration_ms=100)
+        )
+
+        stack = tracker._agent_buffs[1]["might"]
+        assert stack.expirations == [200]
+        assert stack.total_durations == [100]
+        assert stack.cumulative_stack_ms == 100
+
+    def test_override_single_removal_prefers_stack_id_over_duration(self) -> None:
+        tracker = BuffStateTracker()
+        for stack_id, duration in ((11, 1_000), (22, 2_000)):
+            tracker.process(
+                _boon_apply(
+                    skill_id=TRACKED_BUFFS["might"], target=1, duration_ms=duration
+                ).model_copy(update={"stack_id": stack_id})
+            )
+
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["might"],
+                target=1,
+                duration_ms=2_000,
+                kind="remove_single",
+            ).model_copy(update={"stack_id": 11})
+        )
+
+        stack = tracker._agent_buffs[1]["might"]
+        assert stack.stack_ids == [22]
+        assert stack.total_durations == [2_000]
+
+    def test_deactive_event_does_not_mutate_tracker(self) -> None:
+        tracker = BuffStateTracker()
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["might"], target=1, duration_ms=1_000
+            ).model_copy(update={"stack_id": 11})
+        )
+        stack = tracker._agent_buffs[1]["might"]
+        before = (stack.expirations.copy(), stack.stack_ids.copy(), stack.total_durations.copy())
+
+        tracker.process(
+            BuffStackDeactiveEvent(
+                time_ms=100, source_agent_id=0, target_agent_id=1,
+                skill_id=TRACKED_BUFFS["might"], stack_id=11,
+            )
+        )
+
+        assert (
+            stack.expirations, stack.stack_ids, stack.total_durations
+        ) == before
+
+    def test_stability_buff_apply_preserves_original_duration_for_removal(self) -> None:
+        tracker = BuffStateTracker(stability_duration_correction=True)
+        tracker.process(
+            BuffApplyEvent(
+                time_ms=0,
+                source_agent_id=0,
+                target_agent_id=1,
+                skill_id=TRACKED_BUFFS["stability"],
+                duration_ms=1_500,
+                original_duration_ms=2_000,
+                stack_id=22,
+            )
+        )
+
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["stability"],
+                target=1,
+                time_ms=500,
+                duration_ms=2_000,
+                kind="remove_single",
+            ).model_copy(update={"stack_id": 22})
+        )
+
+        assert tracker._agent_buffs[1]["stability"].expirations == []
+
+    def test_stability_removal_uses_ei_instance_duration_correction(self) -> None:
+        tracker = BuffStateTracker(stability_duration_correction=True)
+        for stack_id, duration in ((11, 1_000), (22, 2_000)):
+            tracker.process(
+                _boon_apply(
+                    skill_id=TRACKED_BUFFS["stability"], target=1, duration_ms=duration
+                ).model_copy(update={"stack_id": stack_id})
+            )
+
+        # EI recognizes the original applied duration and normalizes it to the
+        # remaining duration using the instance ID before simulator removal.
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["stability"],
+                target=1,
+                time_ms=1_000,
+                duration_ms=2_000,
+                kind="remove_single",
+            ).model_copy(update={"stack_id": 22})
+        )
+
+        assert tracker._agent_buffs[1]["stability"].expirations == []
+
+    def test_stability_extension_updates_ei_original_duration_for_removal(self) -> None:
+        tracker = BuffStateTracker(stability_duration_correction=True)
+        tracker.process(
+            _boon_apply(skill_id=TRACKED_BUFFS["stability"], target=1, duration_ms=2_000)
+            .model_copy(update={"stack_id": 22})
+        )
+        tracker.process(
+            BuffExtensionEvent(
+                time_ms=500,
+                source_agent_id=1,
+                target_agent_id=1,
+                skill_id=TRACKED_BUFFS["stability"],
+                extended_duration_ms=500,
+                new_duration_ms=2_500,
+                stack_id=22,
+            )
+        )
+
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["stability"],
+                target=1,
+                time_ms=1_000,
+                duration_ms=2_500,
+                kind="remove_single",
+            ).model_copy(update={"stack_id": 22})
+        )
+
+        assert tracker._agent_buffs[1]["stability"].expirations == []
+
+    def test_stability_reused_instance_uses_latest_apply_and_extension_window(self) -> None:
+        tracker = BuffStateTracker(stability_duration_correction=True)
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["stability"],
+                target=1,
+                time_ms=0,
+                duration_ms=2_000,
+            ).model_copy(update={"stack_id": 22})
+        )
+        tracker.process(
+            BuffExtensionEvent(
+                time_ms=300,
+                source_agent_id=1,
+                target_agent_id=1,
+                skill_id=TRACKED_BUFFS["stability"],
+                extended_duration_ms=500,
+                new_duration_ms=2_500,
+                stack_id=22,
+            )
+        )
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["stability"],
+                target=1,
+                time_ms=400,
+                duration_ms=1_000,
+            ).model_copy(update={"stack_id": 22})
+        )
+
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["stability"],
+                target=1,
+                time_ms=900,
+                duration_ms=1_000,
+                kind="remove_single",
+            ).model_copy(update={"stack_id": 22})
+        )
+
+        stack = tracker._agent_buffs[1]["stability"]
+        assert stack.total_durations == [1_600]
+        assert stack.stack_ids == [22]
+
+    def test_stability_extension_keeps_normalization_id_separate_from_simulator_match(
+        self,
+    ) -> None:
+        tracker = BuffStateTracker()
+        for stack_id, duration in ((11, 1_000), (22, 2_000)):
+            tracker.process(
+                _boon_apply(
+                    skill_id=TRACKED_BUFFS["stability"], target=1, duration_ms=duration
+                ).model_copy(update={"stack_id": stack_id})
+            )
+
+        tracker.process(
+            BuffExtensionEvent(
+                time_ms=0,
+                source_agent_id=1,
+                target_agent_id=1,
+                skill_id=TRACKED_BUFFS["stability"],
+                extended_duration_ms=500,
+                new_duration_ms=2_500,
+                stack_id=11,
+            )
+        )
+
+        stack = tracker._agent_buffs[1]["stability"]
+        assert stack.stack_ids == [11, 22]
+        assert stack.total_durations == [1_000, 2_500]
+        assert stack.expirations == [1_000, 2_500]
+        assert tracker._stability_extensions[(1, 11)] == [(0, 500)]
+
+    def test_stability_duration_correction_disabled_matches_raw_duration(self) -> None:
+        tracker = BuffStateTracker()
+        for duration in (1_000, 2_000):
+            tracker.process(
+                _boon_apply(
+                    skill_id=TRACKED_BUFFS["stability"], target=1, duration_ms=duration
+                ).model_copy(update={"stack_id": 0})
+            )
+
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["stability"],
+                target=1,
+                time_ms=1_000,
+                duration_ms=2_000,
+                kind="remove_single",
+            ).model_copy(update={"stack_id": 0})
+        )
+
+        assert tracker._agent_buffs[1]["stability"].stack_ids == [0]
+
+    def test_might_max_duration_removal_is_normalized_by_instance_history(self) -> None:
+        tracker = BuffStateTracker(might_duration_correction=True)
+        max_duration = 2**31 - 1
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["might"],
+                target=1,
+                duration_ms=max_duration,
+            ).model_copy(update={"stack_id": 22})
+        )
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["might"],
+                target=1,
+                time_ms=100,
+                duration_ms=max_duration,
+                kind="remove_single",
+            ).model_copy(update={"stack_id": 22})
+        )
+
+        assert tracker._agent_buffs[1]["might"].stack_ids == []
+
+    def test_might_max_duration_removal_prefers_instance_id(self) -> None:
+        tracker = BuffStateTracker(might_duration_correction=True)
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["might"], target=1, duration_ms=2_000
+            ).model_copy(update={"stack_id": 22})
+        )
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["might"],
+                target=1,
+                time_ms=100,
+                duration_ms=2**31 - 1,
+                kind="remove_single",
+            ).model_copy(update={"stack_id": 22})
+        )
+
+        assert tracker._agent_buffs[1]["might"].stack_ids == []
+
+    def test_stability_without_instance_ids_matches_duration(self) -> None:
+        tracker = BuffStateTracker()
+        for duration in (1_000, 2_000):
+            tracker.process(
+                _boon_apply(
+                    skill_id=TRACKED_BUFFS["stability"], target=1, duration_ms=duration
+                ).model_copy(update={"stack_id": 0})
+            )
+
+        tracker.process(
+            _boon_apply(
+                skill_id=TRACKED_BUFFS["stability"],
+                target=1,
+                duration_ms=2_000,
+                kind="remove_single",
+            ).model_copy(update={"stack_id": 0})
+        )
+
+        stack = tracker._agent_buffs[1]["stability"]
+        assert stack.total_durations == [1_000]
+        assert stack.stack_ids == [0]
 
     def test_manual_expiry_marker_does_not_remove_next_stack(self) -> None:
         tracker = BuffStateTracker()
@@ -392,6 +747,7 @@ class TestBuffStateTracker:
                 source_agent_id=0,
                 target_agent_id=1,
                 skill_id=fury_id,
+                duration_ms=5_000,
             )
         )
         tracker.process(_boon_apply(skill_id=fury_id, target=1, time_ms=5000, kind="remove_all"))
@@ -470,7 +826,272 @@ class TestBuffStateTracker:
             )
         )
 
+        stack = tracker._agent_buffs[1]["protection"]
+        assert stack.expirations == [1_000]
+        assert stack.queue_extensions == [[3_000]]
         assert tracker.compute_player_uptimes(1, 10_000)["protection"] == pytest.approx(50.0)
+
+    def test_queue_extension_targets_active_front_not_matching_stack_id(self) -> None:
+        swiftness_id = TRACKED_BUFFS["swiftness"]
+        tracker = BuffStateTracker()
+        tracker.process(
+            _boon_apply(skill_id=swiftness_id, time_ms=0, duration_ms=2_000)
+            .model_copy(update={"stack_id": 11})
+        )
+        tracker.process(
+            _boon_apply(skill_id=swiftness_id, time_ms=0, duration_ms=1_000)
+            .model_copy(update={"stack_id": 22})
+        )
+        tracker.process(
+            BuffExtensionEvent(
+                time_ms=100,
+                source_agent_id=1,
+                target_agent_id=1,
+                skill_id=swiftness_id,
+                extended_duration_ms=100,
+                new_duration_ms=1_000,
+                stack_id=22,
+            )
+        )
+
+        stack = tracker._agent_buffs[1]["swiftness"]
+        assert stack.expirations == [1_900, 1_000]
+        assert stack.queue_extensions == [[100], []]
+
+    def test_queue_logic_single_removal_matches_total_duration_before_stack_id(self) -> None:
+        protection_id = TRACKED_BUFFS["protection"]
+        tracker = BuffStateTracker()
+        for stack_id, duration in ((11, 1_000), (22, 2_000)):
+            tracker.process(
+                _boon_apply(
+                    skill_id=protection_id, target=7, duration_ms=duration,
+                ).model_copy(update={"stack_id": stack_id})
+            )
+
+        tracker.process(
+            _boon_apply(
+                skill_id=protection_id, target=7, time_ms=100,
+                duration_ms=2_000, kind="remove_single",
+            ).model_copy(update={"stack_id": 11})
+        )
+
+        assert tracker._agent_buffs[7]["protection"].stack_ids == [11]
+
+
+def test_intensity_total_duration_decreases_with_elapsed_time() -> None:
+    tracker = BuffStateTracker()
+    tracker.process(
+        _boon_apply(
+            skill_id=TRACKED_BUFFS["might"],
+            duration_ms=1_000,
+            stacks=2,
+        )
+    )
+    stack = tracker._agent_buffs[1]["might"]
+
+    BuffStateTracker._advance(stack, 400)
+
+    assert stack.total_durations == [600, 600]
+
+
+def test_override_extension_without_live_stack_creates_absolute_expiry() -> None:
+    tracker = BuffStateTracker()
+    tracker.process(
+        BuffExtensionEvent(
+            time_ms=100,
+            source_agent_id=1,
+            target_agent_id=1,
+            skill_id=TRACKED_BUFFS["might"],
+            extended_duration_ms=1_000,
+            new_duration_ms=1_000,
+            stack_id=11,
+        )
+    )
+
+    stack = tracker._agent_buffs[1]["might"]
+    assert stack.expirations == [1_100]
+    assert stack.total_durations == [1_000]
+    assert stack.stack_ids == [11]
+    assert tracker.compute_player_uptimes(1, 10_000)["might"] == pytest.approx(0.1)
+
+
+def test_regeneration_extension_without_live_stack_creates_ei_duration() -> None:
+    tracker = BuffStateTracker()
+    tracker.process(
+        BuffExtensionEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            extended_duration_ms=100,
+            new_duration_ms=1_100,
+            stack_id=9,
+        )
+    )
+
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.expirations == [1_100]
+    assert stack.total_durations == [1_100]
+    assert stack.stack_ids == [9]
+    assert stack.regen_extensions == [[]]
+    assert tracker.compute_player_uptimes(7, 1_100)["regeneration"] == pytest.approx(100.0)
+
+
+def test_regeneration_added_extension_uses_last_expired_seed_healing() -> None:
+    tracker = BuffStateTracker(healing_by_agent={1: 5, 2: 50, 3: 100})
+    tracker.process(_regen_apply(0, 100, 1).model_copy(update={"source_agent_id": 1}))
+    tracker.process(_regen_apply(0, 1_000, 2).model_copy(update={"source_agent_id": 2}))
+    tracker.process(
+        BuffStackActiveEvent(
+            time_ms=0, source_agent_id=1, target_agent_id=7,
+            skill_id=718, stack_id=1,
+        )
+    )
+    tracker.process(
+        BuffExtensionEvent(
+            time_ms=100, source_agent_id=3, target_agent_id=7, skill_id=718,
+            extended_duration_ms=100, new_duration_ms=100, stack_id=3,
+        )
+    )
+
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.stack_ids == [3, 2]
+    assert stack.healing_scores == [5, 50]
+
+
+def test_regeneration_extension_with_zero_old_value_adds_active_stack() -> None:
+    tracker = BuffStateTracker()
+    tracker.process(_regen_apply(0, 5_000, 1))
+    tracker.process(
+        BuffExtensionEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            extended_duration_ms=100,
+            new_duration_ms=100,
+            stack_id=2,
+        )
+    )
+
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.stack_ids == [2, 1]
+    assert stack.expirations == [100, 5_000]
+
+
+def test_regeneration_extension_at_capacity_extends_front_with_zero_old_value() -> None:
+    tracker = BuffStateTracker()
+    for sid in range(5):
+        tracker.process(_regen_apply(0, 5_000 + sid, sid))
+    tracker.process(
+        BuffExtensionEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            extended_duration_ms=100,
+            new_duration_ms=100,
+            stack_id=9,
+        )
+    )
+
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert len(stack.expirations) == 5
+    assert stack.expirations[0] == 5_000
+    assert stack.total_durations[0] == 5_100
+    assert stack.regen_extensions[0] == [100]
+
+
+def test_regeneration_extensions_stay_aligned_after_healing_priority_sort() -> None:
+    tracker = BuffStateTracker(healing_by_agent={1: 10, 2: 30, 3: 20})
+    tracker.process(
+        BuffApplyEvent(
+            time_ms=0, source_agent_id=1, target_agent_id=7, skill_id=718,
+            duration_ms=1_000, stack_id=1,
+        )
+    )
+    tracker.process(
+        BuffExtensionEvent(
+            time_ms=0, source_agent_id=1, target_agent_id=7, skill_id=718,
+            extended_duration_ms=100, new_duration_ms=1_100, stack_id=1,
+        )
+    )
+    tracker.process(
+        BuffApplyEvent(
+            time_ms=0, source_agent_id=2, target_agent_id=7, skill_id=718,
+            duration_ms=2_000, stack_id=2,
+        )
+    )
+    tracker.process(
+        BuffApplyEvent(
+            time_ms=0, source_agent_id=3, target_agent_id=7, skill_id=718,
+            duration_ms=3_000, stack_id=3,
+        )
+    )
+
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.stack_ids == [2, 3, 1]
+    assert stack.healing_scores == [30, 20, 10]
+    assert stack.expirations == [2_000, 3_000, 1_000]
+    assert stack.total_durations == [2_000, 3_000, 1_100]
+    assert stack.regen_extensions == [[], [], [100]]
+
+
+def test_regeneration_extension_extends_front_not_closest_total_duration() -> None:
+    tracker = BuffStateTracker()
+    tracker.process(_regen_apply(0, 5_000, 1))
+    tracker.process(_regen_apply(0, 1_000, 2))
+    tracker.process(
+        BuffExtensionEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            extended_duration_ms=100,
+            new_duration_ms=1_100,
+            stack_id=2,
+        )
+    )
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.expirations == [5_000, 1_000]
+    assert stack.total_durations == [5_100, 1_000]
+    assert stack.regen_extensions == [[100], []]
+
+
+def test_regeneration_total_duration_is_not_reduced_by_elapsed_time() -> None:
+    tracker = BuffStateTracker()
+    tracker.process(_regen_apply(0, 1_000, 1))
+    tracker.process(_regen_apply(400, 1_000, 2))
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.expirations == [600, 1_000]
+    assert stack.total_durations == [600, 1_000]
+
+
+def test_regeneration_pending_extension_keeps_stack_metadata_at_expiry() -> None:
+    tracker = BuffStateTracker()
+    tracker.process(_regen_apply(0, 1_000, 1))
+    tracker.process(
+        BuffExtensionEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=718,
+            extended_duration_ms=100,
+            new_duration_ms=1_100,
+            stack_id=1,
+        )
+    )
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.expirations == [1_000]
+    assert stack.total_durations == [1_100]
+    assert tracker.compute_player_uptimes(7, 1_100)["regeneration"] == pytest.approx(100.0)
+    assert tracker.compute_merged_uptimes([7], 1_100)["regeneration"] == pytest.approx(100.0)
+
+    BuffStateTracker._advance(stack, 1_000)
+
+    assert stack.expirations == [100]
+    assert stack.total_durations == [100]
+    assert stack.stack_ids == [1]
 
 
 def test_regeneration_stack_active_record_moves_the_stack_to_the_front() -> None:
@@ -512,7 +1133,7 @@ def test_regeneration_stack_active_record_moves_the_stack_to_the_front() -> None
     assert tracker.compute_player_uptimes(7, 3_000)["regeneration"] == 100.0
 
 
-def test_initial_regeneration_active_stack_starts_at_front() -> None:
+def test_initial_regeneration_snapshot_preserves_stack_order() -> None:
     tracker = BuffStateTracker()
 
     tracker.process(
@@ -533,36 +1154,37 @@ def test_initial_regeneration_active_stack_starts_at_front() -> None:
             skill_id=718,
             duration_ms=5_000,
             stack_id=22,
-            added_active=True,
         )
     )
 
     stack = tracker._agent_buffs[7]["regeneration"]
-    assert stack.stack_ids == [22, 11]
-    assert tracker._healing_no_sort is True
-
-
-def test_regeneration_added_active_does_not_activate_or_stop_sorting() -> None:
-    tracker = BuffStateTracker()
-    first = BoonApplyEvent(
-        time_ms=0,
-        source_agent_id=1,
-        target_agent_id=7,
-        skill_id=718,
-        duration_ms=1_000,
-        stacks=1,
-        stack_id=11,
-    )
-    added_active = first.model_copy(
-        update={"duration_ms": 5_000, "stack_id": 22, "added_active": True}
-    )
-
-    tracker.process(first)
-    tracker.process(added_active)
-
-    stack = tracker._agent_buffs[7]["regeneration"]
     assert stack.stack_ids == [11, 22]
     assert tracker._healing_no_sort is False
+
+
+def test_regeneration_single_removal_matches_total_duration_before_stack_id() -> None:
+    tracker = BuffStateTracker()
+    tracker.process(_regen_apply(0, 1_000, 11))
+    tracker.process(_regen_apply(0, 2_000, 22))
+    tracker.process(
+        _regen_apply(0, 1_000, 22).model_copy(update={"kind": "remove_single"})
+    )
+
+    assert tracker._agent_buffs[7]["regeneration"].stack_ids == [22]
+
+
+def test_stability_fallback_capacity_without_buff_info_is_25() -> None:
+    tracker = BuffStateTracker()
+    tracker.process(
+        _boon_apply(
+            skill_id=TRACKED_BUFFS["stability"],
+            target=7,
+            duration_ms=5_000,
+            stacks=26,
+        )
+    )
+
+    assert len(tracker._agent_buffs[7]["stability"].expirations) == 25
 
 
 def _regen_apply(time_ms: int, duration_ms: int, stack_id: int) -> BoonApplyEvent:
@@ -597,6 +1219,53 @@ def test_regeneration_overstack_hint_names_the_displaced_stack() -> None:
 
     # The hint named instance 102, a 1 s stack, so the 60 s one survives.
     assert tracker.compute_player_uptimes(7, 30_000)["regeneration"] == 100.0
+
+
+def test_initial_regeneration_overflow_hint_evicts_named_non_tail_stack() -> None:
+    tracker = BuffStateTracker(regen_overstacks={7: [(0, 10_000, 102)]})
+    for stack_id, duration in zip(
+        (100, 101, 102, 103, 104), (5_000, 9_000, 10_000, 11_000, 12_000), strict=True
+    ):
+        tracker.process(_regen_apply(0, duration, stack_id))
+
+    tracker.process(_regen_apply(0, 2_000, 999))
+
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert 102 not in stack.stack_ids
+    assert 104 in stack.stack_ids
+
+
+def test_initial_regeneration_overflow_without_hint_evicts_lowest_heal_tail() -> None:
+    tracker = BuffStateTracker(healing_by_agent={1: 10, 2: 20})
+    for stack_id, duration in zip(
+        (100, 101, 102, 103, 104), range(5_000, 10_000, 1_000), strict=True
+    ):
+        tracker.process(
+            _regen_apply(0, duration, stack_id).model_copy(update={"source_agent_id": 1})
+        )
+    tracker.process(_regen_apply(10, 2_000, 999).model_copy(update={"source_agent_id": 2}))
+
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert stack.stack_ids == [999, 100, 101, 102, 103]
+    assert stack.healing_scores == [20, 10, 10, 10, 10]
+
+
+def test_regeneration_overstack_hint_is_consumed_once() -> None:
+    tracker = BuffStateTracker(regen_overstacks={7: [(5, 10_000, 102)]})
+    for stack_id, duration in zip(
+        (100, 101, 102, 103, 104),
+        (5_000, 9_000, 10_000, 11_000, 12_000),
+        strict=True,
+    ):
+        tracker.process(_regen_apply(0, duration, stack_id))
+
+    tracker.process(_regen_apply(10, 2_000, 999))
+    tracker.process(_regen_apply(10, 2_000, 1_000))
+
+    stack = tracker._agent_buffs[7]["regeneration"]
+    assert 102 not in stack.stack_ids
+    assert 101 in stack.stack_ids
+    assert 1_000 in stack.stack_ids
 
 
 def test_regeneration_overstack_hint_falls_back_to_the_closest_duration() -> None:
@@ -683,49 +1352,37 @@ def test_queue_logic_overflow_replaces_shortest_stack_in_place() -> None:
     assert stack.expirations[4] == 400  # tail order preserved
 
 
-def test_queue_logic_added_active_moves_stack_to_front() -> None:
-    """EI BuffSimulator.Add calls _logic.Activate on addedActive, which moves
-    the new stack to the front of the queue.
-    """
+def test_queue_logic_overflow_compares_duration_plus_pending_extensions() -> None:
     protection_id = TRACKED_BUFFS["protection"]
     tracker = BuffStateTracker()
+    for stack_id, duration in enumerate((100, 200, 300, 400, 500), start=1):
+        tracker.process(
+            _boon_apply(
+                skill_id=protection_id, target=7, time_ms=0,
+                duration_ms=duration,
+            ).model_copy(update={"stack_id": stack_id})
+        )
     tracker.process(
-        BoonApplyEvent(
-            time_ms=0,
-            source_agent_id=1,
-            target_agent_id=7,
-            skill_id=protection_id,
-            duration_ms=5_000,
-            stacks=1,
-            stack_id=11,
+        BuffExtensionEvent(
+            time_ms=0, source_agent_id=1, target_agent_id=7,
+            skill_id=protection_id, extended_duration_ms=500,
+            new_duration_ms=600, stack_id=1,
         )
     )
     tracker.process(
-        BoonApplyEvent(
-            time_ms=0,
-            source_agent_id=1,
-            target_agent_id=7,
-            skill_id=protection_id,
+        _boon_apply(
+            skill_id=protection_id, target=7, time_ms=0,
+            duration_ms=9_000,
+        ).model_copy(update={"stack_id": 99})
+    )
+    tracker.process(
+        _boon_apply(
+            skill_id=protection_id, target=7, time_ms=0,
             duration_ms=8_000,
-            stacks=1,
-            stack_id=22,
-        )
+        ).model_copy(update={"stack_id": 100})
     )
-    stack = tracker._agent_buffs[7]["protection"]
-    assert stack.expirations == [5_000, 8_000]
 
-    # The new stack is flagged active -> it fronts the queue immediately.
-    tracker.process(
-        BoonApplyEvent(
-            time_ms=0,
-            source_agent_id=1,
-            target_agent_id=7,
-            skill_id=protection_id,
-            duration_ms=3_000,
-            stacks=1,
-            stack_id=33,
-            added_active=True,
-        )
-    )
-    assert stack.stack_ids == [33, 11, 22]
-    assert stack.expirations == [3_000, 5_000, 8_000]
+    stack = tracker._agent_buffs[7]["protection"]
+    assert 1 in stack.stack_ids
+    assert 3 not in stack.stack_ids
+    assert stack.stack_ids.count(100) == 1

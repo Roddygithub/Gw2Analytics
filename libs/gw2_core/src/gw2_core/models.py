@@ -337,6 +337,7 @@ class EventType(StrEnum):
     BUFF_APPLY = "BUFF_APPLY"
     BUFF_EXTENSION = "BUFF_EXTENSION"
     BUFF_STACK_ACTIVE = "BUFF_STACK_ACTIVE"
+    BUFF_STACK_DEACTIVE = "BUFF_STACK_DEACTIVE"
     BUFF_INFO = "BUFF_INFO"
     POSITION = "POSITION"
     SKILL_ACTIVATION = "SKILL_ACTIVATION"
@@ -909,6 +910,17 @@ class BuffStackActiveEvent(BaseEvent):
     stack_id: int = Field(..., ge=0, le=0xFFFFFFFF)
 
 
+class BuffStackDeactiveEvent(BaseEvent):
+    """CBTS_BUFFSTACKDEACTIVE=28: a stack became inactive."""
+
+    event_type: Literal[EventType.BUFF_STACK_DEACTIVE] = EventType.BUFF_STACK_DEACTIVE
+    time_ms: int = Field(..., ge=0)
+    source_agent_id: int = Field(..., ge=0)
+    target_agent_id: int = Field(..., ge=0)
+    skill_id: int = Field(..., ge=0)
+    stack_id: int = Field(..., ge=0, le=0xFFFFFFFF)
+
+
 class BuffInfoEvent(BaseEvent):
     """CBTS_BUFFINFO=30 statechange: buff metadata including MaxStacks.
 
@@ -1050,6 +1062,7 @@ _EVENT_MAP: dict[EventType, type[BaseEvent]] = {
     EventType.BUFF_APPLY: BuffApplyEvent,
     EventType.BUFF_EXTENSION: BuffExtensionEvent,
     EventType.BUFF_STACK_ACTIVE: BuffStackActiveEvent,
+    EventType.BUFF_STACK_DEACTIVE: BuffStackDeactiveEvent,
     EventType.BUFF_INFO: BuffInfoEvent,
     EventType.POSITION: PositionEvent,
     EventType.SKILL_ACTIVATION: SkillActivationEvent,

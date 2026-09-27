@@ -11,7 +11,9 @@ from gw2_core import (
     ActivationType,
     Agent,
     BoonApplyEvent,
+    BuffApplyEvent,
     BuffInfoEvent,
+    BuffStackActiveEvent,
     CombatOutcomeEvent,
     DamageEvent,
     DeathEvent,
@@ -28,6 +30,42 @@ from gw2_evtc_parser import OwnershipInterval
 
 def _rows(result: dict[str, object]) -> dict[str, dict[str, Any]]:
     return {str(row["key"]): row for row in cast("list[dict[str, Any]]", result["results"])}
+
+
+def test_ei_has_stack_ids_build_gate_normalizes_removal_duration() -> None:
+    agent = Agent(
+        id=1, name="Player", profession=Profession.GUARDIAN,
+        elite=EliteSpec.DRAGONHUNTER, is_player=True,
+        account_name=":Player.1234", instance_id=1111,
+    )
+    events = [
+        BuffApplyEvent(
+            time_ms=0, source_agent_id=1, target_agent_id=1,
+            skill_id=1122, duration_ms=2_000, original_duration_ms=2_000,
+            stack_id=0,
+        ),
+        BuffStackActiveEvent(time_ms=0, source_agent_id=1, target_agent_id=1,
+                            skill_id=1122, stack_id=5),
+        BoonApplyEvent(
+            time_ms=1_000, source_agent_id=1, target_agent_id=1,
+            skill_id=1122, duration_ms=2_000, stacks=1, kind="remove_single", stack_id=0,
+        ),
+    ]
+
+    for build, uptime in (("20210529", 0.2), ("20210530", 0.1)):
+        fight = Fight(
+            id="fight",
+            header=EvtcHeader(build_version=build, agent_count=1, duration_ms=10_000),
+            agents=[agent],
+        )
+        expected: dict[str, Any] = {
+            "players": [{
+                "account": "Player.1234", "instanceID": 1111, "name": "Player",
+                "profession": "Dragonhunter",
+                "buffUptimes": [{"id": 1122, "buffData": [{"uptime": uptime}]}],
+            }]
+        }
+        assert compare_elite_insights(fight, expected, events)["differences"] == {}
 
 
 def test_compare_elite_insights_keeps_first_anonymous_agent_for_shared_instance() -> None:

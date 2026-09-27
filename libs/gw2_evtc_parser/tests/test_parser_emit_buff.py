@@ -747,6 +747,34 @@ def test_parse_events_emit_buff_out_of_range_does_not_emit(is_buffremove_value: 
     assert all(not isinstance(e, BoonApplyEvent) for e in events)
 
 
+def test_parse_events_emit_buff_stack_deactive_statechange() -> None:
+    from gw2_core import BuffStackDeactiveEvent
+
+    evtc = _build_minimal_evtc(
+        [(1, 1, 1, "Src", True)],
+        skills=[(42, "Skill")],
+        events=[
+            _build_event_record(
+                time_ms=1_000,
+                src_agent=1,
+                dst_agent=22,
+                value=0,
+                skill_id=42,
+                is_statechange=28,
+            ),
+        ],
+    )
+
+    events = list(PythonEvtcParser().parse_events(evtc))
+
+    assert len(events) == 1
+    assert isinstance(events[0], BuffStackDeactiveEvent)
+    assert events[0].target_agent_id == 1
+    assert events[0].skill_id == 42
+    assert events[0].stack_id == 22
+    assert events[0].skill_id == 42
+
+
 def test_parse_events_emit_buff_statechange_record_filters_upstream() -> None:
     """``is_statechange != 0`` records are filtered upstream (no BoonApplyEvent fires).
 

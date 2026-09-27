@@ -83,6 +83,7 @@ from gw2_core import (
     BuffInfoEvent,
     BuffRemovalEvent,
     BuffStackActiveEvent,
+    BuffStackDeactiveEvent,
     CCEvent,
     CombatOutcomeEvent,
     DamageEvent,
@@ -834,6 +835,15 @@ class PythonEvtcParser:
                 continue
             if is_statechange == 27:
                 yield BuffStackActiveEvent(
+                    time_ms=time_ms,
+                    source_agent_id=event_src_agent,
+                    target_agent_id=event_src_agent,
+                    skill_id=skill_id,
+                    stack_id=dst_agent,
+                )
+                continue
+            if is_statechange == 28:
+                yield BuffStackDeactiveEvent(
                     time_ms=time_ms,
                     source_agent_id=event_src_agent,
                     target_agent_id=event_src_agent,

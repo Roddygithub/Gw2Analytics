@@ -21,6 +21,7 @@ from gw2_core import (
     BuffExtensionEvent,
     BuffInfoEvent,
     BuffStackActiveEvent,
+    BuffStackDeactiveEvent,
     CCEvent,
     CombatOutcomeEvent,
     DamageEvent,
@@ -781,10 +782,40 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
     )
 
     healing_by_agent = {agent.id: agent.healing for agent in fight.agents}
+    stability_events = [
+        event
+        for event in event_list
+        if isinstance(event, (BoonApplyEvent, BuffApplyEvent))
+        and event.skill_id == TRACKED_BUFFS["stability"]
+    ]
+    # EI CombatData.HasStackIDs requires either transition event (and an
+    # EVTC build newer than ProperConfusionDamageSimulation).
+    build_version = int(fight.header.build_version) if fight.header else 0
+    has_stack_ids = build_version > 20210529 and any(
+        isinstance(event, (BuffStackActiveEvent, BuffStackDeactiveEvent))
+        for event in event_list
+    )
+    stability_duration_correction = has_stack_ids and any(
+        isinstance(event, BoonApplyEvent) and event.kind == "remove_single"
+        for event in stability_events
+    )
+    might_events = [
+        event for event in event_list
+        if isinstance(event, (BoonApplyEvent, BuffApplyEvent))
+        and event.skill_id == TRACKED_BUFFS["might"]
+    ]
+    might_duration_correction = has_stack_ids and any(
+        isinstance(event, BoonApplyEvent)
+        and event.kind == "remove_single"
+        and event.duration_ms == 2**31 - 1
+        for event in might_events
+    )
     tracker = BuffStateTracker(
         start_time_ms=origin,
         healing_by_agent=healing_by_agent,
         regen_overstacks=regen_overstacks,
+        stability_duration_correction=stability_duration_correction,
+        might_duration_correction=might_duration_correction,
     )
     for tracked_event in event_list:
         if isinstance(tracked_event, BuffInfoEvent):
@@ -795,7 +826,13 @@ def compare_elite_insights(  # noqa: PLR0912, PLR0915
             continue
         if isinstance(
             tracked_event,
-            (BoonApplyEvent, BuffApplyEvent, BuffExtensionEvent, BuffStackActiveEvent),
+            (
+                BoonApplyEvent,
+                BuffApplyEvent,
+                BuffExtensionEvent,
+                BuffStackActiveEvent,
+                BuffStackDeactiveEvent,
+            ),
         ):
             tracker.process(tracked_event)
         elif isinstance(tracked_event, DespawnEvent):
