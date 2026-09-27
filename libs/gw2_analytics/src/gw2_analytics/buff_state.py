@@ -1029,15 +1029,10 @@ class BuffStateTracker:
         ):
             while len(stack.regen_extensions) < len(stack.expirations):
                 stack.regen_extensions.append([])
-            index = min(
-                range(len(stack.total_durations)),
-                key=lambda i: abs(stack.total_durations[i] - old_duration),
-            )
-            stack.total_durations[index] += event.extended_duration_ms
-            stack.expirations[index] = (stack.expirations[index] or 0) + event.extended_duration_ms
+            stack.regen_extensions[0].append(event.extended_duration_ms)
+            stack.total_durations[0] += event.extended_duration_ms
             return
 
-        seeded_from_removal = stack.regen_last_removed_healing is not None
         stack.expirations.append(event.new_duration_ms)
         stack.total_durations.append(event.new_duration_ms)
         stack.regen_extensions.append([])
@@ -1070,7 +1065,7 @@ class BuffStateTracker:
             stack.healing_scores,
         ):
             del values[capacity:]
-        if event.stack_id in stack.stack_ids and not seeded_from_removal:
+        if event.stack_id in stack.stack_ids:
             self._activate_regeneration_stack(stack, stack.stack_ids.index(event.stack_id))
             self._healing_no_sort = True
 

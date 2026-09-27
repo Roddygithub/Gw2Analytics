@@ -936,8 +936,8 @@ def test_regeneration_added_extension_uses_last_expired_seed_healing() -> None:
     )
 
     stack = tracker._agent_buffs[7]["regeneration"]
-    assert stack.stack_ids == [2, 3]
-    assert stack.healing_scores == [50, 5]
+    assert stack.stack_ids == [3, 2]
+    assert stack.healing_scores == [5, 50]
 
 
 def test_regeneration_extension_with_zero_old_value_adds_active_stack() -> None:
@@ -978,9 +978,9 @@ def test_regeneration_extension_at_capacity_extends_front_with_zero_old_value() 
 
     stack = tracker._agent_buffs[7]["regeneration"]
     assert len(stack.expirations) == 5
-    assert stack.expirations[0] == 5_100
+    assert stack.expirations[0] == 5_000
     assert stack.total_durations[0] == 5_100
-    assert stack.regen_extensions[0] == []
+    assert stack.regen_extensions[0] == [100]
 
 
 def test_regeneration_extensions_stay_aligned_after_healing_priority_sort() -> None:
@@ -1013,12 +1013,12 @@ def test_regeneration_extensions_stay_aligned_after_healing_priority_sort() -> N
     stack = tracker._agent_buffs[7]["regeneration"]
     assert stack.stack_ids == [2, 3, 1]
     assert stack.healing_scores == [30, 20, 10]
-    assert stack.expirations == [2_000, 3_000, 1_100]
+    assert stack.expirations == [2_000, 3_000, 1_000]
     assert stack.total_durations == [2_000, 3_000, 1_100]
-    assert stack.regen_extensions == [[], [], []]
+    assert stack.regen_extensions == [[], [], [100]]
 
 
-def test_regeneration_extension_extends_closest_total_duration() -> None:
+def test_regeneration_extension_extends_front_stack() -> None:
     tracker = BuffStateTracker()
     tracker.process(_regen_apply(0, 5_000, 1))
     tracker.process(_regen_apply(0, 1_000, 2))
@@ -1034,9 +1034,9 @@ def test_regeneration_extension_extends_closest_total_duration() -> None:
         )
     )
     stack = tracker._agent_buffs[7]["regeneration"]
-    assert stack.expirations == [5_000, 1_100]
-    assert stack.total_durations == [5_000, 1_100]
-    assert stack.regen_extensions == [[], []]
+    assert stack.expirations == [5_000, 1_000]
+    assert stack.total_durations == [5_100, 1_000]
+    assert stack.regen_extensions == [[100], []]
 
 
 def test_regeneration_total_duration_is_not_reduced_by_elapsed_time() -> None:
@@ -1048,7 +1048,7 @@ def test_regeneration_total_duration_is_not_reduced_by_elapsed_time() -> None:
     assert stack.total_durations == [600, 1_000]
 
 
-def test_regeneration_extension_updates_stack_duration_immediately() -> None:
+def test_regeneration_pending_extension_keeps_stack_metadata_at_expiry() -> None:
     tracker = BuffStateTracker()
     tracker.process(_regen_apply(0, 1_000, 1))
     tracker.process(
@@ -1063,8 +1063,9 @@ def test_regeneration_extension_updates_stack_duration_immediately() -> None:
         )
     )
     stack = tracker._agent_buffs[7]["regeneration"]
-    assert stack.expirations == [1_100]
+    assert stack.expirations == [1_000]
     assert stack.total_durations == [1_100]
+    assert stack.regen_extensions == [[100]]
     assert tracker.compute_player_uptimes(7, 1_100)["regeneration"] == pytest.approx(100.0)
     assert tracker.compute_merged_uptimes([7], 1_100)["regeneration"] == pytest.approx(100.0)
 
