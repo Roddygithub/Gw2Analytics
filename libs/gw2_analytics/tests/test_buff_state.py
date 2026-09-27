@@ -1187,6 +1187,47 @@ def test_stability_fallback_capacity_without_buff_info_is_25() -> None:
     assert len(tracker._agent_buffs[7]["stability"].expirations) == 25
 
 
+def test_override_extension_keeps_capacity_eviction_order_and_metadata_aligned() -> None:
+    tracker = BuffStateTracker(healing_by_agent={1: 10})
+    skill_id = TRACKED_BUFFS["might"]
+    for stack_id, duration in enumerate(range(100, 2_600, 100), start=1):
+        tracker.process(
+            _boon_apply(skill_id, target=7, duration_ms=duration)
+            .model_copy(update={"stack_id": stack_id})
+        )
+
+    tracker.process(
+        BuffExtensionEvent(
+            time_ms=0,
+            source_agent_id=1,
+            target_agent_id=7,
+            skill_id=skill_id,
+            extended_duration_ms=10_000,
+            new_duration_ms=10_100,
+            stack_id=1,
+        )
+    )
+    tracker.process(
+        _boon_apply(skill_id, target=7, duration_ms=300)
+        .model_copy(update={"stack_id": 99})
+    )
+
+    stack = tracker._agent_buffs[7]["might"]
+    assert 1 in stack.stack_ids
+    assert 2 not in stack.stack_ids
+    assert stack.total_durations == sorted(stack.total_durations)
+    assert len(stack.expirations) == 25
+    assert len(stack.total_durations) == 25
+    assert len(stack.stack_ids) == 25
+    assert len(stack.healing_scores) == 25
+    assert stack.stack_ids == [3, 99, *range(4, 26), 1]
+    assert all(score == 10 for score in stack.healing_scores)
+    assert all(
+        expiry == duration
+        for expiry, duration in zip(stack.expirations, stack.total_durations, strict=True)
+    )
+
+
 def _regen_apply(time_ms: int, duration_ms: int, stack_id: int) -> BoonApplyEvent:
     return BoonApplyEvent(
         time_ms=time_ms,

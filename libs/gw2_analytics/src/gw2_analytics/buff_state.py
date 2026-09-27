@@ -1097,6 +1097,13 @@ class BuffStateTracker:
             )
             stack.total_durations[index] += event.extended_duration_ms
             stack.expirations[index] = (stack.expirations[index] or 0) + event.extended_duration_ms
+            # Keep OverrideLogic's parallel metadata sorted by TotalDuration;
+            # stable sorting preserves the existing order for equal durations.
+            order = sorted(range(len(stack.total_durations)), key=stack.total_durations.__getitem__)
+            stack.expirations = [stack.expirations[i] for i in order]
+            stack.total_durations = [stack.total_durations[i] for i in order]
+            stack.stack_ids = [stack.stack_ids[i] for i in order]
+            stack.healing_scores = [stack.healing_scores[i] for i in order]
         else:
             duration = event.new_duration_ms
             stack.expirations.append(time_ms + duration)
