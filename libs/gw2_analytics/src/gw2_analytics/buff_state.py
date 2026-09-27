@@ -807,20 +807,11 @@ class BuffStateTracker:
                 stack_index = next(
                     (
                         i
-                        for i, stack_id in enumerate(target_tracker.stack_ids)
-                        if event.stack_id not in (None, 0) and stack_id == event.stack_id
+                        for i, total_dur in enumerate(target_tracker.total_durations)
+                        if abs(total_dur - removed_duration) < 15
                     ),
                     None,
                 )
-                if stack_index is None:
-                    stack_index = next(
-                        (
-                            i
-                            for i, total_dur in enumerate(target_tracker.total_durations)
-                            if abs(total_dur - removed_duration) < 15
-                        ),
-                        None,
-                    )
                 if stack_index is not None:
                     target_tracker.expirations.pop(stack_index)
                     target_tracker.total_durations.pop(stack_index)
@@ -830,20 +821,11 @@ class BuffStateTracker:
                 stack_index = next(
                     (
                         i
-                        for i, stack_id in enumerate(target_tracker.stack_ids)
-                        if event.stack_id not in (None, 0) and stack_id == event.stack_id
+                        for i, duration in enumerate(target_tracker.expirations)
+                        if duration is not None and abs(duration - event.duration_ms) < 15
                     ),
                     None,
                 )
-                if stack_index is None:
-                    stack_index = next(
-                        (
-                            i
-                            for i, duration in enumerate(target_tracker.expirations)
-                            if duration is not None and abs(duration - event.duration_ms) < 15
-                        ),
-                        None,
-                    )
                 if stack_index is not None:
                     target_tracker.expirations.pop(stack_index)
                     if target_tracker.total_durations:
@@ -1047,10 +1029,15 @@ class BuffStateTracker:
         ):
             while len(stack.regen_extensions) < len(stack.expirations):
                 stack.regen_extensions.append([])
-            stack.regen_extensions[0].append(event.extended_duration_ms)
-            stack.total_durations[0] += event.extended_duration_ms
+            index = min(
+                range(len(stack.total_durations)),
+                key=lambda i: abs(stack.total_durations[i] - old_duration),
+            )
+            stack.total_durations[index] += event.extended_duration_ms
+            stack.expirations[index] = (stack.expirations[index] or 0) + event.extended_duration_ms
             return
 
+        seeded_from_removal = stack.regen_last_removed_healing is not None
         stack.expirations.append(event.new_duration_ms)
         stack.total_durations.append(event.new_duration_ms)
         stack.regen_extensions.append([])
@@ -1083,7 +1070,7 @@ class BuffStateTracker:
             stack.healing_scores,
         ):
             del values[capacity:]
-        if event.stack_id in stack.stack_ids:
+        if event.stack_id in stack.stack_ids and not seeded_from_removal:
             self._activate_regeneration_stack(stack, stack.stack_ids.index(event.stack_id))
             self._healing_no_sort = True
 
@@ -1097,13 +1084,6 @@ class BuffStateTracker:
             )
             stack.total_durations[index] += event.extended_duration_ms
             stack.expirations[index] = (stack.expirations[index] or 0) + event.extended_duration_ms
-            # Keep OverrideLogic's parallel metadata sorted by TotalDuration;
-            # stable sorting preserves the existing order for equal durations.
-            order = sorted(range(len(stack.total_durations)), key=stack.total_durations.__getitem__)
-            stack.expirations = [stack.expirations[i] for i in order]
-            stack.total_durations = [stack.total_durations[i] for i in order]
-            stack.stack_ids = [stack.stack_ids[i] for i in order]
-            stack.healing_scores = [stack.healing_scores[i] for i in order]
         else:
             duration = event.new_duration_ms
             stack.expirations.append(time_ms + duration)

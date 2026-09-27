@@ -427,7 +427,7 @@ class TestBuffStateTracker:
         assert stack.total_durations == [100]
         assert stack.cumulative_stack_ms == 100
 
-    def test_override_single_removal_prefers_stack_id_over_duration(self) -> None:
+    def test_override_single_removal_matches_duration_not_stack_id(self) -> None:
         tracker = BuffStateTracker()
         for stack_id, duration in ((11, 1_000), (22, 2_000)):
             tracker.process(
@@ -446,8 +446,8 @@ class TestBuffStateTracker:
         )
 
         stack = tracker._agent_buffs[1]["might"]
-        assert stack.stack_ids == [22]
-        assert stack.total_durations == [2_000]
+        assert stack.stack_ids == [11]
+        assert stack.total_durations == [1_000]
 
     def test_deactive_event_does_not_mutate_tracker(self) -> None:
         tracker = BuffStateTracker()
@@ -659,25 +659,6 @@ class TestBuffStateTracker:
                 target=1,
                 time_ms=100,
                 duration_ms=max_duration,
-                kind="remove_single",
-            ).model_copy(update={"stack_id": 22})
-        )
-
-        assert tracker._agent_buffs[1]["might"].stack_ids == []
-
-    def test_might_max_duration_removal_prefers_instance_id(self) -> None:
-        tracker = BuffStateTracker(might_duration_correction=True)
-        tracker.process(
-            _boon_apply(
-                skill_id=TRACKED_BUFFS["might"], target=1, duration_ms=2_000
-            ).model_copy(update={"stack_id": 22})
-        )
-        tracker.process(
-            _boon_apply(
-                skill_id=TRACKED_BUFFS["might"],
-                target=1,
-                time_ms=100,
-                duration_ms=2**31 - 1,
                 kind="remove_single",
             ).model_copy(update={"stack_id": 22})
         )
@@ -955,8 +936,8 @@ def test_regeneration_added_extension_uses_last_expired_seed_healing() -> None:
     )
 
     stack = tracker._agent_buffs[7]["regeneration"]
-    assert stack.stack_ids == [3, 2]
-    assert stack.healing_scores == [5, 50]
+    assert stack.stack_ids == [2, 3]
+    assert stack.healing_scores == [50, 5]
 
 
 def test_regeneration_extension_with_zero_old_value_adds_active_stack() -> None:
@@ -997,9 +978,9 @@ def test_regeneration_extension_at_capacity_extends_front_with_zero_old_value() 
 
     stack = tracker._agent_buffs[7]["regeneration"]
     assert len(stack.expirations) == 5
-    assert stack.expirations[0] == 5_000
+    assert stack.expirations[0] == 5_100
     assert stack.total_durations[0] == 5_100
-    assert stack.regen_extensions[0] == [100]
+    assert stack.regen_extensions[0] == []
 
 
 def test_regeneration_extensions_stay_aligned_after_healing_priority_sort() -> None:
@@ -1032,12 +1013,12 @@ def test_regeneration_extensions_stay_aligned_after_healing_priority_sort() -> N
     stack = tracker._agent_buffs[7]["regeneration"]
     assert stack.stack_ids == [2, 3, 1]
     assert stack.healing_scores == [30, 20, 10]
-    assert stack.expirations == [2_000, 3_000, 1_000]
+    assert stack.expirations == [2_000, 3_000, 1_100]
     assert stack.total_durations == [2_000, 3_000, 1_100]
-    assert stack.regen_extensions == [[], [], [100]]
+    assert stack.regen_extensions == [[], [], []]
 
 
-def test_regeneration_extension_extends_front_not_closest_total_duration() -> None:
+def test_regeneration_extension_extends_closest_total_duration() -> None:
     tracker = BuffStateTracker()
     tracker.process(_regen_apply(0, 5_000, 1))
     tracker.process(_regen_apply(0, 1_000, 2))
@@ -1053,9 +1034,9 @@ def test_regeneration_extension_extends_front_not_closest_total_duration() -> No
         )
     )
     stack = tracker._agent_buffs[7]["regeneration"]
-    assert stack.expirations == [5_000, 1_000]
-    assert stack.total_durations == [5_100, 1_000]
-    assert stack.regen_extensions == [[100], []]
+    assert stack.expirations == [5_000, 1_100]
+    assert stack.total_durations == [5_000, 1_100]
+    assert stack.regen_extensions == [[], []]
 
 
 def test_regeneration_total_duration_is_not_reduced_by_elapsed_time() -> None:
@@ -1067,7 +1048,7 @@ def test_regeneration_total_duration_is_not_reduced_by_elapsed_time() -> None:
     assert stack.total_durations == [600, 1_000]
 
 
-def test_regeneration_pending_extension_keeps_stack_metadata_at_expiry() -> None:
+def test_regeneration_extension_updates_stack_duration_immediately() -> None:
     tracker = BuffStateTracker()
     tracker.process(_regen_apply(0, 1_000, 1))
     tracker.process(
@@ -1082,7 +1063,7 @@ def test_regeneration_pending_extension_keeps_stack_metadata_at_expiry() -> None
         )
     )
     stack = tracker._agent_buffs[7]["regeneration"]
-    assert stack.expirations == [1_000]
+    assert stack.expirations == [1_100]
     assert stack.total_durations == [1_100]
     assert tracker.compute_player_uptimes(7, 1_100)["regeneration"] == pytest.approx(100.0)
     assert tracker.compute_merged_uptimes([7], 1_100)["regeneration"] == pytest.approx(100.0)
@@ -1213,14 +1194,13 @@ def test_override_extension_keeps_capacity_eviction_order_and_metadata_aligned()
     )
 
     stack = tracker._agent_buffs[7]["might"]
-    assert 1 in stack.stack_ids
-    assert 2 not in stack.stack_ids
-    assert stack.total_durations == sorted(stack.total_durations)
+    assert 1 not in stack.stack_ids
+    assert 2 in stack.stack_ids
     assert len(stack.expirations) == 25
     assert len(stack.total_durations) == 25
     assert len(stack.stack_ids) == 25
     assert len(stack.healing_scores) == 25
-    assert stack.stack_ids == [3, 99, *range(4, 26), 1]
+    assert stack.stack_ids == [2, 3, 99, *range(4, 26)]
     assert all(score == 10 for score in stack.healing_scores)
     assert all(
         expiry == duration
