@@ -4,7 +4,7 @@
 # (`paths-ignore`). When the diff does touch `.github/**`, this
 # workflow does not fire at all, leaving the PR for human review —
 # the only reliable way to prevent dependabot from auto-merging an
-# invalid major tag on a GitHub Action (see plans/136).
+# invalid major tag on a GitHub Action (see .github/dependabot.yml).
 #
 # Combined with the `ignore:` block on the `github-actions` ecosystem
 # in .github/dependabot.yml (cap majors for stale actions), this
@@ -26,9 +26,10 @@
 #   (b) enable the repo's "Allow GitHub Actions to create and approve
 #       pull requests" setting in repo Settings -> Actions -> General.
 # Without either (a) or (b), auto-merge silently fails on every PR and
-# this workflow becomes a no-op. Defense-in-depth: combine with the
-# branch-protection rule in plans/137 so even if auto-merge fails,
-# the workflow still cannot land an invalid tag on `main`.
+# this workflow becomes a no-op. Defense-in-depth: the branch protection
+# on `main` (9 required status checks — CONTRIBUTING.md §"Branch
+# protection for main") means that even if auto-merge fails, the
+# workflow still cannot land an invalid tag on `main`.
 
 name: Dependabot auto-merge
 

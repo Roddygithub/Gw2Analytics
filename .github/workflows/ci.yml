@@ -428,12 +428,12 @@ jobs:
     # the flag only prevents workflow FAILURE on this job's
     # failure; the underlying status check still reports ``failure``.
     # It is currently safe because CONTRIBUTING.md §"Branch
-    # protection for main" lists 6 required-status-checks (see
+    # protection for main" lists 9 required-status-checks (see
     # that section for the current list), and ``Playwright
     # (visual-regression)`` is NOT among them -- so a failed run
     # here does NOT block the merge gate. WARNING: a future
-    # maintainer who adds this job to the required_status_checks
-    # ruleset MUST also remove ``continue-on-error: true`` (or the
+    # maintainer who adds this job to ``required_status_checks``
+    # MUST also remove ``continue-on-error: true`` (or the
     # gate will silently start blocking merges). Cite
     # CONTRIBUTING.md "Branch protection for main" by section
     # when revisiting.
@@ -631,12 +631,11 @@ jobs:
   # external action dependency — the previous ``crazy-max/ghaction-dco@v1``
   # was removed upstream, breaking the check silently.
   #
-  # NOT currently added to the branch-protection ``required_status_checks``
-  # rule — we ship it informational-only first. Bump to hard-required
-  # after one real Contributor-signed PR has demonstrated the workflow
-  # end-to-end. The job will FAIL (not error) on unsigned commits, so the
-  # first failing PR will surface clearly in the Actions UI without
-  # blocking the merge until we wire it into required_status_checks.
+  # Part of ``main``'s ``required_status_checks`` (9 required checks —
+  # see CONTRIBUTING.md §"Branch protection for main"). The job FAILs
+  # (not errors) on unsigned commits, and because it is a required gate
+  # that failure now blocks the merge until the commit is re-signed with
+  # ``git commit -s``.
   # ---------------------------------------------------------------------------
   dco-check:
     name: DCO check
