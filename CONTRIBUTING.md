@@ -278,24 +278,32 @@ until they configure .env via `cp .env.example .env`.
 
 ## Branch protection for ``main``
 
-Recommended GitHub repository ruleset (Settings → Rules →
-Rulesets → New branch ruleset):
+**Status: applied** (2026-10-02). Set on `main` through the classic
+branch-protection API — ``PUT /repos/:owner/:repo/branches/main/protection``
+— because ``gh ruleset`` is a GitHub-Enterprise CLI and the free plan
+only exposes the equivalent Rulesets UI by hand. The table below is the
+effective configuration; re-apply it with that endpoint if it is ever
+reset (the private-flip appendix at the end of this file walks the
+manual UI path).
 
 | Setting                                          | Value                                |
 |--------------------------------------------------|--------------------------------------|
 | Target branches                                  | `main` only                          |
-| Restrict creations                               | Enable (only via PR)                 |
-| Restrict updates                                 | Enable (PR or admin bypass only)     |
-| Required status checks                           | Lint Python, Test Python, Lint Web, Playwright (chromium), ARQ worker integration, DCO check, Build API image, Build Web image, Trivy filesystem scan |
+| Require a pull request before merging            | Yes, 0 required approvals (PR-only)  |
+| Required status checks (9)                       | Lint Python, Test Python, Lint Web, Playwright (chromium), ARQ worker integration, DCO check, Build API image, Build Web image, Trivy filesystem scan |
 | Require linear history                           | Yes (no merge commits)               |
 | Require deployments before merging               | No (no deploys from `main` directly) |
-| Block force pushes                               | **Yes** (admin included)             |
+| Block force pushes                               | **Yes** (`enforce_admins`, admin included) |
 | Block branch deletion                            | **Yes**                              |
+| Enforce for admins                               | **Yes**                              |
+| Require status checks to be up to date           | No (branches need not be rebased)    |
 
 CI runs automatically on pushes to `main` and PRs targeting `main`.
 The required checks are intentionally limited to deterministic merge
-gates. Visual regression still runs on PRs but is not required while
-the screenshot baselines remain under refresh.
+gates and are all reported on `pull_request`, so none of them can leave
+a PR permanently blocked by being skipped. Visual regression still runs
+on PRs but is not required while the screenshot baselines remain under
+refresh.
 
 ## Pre-commit / CI mirror
 

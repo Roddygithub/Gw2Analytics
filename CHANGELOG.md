@@ -1,5 +1,33 @@
 ## [Unreleased]
 
+### Changed -- Branch protection actually enforced on ``main``
+- **Applied classic branch protection to ``main``** via
+  ``PUT /repos/:owner/:repo/branches/main/protection``: 9 required
+  status checks (Lint Python, Test Python, Lint Web, Playwright
+  (chromium), ARQ worker integration, DCO check, Build API image,
+  Build Web image, Trivy filesystem scan), pull request required
+  (0 approvals), linear history, force pushes and branch deletion
+  blocked, ``enforce_admins`` on.
+- **The ruleset documented since v0.15.2 was never applied.**
+  ``CONTRIBUTING.md`` and ``CHANGELOG.md`` both described "the ``main``
+  ruleset" as if it existed, while ``required_status_checks`` was
+  ``null`` — dependabot PRs were therefore auto-merging with red checks
+  (4 landed on 2026-10-01, including one whose CI had failed). Root
+  cause: the public-flip cheatsheet's manual "Step 8 — apply the
+  branch-protection ruleset via the GitHub web UI" was never executed.
+- **``dependabot-auto-merge`` is now genuinely gated** —
+  ``gh pr merge --auto --squash`` waits for the 9 required checks
+  instead of merging immediately, which is the defense-in-depth its
+  own header comment called for.
+- **Doc drift fixed**: ``ci.yml`` said CONTRIBUTING listed 6 required
+  checks (it lists 9), the ``dco-check`` job comment still claimed DCO
+  was informational-only, and ``dependabot-auto-merge.yml`` cited
+  ``plans/136`` / ``plans/137`` as sources for CI decisions — those
+  plans are an arcdps sidecar and a buff-uptime model, and neither file
+  is present in the tree.
+- **Validation**: PR #315 (empty commit) reported ``BLOCKED`` on every
+  poll while checks ran and flipped to ``CLEAN`` at 10/10, then merged.
+
 ### Added -- Webhook subscriptions CRUD UI (PR #69) + API hardening (PR #68)
 - **New ``/webhooks`` management page** (``web/src/app/webhooks/page.tsx``)
   renders a full subscription lifecycle alongside the existing DLQ surface:
