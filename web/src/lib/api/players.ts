@@ -10,6 +10,10 @@ export interface PlayerListRow {
   total_damage: number;
   total_healing: number;
   total_buff_removal: number;
+  // Defense counters; the API always sends them (defaults to 0).
+  dodges: number;
+  blocks: number;
+  interrupts: number;
   detected_role: string | null;
   detected_tags: string[] | null;
 }
@@ -66,6 +70,10 @@ export interface PerFightBreakdownRow
   total_damage: number;
   total_healing: number;
   total_buff_removal: number;
+  // Defense counters; the API always sends them (defaults to 0).
+  dodges: number;
+  blocks: number;
+  interrupts: number;
   // Optional: absent on rows written before these columns landed.
   boon_strips?: number | null;
   condition_cleanses?: number | null;

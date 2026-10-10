@@ -107,6 +107,9 @@ const POPULATED: PlayerProfile = {
       total_damage: 1_234,
       total_healing: 0,
       total_buff_removal: 100,
+      dodges: 0,
+      blocks: 0,
+      interrupts: 0,
     },
     {
       fight_id: "fight-b",
@@ -114,6 +117,9 @@ const POPULATED: PlayerProfile = {
       total_damage: 6_656,
       total_healing: 0,
       total_buff_removal: 200,
+      dodges: 0,
+      blocks: 0,
+      interrupts: 0,
     },
   ],
 };
