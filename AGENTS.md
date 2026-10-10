@@ -1,78 +1,51 @@
-# Règles de session — Gw2Analytics
+# Gw2Analytics — development notes for automated agents and contributors
 
-## Mémoire durable et confidentialité
+Gw2Analytics is a Guild Wars 2 WvW combat-analytics platform: a PostgreSQL-backed
+FastAPI backend, an Arq worker, and a Next.js frontend. The detailed contracts and
+conventions live in `README.md`, `CONTRIBUTING.md`, `DECISIONS.md` and `docs/`;
+this file only records the rules that are easy to get wrong.
 
-- Le dépôt est la mémoire durable : code/tests/CI pour le comportement livré,
-  SPEC acceptées pour le contrat à construire, ADR pour les décisions et
-  `docs/agentic/` pour les checkpoints opérationnels.
-- Supermemory est un outil personnel optionnel ; il ne constitue ni une
-  dépendance, ni une source de vérité, ni une obligation de fin de session.
-- `WvW/` contient des données personnelles locales de combats : ne jamais les
-  ajouter à Git, les exfiltrer ou les ouvrir hors du périmètre du dépôt. Leur
-  analyse locale (développement, tests et validations inclus) est autorisée en
-  permanence : elle ne requiert ni token, ni sudoers, ni executor dédié, ni une
-  nouvelle intervention humaine.
+## Data and privacy
 
-## GW2Analytics Lead
+- `WvW/` links to the maintainer's private combat-log corpus. Never commit,
+  upload, publish or otherwise exfiltrate its contents or player identifiers.
+  Local analysis for development and tests is allowed; nothing derived from it
+  may be checked in.
+- Never commit raw `.zevtc` logs or private Elite Insights JSON exports. Only
+  anonymized manifests and checksums are versioned (see `scripts/ei-parity/`).
 
-- Le rôle d'entrée stable est **GW2Analytics Lead** ; son moteur initial est
-  Codex / `gpt-5.6-terra` / `medium`, mais le rôle n'est pas lié à ce profil.
-- Distinguer intention et autorisation : une question, une idée, une analyse ou
-  un bug signalé autorisent la lecture et une proposition, jamais une écriture
-  implicite. Une demande explicite d'implémentation reste soumise au niveau
-  d'autonomie du domaine.
-- Appliquer le guide unique `docs/agentic/README.md` pour le routing, les
-  handoffs, l'autonomie et les checkpoints utiles.
-- « Continue GW2Analytics » autorise le Lead à sélectionner et exécuter la
-  prochaine tâche sûre, avec checkpoints concis; il s'arrête seulement devant
-  une décision produit ambiguë, une opération destructive ou une permission
-  réellement inaccessible.
+## Running things
 
-<!-- bmad:context -->
-<!-- Verified 2026-08-13 against 553b40c. Managed by bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want preserved outside the markers. -->
+- Run all Python tooling through `uv run` (a bare `python` bypasses the workspace
+  environment). The workspace pins CPython via `.python-version`.
+- Iterate with targeted tests. The full Python suite (`uv run pytest`) enforces
+  coverage and needs Docker for the integration/database tests.
+- Python lint/type gates: `uv run ruff check`, `uv run ruff format --check`,
+  `uv run mypy libs`, `uv run mypy apps/api/src`.
+- Web gates (from `web/`): `pnpm exec tsc --noEmit`,
+  `pnpm exec vitest run`.
 
-## Gw2Analytics
+## Architecture rules
 
-Plateforme d'analyse de combats WvW. Les contrats et conventions détaillés vivent dans `README.md`, `CONTRIBUTING.md` et `docs/`; les SPEC BMAD acceptées vivent dans `_bmad-output/specs/`.
+- `libs/gw2_core` is the single shared contract and stays I/O-free. The frontend
+  consumes the OpenAPI schema, never EVTC structures or ORM models.
+- In the API, respect the `routes -> services -> repositories -> ORM` layering:
+  repositories never commit, services own transactions.
+- Parser/analytics code must not leak implementation-specific raw keys into the
+  database, API models or frontend.
 
-## Policy
+## WvW semantics that are easy to get wrong
 
-- Ne jamais pousser directement sur `main`; passer par une PR, conserver un historique linéaire et squash-merger.
-- Signer chaque commit avec le trailer DCO `Signed-off-by:`.
-- Ne jamais créer de commit sans demande explicite du mainteneur.
-- Ne jamais committer les logs EVTC ou exports Elite Insights privés; ne versionner que leur manifeste et leurs empreintes.
+- Compare each Elite Insights player entry against its own `firstAware`/
+  `lastAware` window, not whole-fight totals; one account can have several
+  contiguous slices.
+- Resolve owners, character swaps and agent IDs over time; a global
+  `instance_id -> owner` table produces false attributions.
+- Distinguish the arcdps damage channel from the Elite Insights classification
+  for condition damage; life-steal effects are not EI conditions.
 
-## Where things are
+## Git policy
 
-- Comparaison EI canonique: `libs/gw2_analytics/src/gw2_analytics/ei_compare.py`; pilotes et corpus local: `scripts/ei-parity/`.
-- Décisions d'architecture acceptées: `docs/adr/`; contrat BMAD actif: `_bmad-output/specs/`; checkpoints opérationnels: `docs/agentic/`.
-- Les roadmaps, backlogs, sessions et plans explicitement marqués historiques ne définissent pas la priorité. Au Level 1, une nouvelle priorité exige une proposition puis l'accord du mainteneur.
-
-## Running and verifying
-
-- Exécuter les outils Python via `uv run`; une invocation Python nue contourne l'environnement du workspace.
-- Itérer avec les tests ciblés; la suite Python complète impose une couverture globale de 90 % et peut nécessiter les services Docker pour les tests d'intégration.
-- Les skills BMAD canoniques vivent dans `.agents/skills/bmad-*` et sont intégrés à Codex. Le framework est dans `_bmad/`. Le noyau (`resolve_config.py`, `resolve_customization.py`, `render_skill.py`, `memlog.py`) ne dépend que de la stdlib — vérifiable via `tests/scripts/test_bmad_framework.py`.
-- Régénérer une intégration BMAD par l'installeur officiel épinglé plutôt que modifier les fichiers gérés à la main. OpenCode n'est plus un harness actif ; tout fallback multi-provider exige une configuration et une validation distinctes.
-
-## Conventions that differ from defaults
-
-- `libs/gw2_core` est l'unique contrat partagé et reste sans I/O; le frontend consomme OpenAPI, jamais les structures EVTC ou ORM.
-- Dans l'API, respecter `routes -> services -> repositories -> ORM`; les repositories ne commitent jamais, les services possèdent les transactions.
-
-## Known pitfalls
-
-- Comparer chaque entrée joueur EI à sa fenêtre `firstAware`/`lastAware`, pas aux totaux du combat entier; un même compte peut avoir plusieurs slices contiguës.
-- Résoudre propriétaires, changements de personnage et identifiants d'agent avec le temps; une table globale `instance_id -> owner` produit de fausses attributions.
-- Distinguer canal arcdps et classification EI pour les dégâts d'altération; les effets de vol de vie ne sont pas des altérations EI.
-
-<!-- /bmad:context -->
-
-## Priorité d'autonomie actuelle
-
-La mention Level 1 du bloc BMAD géré ci-dessus est historique et ne régit plus
-`Continue GW2Analytics`. La règle du **GW2Analytics Lead** définie avant ce
-bloc, puis `docs/agentic/README.md`, prévaut : il exécute la prochaine tâche
-sûre et déterminable sans attendre de checkpoint humain. Une décision produit
-ambiguë, une opération destructive/externe ou une permission réellement
-inaccessible restent les seules frontières.
+- Never push directly to `main`; open a PR with a linear history.
+- Sign every commit with the DCO trailer `Signed-off-by:`.
+- Do not create commits unless the maintainer asked for them.
