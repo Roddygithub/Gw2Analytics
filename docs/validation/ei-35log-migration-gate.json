@@ -3518,5 +3518,6 @@
     "positions_disabled_peak_rss_mb_max": 336.5,
     "positions_enabled_samples": 525221,
     "positions_disabled_samples": 0
-  }
+  },
+  "resource_measurement_method": "Sampled VmRSS of the direct dotnet process every 10 ms; child processes are not included."
 }

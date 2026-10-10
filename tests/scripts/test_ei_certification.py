@@ -52,3 +52,24 @@ def test_summary_contains_only_aggregate_actor_free_fields() -> None:
     assert "account" not in summary
     assert "character" not in summary
     assert sum(summary["events_by_kind"].values()) == summary["events"]
+
+
+def test_invalid_export_is_reported_as_schema_invalid() -> None:
+    import json
+
+    fixture = ROOT / "libs/gw2_core/tests/fixtures/wvw_export_v1.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    payload["fights"][0]["events"][0]["time_ms"] = 3_000
+
+    result = TOOL["_validation_result"](payload)
+
+    assert result["schema_valid"] is False
+    assert result["validation_errors"][0]["type"] == "value_error"
+    assert "exceeds fight duration" in result["validation_errors"][0]["message"]
+
+
+def test_different_repeat_bytes_are_reported_as_nondeterministic() -> None:
+    comparison = TOOL["_compare_export_bytes"](b"first", b"second")
+
+    assert comparison["deterministic_repeat"] is False
+    assert comparison["output_sha256"] != comparison["repeat_output_sha256"]

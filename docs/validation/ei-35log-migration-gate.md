@@ -33,7 +33,7 @@ uv run python scripts/ei-certification/certify_wvw_export.py \
 | Replay enabled | 32/35 | 28/35 | 25/35 | Failed certification gate |
 | Replay disabled | 32/35 | 28/35 | 25/35 | Failed certification gate |
 
-The three invalid logs each contain exactly one `buff_remove_single` event after the exported fight duration. The exporter does not clamp the timestamp; the product validator rejects it. EI’s event timestamps use `event.Time - LogStart`, and actor awareness, ownership and positions use that same origin. All actor awareness, ownership, and position ranges are within `0..duration_ms`; event ranges are valid except for the three identified rows. Across valid events the time range was `0..455850 ms`; declared durations ranged from `10888` to `456001 ms` (median `63351 ms`). Position sample times ranged from `1` to `455877 ms`. No clamping occurred.
+For each of the three rows, pinned EI retains one `BuffRemoveSingleEvent` in `CombatData`, and WvwExportV1 transports that record. Its fight-relative timestamp exceeds `LogData.LogDuration`; the current Gw2Analytics V1 validator rejects it. The exporter filters the `NoBuff` constant by exact equality, so this report does not infer a sentinel classification from other negative IDs. No timestamp is clamped or event silently dropped. The precise EI temporal-domain semantics must be resolved explicitly in the V2 design; canonical EI events must not be clamped or discarded merely to satisfy the V1 validator. Actor awareness, ownership and positions use the same fight origin and remain within `0..duration_ms`. Across in-range events the time range was `0..455850 ms`; declared durations ranged from `10888` to `456001 ms` (median `63351 ms`). Position sample times ranged from `1` to `455877 ms`. No clamping occurred.
 
 | Log stem | Duration ms | Event max ms | Events beyond duration | Validation |
 | --- | ---: | ---: | ---: | --- |
@@ -41,13 +41,13 @@ The three invalid logs each contain exactly one `buff_remove_single` event after
 | `20260508-001302` | 285414 | 286971 | 1 | rejected: event time exceeds fight duration |
 | `20260327-223844` | 45064 | 51167 | 1 | rejected: event time exceeds fight duration |
 
-Seven logs were not byte-deterministic. Exact structural comparison of repeated exports showed changes only at `fights[0].actors[*].instance_id`; there were no changed actor IDs, event records, ordering, or other JSON paths. A temporary local EI diagnostic correlated all 36 changed actor records with EI fake-agent metadata: none were `IsFake`. The current exporter reads `AgentItem.InstID` directly. This isolates the observed instability to EI’s parsed actor instance IDs (or their upstream assignment), not JSON serialization or exporter ordering. The precise upstream cause remains unresolved, so determinism is not certified.
+Seven of 35 logs differed on repeated exports, affecting 36 actor records. Only `instance_id` changed; `actor_id`, references, events, ownership and ordering remained stable. None of the affected records observed in the temporary diagnostic was `IsFake`. EI `AgentItem.InstID` is observed to be non-repeatable for these records across repeated parses; the exact upstream assignment cause remains unresolved. Exporter `actor_id` remained deterministic in the observed runs, so determinism of the complete V1 payload is not certified.
 
 Nondeterministic manifest stems: `20260125-194936`, `20260224-233019`, `20260412-220632`, `20260424-204954`, `20260519-112129`, `20260526-202841`, `20260506-211522`.
 
 ## Aggregate results and resource measurements
 
-Peak RSS is sampled from the EI process every 10 ms; it is approximate. Wall time is the first export per log. Per-log values, exact event-kind counts, hashes, validation failures and repeat status are in the JSON report.
+RSS is the sampled VmRSS of the direct dotnet process every 10 ms; child processes are not included, and the measurement is approximate. Wall time is the first export per log. Per-log values, exact event-kind counts, hashes, validation failures and repeat status are in the JSON report.
 
 | Metric | Replay enabled | Replay disabled |
 | --- | ---: | ---: |
@@ -152,7 +152,7 @@ The classifications below are mutually exclusive at the requirement-row level an
 | DPS/HPS, squad/subgroup rollups, strips/cleanses, roles, historical and comparison metrics | `PRODUCT_DERIVED` | Gw2Analytics owns these calculations over canonical EI facts/aggregates. |
 | Heatmaps and commander-distance views | `PRODUCT_DERIVED` | Position samples are canonical EI facts; bucketing, selection and presentation are product analytics. |
 | Per-fight damage/strip timelines | `PRODUCT_DERIVED` | Can be bucketed from EI event facts; missing timed healing prevents complete current three-series timeline behavior. |
-| Actor instance identity across repeated parses | `PRODUCT_CHANGE_REQUIRED` | Seven repeated exports vary only in actor `instance_id`; stable actor reference policy must be resolved before deterministic adapter output. |
+| EI `AgentItem.InstID` repeatability | `PRODUCT_CHANGE_REQUIRED` | Seven repeated exports vary only in `instance_id`, while exporter `actor_id` remains stable in these runs. V2 must decide whether this metadata is non-stable, unnecessary for shipped consumers, or required by a proven product need. |
 | Cast/activation rotation timelines and effect markers | `NOT_CURRENTLY_SHIPPED` | No current production route consumes parser cast/effect events as a timeline; existing internal utility alone is not a shipped consumer. |
 | Parsed combat metrics in webhooks | `NOT_CURRENTLY_SHIPPED` | Current webhook path sends upload/subscription notifications, not combat analytics. |
 | Private legacy parser-only event families without a current product consumer | `NOT_CURRENTLY_SHIPPED` | Do not add export scope solely to preserve unused parser capability. |
@@ -161,12 +161,12 @@ Category counts: `EI_CANONICAL_DIRECT` 9; `EI_CANONICAL_TRANSFORM` 1; `PRODUCT_D
 
 ### Deferred event-family reassessment
 
-- **Healing:** required as a timed event family for timeline and per-target event windows; standard EI aggregates do not replace those windows. Next export addition should carry EI’s parsed healing event semantics with source/target, skill and time.
-- **Barrier:** whole-fight metrics are already in EI aggregates; no current event-window barrier series is exposed, so do not add a barrier stream until a shipped consumer needs it.
-- **Casts/activation timing:** no current production route consumes cast rotation. Keep deferred (`NOT_CURRENTLY_SHIPPED`).
-- **CC / breakbar / interrupts:** whole-fight totals are available from EI. Timestamped CC source/target is specifically needed for existing pre-down contribution attribution; add that event family if preserving this product behavior. Breakbar event-level detail is not otherwise a current consumer requirement.
-- **Weapon swaps and effects:** no current parsed-event consumer was found; defer as `NOT_CURRENTLY_SHIPPED`.
-- **Damage result flags:** standard EI aggregates provide shipped defense/critical summaries. No additional raw flags are needed for current summary views; preserve only if a concrete shipped event-level consumer requires them.
+- **Timed healing (required):** current timeline and per-target event windows need timestamp, source, target and healing amount; skill ID is included if EI defines it. Timed barrier amount is not a current event-window requirement. Do not treat health updates as healing.
+- **Up transition (required):** current down-state segment logic needs the timestamp and actor transitioning from down to up.
+- **Timed CC (required):** pre-down contribution needs timestamp, source, target and the duration/value used by current product logic; include skill identity if required by a shipped consumer and available canonically. The V2 implementation must first verify the exact pinned EI representation and semantics for healing, up/rally and CC before coding.
+- **Timed barrier (deferred):** it is not currently required by a shipped event-window consumer. Whole-fight barrier metrics are already available from EI aggregates.
+- **Casts/activation timing, weapon swaps, effects:** no current production route consumes these as event timelines; defer as `NOT_CURRENTLY_SHIPPED`.
+- **Breakbar/interrupt detail and damage result flags:** whole-fight aggregates cover current summary views; no additional event-level family is currently required.
 
 ## Legacy-parser comparison and product impact
 
@@ -188,4 +188,4 @@ Before any production cutover, require:
 
 ## Recommended next slice
 
-Extend WvwExportV1 with the minimum canonical EI facts needed by shipped event-window consumers: timed healing, rally/up lifecycle, and timed source/target CC events. In parallel, investigate the `instance_id` instability and the three buff-removal timestamps at their EI source paths. Keep the changes in the EI fork/export layer; do not reconstruct missing EVTC semantics in Python. Re-run all 35 logs with replay on and off before proposing any process adapter.
+The next dedicated export/contract slice should verify the exact pinned-EI internal representation before implementing the required product facts: timed healing (timestamp, source, target, healing amount, and skill if EI defines it), up/rally (timestamp and actor), and timed CC (timestamp, source, target and required duration/value, with skill if needed/available canonically). Timed barrier is not currently required by a shipped consumer and remains deferred. Separately resolve the V1 temporal-domain cases and decide whether `instance_id` is useful shipped metadata, explicitly non-stable, or unnecessary; exporter `actor_id` was deterministic in the observed runs. Do not infer these answers from legacy-parser differences or modify EI facts to fit V1. Re-run all 35 logs after that dedicated implementation before proposing any process adapter.

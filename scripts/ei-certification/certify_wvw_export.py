@@ -213,6 +213,19 @@ def _validation_errors(payload: dict[str, Any]) -> list[dict[str, str]]:
     return []
 
 
+def _validation_result(payload: dict[str, Any]) -> dict[str, Any]:
+    errors = _validation_errors(payload)
+    return {"schema_valid": not errors, "validation_errors": errors}
+
+
+def _compare_export_bytes(first: bytes, second: bytes) -> dict[str, str | bool]:
+    return {
+        "deterministic_repeat": first == second,
+        "output_sha256": hashlib.sha256(first).hexdigest(),
+        "repeat_output_sha256": hashlib.sha256(second).hexdigest(),
+    }
+
+
 def _percentile95(values: list[float]) -> float:
     return sorted(values)[max(0, int(0.95 * len(values) + 0.999999) - 1)]
 
@@ -257,19 +270,19 @@ def _run_mode(
             exported = exports[0]
             first_bytes = exported.read_bytes()
             payload = json.loads(first_bytes)
-            validation_errors = _validation_errors(payload)
+            validation = _validation_result(payload)
+            validation_errors = validation["validation_errors"]
             repeat_wall, repeat_peak_rss = _run_ei(dotnet, cli, config, log, transcript)
             second_bytes = exported.read_bytes()
-            identical = first_bytes == second_bytes
+            repeat_comparison = _compare_export_bytes(first_bytes, second_bytes)
+            identical = repeat_comparison["deterministic_repeat"]
             row = _summarize(payload, stem, log.stat().st_size, first_bytes)
             row.update(
                 wall_seconds=round(first_wall, 3),
                 repeat_wall_seconds=round(repeat_wall, 3),
                 peak_rss_mb=round(max(peak_rss, repeat_peak_rss) / 1024, 1),
-                deterministic_repeat=identical,
-                schema_valid=not validation_errors,
-                validation_errors=validation_errors,
-                repeat_output_sha256=hashlib.sha256(second_bytes).hexdigest(),
+                **repeat_comparison,
+                **validation,
             )
             results.append(row)
             if validation_errors:
