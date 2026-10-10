@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "parser_version": "3.26.0.0-prototype",
+  "source_commit": null,
+  "config_sha256": null,
+  "session_id": null,
+  "source_log_count": 1,
+  "fights": [
+    {
+      "fight_id": "log-0000/fight-0000",
+      "source_log_index": 0,
+      "segment_index": 0,
+      "started_at": "2026-01-01T00:00:00Z",
+      "duration_ms": 2000,
+      "build": null,
+      "outcome": "unknown",
+      "actors": [
+        {
+          "actor_id": "a000000",
+          "kind": "player",
+          "name": null,
+          "account": null,
+          "subgroup": 1,
+          "profession": "Guardian",
+          "elite_spec": null,
+          "instance_id": 17,
+          "species_id": null,
+          "first_aware_ms": 0,
+          "last_aware_ms": 2000
+        },
+        {
+          "actor_id": "a000001",
+          "kind": "npc",
+          "name": "Example minion",
+          "account": null,
+          "subgroup": null,
+          "profession": null,
+          "elite_spec": null,
+          "instance_id": 0,
+          "species_id": 1234,
+          "first_aware_ms": 100,
+          "last_aware_ms": 1800
+        }
+      ],
+      "events": [
+        {
+          "sequence": 0,
+          "kind": "damage",
+          "time_ms": 500,
+          "source_actor_id": "a000000",
+          "target_actor_id": "a000001",
+          "skill_id": 42,
+          "damage": 100,
+          "shield_damage": 0
+        }
+      ],
+      "ownership_intervals": [
+        {
+          "agent_id": "a000001",
+          "owner_actor_id": "a000000",
+          "owner_resolution": "resolved",
+          "start_ms": 100,
+          "end_ms": 1800,
+          "start_basis": "master_observation",
+          "end_basis": "agent_awareness"
+        }
+      ],
+      "ownership_observation_count": 1,
+      "ownership_same_time_collision_count": 0,
+      "position_samples": []
+    }
+  ]
+}
