@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Certify the pinned WvwExportV1 transport against a private log manifest."""
+"""Certify a pinned WvW export contract against a private log manifest."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
-from gw2_core import WvwExportV1
+from gw2_core import WvwExportV1, WvwExportV2
 
 ROOT = Path(__file__).resolve().parents[2]
 PINNED_EI_COMMIT = "062e250d55c0a09a7f734524287043c7852483b4"
@@ -33,6 +33,7 @@ KINDS = (
     "despawn",
     "health_update",
 )
+V2_KINDS = (*KINDS, "healing", "up", "cc")
 
 
 def _cli() -> argparse.Namespace:
@@ -46,6 +47,8 @@ def _cli() -> argparse.Namespace:
     )
     parser.add_argument("--dotnet", type=Path, required=True, help="Local .NET SDK executable")
     parser.add_argument("--cli", type=Path, required=True, help="Built EI CLI DLL")
+    parser.add_argument("--schema-version", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--expected-ei-commit", help="Required exact EI commit for V2 runs")
     parser.add_argument("--output", type=Path, required=True, help="Ignored local output directory")
     parser.add_argument(
         "--replay-disabled-report",
@@ -87,11 +90,12 @@ def _run_ei(dotnet: Path, cli: Path, config: Path, log: Path, log_path: Path) ->
     return elapsed, peak_rss_kib
 
 
-def _config(output_dir: Path, parse_replay: bool) -> str:
+def _config(output_dir: Path, parse_replay: bool, schema_version: int = 1) -> str:
     settings = {
         "SaveAtOut": "false",
         "OutLocation": str(output_dir.resolve()),
-        "SaveOutWvwExport": "true",
+        "SaveOutWvwExport": str(schema_version == 1).lower(),
+        "SaveOutWvwExportV2": str(schema_version == 2).lower(),
         "SaveOutJSON": "false",
         "SaveOutHTML": "false",
         "SaveOutCSV": "false",
@@ -137,7 +141,7 @@ def _find_logs(manifest: dict[str, Any], corpus: Path) -> list[tuple[dict[str, A
 
 
 def _summarize(
-    payload: dict[str, Any], stem: str, input_bytes: int, output: bytes
+    payload: dict[str, Any], stem: str, input_bytes: int, output: bytes, schema_version: int = 1
 ) -> dict[str, Any]:
     fight = payload["fights"][0]
     events = fight["events"]
@@ -162,7 +166,17 @@ def _summarize(
         "duration_ms": duration_ms,
         "actors": len(fight["actors"]),
         "events": len(events),
-        "events_by_kind": {kind: event_counts[kind] for kind in KINDS},
+        "healing_amount_total": sum(
+            event.get("amount", 0) for event in events if event["kind"] == "healing"
+        ),
+        "cc_duration_ms_total": sum(
+            event.get("duration_ms", 0) for event in events if event["kind"] == "cc"
+        ),
+        "events_by_kind": {
+            kind: event_counts[kind] for kind in (V2_KINDS if schema_version == 2 else KINDS)
+        },
+        "event_domain_end_ms": fight.get("event_domain_end_ms"),
+        "healing_available": fight.get("healing_available"),
         "ownership_observations": fight["ownership_observation_count"],
         "ownership_same_time_collisions": fight["ownership_same_time_collision_count"],
         "ownership_intervals": len(fight["ownership_intervals"]),
@@ -189,9 +203,10 @@ def _summarize(
     }
 
 
-def _validation_errors(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _validation_errors(payload: dict[str, Any], schema_version: int = 1) -> list[dict[str, str]]:
     try:
-        validated = WvwExportV1.model_validate(payload)
+        model = WvwExportV1 if schema_version == 1 else WvwExportV2
+        validated = model.model_validate(payload)
         if validated.parser_version != "3.26.0.0":
             raise ValueError("unexpected_parser_version")
         if validated.source_log_count != 1 or len(validated.fights) != 1:
@@ -213,8 +228,8 @@ def _validation_errors(payload: dict[str, Any]) -> list[dict[str, str]]:
     return []
 
 
-def _validation_result(payload: dict[str, Any]) -> dict[str, Any]:
-    errors = _validation_errors(payload)
+def _validation_result(payload: dict[str, Any], schema_version: int = 1) -> dict[str, Any]:
+    errors = _validation_errors(payload, schema_version)
     return {"schema_valid": not errors, "validation_errors": errors}
 
 
@@ -246,6 +261,7 @@ def _run_mode(
     cli: Path,
     root_output: Path,
     parse_replay: bool,
+    schema_version: int = 1,
 ) -> dict[str, Any]:
     mode = "replay_enabled" if parse_replay else "replay_disabled"
     mode_root = root_output / mode
@@ -258,25 +274,26 @@ def _run_mode(
         output_dir = log_root / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
         config = log_root / "ei.conf"
-        config.write_text(_config(output_dir, parse_replay), encoding="utf-8")
-        for previous in output_dir.glob(f"{stem}*_wvw_export_v1.json"):
+        config.write_text(_config(output_dir, parse_replay, schema_version), encoding="utf-8")
+        suffix = f"_wvw_export_v{schema_version}.json"
+        for previous in output_dir.glob(f"{stem}*{suffix}"):
             previous.unlink()
         transcript = log_root / "ei.log"
         try:
             first_wall, peak_rss = _run_ei(dotnet, cli, config, log, transcript)
-            exports = list(output_dir.glob(f"{stem}*_wvw_export_v1.json"))
+            exports = list(output_dir.glob(f"{stem}*{suffix}"))
             if len(exports) != 1:
-                raise RuntimeError(f"EI produced no WvwExportV1 file for {stem}")
+                raise RuntimeError(f"EI produced no WvwExportV{schema_version} file for {stem}")
             exported = exports[0]
             first_bytes = exported.read_bytes()
             payload = json.loads(first_bytes)
-            validation = _validation_result(payload)
+            validation = _validation_result(payload, schema_version)
             validation_errors = validation["validation_errors"]
             repeat_wall, repeat_peak_rss = _run_ei(dotnet, cli, config, log, transcript)
             second_bytes = exported.read_bytes()
             repeat_comparison = _compare_export_bytes(first_bytes, second_bytes)
             identical = repeat_comparison["deterministic_repeat"]
-            row = _summarize(payload, stem, log.stat().st_size, first_bytes)
+            row = _summarize(payload, stem, log.stat().st_size, first_bytes, schema_version)
             row.update(
                 wall_seconds=round(first_wall, 3),
                 repeat_wall_seconds=round(repeat_wall, 3),
@@ -320,8 +337,11 @@ def _run_mode(
             "peak_rss_mb_max": max(row["peak_rss_mb"] for row in results),
             "actors": sum(row["actors"] for row in results),
             "events": sum(row["events"] for row in results),
+            "healing_amount_total": sum(row["healing_amount_total"] for row in results),
+            "cc_duration_ms_total": sum(row["cc_duration_ms_total"] for row in results),
             "events_by_kind": {
-                kind: sum(row["events_by_kind"][kind] for row in results) for kind in KINDS
+                kind: sum(row["events_by_kind"][kind] for row in results)
+                for kind in (V2_KINDS if schema_version == 2 else KINDS)
             },
             "ownership_observations": sum(row["ownership_observations"] for row in results),
             "ownership_same_time_collisions": sum(
@@ -340,6 +360,11 @@ def _run_mode(
             "overall_pass_logs": sum(
                 row["schema_valid"] and row["deterministic_repeat"] for row in results
             ),
+            "logs_with_healing": sum(
+                row["events_by_kind"].get("healing", 0) > 0 for row in results
+            ),
+            "logs_with_up": sum(row["events_by_kind"].get("up", 0) > 0 for row in results),
+            "logs_with_cc": sum(row["events_by_kind"].get("cc", 0) > 0 for row in results),
         },
     }
 
@@ -353,8 +378,11 @@ def main() -> int:
         ["git", "-C", str(args.ei_source), "rev-parse", "HEAD"],  # noqa: S607
         text=True,
     ).strip()
-    if commit != PINNED_EI_COMMIT:
-        raise SystemExit(f"EI checkout is not at the pinned commit {PINNED_EI_COMMIT}")
+    expected_commit = args.expected_ei_commit or PINNED_EI_COMMIT
+    if args.schema_version == 2 and not args.expected_ei_commit:
+        raise SystemExit("--expected-ei-commit is required for V2 certification")
+    if commit != expected_commit:
+        raise SystemExit(f"EI checkout is not at the requested commit {expected_commit}")
     logs = _find_logs(manifest, args.corpus.resolve())
     tracked = set(
         subprocess.check_output(  # noqa: S603 - fixed local git command
@@ -374,9 +402,10 @@ def main() -> int:
         cli=args.cli.resolve(),
         root_output=args.output,
         parse_replay=True,
+        schema_version=args.schema_version,
     )
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": args.schema_version,
         "ei_commit": commit,
         "ei_version": manifest["reference"]["ei_version"],
         "manifest_entries": len(logs),
@@ -389,8 +418,24 @@ def main() -> int:
             cli=args.cli.resolve(),
             root_output=args.output,
             parse_replay=False,
+            schema_version=args.schema_version,
         )
         report["replay_disabled"] = disabled
+        enabled_summary = enabled.get("summary", {})
+        disabled_summary = disabled.get("summary", {})
+        report["replay_cost_comparison"] = {
+            "output_bytes_delta_enabled_minus_disabled": enabled_summary.get("output_bytes", 0)
+            - disabled_summary.get("output_bytes", 0),
+            "wall_seconds_delta_enabled_minus_disabled": round(
+                enabled_summary.get("wall_seconds_total", 0)
+                - disabled_summary.get("wall_seconds_total", 0),
+                3,
+            ),
+            "sampled_direct_dotnet_rss_max_mb_enabled": enabled_summary.get("peak_rss_mb_max"),
+            "sampled_direct_dotnet_rss_max_mb_disabled": disabled_summary.get("peak_rss_mb_max"),
+            "positions_enabled": enabled_summary.get("positions", 0),
+            "positions_disabled": disabled_summary.get("positions", 0),
+        }
     output = args.replay_disabled_report or (args.output / "aggregate-report.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

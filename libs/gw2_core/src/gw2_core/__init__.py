@@ -33,6 +33,15 @@ from gw2_core.ei_wvw_export import (
     WvwPositionSample,
     WvwSpawnEvent,
 )
+from gw2_core.ei_wvw_export_v2 import (
+    WvwExportV2,
+    WvwV2Actor,
+    WvwV2CCEvent,
+    WvwV2Event,
+    WvwV2Fight,
+    WvwV2HealingEvent,
+    WvwV2UpEvent,
+)
 from gw2_core.models import (
     _EVENT_MAP,
     BUFF_CATEGORY_MAP,
@@ -148,10 +157,17 @@ __all__ = [
     "WvwExportEvent",
     "WvwExportFight",
     "WvwExportV1",
+    "WvwExportV2",
     "WvwHealthUpdateEvent",
     "WvwOwnershipInterval",
     "WvwPositionSample",
     "WvwSpawnEvent",
+    "WvwV2Actor",
+    "WvwV2CCEvent",
+    "WvwV2Event",
+    "WvwV2Fight",
+    "WvwV2HealingEvent",
+    "WvwV2UpEvent",
     "__version__",
     "_dispatch_event",
     "classify_buff",

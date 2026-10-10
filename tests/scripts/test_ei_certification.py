@@ -38,6 +38,13 @@ def test_generated_ei_config_enables_replay_and_wvw_export(tmp_path: Path) -> No
     assert "UploadToDPSReports=false" in config
 
 
+def test_generated_v2_config_selects_only_v2_export(tmp_path: Path) -> None:
+    config = TOOL["_config"](tmp_path, True, 2)
+
+    assert "SaveOutWvwExport=true" not in config
+    assert "SaveOutWvwExportV2=true" in config
+
+
 def test_summary_contains_only_aggregate_actor_free_fields() -> None:
     from gw2_core import WvwExportV1
 
@@ -73,3 +80,34 @@ def test_different_repeat_bytes_are_reported_as_nondeterministic() -> None:
 
     assert comparison["deterministic_repeat"] is False
     assert comparison["output_sha256"] != comparison["repeat_output_sha256"]
+
+
+def test_v2_transport_validation_captures_schema_failures() -> None:
+    import json
+
+    fixture = ROOT / "libs/gw2_core/tests/fixtures/wvw_export_v2.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    payload["fights"][0]["event_domain_end_ms"] = 1
+
+    result = TOOL["_validation_result"](payload, 2)
+
+    assert result["schema_valid"] is False
+    assert result["validation_errors"]
+    assert any("event_domain_end_ms" in error["message"] for error in result["validation_errors"])
+
+
+def test_v2_summary_reports_family_amounts_without_identity_fields() -> None:
+    import json
+
+    fixture = ROOT / "libs/gw2_core/tests/fixtures/wvw_export_v2.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+
+    summary = TOOL["_summarize"](payload, "fixture-log", 100, fixture.read_bytes(), 2)
+
+    assert summary["events_by_kind"]["healing"] == 1
+    assert summary["healing_amount_total"] == 75
+    assert summary["events_by_kind"]["up"] == 1
+    assert summary["events_by_kind"]["cc"] == 1
+    assert summary["cc_duration_ms_total"] == 500
+    assert "account" not in summary
+    assert "character" not in summary
