@@ -13,6 +13,14 @@ import anyone else.
 
 from __future__ import annotations
 
+from gw2_core.ei_wvw_export import (
+    WvwExportActor,
+    WvwExportEvent,
+    WvwExportFight,
+    WvwExportV1,
+    WvwOwnershipInterval,
+    WvwPositionSample,
+)
 from gw2_core.models import (
     _EVENT_MAP,
     BUFF_CATEGORY_MAP,
@@ -114,6 +122,12 @@ __all__ = [
     "UpEvent",
     "WeaponSwapEvent",
     "WorldInfo",
+    "WvwExportActor",
+    "WvwExportEvent",
+    "WvwExportFight",
+    "WvwExportV1",
+    "WvwOwnershipInterval",
+    "WvwPositionSample",
     "__version__",
     "_dispatch_event",
     "classify_buff",
