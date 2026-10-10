@@ -8,6 +8,10 @@ The export addresses event-level gaps recorded by the [executed field-coverage g
 
 This slice does not route uploads through EI, change `parser_adapter`, remove `gw2_evtc_parser`, or change persistence, API, or frontend behavior. The existing adapter remains the future process boundary. Archive extraction, multi-log grouping, upload/session identity, error mapping, and the production runtime remain product-owned and are not implemented here.
 
+## Canonical interpretation boundary
+
+Elite Insights is the canonical interpreter of EVTC for Gw2Analytics: it owns combat, actor, skill/buff, ownership, timestamp, and position interpretation. Gw2Analytics validates the versioned JSON transport and derives product analytics from those facts. During migration, `gw2_evtc_parser` is a comparison tool for finding export gaps, behavior changes, and product impact, not an arbiter of truth. The original `.zevtc` remains the immutable source artifact for future reprocessing with another pinned EI version.
+
 ## Export contents
 
 The sidecar has a `WvwExportV1` envelope with `schema_version`, EI `parser_version`, optional source/config/session metadata, `source_log_count`, and ordered `fights`. The product contract lives in `gw2_core.ei_wvw_export`; unknown fields and versions are rejected. The [fixture](../../libs/gw2_core/tests/fixtures/wvw_export_v1.json) is synthetic.
@@ -62,7 +66,7 @@ Event counts by kind (`damage`, `buff_apply`, `buff_extension`, `buff_remove_all
 - `20251207-225200`: 2,665; 12,715; 4,398; 1,509; 7,164; 3,022; 47; 196; 34; 251; 220; 7,210.
 - `20251208-230823`: 1,910; 4,022; 669; 1,087; 1,215; 2,555; 12; 20; 5; 43; 77; 1,203.
 
-Across all three logs, event times ranged from 0 to 69,073 / 151,737 / 74,816 ms, respectively. Actor awareness, ownership intervals, and positions also validated within each fight's `0..duration_ms` window. The code applies no timestamp clamp. Both exports of each input had matching SHA-256: `eaf09735082505bef91fc2ad2cf4709236846b831a1c966fb24b18684073d4c6`, `c3ea1fa481bb2b94e36f8cb6262b319c217263e44b792737760030d4b949b6f9`, and `bc82fdfd4742cd6b37b6f6522abec447347a261b5315832c915b7de8d6c4978e`. This establishes repeatability for these runs, not 35-log determinism or semantic parity.
+Across all three logs, event times ranged from 0 to 69,073 / 151,737 / 74,816 ms, respectively. Actor awareness, ownership intervals, and positions also validated within each fight's `0..duration_ms` window. The code applies no timestamp clamp. Both exports of each input had matching SHA-256: `eaf09735082505bef91fc2ad2cf4709236846b831a1c966fb24b18684073d4c6`, `c3ea1fa481bb2b94e36f8cb6262b319c217263e44b792737760030d4b949b6f9`, and `bc82fdfd4742cd6b37b6f6522abec447347a261b5315832c915b7de8d6c4978e`. This establishes repeatability for these runs, not export determinism across the full 35-log set or migration coverage.
 
 Output is 7.5–10.9 times compressed EVTC size with replay positions enabled. These samples do not set an acceptable production budget; output size, time, and peak memory need the full certification set and production-like process limits before cutover.
 
@@ -70,14 +74,14 @@ Output is 7.5–10.9 times compressed EVTC size with replay positions enabled. T
 
 The focused exporter tests pass (14/14). The full EI suite reports 1,068 passed and two pre-existing failures on the corrected candidate; upstream base v3.26.0.0 reports 1,054 passed and the same two failures. Both failures are `StableSortByTimeThenSwap` and `StableSortByTimeThenNegatedSwap`, which throw `NullReferenceException` because their existing test helper constructs `CastEvent` with a null caster. No new test failure was introduced.
 
-The exporter is not parser parity. The three private logs validate shape, ordering, actor references, timestamps and repeated output only. No product semantic comparison against `gw2_evtc_parser` has been performed.
+The three private logs validate shape, ordering, actor references, timestamps and repeated output only. They do not establish migration coverage or behavior-continuity, and no comparison of product impact against `gw2_evtc_parser` has been performed. Any comparison must first establish that the JSON faithfully represents EI's parsed result; documented differences from the legacy parser are acceptable when that transport is faithful, with product impact assessed separately.
 
 ## Migration acceptance gates
 
 Keep `gw2_evtc_parser` until all of these pass:
 
 1. EI projections cover every shipped product field and event semantic.
-2. The complete 35-log certification set passes semantic parity for fight boundaries, actor slices, events, ownership attribution, positions and buff removals.
+2. The complete 35-log certification set establishes migration coverage and behavior-continuity for shipped product features: verify that EI results are faithfully represented in JSON, document understood differences from the legacy parser without requiring identical interpretation, and assess persistence, API and frontend impact. Include fight boundaries, actor slices, events, ownership attribution, positions and buff removals.
 3. Multi-log archive grouping and stable fight/segment identities are validated.
 4. Output is deterministic across repeated processes and versions.
 5. Runtime, memory and JSON-size budgets are acceptable.
