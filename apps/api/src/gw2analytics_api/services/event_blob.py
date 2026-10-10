@@ -15,14 +15,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gw2_core import Event
-from gw2_evtc_parser import EvtcParseError, PythonEvtcParser
 from gw2analytics_api.models import OrmFight, Upload
 from gw2analytics_api.repositories import FightRepository
+from gw2analytics_api.services.parser_adapter import EvtcParseError, parse_events
 from gw2analytics_api.services.player_summaries import _persist_player_summaries
 from gw2analytics_api.storage import put_events
-
-# Module-level singleton: PythonEvtcParser is stateless and safe to reuse.
-_parser = PythonEvtcParser()
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +53,7 @@ def _persist_event_blob(
     instead of building the full JSONL string in memory.
     """
     try:
-        events = list(_parser.parse_events(evtc_bytes))
+        events = list(parse_events(evtc_bytes))
     except (EvtcParseError, S3Error, OSError, gzip.BadGzipFile):
         logger.exception("event blob unavailable for fight %s; deep metrics degraded", fight_id)
         return

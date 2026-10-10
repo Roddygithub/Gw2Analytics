@@ -8,14 +8,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from gw2_core import Fight as DomainFight
-from gw2_evtc_parser import (
-    EvtcParseError,
-    PythonEvtcParser,
-    read_zevtc_bytes,
-)
-from gw2_evtc_parser import (
-    __version__ as PARSER_VERSION,  # noqa: N812
-)
 from gw2analytics_api.models import (
     UPLOAD_STATUS_COMPLETED,
     UPLOAD_STATUS_FAILED,
@@ -23,11 +15,13 @@ from gw2analytics_api.models import (
 )
 from gw2analytics_api.services.event_blob import _persist_event_blob
 from gw2analytics_api.services.fight_persistence import _save_fight
+from gw2analytics_api.services.parser_adapter import (
+    EvtcParseError,
+    parse_archive,
+    provenance,
+)
 
 logger = logging.getLogger(__name__)
-
-# Module-level singleton: PythonEvtcParser is stateless and safe to reuse.
-_parser = PythonEvtcParser()
 
 
 def _commit_fight_and_blob(
@@ -115,8 +109,7 @@ def process_parse(
             logger.error("upload %s disappeared between POST and parse", upload_id)
             return
         try:
-            evtc_bytes = read_zevtc_bytes(raw_bytes)
-            fights = _parser.parse(evtc_bytes)
+            evtc_bytes, fights = parse_archive(raw_bytes)
             core_fight = next(fights, None)
         except EvtcParseError as exc:
             logger.warning("parse failed for upload %s: %s", upload_id, exc)
@@ -156,5 +149,5 @@ def process_parse(
 
         upload.status = UPLOAD_STATUS_COMPLETED
         upload.error_message = None
-        upload.parser_version = PARSER_VERSION
+        upload.parser_version = provenance.version
         db.commit()

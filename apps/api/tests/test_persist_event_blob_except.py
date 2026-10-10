@@ -25,12 +25,12 @@ def test_s3_error_is_swallowed_with_warning_log(monkeypatch: pytest.MonkeyPatch)
     def fake_put_events(fight_id: str, gz_bytes: bytes) -> str:
         raise _make_s3_error()
 
-    def fake_parse_events(_self: object, evtc_bytes: bytes) -> list[object]:
+    def fake_parse_events(evtc_bytes: bytes) -> list[object]:
         return [MagicMock(model_dump_json=lambda: "{}")]
 
     monkeypatch.setattr("gw2analytics_api.services.event_blob.put_events", fake_put_events)
     monkeypatch.setattr(
-        "gw2analytics_api.services.event_blob.PythonEvtcParser.parse_events",
+        "gw2analytics_api.services.event_blob.parse_events",
         fake_parse_events,
     )
     with patch("gw2analytics_api.services.event_blob.logger") as mock_log:
@@ -47,12 +47,12 @@ def test_s3_error_is_swallowed_with_warning_log(monkeypatch: pytest.MonkeyPatch)
 def test_attribute_error_propagates_to_caller() -> None:
     """Programming bug (AttributeError) is NOT swallowed; propagates UP."""
 
-    def fake_parse_events(_self: object, evtc_bytes: bytes) -> list[object]:
+    def fake_parse_events(evtc_bytes: bytes) -> list[object]:
         raise AttributeError("'NoneType' object has no attribute 'foo'")
 
     with (
         patch(
-            "gw2analytics_api.services.event_blob.PythonEvtcParser.parse_events",
+            "gw2analytics_api.services.event_blob.parse_events",
             fake_parse_events,
         ),
         pytest.raises(AttributeError),
