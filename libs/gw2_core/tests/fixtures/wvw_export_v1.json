@@ -51,22 +51,22 @@
           "target_actor_id": "a000001",
           "skill_id": 42,
           "damage": 100,
-          "shield_damage": 0,
-          "buff_id": null,
-          "buff_duration_ms": null,
-          "removed_stacks": null,
-          "health_percent": null
+          "shield_damage": 0
         }
       ],
       "ownership_intervals": [
         {
           "agent_id": "a000001",
           "owner_actor_id": "a000000",
+          "owner_resolution": "resolved",
           "start_ms": 100,
           "end_ms": 1800,
-          "boundary_basis": "agent_awareness"
+          "start_basis": "master_observation",
+          "end_basis": "agent_awareness"
         }
       ],
+      "ownership_observation_count": 1,
+      "ownership_same_time_collision_count": 0,
       "position_samples": []
     }
   ]

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 
 class _ExportModel(BaseModel):
@@ -32,72 +32,126 @@ class WvwExportActor(_ExportModel):
         return self
 
 
-class WvwExportEvent(_ExportModel):
+class WvwEventBase(_ExportModel):
     sequence: int = Field(ge=0)
-    kind: Literal[
-        "damage",
-        "buff_apply",
-        "buff_extension",
-        "buff_remove_all",
-        "buff_remove_single",
-        "buff_remove_manual",
-        "down",
-        "death",
-        "alive",
-        "spawn",
-        "despawn",
-        "health_update",
-    ]
     time_ms: int = Field(ge=0)
+
+
+class WvwDamageEvent(WvwEventBase):
+    kind: Literal["damage"]
     source_actor_id: str | None
     target_actor_id: str | None
-    skill_id: int | None = Field(ge=0)
-    damage: int | None = Field(ge=0)
-    shield_damage: int | None = Field(ge=0)
-    buff_id: int | None = Field(ge=0)
-    buff_duration_ms: int | None = Field(ge=0)
-    removed_stacks: int | None = Field(ge=0)
-    health_percent: float | None = Field(ge=0, le=100)
+    skill_id: int
+    damage: int = Field(ge=0)
+    shield_damage: int = Field(ge=0)
 
-    @model_validator(mode="after")
-    def event_payload_matches_kind(self) -> WvwExportEvent:
-        if self.kind == "damage" and self.damage is None:
-            raise ValueError("damage events require damage")
-        if self.kind in {"buff_apply", "buff_extension"} and (
-            self.buff_id is None or self.buff_duration_ms is None
-        ):
-            raise ValueError(f"{self.kind} events require buff_id and buff_duration_ms")
-        if self.kind.startswith("buff_remove_") and (
-            self.buff_id is None or self.buff_duration_ms is None
-        ):
-            raise ValueError("buff removal events require buff_id and buff_duration_ms")
-        if self.kind == "buff_remove_all" and self.removed_stacks is None:
-            raise ValueError("buff_remove_all events require removed_stacks")
-        if self.kind == "health_update" and self.health_percent is None:
-            raise ValueError("health_update events require health_percent")
-        return self
+
+class WvwBuffApplyEvent(WvwEventBase):
+    kind: Literal["buff_apply"]
+    source_actor_id: str | None
+    target_actor_id: str | None
+    buff_id: int
+    duration_ms: int = Field(ge=0)
+
+
+class WvwBuffExtensionEvent(WvwEventBase):
+    kind: Literal["buff_extension"]
+    source_actor_id: str | None
+    target_actor_id: str | None
+    buff_id: int
+    duration_ms: int = Field(ge=0)
+
+
+class _WvwBuffRemovalEvent(WvwEventBase):
+    source_actor_id: str | None
+    target_actor_id: str | None
+    buff_id: int
+    duration_ms: int = Field(ge=0)
+    removed_stacks: int = Field(ge=0)
+
+
+class WvwBuffRemoveAllEvent(_WvwBuffRemovalEvent):
+    kind: Literal["buff_remove_all"]
+
+
+class WvwBuffRemoveSingleEvent(_WvwBuffRemovalEvent):
+    kind: Literal["buff_remove_single"]
+
+
+class WvwBuffRemoveManualEvent(_WvwBuffRemovalEvent):
+    kind: Literal["buff_remove_manual"]
+
+
+class _WvwLifecycleEvent(WvwEventBase):
+    target_actor_id: str | None
+
+
+class WvwDownEvent(_WvwLifecycleEvent):
+    kind: Literal["down"]
+
+
+class WvwDeathEvent(_WvwLifecycleEvent):
+    kind: Literal["death"]
+
+
+class WvwAliveEvent(_WvwLifecycleEvent):
+    kind: Literal["alive"]
+
+
+class WvwSpawnEvent(_WvwLifecycleEvent):
+    kind: Literal["spawn"]
+
+
+class WvwDespawnEvent(_WvwLifecycleEvent):
+    kind: Literal["despawn"]
+
+
+class WvwHealthUpdateEvent(_WvwLifecycleEvent):
+    kind: Literal["health_update"]
+    health_percent: FiniteFloat = Field(ge=0, le=100)
+
+
+type WvwExportEvent = Annotated[
+    WvwDamageEvent
+    | WvwBuffApplyEvent
+    | WvwBuffExtensionEvent
+    | WvwBuffRemoveAllEvent
+    | WvwBuffRemoveSingleEvent
+    | WvwBuffRemoveManualEvent
+    | WvwDownEvent
+    | WvwDeathEvent
+    | WvwAliveEvent
+    | WvwSpawnEvent
+    | WvwDespawnEvent
+    | WvwHealthUpdateEvent,
+    Field(discriminator="kind"),
+]
 
 
 class WvwOwnershipInterval(_ExportModel):
     agent_id: str = Field(min_length=1)
     owner_actor_id: str | None
+    owner_resolution: Literal["resolved", "unresolved"]
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
-    boundary_basis: Literal["master_observation", "agent_awareness"]
+    start_basis: Literal["master_observation"]
+    end_basis: Literal["master_observation", "agent_awareness"]
 
     @model_validator(mode="after")
-    def interval_is_nonempty(self) -> WvwOwnershipInterval:
+    def interval_is_consistent(self) -> WvwOwnershipInterval:
         if self.end_ms <= self.start_ms:
             raise ValueError("ownership interval must satisfy start_ms < end_ms")
+        if (self.owner_actor_id is None) != (self.owner_resolution == "unresolved"):
+            raise ValueError("owner_actor_id and owner_resolution disagree")
         return self
 
 
 class WvwPositionSample(_ExportModel):
     actor_id: str = Field(min_length=1)
     time_ms: int = Field(ge=0)
-    x: float
-    y: float
-    z: float
+    x: FiniteFloat
+    y: FiniteFloat
+    z: FiniteFloat
 
 
 class WvwExportFight(_ExportModel):
@@ -111,12 +165,14 @@ class WvwExportFight(_ExportModel):
     actors: list[WvwExportActor]
     events: list[WvwExportEvent]
     ownership_intervals: list[WvwOwnershipInterval]
+    ownership_observation_count: int = Field(ge=0)
+    ownership_same_time_collision_count: int = Field(ge=0)
     position_samples: list[WvwPositionSample]
 
     @model_validator(mode="after")
     def references_and_order_are_valid(self) -> WvwExportFight:  # noqa: PLR0912
-        actor_ids = {actor.actor_id for actor in self.actors}
-        if len(actor_ids) != len(self.actors):
+        actor_by_id = {actor.actor_id: actor for actor in self.actors}
+        if len(actor_by_id) != len(self.actors):
             raise ValueError("actor_id values must be unique within a fight")
         if self.started_at is not None and self.started_at.utcoffset() is None:
             raise ValueError("started_at must include a UTC offset")
@@ -125,35 +181,49 @@ class WvwExportFight(_ExportModel):
                 raise ValueError("actor awareness exceeds fight duration_ms")
         if self.events != sorted(self.events, key=lambda event: (event.time_ms, event.sequence)):
             raise ValueError("events must be ordered by time_ms then sequence")
-        if len({event.sequence for event in self.events}) != len(self.events):
-            raise ValueError("event sequence values must be unique within a fight")
+        if [event.sequence for event in self.events] != list(range(len(self.events))):
+            raise ValueError("event sequence must be contiguous from zero")
+        if self.ownership_observation_count < len(self.ownership_intervals):
+            raise ValueError("ownership observations cannot be fewer than generated intervals")
+        if self.ownership_same_time_collision_count > self.ownership_observation_count:
+            raise ValueError("same-time collisions cannot exceed ownership observations")
         for event in self.events:
-            for actor_id in (event.source_actor_id, event.target_actor_id):
-                if actor_id is not None and actor_id not in actor_ids:
+            for actor_id in _event_actor_ids(event):
+                if actor_id is not None and actor_id not in actor_by_id:
                     raise ValueError(f"event references unknown actor_id {actor_id!r}")
             if event.time_ms > self.duration_ms:
                 raise ValueError("event time_ms exceeds fight duration_ms")
-        if self.position_samples != sorted(
-            self.position_samples, key=lambda sample: (sample.time_ms, sample.actor_id)
-        ):
-            raise ValueError("position_samples must be ordered by time_ms then actor_id")
+        expected_positions = sorted(
+            self.position_samples,
+            key=lambda sample: (sample.time_ms, sample.actor_id, sample.x, sample.y, sample.z),
+        )
+        if self.position_samples != expected_positions:
+            raise ValueError("position_samples must be ordered by time, actor, x, y, z")
         for sample in self.position_samples:
-            if sample.actor_id not in actor_ids:
+            position_actor = actor_by_id.get(sample.actor_id)
+            if position_actor is None:
                 raise ValueError(f"position sample references unknown actor_id {sample.actor_id!r}")
             if sample.time_ms > self.duration_ms:
                 raise ValueError("position sample time_ms exceeds fight duration_ms")
         for interval in self.ownership_intervals:
-            if interval.agent_id not in actor_ids:
+            agent = actor_by_id.get(interval.agent_id)
+            if agent is None:
                 raise ValueError(
                     f"ownership interval references unknown agent_id {interval.agent_id!r}"
                 )
-            if interval.owner_actor_id is not None and interval.owner_actor_id not in actor_ids:
-                raise ValueError(
-                    "ownership interval references unknown owner_actor_id "
-                    f"{interval.owner_actor_id!r}"
-                )
             if interval.end_ms > self.duration_ms:
                 raise ValueError("ownership interval end_ms exceeds fight duration_ms")
+            if interval.start_ms < agent.first_aware_ms or interval.end_ms > agent.last_aware_ms:
+                raise ValueError("ownership interval exceeds agent awareness")
+            if interval.owner_actor_id is not None:
+                owner = actor_by_id.get(interval.owner_actor_id)
+                if owner is None:
+                    raise ValueError(
+                        f"ownership interval references unknown owner_actor_id "
+                        f"{interval.owner_actor_id!r}"
+                    )
+                if not owner.first_aware_ms <= interval.start_ms <= owner.last_aware_ms:
+                    raise ValueError("observed owner is not aware at ownership start_ms")
         if self.ownership_intervals != sorted(
             self.ownership_intervals,
             key=lambda interval: (
@@ -164,6 +234,16 @@ class WvwExportFight(_ExportModel):
         ):
             raise ValueError("ownership_intervals must be ordered by agent, start, then owner")
         return self
+
+
+def _event_actor_ids(event: WvwExportEvent) -> tuple[str | None, ...]:
+    match event:
+        case WvwDamageEvent() | WvwBuffApplyEvent() | WvwBuffExtensionEvent():
+            return event.source_actor_id, event.target_actor_id
+        case WvwBuffRemoveAllEvent() | WvwBuffRemoveSingleEvent() | WvwBuffRemoveManualEvent():
+            return event.source_actor_id, event.target_actor_id
+        case _:
+            return (event.target_actor_id,)
 
 
 class WvwExportV1(_ExportModel):

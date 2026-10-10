@@ -1,96 +1,86 @@
 # WvW Elite Insights export v1
 
-**Status: compiled EI exporter prototype and product validator; no production parser cutover.** This document defines the small process boundary needed to carry EI's parsed WvW data into the product. The Python validator and example payload are Gw2Analytics-owned. The example is synthetic and contains no private log data. The local EI fork adds an opt-in CLI sidecar; it has not been run against a valid WvW log in this environment.
+**Status: prototype, not production cutover.** The Python validator and synthetic fixture are product-owned. An opt-in sidecar exporter is maintained in the dedicated [Gw2Analytics EI fork](https://github.com/Roddygithub/GW2-Elite-Insights-Parser/tree/gw2analytics-wvw-export-v1) at commit [`062e250d55c0a09a7f734524287043c7852483b4`](https://github.com/Roddygithub/GW2-Elite-Insights-Parser/commit/062e250d55c0a09a7f734524287043c7852483b4). It is based on upstream `baaron4/GW2-Elite-Insights-Parser` v3.26.0.0, commit `e4e548bf95b8a4901018a2c6a70058fc9c9e539f`. The implementation was built with local .NET SDK 8.0.425.
 
 ## Purpose and non-goals
 
-The export fills the event-level gaps recorded by the [executed field-coverage gate](../validation/ei-field-coverage-gate.md): normalized combat events, time-aware ownership, positions, and per-target buff removals. EI's existing detailed-WvW JSON remains useful for its aggregates; this contract does not copy that document or expose its C# object graph.
+The export addresses event-level gaps recorded by the [executed field-coverage gate](../validation/ei-field-coverage-gate.md): normalized combat events, time-aware ownership, positions, and per-target buff removals. It projects EI's parsed objects; it does not reparse EVTC bytes or copy EI's general JSON document.
 
-This slice does not route uploads through EI, change `parser_adapter`, remove `gw2_evtc_parser`, change persistence/API/frontend contracts, or claim semantic parity. The adapter remains the eventual process boundary and will own archive unpacking, multi-file grouping, version validation, error mapping, and session identity.
+This slice does not route uploads through EI, change `parser_adapter`, remove `gw2_evtc_parser`, or change persistence, API, or frontend behavior. The existing adapter remains the future process boundary. Archive extraction, multi-log grouping, upload/session identity, error mapping, and the production runtime remain product-owned and are not implemented here.
 
-The compiled prototype currently emits damage events (health/shield values), buff apply/extension/removal events, down/death/alive/spawn/despawn and health-update events, ownership intervals, and parsed position samples when replay parsing is enabled. This is deliberately not the complete generic event stream needed for cutover. Healing/barrier events, breakbar and CC details, activation/cast timing, weapon swaps, interrupts, damage-result flags, effects, and full raw event metadata remain deferred. Several are available as EI statistics/aggregates, but they do not preserve event-level timing/attribution; the field matrix documents those semantics. Extend the DTO only with a concrete product consumer and evidence of the corresponding EI source data.
+## Export contents
 
-## Envelope and shape
+The sidecar has a `WvwExportV1` envelope with `schema_version`, EI `parser_version`, optional source/config/session metadata, `source_log_count`, and ordered `fights`. The product contract lives in `gw2_core.ei_wvw_export`; unknown fields and versions are rejected. The [fixture](../../libs/gw2_core/tests/fixtures/wvw_export_v1.json) is synthetic.
 
-`WvwExportV1` is a UTF-8 JSON object with strict keys. The product-side Pydantic models are in `gw2_core.ei_wvw_export` and are exported from `gw2_core`.
+Each fight contains actor slices, normalized events, ownership intervals and position samples. It also includes aggregate `ownership_observation_count` and `ownership_same_time_collision_count` diagnostics so interval coalescing can be measured without exporting raw observation identities.
 
-```json
-{
-  "schema_version": 1,
-  "parser_version": "3.26.0.0",
-  "source_commit": null,
-  "config_sha256": null,
-  "session_id": null,
-  "source_log_count": 1,
-  "fights": [{
-    "fight_id": "log-0000/fight-0000",
-    "source_log_index": 0,
-    "segment_index": 0,
-    "started_at": "2026-01-01T00:00:00Z",
-    "duration_ms": 2000,
-    "build": null,
-    "outcome": "unknown",
-    "actors": [],
-    "events": [],
-    "ownership_intervals": [],
-    "position_samples": []
-  }]
-}
-```
+Events are a strict discriminated union on `kind`. Damage carries source, target, signed EI skill ID, health damage and shield damage. Buff apply, extension, and the three removal kinds each carry source, target, signed EI buff ID and duration; removals also carry removed stacks. Down, death, alive, spawn, despawn and health-update variants carry only their lifecycle fields. EI's `NoBuff` sentinel and stack activation/deactivation bookkeeping events are omitted: they are not product buff changes. Buff stack IDs are not included. Sequence values are assigned after deterministic sort and must equal their zero-based array index.
 
-The committed [fixture](../../libs/gw2_core/tests/fixtures/wvw_export_v1.json) shows one actor, one damage event, one ownership interval, and explicit missing values. It is a contract example, not EI output.
+All event, actor-awareness, ownership and position times use the same origin: `event_time - ParsedEvtcLog.LogData.LogStart`. The exporter does not clamp timestamps; it uses checked integer conversion and the product validator rejects values outside `0..duration_ms`. Position samples use EI world coordinates and sort by `(time_ms, actor_id, x, y, z)`. Coordinates must be finite.
 
-Each fight contains:
+## Identity, grouping and missingness
 
-- `actors`: export-local stable actor IDs, actor kind, nullable name/account, subgroup, profession/spec labels, instance/species IDs, and awareness bounds.
-- `events`: a monotonically ordered normalized event stream. IDs refer only to actors in the same fight. `source_actor_id`, `target_actor_id`, and event payload fields are explicitly nullable when EI cannot resolve them.
-- `ownership_intervals`: half-open `[start_ms, end_ms)` relationships. A null owner is reserved for an explicit unowned interval; absence of an interval means ownership was not observed and must not be interpreted as unowned.
-- `position_samples`: actor-local x/y/z samples in EI's world coordinate system, at fight-relative millisecond timestamps.
+Actor IDs are local to one fight. They are assigned from parsed actor ordering and are not account IDs, EI `AgentItem.UniqueID` values, or stable across fights. Separate awareness slices remain separate actors. Unreferenced EI synthetic (`IsFake`) actor records are omitted because EI creates their internal agent/instance IDs randomly; referenced synthetic actors remain so exported references resolve. EI instance and species IDs can be null; buff and skill IDs preserve signed EI identifiers. Nullable names, accounts, subgroup, profession/spec, and event actor references remain null when unavailable.
 
-`time_ms`, awareness, interval, and sample values are relative to EI's fight-log start. `started_at` preserves EI's offset-qualified timestamp and is nullable; it is not used to calculate event times. This avoids inventing an epoch when the source timestamp is missing. Skill identity is the numeric EI skill/buff ID; labels stay metadata and are not required to interpret events.
+The current CLI invocation emits one fight as `log-0000/fight-0000`. `source_log_count=1`; `segment_index=0`. It does not group multiple `.zevtc` archive members. The eventual adapter must invoke the pinned process per archive entry, preserve archive order, and combine results with `source_log_index` and `segment_index`; it must not merge logs by timestamp or player identity. WvW outcome is `unknown` because this exporter has no product outcome mapping.
 
-## Identity, grouping, and ordering
+## Ownership semantics
 
-Actor IDs are assigned within a fight from a deterministic ordering of the parsed actor slices; they are not account IDs, agent pointers, or stable across fights. Awareness slices for the same character remain separate actor records. The implementation must never use EI's `AgentItem.UniqueID` as an export ID; EI documents it as nondeterministic.
+EI's `EvtcParser.FindAgentMaster` resolves a master by instance ID at the observation timestamp (`AgentData.GetAgentByInstID(instID, time)`) and obtains the minion slice aware at that same time. When both resolve, the new opt-in path records the minion's observed master and timestamp while preserving the existing `AgentItem.Master` behavior. `AgentItem` copies retain observations and `ApplyOffset` shifts their times with the agent's awareness bounds.
 
-`fight_id` is `log-NNNN/fight-NNNN`, where the first index is the input EVTC entry order in the `.zevtc` archive and the second is the EI segment order within that entry. EI currently parses one log per invocation. The future adapter will invoke it per archive entry and combine results in archive order; the per-file prototype emits one segment at index zero. It must not merge different source logs based only on timestamps or names. WvW outcome is `unknown`: EI marks the WvW main phase successful by parser convention, which is not a product combat outcome.
+Each distinct observation time starts a half-open interval. The next later observation ends it; the last interval ends at that minion slice's `LastAware`. Thus `start_basis` is `master_observation`; `end_basis` is `master_observation` or `agent_awareness`. Same-time records are counted as collisions and the last record in EI traversal order supplies that timestamp's owner. Non-positive intervals are omitted.
 
-Events are ordered by `(time_ms, sequence)`. The exporter assigns zero-based unique sequence values after sorting by time, kind, source, target, skill, and event payload; it does not promise original EVTC byte order among equal-time events. Position samples are ordered by `(time_ms, actor_id, x, y, z)`; ownership intervals by `(agent_id, start_ms, owner_actor_id)`. Consumers may rely on these orders, not on source collection iteration order.
+`owner_resolution="unresolved"` with `owner_actor_id=null` means EI recorded a master observation but the export could not map it to an actor slice at that timestamp. `resolved` requires a non-null ID. No observation produces no interval; EI does not report explicit unowned observations, so null is not used to mean unowned. The minion interval must fit its own awareness window. The owner must be aware at the observation start, matching EI's timestamped instance lookup; requiring the owner to remain aware through the interval end would be invalid when the minion's last observed relation extends beyond the owner's slice.
 
-## Missingness and versioning
+Local validation found no unresolved owner observations in the three logs. They contained many same-time observation collisions, so collision resolution remains an explicit tie rule requiring broader corpus review.
 
-Required arrays are always present; an empty array means no records were exported for that family. Optional identity, timestamp, actor references, and event-specific values are explicit JSON `null` when unavailable. Unknown EI fields are rejected (`extra="forbid"`), as are unknown schema versions, unknown event kinds, malformed type-specific payloads, invalid actor references, out-of-range timestamps, and unsorted events.
+## EI source mapping and limits
 
-`schema_version` changes only for incompatible shape or semantic changes. `parser_version` identifies EI; `source_commit` and `config_sha256` must be provided by the pinned build/process wrapper when available, otherwise null. `session_id` is assigned by the Gw2Analytics upload adapter, not guessed by EI. The current one-file prototype uses null until that wrapper exists.
+| Family | Parsed EI source and projection | Limits |
+| --- | --- | --- |
+| Damage and lifecycle | `ParsedEvtcLog.CombatData`: `HealthDamageEvent`, down/dead/alive/spawn/despawn and `HealthUpdateEvent` | Projects typed event time, actors, skill IDs, damage/shield and health percent. Other EVTC flags are deferred. |
+| Buff changes | `CombatData.GetBuffDataByDst`; `BuffApplyEvent`, `BuffExtensionEvent`, removal classes and `BuffEvent.By` / `.To` | The collection includes extensions: `CombatData` adds each buff to `_buffDataByDst` before excluding extensions only from the source index. The exporter reads the destination index and reference-deduplicates. Stack metadata and invalidated `NoBuff` events are omitted. |
+| Ownership | `EvtcParser.FindAgentMaster`, `AgentData.GetAgentByInstID(instID,time)`, `AgentItem.FirstAware` / `LastAware`, and new opt-in `OwnershipObservations` | EI previously retained only a global master pointer. This sidecar records timestamped observations. Same-time tie behavior is deterministic for a parse but not proven semantically lossless. |
+| Positions | `CombatData.GetMovementData` and `PositionEvent.GetPoint3D`; replay parser | Positions exist only when combat replay parsing is enabled. Exported float coordinates are EI world coordinates. Replay can increase output size substantially. |
+| Identity and metadata | `AgentItem`, `Player`, `LogMetadata` | Actor IDs exclude `UniqueID`; unreferenced synthetic agents with random EI IDs are omitted. No skill dictionary, guild, gear, weapon, map or team metadata is included. |
 
-## EI source mapping and projection limits
+The exporter is added in `GW2EIJSON/WvwExport.cs` and `GW2EIBuilders/WvwExportBuilder.cs`; the CLI writes an opt-in `_wvw_export_v1.json` through `GW2EIParserCommons.ProgramHelper`. `SaveOutWvwExport` is false by default. Parser ownership observation capture is also false by default and is enabled only when this sidecar is requested. Ordinary parses keep the existing `SetMaster` path without retaining the extra observation list.
 
-The local source checkout is `.tooling/ei-src`, upstream `baaron4/GW2-Elite-Insights-Parser` at `e4e548bf95b8a4901018a2c6a70058fc9c9e539f` (`v3.26.0.0`). Relevant source objects and insertion points are:
+## Real-log validation and resources
 
-| Export family | EI parsed source | Current JSON status | Projection notes |
-| --- | --- | --- | --- |
-| Damage and lifecycle events | `ParsedEvtcLog.CombatData`; `HealthDamageEvent`, `DownEvent`, `DeadEvent`, `AliveEvent`, `SpawnEvent`, `DespawnEvent`, `HealthUpdateEvent` | `JsonLogBuilder` exports aggregates and series, not generic per-event records; the local opt-in `WvwExportBuilder` projects these typed events | Parsed times, actor slices, skill IDs, damage/shield values and health percentages are already available. The v1 projection preserves these fields and intentionally omits other EVTC flags. |
-| Buff apply/removal | `CombatData.GetBuffDataByDst`; `BuffApplyEvent`, `BuffExtensionEvent`, `BuffRemoveAllEvent`, `BuffRemoveSingleEvent`, `BuffRemoveManualEvent`; `BuffEvent.By` / `.To` | Existing buff uptime/volume aggregates only; local exporter reads typed target-indexed events | Buff ID, time, remover, affected target, removed duration and stack count exist in parsed objects. The source-indexed getter omits extensions, so the prototype reads by destination and deduplicates events. Keep `By` and `To` semantics; do not infer target from raw byte positions. |
-| Ownership | `EvtcParser.FindAgentMaster`; EVTC `SrcMasterInstid` / `DstMasterInstid`; new local `AgentItem.OwnershipObservations` alongside `AgentItem.Master` | `JsonPlayer` minion membership only, no time-ranged relation; the local fork records each parsed master observation | The exporter forms half-open intervals from each observation to the next; the final observation extends to `LastAware`. Same-time conflicting observations resolve to the last record in EI's EVTC traversal order. Those boundary/tie assumptions are explicit, not proven lossless; corpus validation is required before product use. |
-| Position samples | `CombatData.GetMovementData`; `PositionEvent.GetPoint3D`; `SingleActor` combat replay | Combat replay actor data exists only with replay parsing enabled; local exporter includes parsed position events when replay was computed | The source decodes packed position records to float32 coordinates. Replay polling is 300 ms; enabling replay can substantially grow output. |
-| Multi-fight identity | CLI parses input files separately; `ParsedEvtcLog` is one parsed log | EI does not combine archive entries | Archive entry order and segment ordinal are explicit. Adapter grouping remains product-owned. |
-| Actor/spec/squad/skill identity | `AgentItem`, `Player`, `SkillItem`, `LogMetadata` | Existing detailed JSON exports close equivalents; local DTO exports a subset | Export-local actor IDs preserve temporal slices. EI `UniqueID` is excluded. Player account/character/group and spec labels are mapped from `Player`; NPC/gadget identity uses parsed agent kind/species. Unknown values remain null. The prototype does not yet export map, guild, team, gear, weapons, or a skill dictionary. |
+The private certification manifest contains 35 entries and all 35 logs are present locally. This slice ran the three requested representative logs twice each. Logs and JSON stayed under ignored `.tooling/ei-export-validation/`; nothing derived from them is committed. The values below are aggregate only. Peak RSS is a 10 ms `psutil` sampling estimate for the CLI process tree.
 
-The JSON DTO project is `GW2EIJSON`; the existing DTO assembly point is `GW2EIBuilders.JsonModels.JsonLogBuilder.BuildJsonLog`, called by `RawFormatBuilder`. The prototype adds `GW2EIJSON/WvwExport.cs`, `GW2EIBuilders/WvwExportBuilder.cs`, records observations in `GW2EIEvtcParser/ParsedData/Agents/AgentItem.cs` from `EvtcParser.FindAgentMaster`, and writes an opt-in `_wvw_export_v1.json` sidecar from `GW2EIParserCommons.ProgramHelper`. Enable `SaveOutWvwExport=true` and `DetailledWvW=true` in a `.conf`; it calls the exporter on the already-parsed `ParsedEvtcLog` and does not re-read EVTC bytes. JSON nulls are retained by the dedicated serializer options.
+| Log | Input bytes | JSON bytes | Ratio | Wall seconds (two runs) | Sampled peak RSS MB | Actors | Events | Ownership observations / collisions / intervals | Owner changes | Unresolved | Positions | Repeat bytes identical |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | :---: |
+| `20251205-211525` | 832,851 | 9,092,536 | 10.917x | 1.190 / 1.170 | 162.1 | 1,129 | 27,796 | 3,303 / 2,102 / 1,194 | 0 | 0 | 7,097 | yes |
+| `20251207-225200` | 2,188,313 | 16,494,411 | 7.538x | 1.525 / 1.573 | 210.2 | 1,276 | 39,431 | 15,989 / 8,586 / 7,352 | 0 | 0 | 26,457 | yes |
+| `20251208-230823` | 462,489 | 4,494,335 | 9.718x | 0.952 / 0.959 | 138.8 | 291 | 12,818 | 4,244 / 2,633 / 1,609 | 0 | 0 | 4,128 | yes |
 
-The exporter has been compiled using .NET SDK 8.0.425 against the local v3.26.0.0 source. The repository's private 35-log corpus is absent locally; the only `.zevtc` in the workspace is a 990-byte sample that EI rejects as truncated before parsing. No real-log output, parity, or resource result is claimed. The exporter remains an experiment until valid-log validation proves all projections.
+Event counts by kind (`damage`, `buff_apply`, `buff_extension`, `buff_remove_all`, `buff_remove_single`, `buff_remove_manual`, `down`, `death`, `alive`, `spawn`, `despawn`, `health_update`):
 
-## Resource considerations
+- `20251205-211525`: 2,262; 12,408; 1,818; 1,530; 7,315; 1,727; 1; 24; 1; 34; 42; 634.
+- `20251207-225200`: 2,665; 12,715; 4,398; 1,509; 7,164; 3,022; 47; 196; 34; 251; 220; 7,210.
+- `20251208-230823`: 1,910; 4,022; 669; 1,087; 1,215; 2,555; 12; 20; 5; 43; 77; 1,203.
 
-The executed 35-log gate measured 305.7 MB of existing detailed JSON total (0.37–29.88 MB, mean 8.73 MB), about 1.2–1.4x uncompressed input. It did not enable replay or measure peak memory. A normalized event list will add data; position samples are likely the largest increase. The sidecar is a transport format, not a persistence format. Record input bytes, output bytes, wall time, peak RSS, and event/sample counts for the same representative logs before setting a production budget. Do not enable replay by default before those measurements.
+Across all three logs, event times ranged from 0 to 69,073 / 151,737 / 74,816 ms, respectively. Actor awareness, ownership intervals, and positions also validated within each fight's `0..duration_ms` window. The code applies no timestamp clamp. Both exports of each input had matching SHA-256: `eaf09735082505bef91fc2ad2cf4709236846b831a1c966fb24b18684073d4c6`, `c3ea1fa481bb2b94e36f8cb6262b319c217263e44b792737760030d4b949b6f9`, and `bc82fdfd4742cd6b37b6f6522abec447347a261b5315832c915b7de8d6c4978e`. This establishes repeatability for these runs, not 35-log determinism or semantic parity.
 
-## Migration and acceptance gates
+Output is 7.5–10.9 times compressed EVTC size with replay positions enabled. These samples do not set an acceptable production budget; output size, time, and peak memory need the full certification set and production-like process limits before cutover.
 
-1. Freeze this schema and prove deterministic output from repeated parses.
-2. Run a few representative private logs locally; keep logs, identities, generated JSON, and measurements containing identity outside Git and CI.
-3. Run all 35 certified logs and compare fight boundaries, actor/slice identity, event counts by kind, timestamps, owner attribution, position availability, and buff removals against the existing parser. Record deltas per semantic field; do not call aggregate similarity parity.
-4. Measure output size, wall time, and peak memory with replay both disabled and enabled if positions are needed.
-5. Add a strict process adapter with pinned EI binary/source/config provenance, clear errors, and multi-file upload grouping. Do not put C# types in product services.
-6. Remove `gw2_evtc_parser` only after shipped-field coverage, the complete 35-log parity set, multi-fight and ownership parity, position semantics, buff-removal semantics, deterministic output, resource budgets, adapter tests, persisted-data compatibility, and API/frontend regression gates all pass.
+## Validation status
 
-The EI fork/export work is separate from the Gw2Analytics runtime migration. This contract can be reviewed independently; it does not authorize production uploads through EI.
+The focused exporter tests pass (14/14). The full EI suite reports 1,068 passed and two pre-existing failures on the corrected candidate; upstream base v3.26.0.0 reports 1,054 passed and the same two failures. Both failures are `StableSortByTimeThenSwap` and `StableSortByTimeThenNegatedSwap`, which throw `NullReferenceException` because their existing test helper constructs `CastEvent` with a null caster. No new test failure was introduced.
+
+The exporter is not parser parity. The three private logs validate shape, ordering, actor references, timestamps and repeated output only. No product semantic comparison against `gw2_evtc_parser` has been performed.
+
+## Migration acceptance gates
+
+Keep `gw2_evtc_parser` until all of these pass:
+
+1. EI projections cover every shipped product field and event semantic.
+2. The complete 35-log certification set passes semantic parity for fight boundaries, actor slices, events, ownership attribution, positions and buff removals.
+3. Multi-log archive grouping and stable fight/segment identities are validated.
+4. Output is deterministic across repeated processes and versions.
+5. Runtime, memory and JSON-size budgets are acceptable.
+6. The process adapter tests pass; persisted data remains compatible; API and frontend behavior has no regression.
+
+EI fork/export work remains separate from the Gw2Analytics adapter/runtime migration. This contract authorizes neither production cutover nor parser deletion.
