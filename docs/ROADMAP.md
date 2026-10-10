@@ -32,7 +32,7 @@ roadmap à lui seul.
 
 ## Roadmaps historiques reconstituées
 
-Les numéros de phase appartiennent à **trois plans indépendants**. Ils ne
+Les numéros de phase appartiennent à **deux plans indépendants**. Ils ne
 forment pas une séquence unique et ne doivent pas être aplatis.
 
 ### Fondations produit originales
@@ -64,21 +64,9 @@ v0.13.0 (`2b3ae8f`).
 | 4 | Position heatmap | Carte de positions | `0708f68` | IMPLEMENTED |
 | 5 | Guild features + multi-fight comparison | Fonctionnalités guildes et comparaison | `e329f9a` | NOT STARTED — candidat, pas priorité active |
 
-### Phases agentiques administratives (non produit)
-
-| Phase | Nom original | Objectif original | Preuve historique | État actuel |
-|---|---|---|---|---|
-| 3 | Baseline validation | Vérifier la baseline | `b7db5f8`, checkpoint Phase 3 | IMPLEMENTED |
-| 4 | BMAD cleanup | Réduire BMAD | `7a347f5` | IMPLEMENTED |
-| 5 | Lead/Codex minimal | Point d'entrée Lead | `72ec29f` | IMPLEMENTED |
-| 6 | Codex/Herdr live validation | Valider l'orchestration | `cca199c` | IMPLEMENTED |
-| 7 | Atomic OSError pilot | Pilote d'autonomie | `175f1f7` | IMPLEMENTED |
-| 8 | Private Corpus Executor | Isolation expérimentale WvW | checkpoint Phase 8 | SUPERSEDED — retiré par `83505d7` |
-
-Les anciens niveaux d'autonomie 1/2/3 étaient une politique agentique, non des
-phases produit. Seul le Level 1 historique est attesté; la politique actuelle
-est l'exécution continue sûre décrite dans `AGENTS.md` et
-`docs/agentic/README.md`.
+> The historical agent-workflow phases (BMAD/Codex/Herdr orchestration,
+> Lead routing, the private-corpus executor) are removed from this repository
+> and are intentionally not reproduced here; they were never product phases.
 
 ## Archive v0.14.2 (conservée pour la traçabilité)
 
