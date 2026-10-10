@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from gw2_analytics.ei_compare import compare_elite_insights
-from gw2_core import CombatOutcomeEvent, DownEvent, UpEvent
+from gw2_core import BuffInfoEvent, CombatOutcomeEvent, DownEvent, UpEvent
 from gw2_evtc_parser import PythonEvtcParser, read_zevtc_archive
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -14,11 +14,20 @@ _EI_CORPUS = os.environ.get("GW2ANALYTICS_EI_CORPUS")
 
 
 @pytest.mark.parametrize(
-    ("name", "duration_ms", "agents", "events", "downs", "ups", "outcomes"),
+    (
+        "name",
+        "duration_ms",
+        "agents",
+        "events",
+        "buff_info_events",
+        "downs",
+        "ups",
+        "outcomes",
+    ),
     [
-        ("20251205-211525.zevtc", 69_097, 119, 46_846, 1, 1, 2),
-        ("20251207-225200.zevtc", 151_791, 323, 112_909, 47, 34, 19),
-        ("20251208-230823.zevtc", 74_837, 115, 21_245, 12, 5, 17),
+        ("20251205-211525.zevtc", 69_097, 119, 47_262, 416, 1, 1, 2),
+        ("20251207-225200.zevtc", 151_791, 323, 113_209, 300, 47, 34, 19),
+        ("20251208-230823.zevtc", 74_837, 115, 21_572, 327, 12, 5, 17),
     ],
 )
 def test_evtc_2025_multilog_corpus(
@@ -26,6 +35,7 @@ def test_evtc_2025_multilog_corpus(
     duration_ms: int,
     agents: int,
     events: int,
+    buff_info_events: int,
     downs: int,
     ups: int,
     outcomes: int,
@@ -44,6 +54,9 @@ def test_evtc_2025_multilog_corpus(
     assert fight.header.duration_ms == duration_ms
     assert len(fight.agents) == agents
     assert len(parsed) == events
+    # CBTS_BUFFINFO=30 metadata events were added in 2d13ced; these explain
+    # the increase from the totals pinned in 729dc85.
+    assert sum(isinstance(event, BuffInfoEvent) for event in parsed) == buff_info_events
     assert sum(isinstance(event, DownEvent) for event in parsed) == downs
     assert sum(isinstance(event, UpEvent) for event in parsed) == ups
     assert sum(isinstance(event, CombatOutcomeEvent) for event in parsed) == outcomes
