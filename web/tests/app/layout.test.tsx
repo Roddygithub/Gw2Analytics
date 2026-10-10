@@ -63,10 +63,10 @@ describe("RootLayout", () => {
     const html = container.ownerDocument.documentElement;
     expect(html.tagName).toBe("HTML");
     expect(html.getAttribute("lang")).toBe("fr");
-    // next/font/google shim in setup.ts returns --mock-sans + --mock-mono
+    // next/font/local shim in setup.ts returns the requested CSS variable,
     // which RootLayout interpolates into the html className.
-    expect(html.className).toContain("--mock-sans");
-    expect(html.className).toContain("--mock-mono");
+    expect(html.className).toContain("--font-geist-sans");
+    expect(html.className).toContain("--font-geist-mono");
 
     const child = screen.getByTestId("child");
     expect(child).toHaveTextContent("hello");
