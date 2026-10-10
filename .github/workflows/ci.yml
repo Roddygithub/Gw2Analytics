@@ -221,7 +221,7 @@ jobs:
 
       - name: Pytest
         # --cov-report=xml generates coverage.xml for Codecov ingestion.
-        run: uv run pytest --tb=line -q --cov-report=xml
+        run: uv run pytest --tb=line -q --cov=apps/api/src --cov=libs --cov-report=term-missing --cov-report=xml --cov-fail-under=90
 
       - name: Upload coverage to Codecov
         # Only on main (PRs don't have the CODECOV_TOKEN secret).
