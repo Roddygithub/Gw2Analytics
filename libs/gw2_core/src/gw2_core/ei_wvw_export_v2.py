@@ -100,6 +100,7 @@ class WvwV2Fight(_V2Model):
     segment_index: int = Field(ge=0)
     started_at: datetime | None
     duration_ms: int = Field(gt=0)
+    recording_end_ms: int = Field(gt=0)
     event_domain_end_ms: int = Field(gt=0)
     healing_available: bool
     build: int | None = Field(default=None, ge=0)
@@ -112,17 +113,31 @@ class WvwV2Fight(_V2Model):
     position_samples: list[WvwPositionSample]
 
     @model_validator(mode="after")
-    def domain_and_references_are_valid(self) -> WvwV2Fight:  # noqa: PLR0912
+    def temporal_bounds_are_ordered(self) -> WvwV2Fight:
         if self.event_domain_end_ms < self.duration_ms:
             raise ValueError("event_domain_end_ms must cover the active fight duration")
+        if self.recording_end_ms < self.duration_ms:
+            raise ValueError("recording_end_ms must cover the active fight duration")
+        if self.event_domain_end_ms < self.recording_end_ms:
+            raise ValueError("event_domain_end_ms must cover recording_end_ms")
+        latest_event_ms = max((event.time_ms for event in self.events), default=0)
+        if self.event_domain_end_ms != max(self.recording_end_ms, latest_event_ms):
+            raise ValueError(
+                "event_domain_end_ms must be the maximum of recording_end_ms and the "
+                "latest exported event timestamp"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def domain_and_references_are_valid(self) -> WvwV2Fight:  # noqa: PLR0912
         actor_by_id = {actor.actor_id: actor for actor in self.actors}
         if len(actor_by_id) != len(self.actors):
             raise ValueError("actor_id values must be unique within a fight")
         if self.started_at is not None and self.started_at.utcoffset() is None:
             raise ValueError("started_at must include a UTC offset")
         for actor in self.actors:
-            if actor.last_aware_ms > self.event_domain_end_ms:
-                raise ValueError("actor awareness exceeds event_domain_end_ms")
+            if actor.last_aware_ms > self.recording_end_ms:
+                raise ValueError("actor awareness exceeds recording_end_ms")
         if self.events != sorted(self.events, key=lambda event: (event.time_ms, event.sequence)):
             raise ValueError("events must be ordered by time_ms then sequence")
         if [event.sequence for event in self.events] != list(range(len(self.events))):
@@ -147,8 +162,8 @@ class WvwV2Fight(_V2Model):
         for sample in self.position_samples:
             if sample.actor_id not in actor_by_id:
                 raise ValueError(f"position sample references unknown actor_id {sample.actor_id!r}")
-            if sample.time_ms > self.event_domain_end_ms:
-                raise ValueError("position sample exceeds event_domain_end_ms")
+            if sample.time_ms > self.recording_end_ms:
+                raise ValueError("position sample exceeds recording_end_ms")
             if not all(map(math.isfinite, (sample.x, sample.y, sample.z))):
                 raise ValueError("position coordinates must be finite")
         for interval in self.ownership_intervals:
@@ -157,8 +172,8 @@ class WvwV2Fight(_V2Model):
                 raise ValueError(
                     f"ownership interval references unknown agent_id {interval.agent_id!r}"
                 )
-            if interval.end_ms > self.event_domain_end_ms:
-                raise ValueError("ownership interval exceeds event_domain_end_ms")
+            if interval.end_ms > self.recording_end_ms:
+                raise ValueError("ownership interval exceeds recording_end_ms")
             if interval.start_ms < agent.first_aware_ms or interval.end_ms > agent.last_aware_ms:
                 raise ValueError("ownership interval exceeds agent awareness")
             owner_id = interval.owner_actor_id

@@ -27,11 +27,17 @@ consumer requires timed barrier.
 ### Up/rally
 
 `CombatEventFactory.AddStateChangeEvent` maps the EVTC `StateChange.ChangeUp`
-record to `AliveEvent`, indexed by `Src`. `ChangeDown`, `ChangeDead` and
-`Spawn` create distinct `DownEvent`, `DeadEvent` and `SpawnEvent` records. V2
-will expose the exact `ChangeUp` record as `up`; it will not infer rally from
+record to `AliveEvent`, indexed by `Src`; the pinned source creates
+`AliveEvent` nowhere else and the class exposes no custom-event constructor,
+so `CombatData.GetAliveEvents` can only contain raw ChangeUp records.
+Because the base `StatusEvent` discarded the raw combat item, `AliveEvent`
+now retains its `StateChange` property. The V2 exporter verifies it at
+export time and emits `up` only for the canonical `StateChange.ChangeUp`
+transition, throwing a narrow `InvalidDataException` if any broader
+alive-state semantic ever reaches the V2 path. V2 will not infer rally from
 health, spawn, death, or alive-state sequences. This is the canonical actor
-transition consumed by the shipped pre-down contribution windows.
+transition consumed by the shipped pre-down contribution windows. The V1
+`alive` projection of `GetAliveEvents` is unchanged.
 
 ### Timed CC
 
@@ -70,14 +76,25 @@ duration. That canonical synthetic removal can exceed the last raw EVTC
 timestamp. The observed times are 56,974 ms vs. a 56,789 ms recording end,
 286,971 ms vs. 285,414 ms, and 51,167 ms vs. 45,064 ms.
 
-V2 represents `duration_ms` (active phase end) separately from
-`event_domain_end_ms`. The latter is the maximum of raw `EvtcLogEnd` and the
-greatest timestamp among exported canonical events. It describes the temporal
-envelope of the EI projection, including EI-derived events, instead of
-asserting that every projected event occurred inside the raw recording
-interval. Events remain unchanged: none are clamped or dropped. Actor
-awareness, ownership and positions retain their EI-specific time semantics and
-are validated independently.
+V2 represents three distinct temporal concepts per fight:
+
+- `duration_ms` is the active EI analyzed-fight boundary (`LogData.LogEnd`).
+- `recording_end_ms` is EI's raw EVTC recording end (`LogData.EvtcLogEnd`),
+  relative to the same origin as event timestamps.
+- `event_domain_end_ms` is `max(recording_end_ms, latest exported canonical
+  event timestamp)`. It describes the temporal envelope of the EI projection,
+  including EI-derived events, instead of asserting that every projected
+  event occurred inside the raw recording interval.
+
+The exporter requires `duration_ms <= recording_end_ms <= event_domain_end_ms`.
+For WvW, `WvWLogic` never calls `SetSuccess`, so EI's active WvW phase ends at
+the raw recording end and the corpus logs have
+`duration_ms == recording_end_ms`; the relation still guards future logs
+where the active phase ends earlier than the recording. Events may extend to
+`event_domain_end_ms`; none are clamped or dropped. Raw-recording facts —
+agent awareness, positions, ownership — retain their EI-specific guarantee of
+staying inside `recording_end_ms` and are not broadened merely because a
+derived event extends the event domain.
 
 The V1 exporter does not expose `FightData` objects; WvW's V1/V2 fight envelope
 is the EI full WvW phase. Any instance-log segmented phases are a separate
@@ -106,17 +123,34 @@ explicitly documented by EI as nondeterministic and is not used. This preserves
 within-fight references without inventing cross-log identity or deriving IDs
 from player names.
 
-Independent review must verify that raw `Agent` address plus awareness interval
-resolves every V2 actor slice, including reused raw addresses and overlapping
-awareness slices.
+Independent review verified how the V2 slice fallback can trigger and whether
+its previous `FirstOrDefault` selection was safe. Pinned EI does not prove
+uniqueness of a `(raw Agent, timestamp)` slice:
+
+- `AgentData.GetAgent` returns the first agent by `FirstAware` whose awareness
+  contains the timestamp, silently choosing among overlaps.
+- `EvtcParser.UpdateAgentData` expands awareness to cover every attributed
+  event, and events without an instance ID always extend the first same-address
+  slice; awareness windows are therefore constructed, not disjoint by design.
+- The orphaned instance-ID repair matches candidates with a plus-or-minus
+  300 ms slack and can extend a window into a neighboring slice's range.
+
+The V2 fallback therefore now gathers all candidate slices for the raw
+address that are aware at the event timestamp: zero candidates keep the
+existing null behavior, exactly one candidate is used, and more than one
+distinct slice raises a narrow `InvalidDataException` instead of exporting a
+potentially wrong actor reference. `InstID` is not reintroduced. The V1
+fallback keeps its certified instance-ID and shortest-window selection.
 
 ## Minimal V2 delta
 
 - `schema_version = 2` and a separate `_wvw_export_v2.json` artifact.
-- Active `duration_ms` plus `event_domain_end_ms`, which covers raw recording
-  time and any later EI-derived event timestamp.
+- Active `duration_ms`, raw `recording_end_ms`, and `event_domain_end_ms`,
+  which covers raw recording time and any later EI-derived event timestamp,
+  with `duration_ms <= recording_end_ms <= event_domain_end_ms`.
 - Per-fight `healing_available` marker.
-- Strict `healing`, `up`, and `cc` event variants.
+- Strict `healing`, `up` (canonical EVTC `ChangeUp` only), and `cc` event
+  variants.
 - No actor `instance_id`.
 
 V1 schema, exporter switch, fixtures, and certification evidence remain
@@ -127,12 +161,16 @@ repeat determinism.
 
 The certified candidate is the separate EI branch
 `feat/gw2analytics-wvw-export-v2` at
-`6c9d2346f49aca9de974fa85a26d6f4f57b31aaf`. Across all 35 manifest logs,
+`445eeb80e373b4597b0b38f9fbf90099c475fefc`. Across all 35 manifest logs,
 replay-enabled and replay-disabled exports were each 35/35 produced, schema
-valid, and byte-identical on repeat. The three late Scourge shade expiry events
-are preserved; the computed event-domain end includes their canonical EI event
-times. The seven previous `instance_id`-variation logs also repeat exactly;
-V2 contains no `instance_id` field.
+valid, and byte-identical under the hardened repeat harness, which deletes
+the first sidecar and requires exactly one freshly produced output per
+repeat. The three late Scourge shade expiry events are preserved; the
+computed event-domain end includes their canonical EI event times while the
+new `recording_end_ms` keeps the raw recording boundary explicit. The seven
+previous `instance_id`-variation logs also repeat exactly; V2 contains no
+`instance_id` field, and the V2 slice fallback's ambiguity guard never fired
+on the corpus.
 
 See the [executed certification and aggregate resource report](../validation/ei-v2-35log-certification.md).
 V2 is ready for a separately reviewed process-adapter prototype only. This

@@ -11,6 +11,8 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from collections.abc import Callable
+from functools import partial
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -162,6 +164,7 @@ def _summarize(
     events = fight["events"]
     positions = fight["position_samples"]
     duration_ms = fight["duration_ms"]
+    recording_end_ms = fight.get("recording_end_ms")
     event_counts: Counter[str] = Counter(event["kind"] for event in events)
     event_times = [event["time_ms"] for event in events]
     position_times = [point["time_ms"] for point in positions]
@@ -190,6 +193,7 @@ def _summarize(
         "events_by_kind": {
             kind: event_counts[kind] for kind in (V2_KINDS if schema_version == 2 else KINDS)
         },
+        "recording_end_ms": recording_end_ms,
         "event_domain_end_ms": fight.get("event_domain_end_ms"),
         "healing_available": fight.get("healing_available"),
         "ownership_observations": fight["ownership_observation_count"],
@@ -206,6 +210,11 @@ def _summarize(
         "position_time_min_ms": min(position_times, default=None),
         "position_time_max_ms": max(position_times, default=None),
         "events_after_duration": sum(event["time_ms"] > duration_ms for event in events),
+        "events_after_recording_end": (
+            sum(event["time_ms"] > recording_end_ms for event in events)
+            if recording_end_ms is not None
+            else None
+        ),
         "actors_after_duration": sum(
             actor["last_aware_ms"] > duration_ms for actor in fight["actors"]
         ),
@@ -256,6 +265,36 @@ def _compare_export_bytes(first: bytes, second: bytes) -> dict[str, str | bool]:
     }
 
 
+def _repeat_export_bytes(
+    output_dir: Path, stem: str, suffix: str, run: Callable[[], tuple[float, int]]
+) -> tuple[bytes, float, int]:
+    """Delete the first export sidecar, rerun EI, and read only a freshly produced output.
+
+    The repeat run must produce exactly one new export sidecar: a missing or an additional
+    output is a harness failure, and the fresh bytes are re-listed from disk so a stale
+    path can never stand in for a new export.
+    """
+    pattern = f"{stem}*{suffix}"
+    existing = list(output_dir.glob(pattern))
+    if len(existing) != 1:
+        raise RuntimeError(
+            f"expected exactly one export sidecar before the repeat run of {stem}, "
+            f"found {len(existing)}"
+        )
+    existing[0].unlink()
+    if list(output_dir.glob(pattern)):
+        raise RuntimeError(f"deleted export sidecar still matches the export pattern for {stem}")
+    wall_seconds, peak_rss_kib = run()
+    fresh = list(output_dir.glob(pattern))
+    if not fresh:
+        raise RuntimeError(f"repeat EI run produced no export output for {stem}")
+    if len(fresh) > 1:
+        raise RuntimeError(
+            f"repeat EI run produced {len(fresh)} export outputs for {stem}, expected exactly one"
+        )
+    return fresh[0].read_bytes(), wall_seconds, peak_rss_kib
+
+
 def _percentile95(values: list[float]) -> float:
     return sorted(values)[max(0, int(0.95 * len(values) + 0.999999) - 1)]
 
@@ -298,14 +337,21 @@ def _run_mode(
             first_wall, peak_rss = _run_ei(dotnet, cli, config, log, transcript)
             exports = list(output_dir.glob(f"{stem}*{suffix}"))
             if len(exports) != 1:
-                raise RuntimeError(f"EI produced no WvwExportV{schema_version} file for {stem}")
+                raise RuntimeError(
+                    f"EI produced {len(exports)} WvwExportV{schema_version} files "
+                    f"for {stem}, expected exactly one"
+                )
             exported = exports[0]
             first_bytes = exported.read_bytes()
             payload = json.loads(first_bytes)
             validation = _validation_result(payload, schema_version)
             validation_errors = validation["validation_errors"]
-            repeat_wall, repeat_peak_rss = _run_ei(dotnet, cli, config, log, transcript)
-            second_bytes = exported.read_bytes()
+            second_bytes, repeat_wall, repeat_peak_rss = _repeat_export_bytes(
+                output_dir,
+                stem,
+                suffix,
+                partial(_run_ei, dotnet, cli, config, log, transcript),
+            )
             repeat_comparison = _compare_export_bytes(first_bytes, second_bytes)
             identical = repeat_comparison["deterministic_repeat"]
             row = _summarize(payload, stem, log.stat().st_size, first_bytes, schema_version)
@@ -380,6 +426,9 @@ def _run_mode(
             ),
             "logs_with_up": sum(row["events_by_kind"].get("up", 0) > 0 for row in results),
             "logs_with_cc": sum(row["events_by_kind"].get("cc", 0) > 0 for row in results),
+            "logs_with_events_after_recording_end": sum(
+                (row["events_after_recording_end"] or 0) > 0 for row in results
+            ),
         },
     }
 

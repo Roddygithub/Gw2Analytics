@@ -32,7 +32,14 @@ def test_v2_fixture_validates_all_event_families_and_preserves_v1() -> None:
         "up",
         "cc",
         "buff_apply",
+        "buff_remove_all",
     ]
+    fight = export.fights[0]
+    assert (fight.duration_ms, fight.recording_end_ms, fight.event_domain_end_ms) == (
+        2000,
+        2100,
+        2200,
+    )
     assert (
         WvwExportV1.model_validate(
             json.loads((FIXTURES / "wvw_export_v1.json").read_text())
@@ -173,8 +180,10 @@ def test_event_tail_is_valid_with_separate_ei_recording_domain() -> None:
         event["sequence"] = index
 
     validated = WvwExportV2.model_validate(payload)
-    assert validated.fights[0].duration_ms == 2000
-    assert validated.fights[0].events[-1].time_ms == 2100
+    fight = validated.fights[0]
+    assert fight.duration_ms == 2000
+    assert fight.events[-2].time_ms == 2100 == fight.recording_end_ms
+    assert fight.events[-1].time_ms == 2200 == fight.event_domain_end_ms
 
 
 def test_event_outside_recording_domain_is_rejected() -> None:
@@ -182,6 +191,87 @@ def test_event_outside_recording_domain_is_rejected() -> None:
     payload["fights"][0]["events"][-1]["time_ms"] = 2201
 
     with pytest.raises(ValidationError, match="event_domain_end_ms"):
+        WvwExportV2.model_validate(payload)
+
+
+def test_temporal_case_a_duration_before_recording_end_equal_to_domain() -> None:
+    payload = _fixture()
+    fight = payload["fights"][0]
+    fight["events"] = [event for event in fight["events"] if event["time_ms"] <= 2100]
+    fight["event_domain_end_ms"] = 2100
+    for sequence, event in enumerate(fight["events"]):
+        event["sequence"] = sequence
+
+    validated = WvwExportV2.model_validate(payload)
+
+    assert validated.fights[0].duration_ms < validated.fights[0].recording_end_ms
+    assert validated.fights[0].recording_end_ms == validated.fights[0].event_domain_end_ms
+
+
+def test_temporal_case_b_duration_equals_recording_end_before_domain() -> None:
+    payload = _fixture()
+    payload["fights"][0]["duration_ms"] = 2100
+
+    validated = WvwExportV2.model_validate(payload)
+
+    fight = validated.fights[0]
+    assert fight.duration_ms == fight.recording_end_ms < fight.event_domain_end_ms
+    assert fight.events[-1].time_ms == fight.event_domain_end_ms
+
+
+def test_temporal_case_c_duration_before_recording_end_before_domain() -> None:
+    validated = WvwExportV2.model_validate(_fixture())
+
+    fight = validated.fights[0]
+    assert fight.duration_ms < fight.recording_end_ms < fight.event_domain_end_ms
+
+
+def test_temporal_case_d_recording_end_before_duration_is_rejected() -> None:
+    payload = _fixture()
+    payload["fights"][0]["recording_end_ms"] = 1999
+
+    with pytest.raises(ValidationError, match="recording_end_ms must cover the active fight"):
+        WvwExportV2.model_validate(payload)
+
+
+def test_temporal_case_e_event_domain_before_recording_end_is_rejected() -> None:
+    payload = _fixture()
+    fight = payload["fights"][0]
+    fight["event_domain_end_ms"] = 2099
+    fight["events"] = [event for event in fight["events"] if event["time_ms"] <= 2099]
+    for sequence, event in enumerate(fight["events"]):
+        event["sequence"] = sequence
+
+    with pytest.raises(ValidationError, match="event_domain_end_ms must cover recording_end_ms"):
+        WvwExportV2.model_validate(payload)
+
+
+def test_event_domain_must_equal_recording_end_and_latest_event() -> None:
+    payload = _fixture()
+    fight = payload["fights"][0]
+    fight["events"] = [event for event in fight["events"] if event["time_ms"] <= 2100]
+    for sequence, event in enumerate(fight["events"]):
+        event["sequence"] = sequence
+
+    with pytest.raises(ValidationError, match="event_domain_end_ms must be the maximum"):
+        WvwExportV2.model_validate(payload)
+
+
+def test_actor_awareness_beyond_recording_end_is_rejected() -> None:
+    payload = _fixture()
+    payload["fights"][0]["actors"][0]["last_aware_ms"] = 2101
+
+    with pytest.raises(ValidationError, match="actor awareness exceeds recording_end_ms"):
+        WvwExportV2.model_validate(payload)
+
+
+def test_position_beyond_recording_end_is_rejected_even_inside_event_domain() -> None:
+    payload = _fixture()
+    payload["fights"][0]["position_samples"] = [
+        {"actor_id": "a000000", "time_ms": 2150, "x": 0, "y": 0, "z": 0}
+    ]
+
+    with pytest.raises(ValidationError, match="position sample exceeds recording_end_ms"):
         WvwExportV2.model_validate(payload)
 
 
