@@ -1,9 +1,17 @@
 # Elite Insights field-coverage gate
 
-**Status: OPEN — not yet executed.** This is the hard gate that must pass before
-the home-grown parser's event path is removed. It cannot be satisfied by
-inspection alone; it requires running the pinned EI build over the 35-log
-certification corpus and comparing each product projection field-by-field.
+**Status: EXECUTED — 2026-10-10. Verdict: the gate does NOT yet permit removing
+the custom parser.**
+
+| | |
+| --- | --- |
+| Generator | `scripts/ei-parity/field_coverage.py` |
+| Machine-readable result | `docs/validation/ei-field-coverage.json` |
+| Human-readable result | `docs/validation/ei-field-coverage-matrix.md` |
+| EI baseline | Elite Insights `3.26.0.0` (see `ei-baseline.md`) |
+| Corpus | 35 logs, `scripts/ei-parity/corpus.txt`, SHA-256 manifests in the recovery root |
+| EI key paths observed | 70 271 distinct paths |
+| Fields classified | 82 |
 
 ## Why this gate exists
 
@@ -13,63 +21,96 @@ identity. EI detailed-WvW JSON is a different shape. Deleting the old event path
 before proving each consumer can be fed from EI would silently change product
 behaviour.
 
-Do **not** fabricate old raw-event semantics from insufficient aggregated EI
-data. Where EI cannot supply the required granularity, choose deliberately:
-extend the EI fork with a narrow WvW export, use a more detailed EI output mode,
-materialize normalized events at ingestion, or redesign the product projection.
+## How the gate is made trustworthy
 
-## Current event consumers (evidence from code)
+`field_coverage.py` is **self-verifying**. Its `MAPPING` table is curated, but
+every claimed `ei` path is resolved against the real 35-log corpus before the
+matrix is written. A claim about a path the corpus does not contain fails the
+gate (exit 1) instead of being published. A run without the private corpus exits
+2 (INCOMPLETE) rather than reporting a pass.
 
-Sources that consume `gw2_core` events / the compressed event blob
-(`events_blob_uri` -> `_event_dispatch.build_event_iterator`):
+Three claims were rejected by that check during development
+(`players[].statsTargets[].totalDmg`, `players[].totalDamageDist[].totalDamage`,
+`players[].dpsTargets[].damage` — each one array level short), which is the
+mechanism working as intended.
 
-| Product surface | Current module(s) |
+The generator also refuses to write if the rendered artifacts contain anything
+resembling an account name or an instance IP, so no private identity can leak
+into the tracked matrix.
+
+## Result
+
+| status | fields |
+| --- | ---: |
+| `EXACT` | 50 |
+| `TRANSFORMABLE` | 12 |
+| `AGGREGATED_BUT_SUFFICIENT` | 7 |
+| `AMBIGUOUS` | 3 |
+| `MISSING` | 4 |
+| `REQUIRES_EI_EXPORT_CHANGE` | 4 |
+| `PRODUCT_REDUNDANT` | 2 |
+
+62 of 82 fields (76 %) are directly serviceable from the pinned EI export,
+either verbatim or after a documented transformation. Damage, strike/condition
+split, healing, barrier, cleanses, strips, CC, downs/deaths, interrupts,
+dodges/blocks, awareness windows, subgroup/team, per-target stats and the fight
+envelope are all covered.
+
+## What EI cannot supply today
+
+These four rows are why the custom parser cannot be deleted yet:
+
+| product need | why EI cannot serve it |
 | --- | --- |
-| Damage / DPS (incl. per-target) | `gw2_analytics/player_damage.py`, `target_dps.py`, `damage_predicates.py`, `condi_power_split.py` |
-| Healing | `gw2_analytics/player_heal.py`, `target_healing.py` |
-| Strips / cleanses | `gw2_analytics/target_buff_removal.py`, `player_boons.py` |
-| Boons / uptime | `gw2_analytics/buff_state.py`, `buff_uptime.py`, `buff_dispatch.py`, `initial_buffs.py` |
-| Rotation / casts | `gw2_analytics/rotation.py`, `skill_usage.py` |
-| Down / death / CC | `gw2_analytics/down_contribution.py`, `player_defense.py` |
-| Timelines | `gw2_analytics/per_fight_timeline.py`, `per_player_timeline.py`, `event_window.py` |
-| Identity / ownership | `gw2_analytics/temporal_identity.py` |
-| Positions / heatmaps | `gw2_analytics/position_analysis.py` |
-| Squad / cross-fight | `gw2_analytics/squad_rollup.py`, `multi_fight.py`, `cross_account_timeline.py` |
-| API aggregation from the blob | `apps/api/src/gw2analytics_api/routes/fights/blob_loader.py`, `fight_aggregators.py`, `player_aggregators.py`, `_event_dispatch.py` |
+| **raw event stream (generic)** | EI publishes aggregates and per-second series only. Every `gw2_analytics` aggregator consumes a normalized event stream (`gw2_evtc_parser.PythonEvtcParser.parse_events` -> `event_blob`). This single row gates the migration. |
+| **`OwnershipInterval` (time-ranged)** | EI nests each minion under its owner (recoverable) but publishes no `[start,end)` ownership interval. `temporal_identity` is time-parameterised. |
+| **agent positions / combat replay** | The pinned config runs `ParseCombatReplay=false`, so no position samples are emitted at all. |
+| **per-target buff removal** | Needs the raw buff-removal stream. |
 
-## Matrix (to be completed against EI 3.26 detailed-WvW output)
+Plus `AMBIGUOUS`: the multi-fight archive contract (EI takes one log per
+invocation and merges nothing across fights, while an upload may yield N
+fights), instant-vs-cast distinctions inside EI's rotation list, and
+`players[].minions[].isUniquePerTimeFrame` (a temporal hint with no bounds).
 
-Fidelity statuses: `exact`, `equivalent-after-transformation`,
-`aggregated-but-sufficient`, `missing`, `ambiguous`,
-`requires-EI-fork-export-change`, `product-feature-must-be-redesigned`.
+## Deliberate decision required before the old path is deleted
 
-| Current field / event | Consumer(s) | EI source | Normalization rule | Status |
-| --- | --- | --- | --- | --- |
-| `DamageEvent` (value, result, connected, absorbed, condi flag) | damage/DPS, readout, timelines | EI damage events / `DamageModifiers` | map result bitfield, separate arcdps channel vs EI condition class | **unverified** |
-| `HealingEvent` | healing, readout | EI healing events | heal magnitude + peer gating | **unverified** |
-| Buff apply / remove / extension / activation | boons, uptime, initial state | EI `buffUptimes` + extension/removal data | regenerate queue/stack semantics | **unverified — high risk** |
-| Skill casts / instant casts | rotation, skill usage | EI rotation data (`RawTimelineArrays`, casts) | ordering + ICD | **unverified** |
-| Down / death / grouped outcomes | down contribution, defense | EI mechanics / death events | classify | **unverified** |
-| CC / statechange events | down contribution, defense | EI CC/statechange data | map statechange constants | **unverified** |
-| Agent identity / awareness windows | temporal identity, all per-player | EI player entries (`firstAware`/`lastAware`, multiple slices) | time-aware account/character resolution | **unverified — high risk** |
-| Ownership / minion / pet attribution | identity, damage attribution | EI master/minion relationships | resolve at event time | **unverified — high risk** |
-| Positions / position samples | heatmaps, `dist_to_commander` | EI combat replay | requires `ParseCombatReplay` or a dedicated export | **unverified — may require fork export** |
+Per the task, each `MISSING` / `AMBIGUOUS` / `REQUIRES_EI_EXPORT_CHANGE` row
+needs an explicit decision recorded. The candidate decision is:
 
-## How to run the gate
+1. **Add a narrow WvW export to the EI fork** carrying the normalized event
+   stream (or an equivalent per-event projection), the time-ranged ownership
+   intervals and position samples. This is the only option that preserves
+   product behaviour without rewriting every aggregator.
+2. **Enable `ParseCombatReplay=true`** for the position/replay row, after
+   budgeting its cost (it dominates export size) and re-certifying.
+3. **Accept EI's own buff semantics** only where the product agrees to adopt
+   them (`AGGREGATED_BUT_SUFFICIENT` rows). `scripts/ei-parity/corpus-baseline.json`
+   already records where the two disagree — e.g. 190 `buffUptimes.uptime`
+   deltas — so this is a product decision, not a mechanical one.
+4. **Redesign the multi-fight contract** in the adapter rather than in EI; a
+   stable product fight identity is the adapter's job.
 
-1. Use the pinned EI build (`GW2EICLI-v3.26.0.0`, config
-   `.tooling/ei-local.conf` with `DetailledWvW=true`).
-2. Run it over the 35-log certification set (`scripts/ei-parity/corpus.txt`,
-   SHA-256 manifests in the recovery root). The raw logs and EI exports stay
-   private and must never be committed.
-3. Fill in the "EI source", "normalization rule" and "status" columns from
-   actual output, one consumer at a time.
-4. For every `missing` / `ambiguous` / `requires-EI-fork-export-change` row,
-   record the deliberate decision (fork export, detailed mode, ingestion-time
-   materialization, or product redesign) before deleting the old path.
-5. Add a synthetic-fixture acceptance test per row so the gate cannot regress.
+Until (1) exists there is nothing for an EI process adapter to normalize the
+event stream *from*, which is why no runtime EI adapter has been written. See
+`docs/architecture/parser-boundary.md`.
+
+## How to re-run the gate
+
+```bash
+uv run python scripts/ei-parity/field_coverage.py \
+    --corpus "<dir with the 35 .zevtc logs>" \
+    --ei-out "<dir with <id>_detailed_wvw_kill.json>" \
+    --write
+```
+
+Exit codes: `0` gate passed and (with `--write`) artifacts rewritten, `1` a
+claimed EI path is not in the corpus, `2` the corpus or an EI export is
+incomplete, `3` the privacy guard fired.
 
 ## Related
 
 - `docs/architecture/parser-boundary.md` — the adapter the EI boundary will land in.
+- `docs/validation/ei-baseline.md` — which EI is pinned, and why.
+- `docs/validation/regeneration-decision.md` — the uptime/ownership semantic
+  knowledge this gate forces us to treat as implementation-independent.
 - `docs/validation/ei-parity-certification/` — SPEC, certification matrix and stories.

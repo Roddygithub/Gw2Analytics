@@ -1,0 +1,839 @@
+{
+  "gate": "ei-field-coverage",
+  "ei_version": "3.26.0.0",
+  "logs_analysed": 35,
+  "corpus_file_set_digest": "1da1e886274a840386614b15f18574cf6273fd8727d93476ea36dfcf230f66ea",
+  "status_counts": {
+    "EXACT": 50,
+    "TRANSFORMABLE": 12,
+    "AGGREGATED_BUT_SUFFICIENT": 7,
+    "AMBIGUOUS": 3,
+    "MISSING": 4,
+    "REQUIRES_EI_EXPORT_CHANGE": 4,
+    "PRODUCT_REDUNDANT": 2
+  },
+  "covered_ei_paths": 70271,
+  "unresolved_claims": [],
+  "fields": [
+    {
+      "area": "fight",
+      "product_field": "time_start_ms",
+      "product_source": "gw2_core.Fight.header.time_start_ms",
+      "consumers": "api routes/fights, web",
+      "status": "TRANSFORMABLE",
+      "ei_path": "timeStartStd",
+      "ei_presence_logs": 35,
+      "note": "EI emits an offset-qualified local timestamp string; convert to epoch ms."
+    },
+    {
+      "area": "fight",
+      "product_field": "time_end_ms",
+      "product_source": "gw2_core.Fight.header.time_end_ms",
+      "consumers": "api routes/fights",
+      "status": "TRANSFORMABLE",
+      "ei_path": "timeEndStd",
+      "ei_presence_logs": 35,
+      "note": "Same conversion as time_start_ms."
+    },
+    {
+      "area": "fight",
+      "product_field": "duration_ms",
+      "product_source": "gw2_core.Fight.header.duration_ms",
+      "consumers": "gw2_analytics aggregators, web",
+      "status": "EXACT",
+      "ei_path": "durationMS",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "fight",
+      "product_field": "build_version",
+      "product_source": "gw2_core.Fight.header.build_version",
+      "consumers": "api routes/fights, diagnostics",
+      "status": "TRANSFORMABLE",
+      "ei_path": "gW2Build",
+      "ei_presence_logs": 35,
+      "note": "EI exposes the integer build number plus the arcdps arcVersion string; the product keys on the arcdps build token."
+    },
+    {
+      "area": "fight",
+      "product_field": "arc_revision",
+      "product_source": "gw2_core.Fight.header.arc_revision",
+      "consumers": "diagnostics",
+      "status": "TRANSFORMABLE",
+      "ei_path": "arcRevision",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "fight",
+      "product_field": "map_id",
+      "product_source": "gw2_core.Fight.header.map_id",
+      "consumers": "api routes/fights, web",
+      "status": "EXACT",
+      "ei_path": "mapID",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "fight",
+      "product_field": "encounter_outcome",
+      "product_source": "gw2_core.CombatOutcomeEvent",
+      "consumers": "gw2_analytics.multi_fight, down_contribution",
+      "status": "EXACT",
+      "ei_path": "success",
+      "ei_presence_logs": 35,
+      "note": "EI resolves success/wipe; the custom parser derives it from the outcome events."
+    },
+    {
+      "area": "players",
+      "product_field": "account_name",
+      "product_source": "gw2_core.Agent.account_name",
+      "consumers": "api routes/fights, web, squad_rollup",
+      "status": "EXACT",
+      "ei_path": "players[].account",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "players",
+      "product_field": "character_name",
+      "product_source": "gw2_core.Agent.name",
+      "consumers": "api routes/fights, web",
+      "status": "EXACT",
+      "ei_path": "players[].name",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "players",
+      "product_field": "profession",
+      "product_source": "gw2_core.Agent.profession",
+      "consumers": "web, role_detection",
+      "status": "TRANSFORMABLE",
+      "ei_path": "players[].profession",
+      "ei_presence_logs": 35,
+      "note": "EI emits the display name (elite spec when specialised); split back into base profession + EliteSpec. Elite Insights' SpecList is the authority."
+    },
+    {
+      "area": "players",
+      "product_field": "elite_spec",
+      "product_source": "gw2_core.Agent.elite",
+      "consumers": "web, role_detection",
+      "status": "TRANSFORMABLE",
+      "ei_path": "players[].profession",
+      "ei_presence_logs": 35,
+      "note": "Same field; needs the spec table to decide core vs elite."
+    },
+    {
+      "area": "players",
+      "product_field": "subgroup",
+      "product_source": "gw2_core.Agent.subgroup",
+      "consumers": "web, squad_rollup, per_fight_timeline",
+      "status": "EXACT",
+      "ei_path": "players[].group",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "players",
+      "product_field": "team_id",
+      "product_source": "gw2_core.Agent.team_id",
+      "consumers": "web, player_profile",
+      "status": "EXACT",
+      "ei_path": "players[].teamID",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "players",
+      "product_field": "instance_id",
+      "product_source": "gw2_core.Agent.instance_id",
+      "consumers": "temporal_identity, per_player_timeline",
+      "status": "EXACT",
+      "ei_path": "players[].instanceID",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "players",
+      "product_field": "gear_stats (healing/toughness/concentration/condition)",
+      "product_source": "gw2_core.Agent.* attribute fields",
+      "consumers": "role_detection",
+      "status": "EXACT",
+      "ei_path": "players[].healing",
+      "ei_presence_logs": 35,
+      "note": "EI also exposes toughness/condition/concentration on the same record."
+    },
+    {
+      "area": "players",
+      "product_field": "weapons",
+      "product_source": "gw2_core.Agent weapon data",
+      "consumers": "web, player_profile",
+      "status": "EXACT",
+      "ei_path": "players[].weapons",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "players",
+      "product_field": "guild_id",
+      "product_source": "gw2_core.Agent.guild_id",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].guildID",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "awareness",
+      "product_field": "first_aware_ms",
+      "product_source": "scan_agent_awareness()[agent][0]",
+      "consumers": "temporal_identity, buff_uptime windows",
+      "status": "EXACT",
+      "ei_path": "players[].firstAware",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "awareness",
+      "product_field": "last_aware_ms",
+      "product_source": "scan_agent_awareness()[agent][1]",
+      "consumers": "temporal_identity, buff_uptime windows",
+      "status": "EXACT",
+      "ei_path": "players[].lastAware",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "identity",
+      "product_field": "source/target agent reference",
+      "product_source": "gw2_core.BaseEvent.src_agent/dst_agent",
+      "consumers": "every gw2_analytics aggregator",
+      "status": "TRANSFORMABLE",
+      "ei_path": "players[].statsTargets[][]",
+      "ei_presence_logs": 35,
+      "note": "EI per-target arrays are positional against targets[] and players[]; a resolvable index replaces the raw agent pointer."
+    },
+    {
+      "area": "ownership",
+      "product_field": "minion -> master (static membership)",
+      "product_source": "gw2_core.Agent ownership",
+      "consumers": "per_player_timeline, role_detection",
+      "status": "TRANSFORMABLE",
+      "ei_path": "players[].minions[].id",
+      "ei_presence_logs": 34,
+      "note": "EI nests each minion under its owning player; membership is recoverable, but only as a static set without time bounds."
+    },
+    {
+      "area": "ownership",
+      "product_field": "OwnershipInterval (time-ranged)",
+      "product_source": "gw2_core.OwnershipInterval",
+      "consumers": "temporal_identity",
+      "status": "REQUIRES_EI_EXPORT_CHANGE",
+      "ei_path": null,
+      "ei_presence_logs": 0,
+      "note": "EI records minion/pet damage under the owner but publishes no [start,end) ownership interval. The product's time-parameterised identity resolution needs a new EI export."
+    },
+    {
+      "area": "ownership",
+      "product_field": "minion unique-per-timeframe flag",
+      "product_source": "gw2_core.Agent ownership",
+      "consumers": "temporal_identity",
+      "status": "AMBIGUOUS",
+      "ei_path": "players[].minions[].isUniquePerTimeFrame",
+      "ei_presence_logs": 34,
+      "note": "Hints at temporal resolution but the payload carries no interval bounds."
+    },
+    {
+      "area": "damage",
+      "product_field": "total_damage",
+      "product_source": "gw2_core.DamageEvent aggregation",
+      "consumers": "player_damage, squad_rollup, web",
+      "status": "EXACT",
+      "ei_path": "players[].dpsAll[].damage",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "damage",
+      "product_field": "strike_damage",
+      "product_source": "gw2_core.DamageEvent (power)",
+      "consumers": "condi_power_split, web",
+      "status": "EXACT",
+      "ei_path": "players[].dpsAll[].powerDamage",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "damage",
+      "product_field": "condition_damage",
+      "product_source": "gw2_core.DamageEvent (condition)",
+      "consumers": "condi_power_split, web",
+      "status": "EXACT",
+      "ei_path": "players[].dpsAll[].condiDamage",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "damage",
+      "product_field": "barrier_damage",
+      "product_source": "gw2_core.DamageEvent shield",
+      "consumers": "player_damage",
+      "status": "EXACT",
+      "ei_path": "players[].dpsAll[].breakbarDamage",
+      "ei_presence_logs": 35,
+      "note": "Breakbar damage is exposed; shield/barrier damage is on totalDamageDist[].shieldDamage."
+    },
+    {
+      "area": "damage",
+      "product_field": "per-skill damage distribution",
+      "product_source": "gw2_core.DamageEvent by skill",
+      "consumers": "skill_usage, web",
+      "status": "EXACT",
+      "ei_path": "players[].totalDamageDist[][].totalDamage",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "damage",
+      "product_field": "damage per target",
+      "product_source": "gw2_core.DamageEvent by target",
+      "consumers": "target_dps, web",
+      "status": "EXACT",
+      "ei_path": "players[].dpsTargets[][].damage",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "damage",
+      "product_field": "critical rate / flanking / glance",
+      "product_source": "gw2_core.DamageEvent flags",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].statsAll[].criticalRate",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "mitigation",
+      "product_field": "invulned / absorbed",
+      "product_source": "gw2_core.DamageEvent.result",
+      "consumers": "player_defense, web",
+      "status": "EXACT",
+      "ei_path": "players[].defenses[].invulnedCount",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "mitigation",
+      "product_field": "blocked",
+      "product_source": "gw2_core.BlockEvent",
+      "consumers": "player_defense, web",
+      "status": "EXACT",
+      "ei_path": "players[].defenses[].blockedCount",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "mitigation",
+      "product_field": "dodges",
+      "product_source": "gw2_core.DodgeEvent",
+      "consumers": "player_defense, web",
+      "status": "EXACT",
+      "ei_path": "players[].defenses[].dodgeCount",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "mitigation",
+      "product_field": "evaded / missed",
+      "product_source": "gw2_core.DamageEvent.result",
+      "consumers": "player_defense, web",
+      "status": "EXACT",
+      "ei_path": "players[].defenses[].evadedCount",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "mitigation",
+      "product_field": "damage taken (total / strike / condition / barrier)",
+      "product_source": "gw2_core.DamageEvent (incoming)",
+      "consumers": "web, player_profile",
+      "status": "EXACT",
+      "ei_path": "players[].defenses[].damageTaken",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "healing",
+      "product_field": "outgoing healing",
+      "product_source": "gw2_core.HealingEvent",
+      "consumers": "player_heal, squad_rollup, web",
+      "status": "EXACT",
+      "ei_path": "players[].extHealingStats.outgoingHealing",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "healing",
+      "product_field": "incoming healing",
+      "product_source": "gw2_core.HealingEvent (incoming)",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].extHealingStats.incomingHealing",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "healing",
+      "product_field": "healing distribution",
+      "product_source": "gw2_core.HealingEvent by skill",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].extHealingStats.totalHealingDist",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "barrier",
+      "product_field": "outgoing barrier",
+      "product_source": "gw2_core.BarrierEvent",
+      "consumers": "player_heal",
+      "status": "EXACT",
+      "ei_path": "players[].extBarrierStats.outgoingBarrier",
+      "ei_presence_logs": 26,
+      "note": ""
+    },
+    {
+      "area": "barrier",
+      "product_field": "incoming barrier",
+      "product_source": "gw2_core.BarrierEvent (incoming)",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].extBarrierStats.incomingBarrier",
+      "ei_presence_logs": 26,
+      "note": ""
+    },
+    {
+      "area": "support",
+      "product_field": "condition cleanses",
+      "product_source": "gw2_core.ConditionRemoveEvent",
+      "consumers": "web, squad_rollup",
+      "status": "EXACT",
+      "ei_path": "players[].support[].condiCleanse",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "support",
+      "product_field": "boon strips",
+      "product_source": "gw2_core.BuffRemovalEvent",
+      "consumers": "web, squad_rollup",
+      "status": "EXACT",
+      "ei_path": "players[].support[].boonStrips",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "support",
+      "product_field": "stun breaks",
+      "product_source": "gw2_core.StunBreakEvent",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].support[].stunBreak",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "support",
+      "product_field": "resurrects / resurrect time",
+      "product_source": "gw2_core resurrect events",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].support[].resurrects",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "support",
+      "product_field": "removed stun duration",
+      "product_source": "gw2_core.StunBreakEvent",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].support[].removedStunDuration",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "crowd_control",
+      "product_field": "applied CC count",
+      "product_source": "gw2_core.CCEvent",
+      "consumers": "web, squad_rollup",
+      "status": "EXACT",
+      "ei_path": "players[].statsAll[].appliedCrowdControl",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "crowd_control",
+      "product_field": "applied CC duration",
+      "product_source": "gw2_core.CCEvent duration",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].statsAll[].appliedCrowdControlDuration",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "crowd_control",
+      "product_field": "received CC",
+      "product_source": "gw2_core.CCEvent (incoming)",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].defenses[].receivedCrowdControl",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "crowd_control",
+      "product_field": "breakbar damage",
+      "product_source": "gw2_core.CCEvent breakbar",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].defenses[].breakbarDamageTaken",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "lifecycle",
+      "product_field": "downs",
+      "product_source": "gw2_core.DownEvent",
+      "consumers": "down_contribution, multi_fight, web",
+      "status": "EXACT",
+      "ei_path": "players[].defenses[].downCount",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "lifecycle",
+      "product_field": "deaths",
+      "product_source": "gw2_core.DeathEvent",
+      "consumers": "multi_fight, web",
+      "status": "EXACT",
+      "ei_path": "players[].defenses[].deadCount",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "lifecycle",
+      "product_field": "down contribution",
+      "product_source": "gw2_core.DamageEvent (down contribution)",
+      "consumers": "down_contribution, web",
+      "status": "EXACT",
+      "ei_path": "players[].statsAll[].downContribution",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "lifecycle",
+      "product_field": "interrupts",
+      "product_source": "gw2_core.InterruptEvent",
+      "consumers": "player_defense, web",
+      "status": "EXACT",
+      "ei_path": "players[].statsAll[].interrupts",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "lifecycle",
+      "product_field": "death recap",
+      "product_source": "gw2_core.DeathEvent context",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].deathRecap[].deathTime",
+      "ei_presence_logs": 23,
+      "note": ""
+    },
+    {
+      "area": "buffs",
+      "product_field": "buff application (per event)",
+      "product_source": "gw2_core.BuffApplyEvent",
+      "consumers": "buff_state, buff_uptime",
+      "status": "MISSING",
+      "ei_path": null,
+      "ei_presence_logs": 0,
+      "note": "EI publishes per-second buff state, never the apply/remove events. The custom parser's event stream is the only source of the transition itself."
+    },
+    {
+      "area": "buffs",
+      "product_field": "buff removal (per event)",
+      "product_source": "gw2_core.BuffRemovalEvent",
+      "consumers": "buff_state, target_buff_removal",
+      "status": "MISSING",
+      "ei_path": null,
+      "ei_presence_logs": 0,
+      "note": "Same as buff application: aggregate state only."
+    },
+    {
+      "area": "buffs",
+      "product_field": "buff extension (per event)",
+      "product_source": "gw2_core.BuffExtensionEvent",
+      "consumers": "buff_state",
+      "status": "MISSING",
+      "ei_path": null,
+      "ei_presence_logs": 0,
+      "note": "No extension event in the EI export."
+    },
+    {
+      "area": "buffs",
+      "product_field": "buff stack activation",
+      "product_source": "gw2_core.BuffStackActiveEvent",
+      "consumers": "buff_state",
+      "status": "AGGREGATED_BUT_SUFFICIENT",
+      "ei_path": "players[].buffUptimes[].states",
+      "ei_presence_logs": 35,
+      "note": "Per-second stack counts are exposed; the individual activation event is not."
+    },
+    {
+      "area": "buffs",
+      "product_field": "buff uptime",
+      "product_source": "gw2_analytics.buff_uptime",
+      "consumers": "player_boons, squad_rollup, web",
+      "status": "AGGREGATED_BUT_SUFFICIENT",
+      "ei_path": "players[].buffUptimes[].buffData",
+      "ei_presence_logs": 35,
+      "note": "EI computes uptime itself (and the corpus shows it differs from the product's recomputation -- see scripts/ei-parity/corpus-baseline.json). Accepting EI's number means accepting EI's semantics."
+    },
+    {
+      "area": "buffs",
+      "product_field": "buff apply/remove deltas (volume)",
+      "product_source": "gw2_analytics.buff_state",
+      "consumers": "web",
+      "status": "AGGREGATED_BUT_SUFFICIENT",
+      "ei_path": "players[].buffVolumes[].buffVolumeData",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "buffs",
+      "product_field": "initial buffs at fight start",
+      "product_source": "gw2_analytics.initial_buffs",
+      "consumers": "player_boons, web",
+      "status": "TRANSFORMABLE",
+      "ei_path": "players[].buffUptimes[].states",
+      "ei_presence_logs": 35,
+      "note": "Index 0 of the per-second state array is the fight-start state."
+    },
+    {
+      "area": "buffs",
+      "product_field": "self vs group vs squad vs off-group buff attribution",
+      "product_source": "gw2_analytics.player_boons",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].squadBuffs[].buffData",
+      "ei_presence_logs": 35,
+      "note": "EI pre-splits the same attribution the product computes."
+    },
+    {
+      "area": "skills",
+      "product_field": "casts (skill activation)",
+      "product_source": "gw2_core.SkillActivationEvent",
+      "consumers": "skill_usage, rotation, web",
+      "status": "TRANSFORMABLE",
+      "ei_path": "players[].rotation[].skills",
+      "ei_presence_logs": 35,
+      "note": "EI exposes the activation ORDER per skill, not per-cast timestamps; cast timing must be re-derived or dropped."
+    },
+    {
+      "area": "skills",
+      "product_field": "instant casts",
+      "product_source": "gw2_core.SkillActivationEvent (instant)",
+      "consumers": "rotation",
+      "status": "AMBIGUOUS",
+      "ei_path": "players[].rotation[].skills",
+      "ei_presence_logs": 35,
+      "note": "The rotation list does not distinguish instant from cast-time skills."
+    },
+    {
+      "area": "skills",
+      "product_field": "rotation (ordered activation list)",
+      "product_source": "gw2_analytics.rotation",
+      "consumers": "web",
+      "status": "TRANSFORMABLE",
+      "ei_path": "players[].rotation[].id",
+      "ei_presence_logs": 35,
+      "note": "EI's rotation is an ordered skill-id list grouped per skill; the product's rotation is timestamped. Semantics differ but both are derivable projections of the same activations."
+    },
+    {
+      "area": "skills",
+      "product_field": "weapon swap count",
+      "product_source": "gw2_core.WeaponSwapEvent",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].statsAll[].swapCount",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "skills",
+      "product_field": "consumables",
+      "product_source": "gw2_core consumable events",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].consumables[].id",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "skills",
+      "product_field": "skill cast uptime",
+      "product_source": "gw2_analytics.skill_usage",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].statsAll[].skillCastUptime",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "positions",
+      "product_field": "agent positions over time",
+      "product_source": "gw2_core.PositionEvent",
+      "consumers": "position_analysis, web",
+      "status": "REQUIRES_EI_EXPORT_CHANGE",
+      "ei_path": null,
+      "ei_presence_logs": 0,
+      "note": "The pinned config runs ParseCombatReplay=false, so no position samples are emitted. Enabling it changes the export shape and cost and must be budgeted and re-certified."
+    },
+    {
+      "area": "positions",
+      "product_field": "combat replay / timeline",
+      "product_source": "gw2_core.PositionEvent timeline",
+      "consumers": "web replay view",
+      "status": "REQUIRES_EI_EXPORT_CHANGE",
+      "ei_path": null,
+      "ei_presence_logs": 0,
+      "note": "Follows from the same config flag as agent positions."
+    },
+    {
+      "area": "positions",
+      "product_field": "distToCom / stack distance",
+      "product_source": "gw2_analytics.position_analysis",
+      "consumers": "web",
+      "status": "AGGREGATED_BUT_SUFFICIENT",
+      "ei_path": "players[].statsAll[].distToCom",
+      "ei_presence_logs": 35,
+      "note": "EI reports the summary distance without the per-sample path."
+    },
+    {
+      "area": "timeline",
+      "product_field": "health / barrier percentage timeline",
+      "product_source": "gw2_analytics.per_fight_timeline",
+      "consumers": "web",
+      "status": "AGGREGATED_BUT_SUFFICIENT",
+      "ei_path": "players[].healthPercents",
+      "ei_presence_logs": 35,
+      "note": "Per-second sampling, not event-resolution."
+    },
+    {
+      "area": "timeline",
+      "product_field": "damage timeline (1s buckets)",
+      "product_source": "gw2_analytics.per_player_timeline",
+      "consumers": "web",
+      "status": "AGGREGATED_BUT_SUFFICIENT",
+      "ei_path": "players[].damage1S",
+      "ei_presence_logs": 35,
+      "note": "EI buckets at 1s; the product's timeline is event-resolution."
+    },
+    {
+      "area": "timeline",
+      "product_field": "boon / condition state timeline",
+      "product_source": "gw2_analytics.per_fight_timeline",
+      "consumers": "web",
+      "status": "AGGREGATED_BUT_SUFFICIENT",
+      "ei_path": "players[].boonsStates",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "targets",
+      "product_field": "enemy target roster",
+      "product_source": "gw2_core.Agent (enemy)",
+      "consumers": "target_dps, target_healing, web",
+      "status": "TRANSFORMABLE",
+      "ei_path": "targets[]",
+      "ei_presence_logs": 35,
+      "note": "EI's targets[] carries name/health/instanceID; mapping to product agents needs an identity join."
+    },
+    {
+      "area": "targets",
+      "product_field": "per-target stats",
+      "product_source": "gw2_analytics.target_dps",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].statsTargets[][].totalDmg",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "targets",
+      "product_field": "per-target healing",
+      "product_source": "gw2_analytics.target_healing",
+      "consumers": "web",
+      "status": "EXACT",
+      "ei_path": "players[].extHealingStats.outgoingHealingAllies",
+      "ei_presence_logs": 35,
+      "note": ""
+    },
+    {
+      "area": "targets",
+      "product_field": "per-target buff removal",
+      "product_source": "gw2_analytics.target_buff_removal",
+      "consumers": "web",
+      "status": "MISSING",
+      "ei_path": null,
+      "ei_presence_logs": 0,
+      "note": "Needs the raw buff-removal stream, which EI does not publish."
+    },
+    {
+      "area": "archive",
+      "product_field": "multi-fight archive semantics",
+      "product_source": "gw2analytics_api.services.parse (fight iterator)",
+      "consumers": "uploads route, event_blob",
+      "status": "AMBIGUOUS",
+      "ei_path": null,
+      "ei_presence_logs": 0,
+      "note": "EI takes one log per invocation and merges nothing across fights. The product's upload->N fights contract has no EI equivalent; the adapter must define fight identity itself (see MULTILOG design note)."
+    },
+    {
+      "area": "archive",
+      "product_field": "raw event stream (generic)",
+      "product_source": "gw2_evtc_parser.PythonEvtcParser.parse_events",
+      "consumers": "event_blob, every gw2_analytics aggregator",
+      "status": "REQUIRES_EI_EXPORT_CHANGE",
+      "ei_path": null,
+      "ei_presence_logs": 0,
+      "note": "The product's analytics consume a normalized event stream. EI publishes aggregates and per-second series only. Removing the custom parser therefore requires either an EI export change or a product-side rewrite onto EI's aggregates. This single row gates the migration."
+    },
+    {
+      "area": "redundant",
+      "product_field": "boon/condition classification tables",
+      "product_source": "gw2_evtc_parser buff tables",
+      "consumers": "buff_dispatch",
+      "status": "PRODUCT_REDUNDANT",
+      "ei_path": "buffMap",
+      "ei_presence_logs": 35,
+      "note": "EI publishes the buffMap/skillMap the product derives locally; the product copy can be sourced from EI metadata."
+    },
+    {
+      "area": "redundant",
+      "product_field": "personal buff/damage-modifier tables",
+      "product_source": "gw2_evtc_parser tables",
+      "consumers": "buff_dispatch",
+      "status": "PRODUCT_REDUNDANT",
+      "ei_path": "personalBuffs",
+      "ei_presence_logs": 35,
+      "note": "EI publishes these per profession."
+    }
+  ]
+}
