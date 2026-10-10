@@ -125,3 +125,33 @@ transport exposes and does not treat the legacy parser as truth.
 | Healing event stream | No per-event healing variant | Missing for event-window HPS in current fight timeline and per-target event windows; standard EI aggregate healing does not preserve event timing. |
 | Crowd-control event stream | No per-event CC variant | Missing for CC attribution inside pre-down windows; standard EI aggregates cover whole-fight count/duration only. |
 | Transport validity and repeatability | 32/35 schema-valid; 28/35 repeated-byte-identical | Not yet certified: three logs have an out-of-duration buff-removal timestamp and seven differ in actor `instance_id` fields between runs. |
+
+## WvwExportV2 certification supplement (2026-10-10)
+
+The earlier V1 rows above are historical and remain unchanged. The separately
+versioned [WvwExportV2 35-log certification](ei-v2-35log-certification.md)
+uses the pinned EI V2 branch and adds timed healing, exact `ChangeUp`, and
+timed CC. All 35 inputs validate and produce byte-identical repeated output in
+both replay modes. Its event-time envelope includes EI-derived canonical event
+times beyond the raw recording end; it does not clamp or discard them. V2
+omits `instance_id`, which has no current shipped consumer and was the only
+field that varied across repeated V1 parses.
+
+The current shipped-feature classifications are therefore updated as
+follows. The three formerly missing event families now have direct EI facts;
+the `instance_id` metadata question is classified as not currently shipped.
+Timed barrier remains deferred, and the remaining buff-uptime row is an
+intentional product-semantics decision rather than an export gap.
+
+| Classification | Current requirement rows |
+| --- | ---: |
+| `EI_CANONICAL_DIRECT` | 12 |
+| `EI_CANONICAL_TRANSFORM` | 1 |
+| `PRODUCT_DERIVED` | 3 |
+| `MISSING_EI_EXPORT` | 0 |
+| `PRODUCT_CHANGE_REQUIRED` | 1 |
+| `NOT_CURRENTLY_SHIPPED` | 4 |
+
+This certification supports readiness for a process-adapter prototype only;
+upload-level multi-log grouping and production persistence/API/frontend
+continuity still need separate validation.

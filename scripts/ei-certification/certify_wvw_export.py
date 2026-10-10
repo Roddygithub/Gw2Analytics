@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Certify the pinned WvwExportV1 transport against a private log manifest."""
+"""Certify a pinned WvW export contract against a private log manifest."""
 
 from __future__ import annotations
 
@@ -11,11 +11,13 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from collections.abc import Callable
+from functools import partial
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
-from gw2_core import WvwExportV1
+from gw2_core import WvwExportV1, WvwExportV2
 
 ROOT = Path(__file__).resolve().parents[2]
 PINNED_EI_COMMIT = "062e250d55c0a09a7f734524287043c7852483b4"
@@ -33,6 +35,22 @@ KINDS = (
     "despawn",
     "health_update",
 )
+V2_KINDS = (
+    "damage",
+    "buff_apply",
+    "buff_extension",
+    "buff_remove_all",
+    "buff_remove_single",
+    "buff_remove_manual",
+    "down",
+    "death",
+    "up",
+    "spawn",
+    "despawn",
+    "health_update",
+    "healing",
+    "cc",
+)
 
 
 def _cli() -> argparse.Namespace:
@@ -46,6 +64,8 @@ def _cli() -> argparse.Namespace:
     )
     parser.add_argument("--dotnet", type=Path, required=True, help="Local .NET SDK executable")
     parser.add_argument("--cli", type=Path, required=True, help="Built EI CLI DLL")
+    parser.add_argument("--schema-version", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--expected-ei-commit", help="Required exact EI commit for V2 runs")
     parser.add_argument("--output", type=Path, required=True, help="Ignored local output directory")
     parser.add_argument(
         "--replay-disabled-report",
@@ -87,11 +107,12 @@ def _run_ei(dotnet: Path, cli: Path, config: Path, log: Path, log_path: Path) ->
     return elapsed, peak_rss_kib
 
 
-def _config(output_dir: Path, parse_replay: bool) -> str:
+def _config(output_dir: Path, parse_replay: bool, schema_version: int = 1) -> str:
     settings = {
         "SaveAtOut": "false",
         "OutLocation": str(output_dir.resolve()),
-        "SaveOutWvwExport": "true",
+        "SaveOutWvwExport": str(schema_version == 1).lower(),
+        "SaveOutWvwExportV2": str(schema_version == 2).lower(),
         "SaveOutJSON": "false",
         "SaveOutHTML": "false",
         "SaveOutCSV": "false",
@@ -137,12 +158,13 @@ def _find_logs(manifest: dict[str, Any], corpus: Path) -> list[tuple[dict[str, A
 
 
 def _summarize(
-    payload: dict[str, Any], stem: str, input_bytes: int, output: bytes
+    payload: dict[str, Any], stem: str, input_bytes: int, output: bytes, schema_version: int = 1
 ) -> dict[str, Any]:
     fight = payload["fights"][0]
     events = fight["events"]
     positions = fight["position_samples"]
     duration_ms = fight["duration_ms"]
+    recording_end_ms = fight.get("recording_end_ms")
     event_counts: Counter[str] = Counter(event["kind"] for event in events)
     event_times = [event["time_ms"] for event in events]
     position_times = [point["time_ms"] for point in positions]
@@ -162,7 +184,18 @@ def _summarize(
         "duration_ms": duration_ms,
         "actors": len(fight["actors"]),
         "events": len(events),
-        "events_by_kind": {kind: event_counts[kind] for kind in KINDS},
+        "healing_amount_total": sum(
+            event.get("amount", 0) for event in events if event["kind"] == "healing"
+        ),
+        "cc_duration_ms_total": sum(
+            event.get("duration_ms", 0) for event in events if event["kind"] == "cc"
+        ),
+        "events_by_kind": {
+            kind: event_counts[kind] for kind in (V2_KINDS if schema_version == 2 else KINDS)
+        },
+        "recording_end_ms": recording_end_ms,
+        "event_domain_end_ms": fight.get("event_domain_end_ms"),
+        "healing_available": fight.get("healing_available"),
         "ownership_observations": fight["ownership_observation_count"],
         "ownership_same_time_collisions": fight["ownership_same_time_collision_count"],
         "ownership_intervals": len(fight["ownership_intervals"]),
@@ -177,6 +210,11 @@ def _summarize(
         "position_time_min_ms": min(position_times, default=None),
         "position_time_max_ms": max(position_times, default=None),
         "events_after_duration": sum(event["time_ms"] > duration_ms for event in events),
+        "events_after_recording_end": (
+            sum(event["time_ms"] > recording_end_ms for event in events)
+            if recording_end_ms is not None
+            else None
+        ),
         "actors_after_duration": sum(
             actor["last_aware_ms"] > duration_ms for actor in fight["actors"]
         ),
@@ -189,9 +227,10 @@ def _summarize(
     }
 
 
-def _validation_errors(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _validation_errors(payload: dict[str, Any], schema_version: int = 1) -> list[dict[str, str]]:
     try:
-        validated = WvwExportV1.model_validate(payload)
+        model = WvwExportV1 if schema_version == 1 else WvwExportV2
+        validated = model.model_validate(payload)
         if validated.parser_version != "3.26.0.0":
             raise ValueError("unexpected_parser_version")
         if validated.source_log_count != 1 or len(validated.fights) != 1:
@@ -213,8 +252,8 @@ def _validation_errors(payload: dict[str, Any]) -> list[dict[str, str]]:
     return []
 
 
-def _validation_result(payload: dict[str, Any]) -> dict[str, Any]:
-    errors = _validation_errors(payload)
+def _validation_result(payload: dict[str, Any], schema_version: int = 1) -> dict[str, Any]:
+    errors = _validation_errors(payload, schema_version)
     return {"schema_valid": not errors, "validation_errors": errors}
 
 
@@ -224,6 +263,36 @@ def _compare_export_bytes(first: bytes, second: bytes) -> dict[str, str | bool]:
         "output_sha256": hashlib.sha256(first).hexdigest(),
         "repeat_output_sha256": hashlib.sha256(second).hexdigest(),
     }
+
+
+def _repeat_export_bytes(
+    output_dir: Path, stem: str, suffix: str, run: Callable[[], tuple[float, int]]
+) -> tuple[bytes, float, int]:
+    """Delete the first export sidecar, rerun EI, and read only a freshly produced output.
+
+    The repeat run must produce exactly one new export sidecar: a missing or an additional
+    output is a harness failure, and the fresh bytes are re-listed from disk so a stale
+    path can never stand in for a new export.
+    """
+    pattern = f"{stem}*{suffix}"
+    existing = list(output_dir.glob(pattern))
+    if len(existing) != 1:
+        raise RuntimeError(
+            f"expected exactly one export sidecar before the repeat run of {stem}, "
+            f"found {len(existing)}"
+        )
+    existing[0].unlink()
+    if list(output_dir.glob(pattern)):
+        raise RuntimeError(f"deleted export sidecar still matches the export pattern for {stem}")
+    wall_seconds, peak_rss_kib = run()
+    fresh = list(output_dir.glob(pattern))
+    if not fresh:
+        raise RuntimeError(f"repeat EI run produced no export output for {stem}")
+    if len(fresh) > 1:
+        raise RuntimeError(
+            f"repeat EI run produced {len(fresh)} export outputs for {stem}, expected exactly one"
+        )
+    return fresh[0].read_bytes(), wall_seconds, peak_rss_kib
 
 
 def _percentile95(values: list[float]) -> float:
@@ -246,6 +315,7 @@ def _run_mode(
     cli: Path,
     root_output: Path,
     parse_replay: bool,
+    schema_version: int = 1,
 ) -> dict[str, Any]:
     mode = "replay_enabled" if parse_replay else "replay_disabled"
     mode_root = root_output / mode
@@ -258,25 +328,33 @@ def _run_mode(
         output_dir = log_root / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
         config = log_root / "ei.conf"
-        config.write_text(_config(output_dir, parse_replay), encoding="utf-8")
-        for previous in output_dir.glob(f"{stem}*_wvw_export_v1.json"):
+        config.write_text(_config(output_dir, parse_replay, schema_version), encoding="utf-8")
+        suffix = f"_wvw_export_v{schema_version}.json"
+        for previous in output_dir.glob(f"{stem}*{suffix}"):
             previous.unlink()
         transcript = log_root / "ei.log"
         try:
             first_wall, peak_rss = _run_ei(dotnet, cli, config, log, transcript)
-            exports = list(output_dir.glob(f"{stem}*_wvw_export_v1.json"))
+            exports = list(output_dir.glob(f"{stem}*{suffix}"))
             if len(exports) != 1:
-                raise RuntimeError(f"EI produced no WvwExportV1 file for {stem}")
+                raise RuntimeError(
+                    f"EI produced {len(exports)} WvwExportV{schema_version} files "
+                    f"for {stem}, expected exactly one"
+                )
             exported = exports[0]
             first_bytes = exported.read_bytes()
             payload = json.loads(first_bytes)
-            validation = _validation_result(payload)
+            validation = _validation_result(payload, schema_version)
             validation_errors = validation["validation_errors"]
-            repeat_wall, repeat_peak_rss = _run_ei(dotnet, cli, config, log, transcript)
-            second_bytes = exported.read_bytes()
+            second_bytes, repeat_wall, repeat_peak_rss = _repeat_export_bytes(
+                output_dir,
+                stem,
+                suffix,
+                partial(_run_ei, dotnet, cli, config, log, transcript),
+            )
             repeat_comparison = _compare_export_bytes(first_bytes, second_bytes)
             identical = repeat_comparison["deterministic_repeat"]
-            row = _summarize(payload, stem, log.stat().st_size, first_bytes)
+            row = _summarize(payload, stem, log.stat().st_size, first_bytes, schema_version)
             row.update(
                 wall_seconds=round(first_wall, 3),
                 repeat_wall_seconds=round(repeat_wall, 3),
@@ -320,8 +398,11 @@ def _run_mode(
             "peak_rss_mb_max": max(row["peak_rss_mb"] for row in results),
             "actors": sum(row["actors"] for row in results),
             "events": sum(row["events"] for row in results),
+            "healing_amount_total": sum(row["healing_amount_total"] for row in results),
+            "cc_duration_ms_total": sum(row["cc_duration_ms_total"] for row in results),
             "events_by_kind": {
-                kind: sum(row["events_by_kind"][kind] for row in results) for kind in KINDS
+                kind: sum(row["events_by_kind"][kind] for row in results)
+                for kind in (V2_KINDS if schema_version == 2 else KINDS)
             },
             "ownership_observations": sum(row["ownership_observations"] for row in results),
             "ownership_same_time_collisions": sum(
@@ -340,6 +421,14 @@ def _run_mode(
             "overall_pass_logs": sum(
                 row["schema_valid"] and row["deterministic_repeat"] for row in results
             ),
+            "logs_with_healing": sum(
+                row["events_by_kind"].get("healing", 0) > 0 for row in results
+            ),
+            "logs_with_up": sum(row["events_by_kind"].get("up", 0) > 0 for row in results),
+            "logs_with_cc": sum(row["events_by_kind"].get("cc", 0) > 0 for row in results),
+            "logs_with_events_after_recording_end": sum(
+                (row["events_after_recording_end"] or 0) > 0 for row in results
+            ),
         },
     }
 
@@ -353,8 +442,11 @@ def main() -> int:
         ["git", "-C", str(args.ei_source), "rev-parse", "HEAD"],  # noqa: S607
         text=True,
     ).strip()
-    if commit != PINNED_EI_COMMIT:
-        raise SystemExit(f"EI checkout is not at the pinned commit {PINNED_EI_COMMIT}")
+    expected_commit = args.expected_ei_commit or PINNED_EI_COMMIT
+    if args.schema_version == 2 and not args.expected_ei_commit:
+        raise SystemExit("--expected-ei-commit is required for V2 certification")
+    if commit != expected_commit:
+        raise SystemExit(f"EI checkout is not at the requested commit {expected_commit}")
     logs = _find_logs(manifest, args.corpus.resolve())
     tracked = set(
         subprocess.check_output(  # noqa: S603 - fixed local git command
@@ -374,9 +466,10 @@ def main() -> int:
         cli=args.cli.resolve(),
         root_output=args.output,
         parse_replay=True,
+        schema_version=args.schema_version,
     )
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": args.schema_version,
         "ei_commit": commit,
         "ei_version": manifest["reference"]["ei_version"],
         "manifest_entries": len(logs),
@@ -389,8 +482,24 @@ def main() -> int:
             cli=args.cli.resolve(),
             root_output=args.output,
             parse_replay=False,
+            schema_version=args.schema_version,
         )
         report["replay_disabled"] = disabled
+        enabled_summary = enabled.get("summary", {})
+        disabled_summary = disabled.get("summary", {})
+        report["replay_cost_comparison"] = {
+            "output_bytes_delta_enabled_minus_disabled": enabled_summary.get("output_bytes", 0)
+            - disabled_summary.get("output_bytes", 0),
+            "wall_seconds_delta_enabled_minus_disabled": round(
+                enabled_summary.get("wall_seconds_total", 0)
+                - disabled_summary.get("wall_seconds_total", 0),
+                3,
+            ),
+            "sampled_direct_dotnet_rss_max_mb_enabled": enabled_summary.get("peak_rss_mb_max"),
+            "sampled_direct_dotnet_rss_max_mb_disabled": disabled_summary.get("peak_rss_mb_max"),
+            "positions_enabled": enabled_summary.get("positions", 0),
+            "positions_disabled": disabled_summary.get("positions", 0),
+        }
     output = args.replay_disabled_report or (args.output / "aggregate-report.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
