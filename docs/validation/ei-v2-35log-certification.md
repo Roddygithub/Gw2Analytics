@@ -9,7 +9,7 @@ parser's interpretation is correct.
 
 - Elite Insights: `Roddygithub/GW2-Elite-Insights-Parser`, branch
   `feat/gw2analytics-wvw-export-v2`, commit
-  `b8be784a670c78092089ace3f91bb7022d2bc8f5`.
+  `6c9d2346f49aca9de974fa85a26d6f4f57b31aaf`.
 - Base: reviewed V1 commit `062e250d55c0a09a7f734524287043c7852483b4`, on
   upstream Elite Insights `v3.26.0.0` commit
   `e4e548bf95b8a4901018a2c6a70058fc9c9e539f`.
@@ -34,6 +34,12 @@ validation. Repeated output SHA-256 matched for every log. All seven logs that
 previously varied only in `instance_id` also passed with byte-identical output;
 V2 omits that unused non-stable field. The export's per-fight `actor_id` values
 and references remained deterministic.
+
+The remediation rerun also restored V1 ownership reference, agent-awareness,
+owner-awareness-at-observation, and canonical-order checks. The V2 envelope
+again enforces unique canonical fight IDs, source-log indexes, and fight order,
+while allowing multiple segments to refer to one source log. Healing events
+require `healing_available=true`; the reverse is intentionally not required.
 
 ## Required event families
 
@@ -94,17 +100,18 @@ were:
 
 | Replay setting | JSON bytes | Weighted expansion | Wall time | Maximum sampled direct-dotnet VmRSS |
 | --- | ---: | ---: | ---: | ---: |
-| Enabled | 459,458,586 | 9.0809x | 88.166 s | 350.9 MiB |
-| Disabled | 375,221,650 | 7.4160x | 82.083 s | 338.0 MiB |
+| Enabled | 459,458,586 | 9.0809x | 57.297 s | 337.2 MiB |
+| Disabled | 375,221,650 | 7.4160x | 55.354 s | 336.6 MiB |
 
 The RSS sample is `VmRSS` from the direct `dotnet` process; child processes are
 not included. Replay adds 84,236,936 output bytes, 525,221 position samples,
-6.083 seconds of measured wall time, and 12.9 MiB to the sampled peak RSS.
+1.943 seconds of measured wall time, and 0.6 MiB to the sampled peak RSS in
+this run.
 Compared with the historical V1 report, V2 output grew by 10,937,112 bytes
 (2.44% replay enabled; 3.00% disabled). Measured full-corpus wall time rose
-from 52.461 s to 88.166 s with replay and from 51.726 s to 82.083 s without
-replay; this is a material increase to track. Current per-log maximum was
-5.778 s. Peak sampled memory remained about 351 MiB. This is acceptable for a
+from 52.461 s to 57.297 s with replay and from 51.726 s to 55.354 s without
+replay; this remains an increase to track. Current per-log maximum was
+4.454 s. Peak sampled memory remained about 337 MiB. This is acceptable for a
 bounded prototype; a process-adapter benchmark must set and verify an
 operational budget before production use.
 

@@ -152,17 +152,35 @@ class WvwV2Fight(_V2Model):
             if not all(map(math.isfinite, (sample.x, sample.y, sample.z))):
                 raise ValueError("position coordinates must be finite")
         for interval in self.ownership_intervals:
-            if interval.agent_id not in actor_by_id:
+            agent = actor_by_id.get(interval.agent_id)
+            if agent is None:
                 raise ValueError(
                     f"ownership interval references unknown agent_id {interval.agent_id!r}"
                 )
             if interval.end_ms > self.event_domain_end_ms:
                 raise ValueError("ownership interval exceeds event_domain_end_ms")
+            if interval.start_ms < agent.first_aware_ms or interval.end_ms > agent.last_aware_ms:
+                raise ValueError("ownership interval exceeds agent awareness")
             owner_id = interval.owner_actor_id
-            if owner_id is not None and owner_id not in actor_by_id:
-                raise ValueError(
-                    f"ownership interval references unknown owner_actor_id {owner_id!r}"
-                )
+            if owner_id is not None:
+                owner = actor_by_id.get(owner_id)
+                if owner is None:
+                    raise ValueError(
+                        f"ownership interval references unknown owner_actor_id {owner_id!r}"
+                    )
+                if not owner.first_aware_ms <= interval.start_ms <= owner.last_aware_ms:
+                    raise ValueError("observed owner is not aware at ownership start_ms")
+        if self.ownership_intervals != sorted(
+            self.ownership_intervals,
+            key=lambda interval: (
+                interval.agent_id,
+                interval.start_ms,
+                interval.owner_actor_id or "",
+            ),
+        ):
+            raise ValueError("ownership_intervals must be ordered by agent, start, then owner")
+        if not self.healing_available and any(event.kind == "healing" for event in self.events):
+            raise ValueError("healing events require healing_available=true")
         return self
 
 
@@ -173,12 +191,24 @@ class WvwExportV2(_V2Model):
     config_sha256: str | None
     session_id: str | None
     source_log_count: int = Field(gt=0)
-    fights: list[WvwV2Fight]
+    fights: list[WvwV2Fight] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def source_count_matches_fights(self) -> WvwExportV2:
-        if self.source_log_count != len(self.fights):
-            raise ValueError("source_log_count must match the exported fight count")
+    def fight_ids_are_unique_and_indexed(self) -> WvwExportV2:
+        ids = [fight.fight_id for fight in self.fights]
+        if len(ids) != len(set(ids)):
+            raise ValueError("fight_id values must be unique within an export")
+        for fight in self.fights:
+            if fight.source_log_index >= self.source_log_count:
+                raise ValueError("source_log_index is outside source_log_count")
+            expected_id = f"log-{fight.source_log_index:04d}/fight-{fight.segment_index:04d}"
+            if fight.fight_id != expected_id:
+                raise ValueError(f"fight_id must be {expected_id!r}")
+        if self.fights != sorted(
+            self.fights,
+            key=lambda fight: (fight.source_log_index, fight.segment_index),
+        ):
+            raise ValueError("fights must be ordered by source_log_index then segment_index")
         return self
 
 

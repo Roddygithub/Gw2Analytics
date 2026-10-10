@@ -33,7 +33,22 @@ KINDS = (
     "despawn",
     "health_update",
 )
-V2_KINDS = (*KINDS, "healing", "up", "cc")
+V2_KINDS = (
+    "damage",
+    "buff_apply",
+    "buff_extension",
+    "buff_remove_all",
+    "buff_remove_single",
+    "buff_remove_manual",
+    "down",
+    "death",
+    "up",
+    "spawn",
+    "despawn",
+    "health_update",
+    "healing",
+    "cc",
+)
 
 
 def _cli() -> argparse.Namespace:

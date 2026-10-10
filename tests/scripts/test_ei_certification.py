@@ -45,6 +45,11 @@ def test_generated_v2_config_selects_only_v2_export(tmp_path: Path) -> None:
     assert "SaveOutWvwExportV2=true" in config
 
 
+def test_v2_event_inventory_uses_up_without_alive() -> None:
+    assert "up" in TOOL["V2_KINDS"]
+    assert "alive" not in TOOL["V2_KINDS"]
+
+
 def test_summary_contains_only_aggregate_actor_free_fields() -> None:
     from gw2_core import WvwExportV1
 

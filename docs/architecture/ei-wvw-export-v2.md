@@ -106,6 +106,10 @@ explicitly documented by EI as nondeterministic and is not used. This preserves
 within-fight references without inventing cross-log identity or deriving IDs
 from player names.
 
+Independent review must verify that raw `Agent` address plus awareness interval
+resolves every V2 actor slice, including reused raw addresses and overlapping
+awareness slices.
+
 ## Minimal V2 delta
 
 - `schema_version = 2` and a separate `_wvw_export_v2.json` artifact.
@@ -123,7 +127,7 @@ repeat determinism.
 
 The certified candidate is the separate EI branch
 `feat/gw2analytics-wvw-export-v2` at
-`b8be784a670c78092089ace3f91bb7022d2bc8f5`. Across all 35 manifest logs,
+`6c9d2346f49aca9de974fa85a26d6f4f57b31aaf`. Across all 35 manifest logs,
 replay-enabled and replay-disabled exports were each 35/35 produced, schema
 valid, and byte-identical on repeat. The three late Scourge shade expiry events
 are preserved; the computed event-domain end includes their canonical EI event
