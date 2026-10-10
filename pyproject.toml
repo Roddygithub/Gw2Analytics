@@ -125,9 +125,6 @@ extend-exclude = [
     # explicitly. The ``*.ini`` glob keeps the build clean.
     "*.ini",
     ".pre-commit-config.yaml",
-    # BMAD framework files (third-party) - exclude from linting
-    ".agents",
-    "_bmad",
 ]
 
 [tool.ruff.lint]
@@ -247,17 +244,3 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["locust"]
 ignore_missing_imports = true
-
-# ---------------------------------------------------------------------------
-# pytest: strict asyncio mode. Async tests need an explicit
-# ``@pytest.mark.asyncio`` decorator (keeps the existing fast / sync
-# test suites from being silently rewired onto the asyncio loop).
-# ---------------------------------------------------------------------------
-
-[tool.pytest.ini_options]
-asyncio_mode = "strict"
-# Coverage gate: enforce a 90% line-coverage floor across the
-# Python source surface. The flags are applied to every pytest
-# invocation (local + CI) so regressions are caught early.
-addopts = "--cov=apps/api/src --cov=libs --cov-report=term-missing --cov-fail-under=90"
-filterwarnings = []

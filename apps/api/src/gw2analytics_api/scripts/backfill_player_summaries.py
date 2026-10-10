@@ -22,7 +22,7 @@ from collections.abc import Callable
 
 from minio.error import S3Error
 from pydantic import ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -160,11 +160,24 @@ def _discover_fights(
     if fight_id is not None:
         stmt = stmt.where(OrmFight.id == fight_id)
     else:
-        stmt = stmt.where(
+        missing_summary = (
             ~select(OrmFightPlayerSummary.fight_id)
             .where(OrmFightPlayerSummary.fight_id == OrmFight.id)
-            .exists(),
+            .exists()
         )
+        missing_actions = (
+            select(OrmFightPlayerSummary.fight_id)
+            .where(
+                OrmFightPlayerSummary.fight_id == OrmFight.id,
+                or_(
+                    OrmFightPlayerSummary.dodges.is_(None),
+                    OrmFightPlayerSummary.blocks.is_(None),
+                    OrmFightPlayerSummary.interrupts.is_(None),
+                ),
+            )
+            .exists()
+        )
+        stmt = stmt.where(or_(missing_summary, missing_actions))
     if limit is not None:
         stmt = stmt.limit(limit)
     return list(db.execute(stmt).scalars().all())

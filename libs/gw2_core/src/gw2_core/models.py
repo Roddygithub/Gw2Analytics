@@ -23,6 +23,7 @@ Three model families live here:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum, IntEnum, StrEnum
 from typing import Annotated, Any, Final, Literal, cast
@@ -236,6 +237,29 @@ class Agent(BaseModel):
         ge=0,
         description="Latest team identifier from TeamChange events. 0 when unavailable.",
     )
+
+
+@dataclass(frozen=True, slots=True)
+class OwnershipInterval:
+    """Temporal ownership of an agent by a master, fight-relative.
+
+    The product's own vocabulary for "who controlled whom, when". Any
+    parser backend (the custom EVTC parser, Elite Insights, or a future
+    one) is expected to *produce* these; nothing in the product should
+    have to import a parser package to name the concept.
+
+    ``owner_agent_id`` is ``None`` when the agent is uncontrolled
+    (e.g. environmental gadget, unclaimed minion). The interval is
+    half-open: ``[start_ms, end_ms)``.
+    """
+
+    agent_id: int
+    owner_agent_id: int | None
+    instance_id: int
+    species_id: int | None
+    start_ms: int
+    end_ms: int
+    is_player: bool
 
 
 class Skill(BaseModel):
@@ -1216,6 +1240,7 @@ __all__ = [
     "GameType",
     "HealingEvent",
     "InterruptEvent",
+    "OwnershipInterval",
     "Population",
     "PositionEvent",
     "Profession",

@@ -205,6 +205,18 @@ vi.mock("next/font/google", () => ({
 }));
 
 /**
+ * Self-hosted fonts load through ``next/font/local``. Return the CSS
+ * variable the caller asked for so layout assertions can check the real
+ * ``--font-geist-*`` names without a network or binary font.
+ */
+vi.mock("next/font/local", () => ({
+  default: (options: { variable?: string }) => ({
+    variable: options?.variable ?? "--mock-font",
+    className: "mock-font",
+  }),
+}));
+
+/**
  * @/lib/env reads ``process.env.API_BASE_URL`` at module-load. The
  * Server Components under test need a deterministic value (``http://test/api``)
  * so footer / display-URL assertions are stable across machines.

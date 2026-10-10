@@ -76,6 +76,9 @@ class _AccountState:
     total_damage: int = 0
     total_healing: int = 0
     total_buff_removal: int = 0
+    dodges: int = 0
+    blocks: int = 0
+    interrupts: int = 0
 
 
 class FightContribution(BaseModel):
@@ -102,6 +105,9 @@ class FightContribution(BaseModel):
     total_damage: int = Field(default=0, ge=0)
     total_healing: int = Field(default=0, ge=0)
     total_buff_removal: int = Field(default=0, ge=0)
+    dodges: int = Field(default=0, ge=0)
+    blocks: int = Field(default=0, ge=0)
+    interrupts: int = Field(default=0, ge=0)
     # v0.10.3 plan 083: the per-fight role detection (ported
     # from an upstream reference parser) lands as 2 optional fields --
     # ``detected_role`` and ``detected_tags``. Default ``None``
@@ -151,6 +157,9 @@ class PlayerProfile(BaseModel):
     total_damage: int = Field(..., ge=0)
     total_healing: int = Field(..., ge=0)
     total_buff_removal: int = Field(..., ge=0)
+    dodges: int = Field(default=0, ge=0)
+    blocks: int = Field(default=0, ge=0)
+    interrupts: int = Field(default=0, ge=0)
     attended_fight_ids: list[str] = Field(default_factory=list)
 
 
@@ -210,6 +219,9 @@ class PlayerProfileAggregator:
             state.total_damage += c.total_damage
             state.total_healing += c.total_healing
             state.total_buff_removal += c.total_buff_removal
+            state.dodges += c.dodges
+            state.blocks += c.blocks
+            state.interrupts += c.interrupts
 
         profiles = sorted(
             [
@@ -222,6 +234,9 @@ class PlayerProfileAggregator:
                     total_damage=state.total_damage,
                     total_healing=state.total_healing,
                     total_buff_removal=state.total_buff_removal,
+                    dodges=state.dodges,
+                    blocks=state.blocks,
+                    interrupts=state.interrupts,
                     attended_fight_ids=sorted(state.attended_fight_ids),
                 )
                 for acct, state in state_by_account.items()

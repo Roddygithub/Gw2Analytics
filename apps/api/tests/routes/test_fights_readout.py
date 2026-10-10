@@ -34,7 +34,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.tests.routes._evtc_builder import build_2025_string
-from gw2_core import DamageEvent, DeathEvent, DownEvent, HealingEvent, PositionEvent, StunBreakEvent
+from gw2_core import (
+    BlockEvent,
+    DamageEvent,
+    DeathEvent,
+    DodgeEvent,
+    DownEvent,
+    HealingEvent,
+    InterruptEvent,
+    PositionEvent,
+    StunBreakEvent,
+)
 from gw2analytics_api.routes.fights.fight_aggregators import (
     make_barrier_portion_getter,
     make_dps_split_getter,
@@ -1235,3 +1245,94 @@ def test_readout_dist_to_commander_with_commander() -> None:
     assert player_row.dist_to_commander == pytest.approx(750.0, abs=1.0), (
         f"expected dist≈750.0, got {player_row.dist_to_commander}"
     )
+
+
+# -----------------------------------------------------------------
+# Defense/heal counters the summary table has no columns for
+# (docs/validation/phase3-removed-column-consumer-audit.md)
+# -----------------------------------------------------------------
+
+
+def test_readout_derives_defense_counters_from_events() -> None:
+    """The readout derives defense/heal counters the summary table no longer stores.
+
+    Regression guard for the corrected reading of
+    ``8b674a6a9cfc_phase3_schema_changes``: that migration dropped
+    ``damage_taken`` / ``deaths`` / ``downs`` / ``stun_breaks`` from
+    ``fight_player_summaries``, and an earlier audit concluded (wrongly) that
+    the API must therefore serve hard zeros, because the ORM maps neither
+    column. The Combat Readout never reads those columns: it derives each value
+    from the event blob via ``PlayerDefenseAggregator`` /
+    ``PlayerHealAggregator`` inside ``aggregate_combat_readout``.
+
+    Synthetic events only -- no DB, no blob, no parser -- so a regression that
+    re-points any of these fields at a persisted summary column fails here.
+    """
+    a = 1_000_001  # lands the interrupt, breaks the stun
+    b = a + 1  # takes the damage, dodges, blocks, goes down, dies
+
+    out = aggregate_combat_readout(
+        events=[
+            DamageEvent(
+                time_ms=1_000,
+                source_agent_id=a,
+                target_agent_id=b,
+                skill_id=9_001,
+                damage=1_200,
+            ),
+            DodgeEvent(time_ms=2_000, source_agent_id=b, target_agent_id=0, skill_id=0),
+            BlockEvent(time_ms=2_100, source_agent_id=b, target_agent_id=0, skill_id=0),
+            BlockEvent(time_ms=2_200, source_agent_id=b, target_agent_id=0, skill_id=0),
+            InterruptEvent(time_ms=2_500, source_agent_id=a, target_agent_id=b, skill_id=9_002),
+            StunBreakEvent(time_ms=2_600, source_agent_id=a, target_agent_id=0, skill_id=0),
+            DownEvent(
+                time_ms=3_000,
+                source_agent_id=b,
+                target_agent_id=0,
+                skill_id=0,
+                downtime_ms=3_000,
+            ),
+            DeathEvent(time_ms=6_000, source_agent_id=b, target_agent_id=0, skill_id=0),
+        ],
+        skill_id_to_name_map={9_001: "Dmg", 9_002: "Interrupt"},
+        agent_id_to_identity_map={
+            a: AgentIdentity(
+                agent_id=a,
+                name=f"Attacker {a}",
+                subgroup=0,
+                account_name=f"synth.{a}",
+                profession="Warrior",
+                elite_spec="Berserker",
+                is_player=True,
+                is_commander=False,
+            ),
+            b: AgentIdentity(
+                agent_id=b,
+                name=f"Victim {b}",
+                subgroup=0,
+                account_name=f"synth.{b}",
+                profession="Guardian",
+                elite_spec="Dragonhunter",
+                is_player=True,
+                is_commander=False,
+            ),
+        },
+        duration_s=6.0,
+        fight_id="derived-defense-test",
+    )
+
+    b_row = next(p for p in out.players if p.agent_id == b)
+    assert b_row.defense.damage_taken == 1_200  # incoming DamageEvent
+    assert b_row.defense.deaths == 1  # DeathEvent actor side
+    assert b_row.defense.time_downed_ms == 3_000  # DownEvent.downtime_ms
+    assert b_row.defense.dodges == 1
+    assert b_row.defense.blocks == 2
+    assert b_row.defense.interrupts == 0  # b was interrupted, did not interrupt
+    assert b_row.heal.stun_breaks == 0
+
+    a_row = next(p for p in out.players if p.agent_id == a)
+    assert a_row.defense.interrupts == 1  # InterruptEvent actor side
+    assert a_row.heal.stun_breaks == 1  # StunBreakEvent actor side
+    # a took no damage: the column is zero because nothing hit a, not because
+    # the value is missing.
+    assert a_row.defense.damage_taken == 0

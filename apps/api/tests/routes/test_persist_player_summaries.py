@@ -10,7 +10,18 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from gw2_core import BoonApplyEvent, BuffRemovalEvent, CCEvent, DamageEvent, Event, HealingEvent
+from gw2_analytics.player_defense import PlayerDefenseAggregator
+from gw2_core import (
+    BlockEvent,
+    BoonApplyEvent,
+    BuffRemovalEvent,
+    CCEvent,
+    DamageEvent,
+    DodgeEvent,
+    Event,
+    HealingEvent,
+    InterruptEvent,
+)
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (
     OrmFight,
@@ -177,6 +188,73 @@ def test_single_player_single_damage() -> None:
         assert rows[0].total_buff_removal == 0
     finally:
         session.close()
+
+
+def test_persists_defense_action_counters() -> None:
+    fight_id = _seed_and_call(
+        [
+            DodgeEvent(time_ms=1, source_agent_id=_D, target_agent_id=0, skill_id=0),
+            BlockEvent(time_ms=2, source_agent_id=_D, target_agent_id=0, skill_id=0),
+            InterruptEvent(time_ms=3, source_agent_id=_D, target_agent_id=101, skill_id=200),
+        ],
+    )
+    session = get_sessionmaker()()
+    try:
+        row = session.execute(
+            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+        ).scalar_one()
+        assert (row.dodges, row.blocks, row.interrupts) == (1, 1, 1)
+    finally:
+        session.close()
+
+
+def test_persisted_defense_counters_match_readout_derivation() -> None:
+    """Dodge/block/interrupt counts agree across both derivations.
+
+    ``dodges`` / ``blocks`` / ``interrupts`` exist twice on purpose (see
+    ``docs/validation/phase3-removed-column-consumer-audit.md``): this module
+    persists them for the cross-fight roll-up endpoints, which cannot re-derive
+    from thousands of blobs, while the per-fight Combat Readout re-derives them
+    from the same event stream via ``PlayerDefenseAggregator``. Both count the
+    same event classes on the same actor-side key, so they must not drift; this
+    pins that equivalence on a real persisted row.
+    """
+    dodge_events = [
+        DodgeEvent(time_ms=t, source_agent_id=_D, target_agent_id=0, skill_id=0) for t in (1, 2, 3)
+    ]
+    block_events = [
+        BlockEvent(time_ms=t, source_agent_id=_D, target_agent_id=0, skill_id=0) for t in (4, 5)
+    ]
+    interrupt_events = [
+        InterruptEvent(time_ms=t, source_agent_id=_D, target_agent_id=101, skill_id=200)
+        for t in (6, 7, 8, 9)
+    ]
+
+    fight_id = _seed_and_call([*dodge_events, *block_events, *interrupt_events])
+    session = get_sessionmaker()()
+    try:
+        persisted = session.execute(
+            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+        ).scalar_one()
+    finally:
+        session.close()
+
+    readout_rows = PlayerDefenseAggregator().aggregate(
+        [],
+        [],
+        [],
+        dodge_events=dodge_events,
+        block_events=block_events,
+        interrupt_events=interrupt_events,
+    )
+    readout_row = next(r for r in readout_rows if r.agent_id == _D)
+
+    assert (persisted.dodges, persisted.blocks, persisted.interrupts) == (3, 2, 4)
+    assert (persisted.dodges, persisted.blocks, persisted.interrupts) == (
+        readout_row.dodges,
+        readout_row.blocks,
+        readout_row.interrupts,
+    )
 
 
 def test_multiple_players() -> None:

@@ -2,7 +2,7 @@
 
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { Logo } from "@/components/Logo";
 import { PlayerSearchBar } from "@/components/PlayerSearchBar";
 import { API_BASE_URL } from "@/lib/env";
@@ -25,14 +25,16 @@ if (
   );
 }
 
-const geistSans = Geist({
+const geistSans = localFont({
+  src: "./fonts/Geist.woff2",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/GeistMono.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {

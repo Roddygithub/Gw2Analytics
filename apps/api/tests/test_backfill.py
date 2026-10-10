@@ -44,7 +44,7 @@ from gw2analytics_api.models import OrmFight, OrmFightPlayerSummary
 from gw2analytics_api.scripts.backfill_player_summaries import run_backfill
 
 
-def test_backfill_recreates_summary_rows_from_blob() -> None:
+def test_backfill_recreates_summary_rows_from_blob() -> None:  # noqa: PLR0915
     """v0.8.5: ``run_backfill`` re-creates the summary rows from the
     gzipped JSONL blob in MinIO.
 
@@ -154,6 +154,18 @@ def test_backfill_recreates_summary_rows_from_blob() -> None:
         assert b_row.total_damage == 0
         assert b_row.total_healing == 400
         assert b_row.total_buff_removal == 0
+
+        # A legacy summary with a newly-added NULL counter is selected
+        # for replacement, then a second run is a no-op.
+        a_row.dodges = None
+        session.commit()
+        backfilled, skipped, failed = run_backfill(session)
+        assert (backfilled, skipped, failed) == (1, 0, 0)
+        session.expire_all()
+        refreshed = session.get(OrmFightPlayerSummary, (fight_id, a_row.account_name))
+        assert refreshed is not None
+        assert (refreshed.dodges, refreshed.blocks, refreshed.interrupts) == (0, 0, 0)
+        assert run_backfill(session) == (0, 0, 0)
     finally:
         session.close()
 

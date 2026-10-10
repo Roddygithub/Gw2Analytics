@@ -1175,6 +1175,11 @@ export interface components {
             aegis_uptime?: number | null;
             /** Alacrity Uptime */
             alacrity_uptime?: number | null;
+            /**
+             * Blocks
+             * @default 0
+             */
+            blocks: number;
             /** Boon Strips */
             boon_strips?: number | null;
             /** Condition Cleanses */
@@ -1183,10 +1188,20 @@ export interface components {
             detected_role?: string | null;
             /** Detected Tags */
             detected_tags?: string[] | null;
+            /**
+             * Dodges
+             * @default 0
+             */
+            dodges: number;
             /** Fight Id */
             fight_id: string;
             /** Fury Uptime */
             fury_uptime?: number | null;
+            /**
+             * Interrupts
+             * @default 0
+             */
+            interrupts: number;
             /** Might Uptime */
             might_uptime?: number | null;
             /** Outgoing Aegis */
@@ -1306,14 +1321,29 @@ export interface components {
         PlayerListRowOut: {
             /** Account Name */
             account_name: string;
+            /**
+             * Blocks
+             * @default 0
+             */
+            blocks: number;
             /** Detected Role */
             detected_role?: string | null;
             /** Detected Tags */
             detected_tags?: string[] | null;
+            /**
+             * Dodges
+             * @default 0
+             */
+            dodges: number;
             /** Elite Spec */
             elite_spec: string;
             /** Fights Attended */
             fights_attended: number;
+            /**
+             * Interrupts
+             * @default 0
+             */
+            interrupts: number;
             /** Name */
             name: string;
             /** Profession */

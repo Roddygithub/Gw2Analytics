@@ -155,6 +155,9 @@ class OrmFightPlayerSummary(Base):
     outgoing_stealth: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     boon_strips: Mapped[int | None] = mapped_column(Integer, nullable=True)
     condition_cleanses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dodges: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    blocks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    interrupts: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # comment= aligns the ORM with the column-level comment carried
     # by the prod DB; suppresses alembic autogenerate churn.
     roles: Mapped[list[str] | None] = mapped_column(

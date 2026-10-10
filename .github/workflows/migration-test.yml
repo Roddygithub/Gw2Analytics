@@ -4,6 +4,10 @@
 # Spins up a fresh Postgres, runs `alembic upgrade head`,
 # then `alembic downgrade -1`, then `alembic upgrade head`
 # again to verify the migration is reversible without data loss.
+#
+# The exit-code-only round-trip cannot tell a faithful downgrade from one
+# that leaves columns behind, and cannot tell a fresh install from an upgrade
+# of a real database. The last two steps close both gaps.
 
 name: Test migrations
 
@@ -37,6 +41,15 @@ jobs:
         ports:
           - 5432:5432
 
+    env:
+      DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics
+      DATABASE_URL: postgresql+psycopg://gw2:gw2@localhost:5432/gw2analytics
+      S3_ENDPOINT: localhost:9000
+      S3_ACCESS_KEY: gw2analytics
+      S3_SECRET_KEY: gw2analytics-secret
+      S3_BUCKET: gw2analytics
+      SECRETS_KEK: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+
     steps:
       - uses: actions/checkout@v4
 
@@ -58,17 +71,39 @@ jobs:
       - name: Upgrade to head
         run: uv run alembic upgrade head
         working-directory: apps/api
-        env:
-          DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics
 
       - name: Downgrade one step
         run: uv run alembic downgrade -1
         working-directory: apps/api
-        env:
-          DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics
 
       - name: Re-upgrade to head (round-trip complete)
         run: uv run alembic upgrade head
         working-directory: apps/api
-        env:
-          DB_DSN: postgresql://gw2:gw2@localhost:5432/gw2analytics
+
+      # `upgrade` then `downgrade -1` must land back on the revision below.
+      # The first version of 0022 renamed one column and left two behind, so
+      # `downgrade -1` silently diverged from its target while this workflow
+      # stayed green -- it only checked exit codes.
+      - name: Assert downgrade restores the target revision schema
+        working-directory: apps/api
+        run: |
+          set -euo pipefail
+          uv run alembic downgrade -1
+          left_behind=$(psql "$DB_DSN" -At -c "select count(*) from information_schema.columns where table_name='fight_player_summaries' and column_name in ('blocks','dodges','interrupts')")
+          echo "0022 columns still present after downgrade -1: $left_behind"
+          test "$left_behind" = "0" || { echo "downgrade -1 did not restore the target revision"; exit 1; }
+          uv run alembic upgrade head
+
+      # Upgrading a real database -- not an empty one -- must reach the same
+      # schema as a fresh install. The `blocked` -> `blocks` story in 0022 is
+      # only exerciseable from the revision below head.
+      - name: Upgrade from the representative prior revision
+        working-directory: apps/api
+        run: |
+          set -euo pipefail
+          psql "$DB_DSN" -q -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+          uv run alembic upgrade ea3023c87c0f
+          uv run alembic upgrade head
+          columns=$(psql "$DB_DSN" -At -c "select count(*) from information_schema.columns where table_name='fight_player_summaries' and column_name in ('blocks','dodges','interrupts')")
+          echo "defense counters after prior-revision upgrade: $columns"
+          test "$columns" = "3" || { echo "prior-revision upgrade did not reach the head schema"; exit 1; }
