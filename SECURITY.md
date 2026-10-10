@@ -37,6 +37,7 @@ See the Disclosure policy below for the full process.
 | **Dependency audit** | pip-audit + pnpm audit on HIGH+ | CI workflow (`ci.yml`) |
 | **Schema guard** | Alembic version check at startup | `schema_guard.py` |
 | **Secure defaults** | CORS localhost only, no debug mode | `config.py` |
+| **Rate limiting** | SlowAPI: 5/min uploads, 30/min public API routes, 100/min default | `limiter.py`, routes |
 
 ### ⚠️ Needs attention (production deployment)
 
@@ -52,8 +53,7 @@ See the Disclosure policy below for the full process.
 
 | Item | Impact | Priority |
 |------|--------|----------|
-| **Rate limiting** | No per-IP or per-endpoint rate limits. `/api/v1/uploads` is the highest-risk endpoint (100 MiB POST). | High |
-| **API authentication** | No auth on any endpoint. Uploads are anonymous. | Medium (by design for WvW log sharing) |
+| **API authentication** | Uploads and analytics reads are anonymous by design; `/api/v1/account` requires a GW2 API key. | Medium |
 | **Audit logging** | No structured access/error logs beyond Uvicorn defaults | Low |
 
 ### 🔍 CI security gates

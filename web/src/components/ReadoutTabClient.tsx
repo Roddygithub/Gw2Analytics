@@ -573,7 +573,7 @@ export function ReadoutTabClient({ fightId }: ReadoutTabClientProps) {
   const events = currentState.status === "success" ? currentState.events : null;
 
   // Role filter — MUST be before early returns
-  const players = readout?.players ?? [];
+  const players = useMemo(() => readout?.players ?? [], [readout]);
   const [roleFilter, setRoleFilter] = useState<string | null>(null);
   const allRoles = useMemo(() => {
     const seen = new Set<string>();
