@@ -1,184 +1,152 @@
-# GW2Analytics
+# Gw2Analytics
 
 [![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
-[![Migration test](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/migration-test.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/migration-test.yml)
+[![Migration tests](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/migration-test.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/migration-test.yml)
 [![Security scan](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/security.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/security.yml)
 [![Docker build](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/docker-build.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/docker-build.yml)
-[![Cache warmup](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/cache-warmup.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/cache-warmup.yml)
-[![codecov](https://codecov.io/gh/Roddygithub/Gw2Analytics/branch/main/graph/badge.svg)](https://codecov.io/gh/Roddygithub/Gw2Analytics)
-[![Latest tag](https://img.shields.io/github/v/tag/Roddygithub/Gw2Analytics?sort=semver&label=latest)](https://github.com/Roddygithub/Gw2Analytics/tags)
 
-**Modern combat analytics platform for Guild Wars 2 WvW (World vs World).**
+**A Guild Wars 2 World vs. World (WvW) combat analytics platform.**
 
-> Independent third-party platform — no dps.report, no Elite Insights web.
-> WvW combat logs (`.zevtc`) are parsed locally and stored in a stable
-> internal model from which all analytics, API, and frontend derive.
+Gw2Analytics turns `.zevtc` combat logs into fight, player, and squad analysis
+for commanders, squad members, and analysts reviewing recorded fights. Explore
+what happened in a fight, how players and subgroups contributed, and how player
+performance changes across fights. It is built for post-fight analysis, not as a
+live DPS meter.
 
-## What's new
+## What you can analyze
 
-| Release | Highlights |
+| Area | What it provides |
 | --- | --- |
-| **v0.15.0** | GlobalStatsBar, timeline activity toggle, CSV removal, heatmap in Analyse, arq-worker, tab fix, unit tests. |
-| **v0.14.3** | PlayerPositionHeatmap canvas component + presence_pct math fix. |
-| **v0.14.2** | Plan 173: 14 boon uptimes + presence % + 14 outgoing boons in Combat Readout. Grouped bars + tooltips. |
-| **v0.14.1** | Slow-path blob walk tests (3 hermetic tests for `_contributions_from_blob_walk`). |
-| **v0.14.0** | CI guard against legacy `db.query()` reintroduction. Coverage plan updated. |
-| **v0.13.9** | Zero legacy SQLAlchemy queries — last `db.query()` migrated to `select()`. |
-| **v0.13.8** | `backfill_role_detection` tests (67%→85%). Redundant `limiter.reset()` cleanup. |
-| **v0.13.7** | Rate limiting integration tests. Guilds route tests (0%→70%). |
-| **v0.13.6** | Players route coverage (30%→69%). Guilds router mounted in `main.py`. |
+| **Fight analysis** | Combat readout for damage, healing, boons, and defense, with per-target and per-skill breakdowns. |
+| **Squad analysis** | Squad and subgroup roll-ups for combat activity and player roles. |
+| **Player history** | Account profiles, per-fight summaries, and historical timelines across uploaded fights. |
+| **Comparison and visualization** | Compare player accounts or fights; explore event timelines, combat replay, and position heatmaps. |
+| **Uploads and integration** | Process `.zevtc` uploads in a background worker, use the versioned REST API, or subscribe to upload-completion webhooks. |
 
-See [CHANGELOG.md](./CHANGELOG.md) for the full per-release history.
+## Product views
 
-## Highlights
+Selected screenshots from [`docs/screenshots/`](docs/screenshots/):
 
-- 🎯 **Per-target / per-subgroup / per-skill roll-ups** on every fight — DPS, healing, and buff removals via stable pydantic aggregations with deterministic ordering + cross-field invariants.
-- 📈 **Account-level historical timelines** — per-day / per-fight bucketing, linear / log Y-axis, and player-name resolution on the fight drilldown's TargetFilter.
-- 🔌 **Webhook subscriptions** for parse-completion notifications — HMAC-SHA256 signed, 3-attempt retry + DLQ + replay, with SSRF block (HTTPS-only + universal private-IP gate).
-- 🎭 **Heuristic role detection** — per-(fight, account) DPS / HEAL / STRIP / BOON / MIXED classification from the 3 magnitudes + spec/profession hint table.
-- 📊 **Per-player timeline overlay** — one per-bucket series per player agent for multi-line chart overlays.
-- 🎨 **GW2Mists-inspired frontend** — dark palette, sticky glass header, inline SVG logo, favicon, and Next.js `<Link>` navigation.
-- ⚔️ **Combat-readout UI** — per-player Damage / Heal / Boons / Defense 4-table roll-up via `/fights/[id]?tab=readout` (default tab), with native HTML sortable tables, boon In/Out columns (14 boons), GlobalStatsBar (squad DPS/Heal/Strips/Cleanses/CC/Healers/Supports), compact FightSummaryCards (Top 3 per category), timeline activity toggle ("Toute la durée" / "Activité seulement"), and 2D position heatmap with play/pause animation.
-- 🧪 **Comprehensive multi-layer test suite** — `pytest` (libs + apps) + `vitest` (web components) + Playwright e2e (web flows), 117 tests, 84% coverage, all gated and green.
-- 🛡️ **Audit hardening** — Caddyfile HSTS/CSP, CI `pip-audit`/`pnpm-audit`, Next.js error boundaries, headers() defense-in-depth, Trivy filesystem scan + detect-secrets pre-commit hook.
-- 📊 **Observability** — OpenTelemetry tracing (FastAPI + SQLAlchemy + Redis) with OTLP HTTP export, structured JSON logging, Prometheus metrics endpoint, Grafana dashboard.
-- 📦 **Pure monorepo** — `libs/gw2_core` (no I/O), `libs/gw2_evtc_parser` (replaceable Protocol), `libs/gw2_analytics` (frozen pydantic), `apps/api` (FastAPI), `web` (Next.js).
-- 🔧 **Zero legacy SQLAlchemy** — all production queries use `select()` (SQLAlchemy 2.x style). CI guard prevents regression.
-- ⚡ **Arq worker** — dedicated background worker process for .zevtc parsing, eliminating in-request GIL contention on parallel uploads.
+<table>
+  <tr>
+    <td align="center"><strong>WvW analytics landing page</strong><br><img src="docs/screenshots/01-landing.png" alt="Gw2Analytics landing page" width="480"></td>
+    <td align="center"><strong>Fight readout and position heatmap</strong><br><img src="docs/screenshots/08-fight-drilldown.png" alt="Fight analysis with summary, timeline, position heatmap, and player readout" width="480"></td>
+  </tr>
+</table>
 
 ## Architecture
 
+The parser is replaceable at a tested adapter boundary. Product contracts live
+in `gw2_core`; analytics, persistence, the API, and the frontend consume those
+contracts rather than parser or database internals.
+
+```mermaid
+flowchart LR
+    upload[".zevtc upload"] --> adapter["Parser adapter boundary"]
+    adapter -->|current path| parser["gw2_evtc_parser\n(transitional Python parser)"]
+    upload -. "planned; needs EI export work" .-> ei["WvW Elite Insights"]
+    ei -.-> adapter
+    parser --> core["gw2_core\nproduct contracts"]
+    adapter -. "future normalized result" .-> core
+    core --> analytics["gw2_analytics"]
+    core --> storage["PostgreSQL + MinIO"]
+    analytics --> api["FastAPI + OpenAPI"]
+    storage --> api
+    api --> web["Next.js web app"]
 ```
-                               gw2_evtc_parser
-                                      │
-                                      ▼ produces
-                                   gw2_core ◀──constrains── gw2_analytics
-                                      │
-                                      ▼
-                                 apps/api  ──gw2_api_client── GW2 v2
-                                      │
-                                      ▼
-                                 web (Next.js)
-```
 
-| Component | Role |
-| --- | --- |
-| `libs/gw2_core` | Stable Pydantic models (combat + API). Single source of truth. **No I/O.** |
-| `libs/gw2_evtc_parser` | Binary `.zevtc` parser, reached **only** through `apps/api`'s `services.parser_adapter`. The boundary is enforced by `tests/scripts/test_parser_boundary.py`. |
-| `libs/gw2_analytics` | Single-, multi-fight, and event-driven aggregations. Frozen pydantic shapes with deterministic ordering + cross-field invariants. |
-| `libs/gw2_api_client` | Typed async httpx wrapper for the Guild Wars 2 REST API v2. |
-| `apps/api` | FastAPI gateway. MinIO blobs + Alembic + Postgres. |
-| `web` | Next.js frontend. AG Grid Community tables + SSR fetches. |
+`gw2_evtc_parser` remains in the repository temporarily. Product runtime code
+can reach it only through `apps/api`'s `services.parser_adapter`; tests enforce
+that boundary. `OwnershipInterval`, for example, is owned by `gw2_core` rather
+than by the parser package. See the [parser boundary design](docs/architecture/parser-boundary.md).
 
-## API Surface
+### Elite Insights status
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/api/v1/uploads` | Ingest a `.zevtc` log; returns 201 (parse runs in background). |
-| `GET` | `/api/v1/uploads/{id}` | Upload metadata. |
-| `GET` | `/api/v1/fights[/{id}]` | List fights (paginated) or fetch a single fight. |
-| `GET` | `/api/v1/fights/{id}/events` | Per-target trio (DPS + healing + buff removal) + per-bucket event windows. |
-| `GET` | `/api/v1/fights/{id}/squads` | Per-subgroup roll-up. |
-| `GET` | `/api/v1/fights/{id}/skills` | Per-skill hit count + damage / heal / strip totals. |
-| `GET` | `/api/v1/fights/{id}/readout` | Combat readout — per-player Damage / Heal / Boons / Defense 4-table roll-up. |
-| `GET` | `/api/v1/fights/{id}/timeline?window_s=N` | Per-fight temporal view (3-series, `M:SS` relative time). |
-| `GET` | `/api/v1/fights/{id}/timeline/players` | Per-player timeline overlay. |
-| `GET` | `/api/v1/fights/{id}/players/{account}/skills` | Per-player skill roll-up + loadout. |
-| `GET` | `/api/v1/players?profession=&limit=&offset=` | Cross-fight player roll-up (paginated). |
-| `GET` | `/api/v1/players/{account_name:path}` | Player profile + per-fight breakdown. |
-| `GET` | `/api/v1/players/{account_name:path}/timeline` | Account-level historical timeline. |
-| `POST/GET/DELETE` | `/api/v1/webhooks[/{id}]` | Webhook subscription management (HTTPS-only URLs). |
-| `GET` | `/api/v1/health/summary` | Operational drift probe. |
-| `GET` | `/api/v1/healthz` | Liveness probe. |
+An EI-based parser path is planned, but it is not implemented. An executed
+field-coverage study against Elite Insights 3.26.0.0 detailed-WvW exports found
+62 of 82 product fields serviceable. The current export still lacks required
+event-level data, including a generic event stream, time-ranged ownership
+intervals, position samples under the tested configuration, and per-target
+buff removals. The existing parser therefore remains temporarily behind the
+adapter until the required EI export work exists. See the [field-coverage gate](docs/validation/ei-field-coverage-gate.md)
+and [coverage matrix](docs/validation/ei-field-coverage-matrix.md) for the evidence.
 
-## Screenshots
+## Developer quickstart
 
-| Route | Capture |
-| --- | --- |
-| `/` | ![Landing](docs/screenshots/01-landing.png) |
-| `/upload` | ![Upload flow](docs/screenshots/03-upload.png) |
-| `/fights` | ![Fights grid](docs/screenshots/04-fights.png) |
-| `/players` | ![Players grid](docs/screenshots/05-players.png) |
-| `/players/[account_name]` | ![Player profile](docs/screenshots/06-player-profile-with-timeline.png) |
-| `/fights/[id]?tab=replay` | ![Replay drilldown](docs/screenshots/08-fight-drilldown.png) |
-
-## Quickstart
+For local development, install `uv`, `pnpm`, Docker Compose, and `make`, then
+run:
 
 ```bash
-# 1. Install uv (Python package manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. Install all monorepo deps including libs + apps
-uv sync
-
-# 3. Install git hooks
-uv run pre-commit install
-
-# 4. Bring up the infra (Postgres + MinIO + Redis + arq-worker)
-#    The arq-worker handles .zevtc parsing in a dedicated background
-#    process with its own GIL, avoiding in-request latency.
-docker compose up -d
-
-#    If the infra is already running from a previous version, start
-#    just the new arq-worker:
-#    docker compose up -d arq-worker
-
-# 5. Configure local app env (DB + S3 creds; never commit the real .env)
-cp .env.example .env
-
-# 6. Apply the Postgres schema
-cd apps/api && uv run alembic upgrade head && cd ../..
-
-# 7. Boot the API (http://localhost:8000/docs)
-uv run fastapi dev apps/api/src/gw2analytics_api/main.py
-
-# 8. Frontend
-cd web
-pnpm install
-pnpm dev   # http://localhost:3000
+make dev-onboard
+make dev-stack-up
 ```
 
-## Development
+`make dev-onboard` creates `.env` from the development example if needed,
+starts PostgreSQL, MinIO, and Redis, syncs Python and web dependencies, applies
+database migrations, and generates the web API types. `make dev-stack-up` starts
+the FastAPI server, Arq parser worker, and Next.js development server.
+
+- Web app: <http://localhost:3000>
+- API and interactive OpenAPI docs: <http://localhost:8000/docs>
+
+The credentials in `.env.example` are development placeholders. Configure real
+secrets and services for any non-development deployment. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for manual setup and contribution details.
+
+## Development checks
+
+Run Python commands from the repository root with `uv`; run web commands from
+`web/` after installing its dependencies.
 
 ```bash
-# Run all backend checks (lint + typecheck + tests)
-uv run ruff check libs apps
-uv run pytest libs apps -q
+# Python
+uv run ruff check
+uv run ruff format --check
+uv run mypy libs --no-incremental
+uv run mypy apps/api/src --no-incremental
+uv run pytest --tb=short
 
-# Run all frontend checks (typecheck + lint + tests)
-cd web
-pnpm typecheck && pnpm lint && pnpm test:unit
+# Web (from web/)
+pnpm exec tsc --noEmit
+pnpm exec eslint .
+pnpm exec vitest run
+pnpm exec playwright test --project=chromium
 ```
 
-## Documentation
+The Python integration suite uses the local services started by the quickstart.
+CI also runs database migration checks, security scans, Docker builds, and a
+visual-regression browser project. See [CI workflows](.github/workflows/).
 
-| File | Purpose |
+## API
+
+The FastAPI application exposes a versioned `/api/v1` REST API with upload,
+fight, player, comparison, and webhook endpoints. The frontend uses generated
+OpenAPI types. With the API running, browse the complete schema and try
+endpoints at [`/docs`](http://localhost:8000/docs).
+
+## Technology
+
+| Layer | Technologies |
 | --- | --- |
-| [CHANGELOG.md](./CHANGELOG.md) | Canonical per-commit history. |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | Workflow conventions, branch protection rules, CI gates. |
-| [docs/ROADMAP.md](./docs/ROADMAP.md) | Forward-looking candidates and technical-debt ledger. |
-| [monitoring/grafana-dashboard.json](./monitoring/grafana-dashboard.json) | Pre-built Grafana dashboard (upload rate, parse duration, errors, queue, drift). |
-| [plans/README.md](./plans/README.md) | Senior-advisor audit trails and scoped cycle implementation plans. |
+| Backend and analytics | Python 3.12+, FastAPI, Pydantic, SQLAlchemy, Alembic |
+| Data and background work | PostgreSQL, MinIO, Redis, Arq |
+| Frontend | Next.js, React, TypeScript |
+| Operations | Optional OpenTelemetry tracing, Prometheus metrics, Grafana dashboard definition |
 
-## Contributing
+## Project documentation
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for branch protection, pre-commit, code style, and test requirements.
+- [Changelog](CHANGELOG.md) — release and change history.
+- [Contributing](CONTRIBUTING.md) — local setup, development workflow, and checks.
+- [Roadmap](docs/ROADMAP.md) — current product direction and historical context.
+- [Parser boundary](docs/architecture/parser-boundary.md) — adapter contract and enforcement.
+- [Elite Insights field-coverage gate](docs/validation/ei-field-coverage-gate.md) — migration evidence and decision.
+- [Grafana dashboard](monitoring/grafana-dashboard.json) — dashboard definition.
 
-### Principles
+## License and affiliation
 
-1. **`gw2_core` is the only contract** between layers. Everything depends on it; it depends on nothing but Pydantic.
-2. **The parser is replaceable**, and the seam is enforced: no product runtime module outside `services.parser_adapter` may import it. Replacing it with Elite Insights is gated on `docs/validation/ei-field-coverage-gate.md` — read that before assuming the swap is mechanical.
-3. **The frontend never knows** about EVTC, parser internals, or DB schema — only the OpenAPI surface.
-4. **Each component evolves independently** — enforced by `pyproject.toml` per lib.
+Gw2Analytics is **proprietary software, all rights reserved**. Repository
+visibility does not grant redistribution or commercial-use rights. See
+[`LICENSE`](LICENSE) for the terms and [`NOTICE.md`](NOTICE.md) for a summary.
 
-## License
-
-**Proprietary software — all rights reserved.** Copyright (c) 2024-2026
-Roddy. See [`LICENSE`](./LICENSE) for the full legal text and
-[`NOTICE.md`](./NOTICE.md) for a plain-language summary of what is
-and isn't permitted without explicit written permission from the
-copyright holder.
-
-The project is independent third-party software — no affiliation with
-ArenaNet or any Guild Wars 2 trademark holder. All Guild Wars 2 game
-content references are nominative fair use under the GW2 content policy.
+Gw2Analytics is independent third-party software and is not affiliated with or
+endorsed by ArenaNet or any Guild Wars 2 trademark holder.
