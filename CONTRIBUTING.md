@@ -192,12 +192,13 @@ canonical cases:
   spells this out and its ``downgrade()`` raises
   ``NotImplementedError`` so a careless ``alembic downgrade base``
   fails loud instead of silently corrupting data.
-- ``8b674a6a9cfc_phase3_schema_changes``: drops 9 SCAFFOLD /
-  transformation-output columns unconditionally. Restore on
-  ``downgrade -1`` (all 9 are recreated), so the cost of a
+- ``8b674a6a9cfc_phase3_schema_changes``: drops 9 columns that
+  ``0016``--``0020`` had added, unconditionally. ``downgrade -1``
+  recreates all 9 (empty, never written), so the cost of a
   single-step backward move is bounded; full-chain reversal
   past this point is also bounded by the 0014 ``NotImplemented``
-  above.
+  above. What each dropped column was, who consumed it, and why
+  nothing needs restoring: ``docs/validation/phase3-removed-column-consumer-audit.md``.
 
 If you need a full chain reversal (e.g. to recover from a botched
 deployment), do it in **two moves**:

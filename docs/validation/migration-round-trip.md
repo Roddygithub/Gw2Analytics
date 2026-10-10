@@ -74,17 +74,36 @@ Confirmed at head on the real server:
 | `fights.context` | no |
 | `fight_agents.position_samples` | no |
 
-Two of the destroyed columns are still advertised by the API:
-`apps/api/src/gw2analytics_api/schemas/fight.py` declares `damage_taken: int = 0`
-and `stun_breaks: int = 0`, and nothing populates them, because the ORM has no
-mapping for either. The API therefore reports a hard zero rather than an
-"unavailable" `NULL`.
+**Persistence was lost; no product value was.** An earlier revision of this
+section claimed that because the ORM has no mapping for `damage_taken` and
+`stun_breaks`, the API "reports a hard zero" for them. That inference was wrong,
+and the correction matters more than the mistake: `damage_taken` and
+`stun_breaks` are not summary columns in the product model at all. They are
+computed per request from the event blob — `PlayerDefenseAggregator` sums
+`DamageEvent` for the damage *received* by a player, and `PlayerHealAggregator`
+counts `StunBreakEvent` per actor — and those values reach
+`PlayerReadoutDefenseOut.damage_taken` and `PlayerReadoutHealOut.stun_breaks`
+through `aggregate_combat_readout`. A missing persistence column is not a
+missing product value.
 
-**Not fixed here, deliberately.** Restoring those columns is a product decision
-(are the stats still wanted? should the API fields be removed instead?) and
-editing an already-applied migration is not an option. The safe remedy is a new
-forward migration, which is left to the reviewer with this evidence. This is
-listed as a genuine risk in the handoff report.
+What `8b674a6a9cfc` actually destroyed is schema intent: four deliberate
+migrations' worth of columns (`0016`–`0020`), and with them the persistence
+that `0017` had reserved for the defense counters. Verified separately, no
+writer or reader for any of the nine ever existed in the application, so no
+stored data was lost either. Both statements are traced column by column —
+writer, reader, current source, decision — in
+`docs/validation/phase3-removed-column-consumer-audit.md`. That audit is the
+authority; this section is its migration-level summary.
+
+**No forward migration is needed.** `0022` already re-adds the three counters
+that still need durable storage (`blocks`, `dodges`, `interrupts`) under the
+product's names, and they are written on ingest. The remaining six are derived
+on read from the immutable blob (`damage_taken`, `deaths`, `downs`,
+`stun_breaks`, positions) or were never wired to anything (`fights.context`).
+Restoring them would create a second source of truth for values that are
+already exact per request, plus a backfill for every historical fight, with no
+consumer asking for it. Editing an already-applied migration remains off the
+table regardless.
 
 ## Other limitations
 

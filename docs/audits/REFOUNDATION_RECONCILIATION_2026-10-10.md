@@ -81,11 +81,22 @@ representative prior revision, pre-existing row preserved, downgrade -1,
 re-upgrade. Evidence and the two defects: `docs/validation/migration-round-trip.md`.
 Alembic reports a single head (`0022`).
 
-**Open, for the reviewer:** the columns `8b674a6a9cfc` destroyed are still gone
-at head, and two of them (`damage_taken`, `stun_breaks`) are still advertised by
-`apps/api/src/gw2analytics_api/schemas/fight.py` with nothing populating them.
-Restoring or removing them is a product decision, and editing an applied
-migration is not an option, so this is reported rather than patched.
+**The consumer audit that followed this record corrected its consequence, not
+its cause.** An earlier revision claimed the two columns still advertised by
+`apps/api/src/gw2analytics_api/schemas/fight.py` (`damage_taken`, `stun_breaks`)
+have "nothing populating them". They are populated on every request: the Combat
+Readout derives them from the event blob (`PlayerDefenseAggregator`,
+`PlayerHealAggregator`), and the ORM never needed a mapping to do it. Persistence
+loss and runtime/API feature loss are different things, and this migration
+caused the first, not the second.
+
+The defect stands as described above — the migration dropped nine columns that
+four deliberate migrations had added — but no stored data was lost either, since
+the application never wrote any of them (traced in
+`docs/validation/phase3-removed-column-consumer-audit.md`). The audit also
+settles the remedy: no forward migration is needed. `0022` already re-adds the
+three counters with a durable consumer; the rest are derived on read or were
+never wired to anything.
 
 A duplicated select-label defect inherited from the source branch was also
 fixed in the per-account aggregate query.
