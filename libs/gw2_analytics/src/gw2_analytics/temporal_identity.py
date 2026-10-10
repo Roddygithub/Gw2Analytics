@@ -11,7 +11,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from gw2_evtc_parser import OwnershipInterval
+from gw2_core import OwnershipInterval
 
 if TYPE_CHECKING:
     from gw2_core import Agent as CoreAgent

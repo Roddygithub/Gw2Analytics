@@ -69,7 +69,6 @@ import math
 import struct
 import zipfile
 from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Final
 
@@ -99,6 +98,7 @@ from gw2_core import (
     HealthUpdateEvent,
     InterruptEvent,
     MissileEvent,
+    OwnershipInterval,
     PositionEvent,
     Profession,
     Skill,
@@ -2543,24 +2543,6 @@ _SPAWN_STATECHANGE: Final[int] = 0
 _DESPAWN_STATECHANGE: Final[int] = 1
 #: Statechange 22 = TeamChange (used in EVTC2025+ agent enrichment).
 _TEAMCHANGE_STATECHANGE_2025: Final[int] = 22
-
-
-@dataclass(frozen=True, slots=True)
-class OwnershipInterval:
-    """Temporal ownership of an agent by a master.
-
-    ``owner_agent_id`` is ``None`` when the agent is uncontrolled
-    (e.g. environmental gadget, unclaimed minion). The interval is
-    half-open: ``[start_ms, end_ms)`` fight-relative.
-    """
-
-    agent_id: int
-    owner_agent_id: int | None
-    instance_id: int
-    species_id: int | None
-    start_ms: int
-    end_ms: int
-    is_player: bool
 
 
 def scan_ownership_intervals(source: BinaryIO | bytes) -> list[OwnershipInterval]:  # noqa: PLR0912,PLR0915

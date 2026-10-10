@@ -32,11 +32,11 @@ from gw2_core import (
     Fight,
     HealthUpdateEvent,
     InterruptEvent,
+    OwnershipInterval,
     Profession,
     UpEvent,
     spec_display_name,
 )
-from gw2_evtc_parser import OwnershipInterval
 
 #: Exact mirror of Elite Insights' ``RangerHelper.JuvenilePetIDs``
 #: (union of the 11 juvenile-pet family lists + the base list). A spawn
