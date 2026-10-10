@@ -96,8 +96,9 @@ the cache lifetime differ.
 They are not competing values: the readout never reads the summary row for
 these counters (it reads it only for boon uptimes), and the roll-up endpoints
 never load a blob. Equivalence is pinned by
-`apps/api/tests/routes/test_phase3_removed_column_consistency.py`, which runs
-both derivations over one synthetic event stream and asserts equal counts.
+`apps/api/tests/routes/test_persist_player_summaries.py::test_persisted_defense_counters_match_readout_derivation`,
+which runs both derivations over one synthetic event stream and asserts equal
+counts.
 
 ## `fights.context`
 
