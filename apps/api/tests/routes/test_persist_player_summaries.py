@@ -10,7 +10,17 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from gw2_core import BoonApplyEvent, BuffRemovalEvent, CCEvent, DamageEvent, Event, HealingEvent
+from gw2_core import (
+    BlockEvent,
+    BoonApplyEvent,
+    BuffRemovalEvent,
+    CCEvent,
+    DamageEvent,
+    DodgeEvent,
+    Event,
+    HealingEvent,
+    InterruptEvent,
+)
 from gw2analytics_api.database import get_sessionmaker
 from gw2analytics_api.models import (
     OrmFight,
@@ -175,6 +185,24 @@ def test_single_player_single_damage() -> None:
         assert rows[0].total_damage == 42
         assert rows[0].total_healing == 0
         assert rows[0].total_buff_removal == 0
+    finally:
+        session.close()
+
+
+def test_persists_defense_action_counters() -> None:
+    fight_id = _seed_and_call(
+        [
+            DodgeEvent(time_ms=1, source_agent_id=_D, target_agent_id=0, skill_id=0),
+            BlockEvent(time_ms=2, source_agent_id=_D, target_agent_id=0, skill_id=0),
+            InterruptEvent(time_ms=3, source_agent_id=_D, target_agent_id=101, skill_id=200),
+        ],
+    )
+    session = get_sessionmaker()()
+    try:
+        row = session.execute(
+            select(OrmFightPlayerSummary).where(OrmFightPlayerSummary.fight_id == fight_id)
+        ).scalar_one()
+        assert (row.dodges, row.blocks, row.interrupts) == (1, 1, 1)
     finally:
         session.close()
 

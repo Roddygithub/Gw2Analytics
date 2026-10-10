@@ -224,6 +224,9 @@ def get_player(
         total_damage=sum(c.total_damage for c in own_contributions),
         total_healing=sum(c.total_healing for c in own_contributions),
         total_buff_removal=sum(c.total_buff_removal for c in own_contributions),
+        dodges=sum(c.dodges for c in own_contributions),
+        blocks=sum(c.blocks for c in own_contributions),
+        interrupts=sum(c.interrupts for c in own_contributions),
         attended_fight_ids=sorted(c.fight_id for c in own_contributions),
     )
 
@@ -244,6 +247,9 @@ def get_player(
         total_damage=profile.total_damage,
         total_healing=profile.total_healing,
         total_buff_removal=profile.total_buff_removal,
+        dodges=profile.dodges,
+        blocks=profile.blocks,
+        interrupts=profile.interrupts,
         detected_role=detected_role,
         detected_tags=detected_tags,
         attended_fight_ids=profile.attended_fight_ids,
@@ -254,6 +260,9 @@ def get_player(
                 total_damage=c.total_damage,
                 total_healing=c.total_healing,
                 total_buff_removal=c.total_buff_removal,
+                dodges=c.dodges,
+                blocks=c.blocks,
+                interrupts=c.interrupts,
                 detected_role=c.detected_role,
                 detected_tags=c.detected_tags,
             )

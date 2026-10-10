@@ -17,13 +17,16 @@ from gw2_analytics.buff_state import TRACKED_BUFFS, BuffStateTracker
 from gw2_analytics.condi_power_split import KNOWN_CONDI_NAMES
 from gw2_analytics.role_detection import detect_role_lite
 from gw2_core import (
+    BlockEvent,
     BoonApplyEvent,
     BuffApplyEvent,
     BuffRemovalEvent,
     CCEvent,
     DamageEvent,
+    DodgeEvent,
     Event,
     HealingEvent,
+    InterruptEvent,
 )
 from gw2analytics_api.models import (
     OrmFight,
@@ -54,6 +57,9 @@ class _SummaryBucket:
     boon_strips: int = 0
     condition_cleanses: int = 0
     cc_applied: int = 0
+    dodges: int = 0
+    blocks: int = 0
+    interrupts: int = 0
     name: str = ""
     prof: int = 0
     elite: int = 0
@@ -158,7 +164,7 @@ def _compute_account_roles(
     return roles_out
 
 
-def _process_events_to_buckets(  # noqa: PLR0912
+def _process_events_to_buckets(  # noqa: PLR0912, PLR0915
     events: list[Event],
     source_map: dict[int, OrmFightAgent],
     skill_name_map: dict[int, str | None],
@@ -226,6 +232,12 @@ def _process_events_to_buckets(  # noqa: PLR0912
             bucket.boon_strips += event.buff_removal
         elif isinstance(event, CCEvent):
             bucket.cc_applied += 1
+        elif isinstance(event, DodgeEvent):
+            bucket.dodges += 1
+        elif isinstance(event, BlockEvent):
+            bucket.blocks += 1
+        elif isinstance(event, InterruptEvent):
+            bucket.interrupts += 1
 
     return per_account
 
@@ -324,6 +336,9 @@ def _write_summary_and_boon_rows(
                 "condi_damage": bucket.condi,
                 "boon_strips": bucket.boon_strips,
                 "condition_cleanses": bucket.condition_cleanses,
+                "dodges": bucket.dodges,
+                "blocks": bucket.blocks,
+                "interrupts": bucket.interrupts,
                 "roles": _compute_account_roles(
                     healing=bucket.healing,
                     total_squad_healing=total_squad_healing,

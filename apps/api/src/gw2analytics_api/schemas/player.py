@@ -17,6 +17,9 @@ class PlayerListRowOut(BaseModel):
     total_damage: int
     total_healing: int
     total_buff_removal: int
+    dodges: int = 0
+    blocks: int = 0
+    interrupts: int = 0
     # Phase 3 (AI-CONTINUATION-PLAN): detected role shown in the players list.
     detected_role: str | None = None
     detected_tags: list[str] | None = None
@@ -30,6 +33,9 @@ class PerFightBreakdownRowOut(BaseModel):
     total_damage: int
     total_healing: int
     total_buff_removal: int
+    dodges: int = 0
+    blocks: int = 0
+    interrupts: int = 0
     detected_role: str | None = None
     detected_tags: list[str] | None = None
     # Phase 1 (AI-CONTINUATION-PLAN): boon uptimes + outgoing boons.

@@ -84,6 +84,9 @@ class PlayerRepository:
                 func.coalesce(func.sum(OrmFightPlayerSummary.total_buff_removal), 0).label(
                     "total_buff_removal"
                 ),
+                func.coalesce(func.sum(OrmFightPlayerSummary.dodges), 0).label("dodges"),
+                func.coalesce(func.sum(OrmFightPlayerSummary.blocks), 0).label("blocks"),
+                func.coalesce(func.sum(OrmFightPlayerSummary.interrupts), 0).label("interrupts"),
             )
             .join(
                 per_account_profession,
@@ -120,6 +123,9 @@ class PlayerRepository:
                 total_damage=int(row.total_damage),
                 total_healing=int(row.total_healing),
                 total_buff_removal=int(row.total_buff_removal),
+                dodges=int(row.dodges),
+                blocks=int(row.blocks),
+                interrupts=int(row.interrupts),
                 attended_fight_ids=[],
             )
             for row in rows
@@ -161,6 +167,9 @@ class PlayerRepository:
                         detected_tags=summary.detected_tags,
                         power_damage=summary.power_damage,
                         condi_damage=summary.condi_damage,
+                        dodges=summary.dodges or 0,
+                        blocks=summary.blocks or 0,
+                        interrupts=summary.interrupts or 0,
                     ),
                     started_at,
                 )
