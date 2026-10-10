@@ -104,3 +104,24 @@ Distinct EI key paths observed across the corpus: 70271.
 | archive | raw event stream (generic) | `gw2_evtc_parser.PythonEvtcParser.parse_events` | event_blob, every gw2_analytics aggregator | `REQUIRES_EI_EXPORT_CHANGE` | -- | The product's analytics consume a normalized event stream. EI publishes aggregates and per-second series only. Removing the custom parser therefore requires either an EI export change or a product-side rewrite onto EI's aggregates. This single row gates the migration. |
 | redundant | boon/condition classification tables | `gw2_evtc_parser buff tables` | buff_dispatch | `PRODUCT_REDUNDANT` | `buffMap` | EI publishes the buffMap/skillMap the product derives locally; the product copy can be sourced from EI metadata. |
 | redundant | personal buff/damage-modifier tables | `gw2_evtc_parser tables` | buff_dispatch | `PRODUCT_REDUNDANT` | `personalBuffs` | EI publishes these per profession. |
+
+## WvwExportV1 sidecar supplement (2026-10-10)
+
+The matrix above is the historical standard detailed-WvW JSON gate and remains
+unchanged. The pinned [WvwExportV1 sidecar](../architecture/ei-wvw-export-v1.md)
+adds typed damage, buff apply/extension/removal, lifecycle and health events,
+time-ranged ownership, and positions. The 35-log execution is recorded in the
+[migration gate report](ei-35log-migration-gate.md). Elite Insights remains the
+canonical EVTC interpreter; this supplement measures what its versioned
+transport exposes and does not treat the legacy parser as truth.
+
+| Requirement | Sidecar evidence | Coverage result |
+| --- | --- | --- |
+| Damage event stream | `damage` includes source/target, skill, health damage and shield damage | Direct fact; aggregate damage splits remain available in standard EI JSON. |
+| Buff transition stream | Apply, extension, remove-all, remove-single and remove-manual variants | Direct fact for these variants; stack activation is represented by standard EI buff states, not the sidecar. |
+| Lifecycle and health events | Down, death, alive, spawn, despawn and health update | Partial: `UpEvent` is not exported, which blocks faithful construction of current downed segments. |
+| Ownership | Observation-derived intervals with explicit unresolved-owner state | Direct for exported observations; 9,061 unresolved intervals across the run remain explicit. |
+| Positions | EI replay-derived samples, enabled for certification | Direct EI facts; full-corpus volume and cost are in the report. |
+| Healing event stream | No per-event healing variant | Missing for event-window HPS in current fight timeline and per-target event windows; standard EI aggregate healing does not preserve event timing. |
+| Crowd-control event stream | No per-event CC variant | Missing for CC attribution inside pre-down windows; standard EI aggregates cover whole-fight count/duration only. |
+| Transport validity and repeatability | 32/35 schema-valid; 28/35 repeated-byte-identical | Not yet certified: three logs have an out-of-duration buff-removal timestamp and seven differ in actor `instance_id` fields between runs. |
