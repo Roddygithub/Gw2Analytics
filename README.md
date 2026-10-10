@@ -64,7 +64,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full per-release history.
 | Component | Role |
 | --- | --- |
 | `libs/gw2_core` | Stable Pydantic models (combat + API). Single source of truth. **No I/O.** |
-| `libs/gw2_evtc_parser` | Binary `.zevtc` parser behind an `EvtcParser` Protocol. V1.3 layout. |
+| `libs/gw2_evtc_parser` | Binary `.zevtc` parser, reached **only** through `apps/api`'s `services.parser_adapter`. The boundary is enforced by `tests/scripts/test_parser_boundary.py`. |
 | `libs/gw2_analytics` | Single-, multi-fight, and event-driven aggregations. Frozen pydantic shapes with deterministic ordering + cross-field invariants. |
 | `libs/gw2_api_client` | Typed async httpx wrapper for the Guild Wars 2 REST API v2. |
 | `apps/api` | FastAPI gateway. MinIO blobs + Alembic + Postgres. |
@@ -167,7 +167,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for branch protection, pre-commit, code
 ### Principles
 
 1. **`gw2_core` is the only contract** between layers. Everything depends on it; it depends on nothing but Pydantic.
-2. **The parser is replaceable** behind the `EvtcParser` Protocol. Swap Python for Rust + PyO3 with zero churn elsewhere.
+2. **The parser is replaceable**, and the seam is enforced: no product runtime module outside `services.parser_adapter` may import it. Replacing it with Elite Insights is gated on `docs/validation/ei-field-coverage-gate.md` — read that before assuming the swap is mechanical.
 3. **The frontend never knows** about EVTC, parser internals, or DB schema — only the OpenAPI surface.
 4. **Each component evolves independently** — enforced by `pyproject.toml` per lib.
 

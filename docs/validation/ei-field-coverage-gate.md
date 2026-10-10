@@ -94,6 +94,32 @@ Until (1) exists there is nothing for an EI process adapter to normalize the
 event stream *from*, which is why no runtime EI adapter has been written. See
 `docs/architecture/parser-boundary.md`.
 
+## Measured cost (2026-10-10)
+
+Timed with the pinned single-threaded CLI (`SingleThreaded=true`,
+`ParseCombatReplay=false`), wall clock per fight, on this host:
+
+| log | `.zevtc` | inner EVTC | EI wall | export |
+| --- | ---: | ---: | ---: | ---: |
+| `20260128-160105` | 64 KB | 0.30 MB | 1.03 s | 0.37 MB |
+| `20260224-233019` | 3.03 MB | 14.82 MB | 3.19 s | 13.02 MB |
+| `20260314-234454` | 3.65 MB | 16.50 MB | 3.98 s | 20.21 MB |
+
+Roughly 4 MB of EVTC per second, and the export is consistently ~1.2-1.4x the
+uncompressed input. Across the whole 35-log certification set that is 305.7 MB
+of JSON (min 0.37 MB, max 29.88 MB, mean 8.73 MB) and on the order of two
+minutes of CPU.
+
+Two consequences for the migration design, neither of which is settled yet:
+
+- **Storage, not time, is the cost.** A few megabytes of JSON per fight per
+  upload is a real retention question; the export should not be persisted
+  verbatim.
+- **Enabling `ParseCombatReplay=true` multiplies the export**, which is the
+  same flag the positions/replay row requires. Budget it before turning it on.
+
+No memory measurement was taken, and no multi-log throughput run.
+
 ## How to re-run the gate
 
 ```bash

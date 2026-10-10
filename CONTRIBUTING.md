@@ -104,6 +104,14 @@ dependencies, at the cost of two extra shell invocations per iteration
 - The parser is replaceable behind the `EvtcParser` Protocol. We currently
   ship a pure-Python implementation (`PythonEvtcParser`); a Rust + PyO3
   binding is anticipated but not in scope for the current slice.
+- The parser is reached **only** through `gw2analytics_api.services.parser_adapter`,
+  and that is enforced by `tests/scripts/test_parser_boundary.py` rather than
+  merely documented. Adding an import elsewhere turns CI red.
+  See `docs/architecture/parser-boundary.md` for the full dependency map.
+- Replacing the parser with Elite Insights is gated on the field-coverage
+  matrix in `docs/validation/ei-field-coverage-matrix.md`. It is **not** a
+  drop-in swap: EI does not export the raw event stream the aggregators
+  consume, so read the gate before assuming otherwise.
 - The frontend never knows about EVTC internals, the parser, or the
   database schema -- only the OpenAPI surface from `apps/api`.
 - Each component evolves independently (`pyproject.toml` per lib/app).

@@ -52,6 +52,27 @@ sites keep working. `test_parser_boundary.py` asserts the two are the *same
 object* (a re-export, not a duplicate) and that no product module names the
 parser as the source of the type.
 
+## Complete dependency map
+
+Repository-wide search (not just `apps/api`) for `gw2_evtc_parser`,
+`PythonEvtcParser`, `read_zevtc_bytes`, `scan_ownership_intervals`,
+`scan_agent_awareness`, `EvtcParseError` and `statechange_dispatch`, each
+remaining reference classified:
+
+| kind | what | classification |
+| --- | --- | --- |
+| Production import | `services/parser_adapter.py` (`EvtcParseError`, `PythonEvtcParser`, `read_zevtc_bytes`, `__version__`) | **parser implementation dependency** — the adapter, and the only permitted one |
+| Production import | `gw2_analytics/temporal_identity.py`, `ei_compare.py` importing `OwnershipInterval` | **product-domain type that should move elsewhere** — *moved* to `gw2_core.models` |
+| Type-only re-export | `gw2_evtc_parser/__init__.py` and `parser.py` re-exporting `OwnershipInterval` | **historical/test-only** — kept so existing import sites resolve |
+| Docstring reference | `gw2_analytics/target_healing.py:55`, `target_dps.py`, `buff_state.py:224`, `buff_dispatch.py:92`, `buff_uptime.py:210`, `ei_compare.py:473`, `event_window.py:7`, `_boon_ids.py:22`, `temporal_identity.py:48`, `target_buff_removal.py:57`, `gw2_core/models.py:740,766,792`, `apps/api/.../routes/fights/__init__.py:545`, `routes/uploads.py:4`, `storage.py:90`, `scripts/seed_demo.py` | **safe to remove later** — prose only, no import; the AST test ignores them, a text search does not |
+| Build wiring | `apps/api/Dockerfile:11,43` (`COPY libs/gw2_evtc_parser`), `apps/api/pyproject.toml:61`, root `pyproject.toml:86,94,174` (workspace member + source) | **safe to remove later** — legitimate while the parser ships; removed with it |
+| Parser-only CLI | `libs/gw2_evtc_parser/pyproject.toml:15` (`gw2-parser` entry point) | **safe to remove later** — parser-specific CLI |
+| Tests | `apps/api/tests/test_parser_adapter.py`, `test_parser_version.py`, `libs/gw2_evtc_parser/tests/*` | **historical/test-only** — parser-specific; `tests/scripts/test_parser_boundary.py` is the one that must outlive it |
+
+Every production reference is now either the adapter or prose. Nothing in the
+map is a *current* blocker; the entries marked "safe to remove later" are
+deferred until the EI export change lands, not overlooked.
+
 ## Migration to Elite Insights
 
 The intended end state is:

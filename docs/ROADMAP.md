@@ -107,6 +107,15 @@ barrier_ps, time_downed_ms), F17 frontend verification with real data.
 - **Architecture:** gw2_evtc_parser → gw2_core → gw2_analytics →
   apps/api (FastAPI) + gw2_api_client → web (Next.js 16)
   + libs/gw2_skills (catalog) + libs/gw2_core/_buff_ids.py (buff ID lookup)
+- **Parser boundary:** product runtime reaches `gw2_evtc_parser` only via
+  `services.parser_adapter` (enforced by `tests/scripts/test_parser_boundary.py`),
+  and product analytics own their own domain types — `OwnershipInterval` lives
+  in `gw2_core`, not in the parser.
+- **Elite Insights migration:** gated on
+  `docs/validation/ei-field-coverage-gate.md`. The gate has been executed: 62 of
+  82 product fields are serviceable from the pinned EI export, but the raw event
+  stream, time-ranged ownership intervals and positions are not, so the custom
+  parser stays until an EI export change lands.
 
 ---
 
