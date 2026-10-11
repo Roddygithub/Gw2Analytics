@@ -1,3 +1,44 @@
+# ⚠️ Project discontinued
+
+**Gw2Analytics is no longer maintained and this repository is archived.**
+
+Development has stopped permanently.
+
+The project will not be migrated or transformed into its successor.
+
+Future experimental work around advanced WvW intelligence will continue
+separately under:
+
+**WIS — WvW Intelligence Service**
+
+WIS is a new project with a different architecture and scope.
+
+Gw2Analytics is preserved only for historical and reference purposes.
+
+## Why development stopped
+
+The existing GW2 WvW ecosystem already covers most of what this project set
+out to build:
+
+- [Elite Insights Parser](https://github.com/baaron4/GW2-Elite-Insights-Parser)
+  owns EVTC log parsing and combat interpretation.
+- [Drevarr's GW2 EI Log Combiner](https://github.com/Drevarr/GW2_EI_log_combiner)
+  already provides multi-fight aggregation and statistics.
+- [AxiBridge](https://github.com/darkharasho/axibridge) and
+  [WvW Insights](https://parser.rethl.net/) already cover much of the
+  integration, reporting, publishing and visualization space.
+
+Continuing Gw2Analytics would have progressively reimplemented capabilities
+that already exist upstream, so the project is discontinued in favor of an
+ecosystem-first approach.
+
+> Gw2Analytics should not be used as the technical foundation of WIS by
+> default.
+
+See [`ARCHIVED.md`](ARCHIVED.md) for the closure note.
+
+---
+
 # Gw2Analytics
 
 [![CI](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/Roddygithub/Gw2Analytics/actions/workflows/ci.yml)
