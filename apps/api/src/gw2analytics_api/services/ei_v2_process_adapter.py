@@ -28,6 +28,7 @@ import fnmatch
 import glob
 import json
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -43,6 +44,7 @@ from pydantic import ValidationError
 from gw2_core import WvwExportV2
 
 __all__ = [
+    "CERTIFIED_EI_PARSER_VERSION",
     "EiProcessAmbiguousOutputError",
     "EiProcessConfigError",
     "EiProcessContractError",
@@ -51,12 +53,24 @@ __all__ = [
     "EiProcessMissingOutputError",
     "EiProcessOutputFormatError",
     "EiProcessTimeoutError",
+    "EiProcessVersionError",
     "EiProcessWorkspaceError",
     "EiV2ExportResult",
     "EiV2ProcessAdapter",
 ]
 
 logger = logging.getLogger(__name__)
+
+#: Parser version of the certified Elite Insights V2 candidate
+#: ``445eeb80e373b4597b0b38f9fbf90099c475fefc``.
+#:
+#: The certified exporter writes ``source_commit = null`` into every V2
+#: export, so a document cannot prove the exact Git commit of the build
+#: that produced it. The adapter's version guard therefore pins this
+#: parser version — a necessary, but NOT sufficient, condition for the
+#: certified candidate. Exact-commit provenance would require the
+#: exporter to fill ``source_commit`` in a future EI change.
+CERTIFIED_EI_PARSER_VERSION = "3.26.0.0"
 
 #: Suffix of the V2 export sidecar EI writes next to the log name.
 _EXPORT_SUFFIX = "_wvw_export_v2.json"
@@ -77,7 +91,12 @@ class EiProcessConfigError(EiProcessError):
 
 
 class EiProcessWorkspaceError(EiProcessError):
-    """The isolated invocation workspace could not be created."""
+    """A material filesystem operation in the invocation workspace failed.
+
+    Covers workspace creation, writing the per-invocation EI config
+    file, and reading the selected V2 export, so a raw ``OSError``
+    never leaks through the adapter's typed failure model.
+    """
 
 
 class EiProcessTimeoutError(EiProcessError):
@@ -134,6 +153,20 @@ class EiProcessContractError(EiProcessError):
     def __init__(self, message: str, *, field_errors: list[tuple[str, str]]):
         super().__init__(message)
         self.field_errors = field_errors
+
+
+class EiProcessVersionError(EiProcessError):
+    """The export reports an unexpected EI parser version.
+
+    The certified EI V2 exporter writes ``source_commit = null``, so an
+    export cannot prove the exact Git commit of its producing build;
+    this guard verifies the certified ``parser_version`` instead.
+    """
+
+    def __init__(self, message: str, *, expected_parser_version: str, actual_parser_version: str):
+        super().__init__(message)
+        self.expected_parser_version = expected_parser_version
+        self.actual_parser_version = actual_parser_version
 
 
 @dataclass(frozen=True)
@@ -268,11 +301,16 @@ class EiV2ProcessAdapter:
     #: The program may be an absolute path, a ``PATH``-relative name, or
     #: any executable file; the V2 config file and log path are appended.
     ei_command: Sequence[str]
-    #: Hard wall-clock limit for one EI invocation, in seconds.
+    #: Hard wall-clock limit for one EI invocation, in seconds. Must be
+    #: positive and finite.
     timeout_seconds: float = 600.0
     #: Parent directory for per-invocation workspaces. Defaults to the
     #: system temporary directory. Must already exist.
     workspace_root: Path | None = None
+    #: Parser version the export must report. Defaults to the certified
+    #: candidate's version; see ``CERTIFIED_EI_PARSER_VERSION`` for why
+    #: this is a version pin, not an exact-commit proof.
+    expected_parser_version: str = CERTIFIED_EI_PARSER_VERSION
     #: Command actually executed, normalized in ``__post_init__``.
     _normalized_command: tuple[str, ...] = field(init=False, repr=False)
 
@@ -284,14 +322,16 @@ class EiV2ProcessAdapter:
         if any(not isinstance(part, str) or not part for part in self.ei_command):
             raise EiProcessConfigError("ei_command parts must be non-empty strings")
         program = _resolve_program(self.ei_command[0])
-        if not self.timeout_seconds > 0:
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise EiProcessConfigError(
-                f"timeout_seconds must be a positive number, got {self.timeout_seconds}"
+                f"timeout_seconds must be a positive finite number, got {self.timeout_seconds!r}"
             )
         if self.workspace_root is not None and not self.workspace_root.is_dir():
             raise EiProcessConfigError(
                 f"workspace_root is not an existing directory: {self.workspace_root}"
             )
+        if not self.expected_parser_version:
+            raise EiProcessConfigError("expected_parser_version must not be empty")
         self._normalized_command = (str(program), *tuple(self.ei_command[1:]))
 
     def export(self, log_path: Path | str) -> EiV2ExportResult:
@@ -302,7 +342,12 @@ class EiV2ProcessAdapter:
         workspace = self._create_workspace()
         try:
             config_path = workspace / "ei.conf"
-            config_path.write_text(_ei_settings(workspace), encoding="utf-8")
+            try:
+                config_path.write_text(_ei_settings(workspace), encoding="utf-8")
+            except OSError as exc:
+                raise EiProcessWorkspaceError(
+                    f"could not write the EI invocation config in {workspace}: {exc.strerror}"
+                ) from exc
             argv = (*self._normalized_command, "-c", str(config_path), str(log))
             started = time.monotonic()
             try:
@@ -333,7 +378,12 @@ class EiV2ProcessAdapter:
                     stderr_tail=_decode_tail(completed.stderr),
                 )
             output_path = _select_export(workspace, log.stem)
-            output_bytes = output_path.read_bytes()
+            try:
+                output_bytes = output_path.read_bytes()
+            except OSError as exc:
+                raise EiProcessWorkspaceError(
+                    f"could not read the V2 export produced in {workspace}: {exc.strerror}"
+                ) from exc
             try:
                 payload: Any = json.loads(output_bytes)
             except json.JSONDecodeError as exc:
@@ -356,6 +406,14 @@ class EiV2ProcessAdapter:
                     "see field_errors on this error",
                     field_errors=field_errors,
                 ) from exc
+            if export.parser_version != self.expected_parser_version:
+                raise EiProcessVersionError(
+                    f"the V2 export produced for {log.name} reports parser version "
+                    f"{export.parser_version!r}; this adapter is certified for "
+                    f"{self.expected_parser_version!r}",
+                    expected_parser_version=self.expected_parser_version,
+                    actual_parser_version=export.parser_version,
+                )
             return EiV2ExportResult(
                 export=export,
                 source_log=log,

@@ -20,6 +20,7 @@ import pytest
 
 from gw2_core import WvwExportV2
 from gw2analytics_api.services.ei_v2_process_adapter import (
+    CERTIFIED_EI_PARSER_VERSION,
     EiProcessAmbiguousOutputError,
     EiProcessConfigError,
     EiProcessContractError,
@@ -27,6 +28,8 @@ from gw2analytics_api.services.ei_v2_process_adapter import (
     EiProcessMissingOutputError,
     EiProcessOutputFormatError,
     EiProcessTimeoutError,
+    EiProcessVersionError,
+    EiProcessWorkspaceError,
     EiV2ExportResult,
     EiV2ProcessAdapter,
 )
@@ -37,6 +40,13 @@ FIXTURE = ROOT / "libs/gw2_core/tests/fixtures/wvw_export_v2.json"
 _LOG_NAME = "demo.zevtc"
 
 
+def _certified_payload() -> bytes:
+    """Fixture payload stamped with the certified EI parser version."""
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload["parser_version"] = CERTIFIED_EI_PARSER_VERSION
+    return json.dumps(payload).encode()
+
+
 def _fake_ei(tmp_path: Path, behavior: str, sentinel: Path | None = None) -> Path:
     """Write a fake EI executable that receives ``-c <config> <log>`` as $1..$3."""
     script = tmp_path / f"fake-ei-{behavior}.sh"
@@ -45,6 +55,9 @@ def _fake_ei(tmp_path: Path, behavior: str, sentinel: Path | None = None) -> Pat
         lines.append('cp "$3" "$out/${base%.*}_wvw_export_v2.json"')
         if sentinel is not None:
             lines.append(f'echo "$out" >> "{sentinel}"')
+    elif behavior == "locked":
+        lines.append('cp "$3" "$out/${base%.*}_wvw_export_v2.json"')
+        lines.append('chmod 000 "$out/${base%.*}_wvw_export_v2.json"')
     elif behavior == "multi":
         lines.append('cp "$3" "$out/${base%.*}_wvw_export_v2.json"')
         lines.append('cp "$3" "$out/${base%.*}-alt_wvw_export_v2.json"')
@@ -92,7 +105,7 @@ def _assert_workspace_clean(root: Path) -> None:
 
 def test_export_returns_validated_v2_document_and_cleans_workspace(tmp_path: Path) -> None:
     adapter = _adapter(_fake_ei(tmp_path, "ok"), tmp_path)
-    log = _log_file(tmp_path, FIXTURE.read_bytes())
+    log = _log_file(tmp_path, _certified_payload())
 
     result = adapter.export(log)
 
@@ -100,7 +113,7 @@ def test_export_returns_validated_v2_document_and_cleans_workspace(tmp_path: Pat
     assert isinstance(result.export, WvwExportV2)
     assert result.export.schema_version == 2
     assert result.export.fights[0].duration_ms == 2000
-    assert result.export.parser_version == "3.26.0.0-prototype"
+    assert result.export.parser_version == CERTIFIED_EI_PARSER_VERSION
     assert result.source_log == log.resolve()
     assert result.elapsed_seconds >= 0
     assert result.ei_command[0] == "/bin/sh"
@@ -108,12 +121,47 @@ def test_export_returns_validated_v2_document_and_cleans_workspace(tmp_path: Pat
     _assert_workspace_clean(_workspace_root(tmp_path))
 
 
+def test_export_rejects_unexpected_parser_version(tmp_path: Path) -> None:
+    adapter = _adapter(_fake_ei(tmp_path, "ok"), tmp_path)
+    log = _log_file(tmp_path, FIXTURE.read_bytes())
+
+    with pytest.raises(EiProcessVersionError) as excinfo:
+        adapter.export(log)
+
+    error = excinfo.value
+    assert error.expected_parser_version == CERTIFIED_EI_PARSER_VERSION
+    assert error.actual_parser_version == "3.26.0.0-prototype"
+    assert log.is_file()
+    _assert_workspace_clean(_workspace_root(tmp_path))
+
+
+def test_expected_parser_version_is_explicit_and_configurable(tmp_path: Path) -> None:
+    adapter = EiV2ProcessAdapter(
+        ei_command=("/bin/sh", str(_fake_ei(tmp_path, "ok"))),
+        workspace_root=_workspace_root(tmp_path),
+        expected_parser_version="3.26.0.0-prototype",
+    )
+    log = _log_file(tmp_path, FIXTURE.read_bytes())
+
+    result = adapter.export(log)
+
+    assert result.export.parser_version == "3.26.0.0-prototype"
+
+
+def test_empty_expected_parser_version_is_a_configuration_error(tmp_path: Path) -> None:
+    with pytest.raises(EiProcessConfigError, match="expected_parser_version"):
+        EiV2ProcessAdapter(
+            ei_command=("sh", str(_fake_ei(tmp_path, "ok"))),
+            expected_parser_version="",
+        )
+
+
 def test_program_resolved_from_path_is_accepted(tmp_path: Path) -> None:
     adapter = EiV2ProcessAdapter(
         ei_command=("sh", str(_fake_ei(tmp_path, "ok"))),
         workspace_root=_workspace_root(tmp_path),
     )
-    log = _log_file(tmp_path, FIXTURE.read_bytes())
+    log = _log_file(tmp_path, _certified_payload())
 
     result = adapter.export(log)
 
@@ -144,9 +192,11 @@ def test_malformed_ei_command_is_a_configuration_error(bad_command: object) -> N
         EiV2ProcessAdapter(ei_command=bad_command)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("bad_timeout", [-1, 0, math.nan])
-def test_non_positive_timeout_is_a_configuration_error(bad_timeout: float) -> None:
-    with pytest.raises(EiProcessConfigError, match="timeout_seconds"):
+@pytest.mark.parametrize("bad_timeout", [-1, 0, math.inf, -math.inf, math.nan])
+def test_non_finite_or_non_positive_timeout_is_a_configuration_error(
+    bad_timeout: float,
+) -> None:
+    with pytest.raises(EiProcessConfigError, match="positive finite"):
         EiV2ProcessAdapter(ei_command=("sh", "ei"), timeout_seconds=bad_timeout)
 
 
@@ -267,6 +317,34 @@ def test_malformed_export_json_is_a_format_error(tmp_path: Path) -> None:
     _assert_workspace_clean(_workspace_root(tmp_path))
 
 
+def test_config_write_failure_is_a_typed_workspace_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _fake_ei(tmp_path, "ok")
+    log = _log_file(tmp_path, _certified_payload())
+
+    def _raise_os_error(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr(Path, "write_text", _raise_os_error)
+    adapter = _adapter(script, tmp_path)
+
+    with pytest.raises(EiProcessWorkspaceError, match="could not write"):
+        adapter.export(log)
+
+    _assert_workspace_clean(_workspace_root(tmp_path))
+
+
+def test_unreadable_export_is_a_typed_workspace_error(tmp_path: Path) -> None:
+    adapter = _adapter(_fake_ei(tmp_path, "locked"), tmp_path)
+    log = _log_file(tmp_path, _certified_payload())
+
+    with pytest.raises(EiProcessWorkspaceError, match="could not read"):
+        adapter.export(log)
+
+    _assert_workspace_clean(_workspace_root(tmp_path))
+
+
 def test_contract_invalid_export_is_a_contract_error(tmp_path: Path) -> None:
     payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
     payload["fights"][0]["event_domain_end_ms"] = 1
@@ -289,7 +367,7 @@ def test_concurrent_invocations_use_distinct_workspaces(tmp_path: Path) -> None:
         ei_command=("/bin/sh", str(_fake_ei(tmp_path, "ok", sentinel=sentinel))),
         workspace_root=_workspace_root(tmp_path),
     )
-    log = _log_file(tmp_path, FIXTURE.read_bytes())
+    log = _log_file(tmp_path, _certified_payload())
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda _: adapter.export(log), range(4)))
@@ -303,7 +381,7 @@ def test_concurrent_invocations_use_distinct_workspaces(tmp_path: Path) -> None:
 
 def test_adapter_instance_is_reusable_across_invocations(tmp_path: Path) -> None:
     adapter = _adapter(_fake_ei(tmp_path, "ok"), tmp_path)
-    log = _log_file(tmp_path, FIXTURE.read_bytes())
+    log = _log_file(tmp_path, _certified_payload())
 
     first = adapter.export(log)
     second = adapter.export(log)
