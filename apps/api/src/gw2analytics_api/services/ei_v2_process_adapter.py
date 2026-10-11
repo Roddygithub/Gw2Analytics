@@ -189,7 +189,13 @@ class EiV2ExportResult:
 
 
 def _resolve_program(program: str) -> Path:
-    """Return the absolute program path, or raise an explicit config error."""
+    """Return the absolute program path, or raise an explicit config error.
+
+    The returned path is fully resolved at construction time (absolute
+    and with symlinks followed), so a later working-directory change —
+    or a swapped symlink — can no longer alter which executable a
+    stored command invokes.
+    """
     if not program:
         raise EiProcessConfigError("ei_command must start with a non-empty program")
     candidate = Path(program)
@@ -205,7 +211,7 @@ def _resolve_program(program: str) -> Path:
         candidate = Path(which)
     if not os.access(candidate, os.X_OK):
         raise EiProcessConfigError(f"EI executable is not executable: {candidate!s}")
-    return candidate
+    return candidate.resolve()
 
 
 def _ei_settings(out_location: Path) -> str:
@@ -263,11 +269,16 @@ def _select_export(workspace: Path, log_stem: str) -> Path:
     the pattern.
     """
     pattern = glob.escape(log_stem) + "*" + _EXPORT_SUFFIX
-    candidates = sorted(
-        path
-        for path in workspace.iterdir()
-        if path.is_file() and fnmatch.fnmatch(path.name, pattern)
-    )
+    try:
+        candidates = sorted(
+            path
+            for path in workspace.iterdir()
+            if path.is_file() and fnmatch.fnmatch(path.name, pattern)
+        )
+    except OSError as exc:
+        raise EiProcessWorkspaceError(
+            f"could not enumerate the V2 export candidates in {workspace}: {exc.strerror}"
+        ) from exc
     if not candidates:
         raise EiProcessMissingOutputError(
             f"EI produced no {_EXPORT_SUFFIX} output in the invocation workspace "
@@ -299,7 +310,10 @@ class EiV2ProcessAdapter:
     #: EI command prefix, program first, e.g.
     #: ``("/opt/dotnet/dotnet", "/opt/ei/GuildWars2EliteInsights-CLI.dll")``.
     #: The program may be an absolute path, a ``PATH``-relative name, or
-    #: any executable file; the V2 config file and log path are appended.
+    #: any executable file; it is resolved to an absolute path at
+    #: construction time, so later working-directory changes cannot
+    #: alter which executable runs. The V2 config file and log path are
+    #: appended at invocation time.
     ei_command: Sequence[str]
     #: Hard wall-clock limit for one EI invocation, in seconds. Must be
     #: positive and finite.
@@ -386,9 +400,9 @@ class EiV2ProcessAdapter:
                 ) from exc
             try:
                 payload: Any = json.loads(output_bytes)
-            except json.JSONDecodeError as exc:
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 raise EiProcessOutputFormatError(
-                    f"the V2 export produced for {log.name} is not valid JSON: {exc.msg}"
+                    f"the V2 export produced for {log.name} is not valid JSON: {exc}"
                 ) from exc
             try:
                 export = WvwExportV2.model_validate(payload)

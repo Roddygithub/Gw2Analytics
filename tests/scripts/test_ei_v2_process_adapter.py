@@ -58,6 +58,9 @@ def _fake_ei(tmp_path: Path, behavior: str, sentinel: Path | None = None) -> Pat
     elif behavior == "locked":
         lines.append('cp "$3" "$out/${base%.*}_wvw_export_v2.json"')
         lines.append('chmod 000 "$out/${base%.*}_wvw_export_v2.json"')
+    elif behavior == "badbytes":
+        # 0xFF never occurs in valid UTF-8; the export is undecodable text.
+        lines.append("printf '{\\377}' > \"$out/${base%.*}_wvw_export_v2.json\"")
     elif behavior == "multi":
         lines.append('cp "$3" "$out/${base%.*}_wvw_export_v2.json"')
         lines.append('cp "$3" "$out/${base%.*}-alt_wvw_export_v2.json"')
@@ -116,7 +119,7 @@ def test_export_returns_validated_v2_document_and_cleans_workspace(tmp_path: Pat
     assert result.export.parser_version == CERTIFIED_EI_PARSER_VERSION
     assert result.source_log == log.resolve()
     assert result.elapsed_seconds >= 0
-    assert result.ei_command[0] == "/bin/sh"
+    assert result.ei_command[0] == str(Path("/bin/sh").resolve())
     assert log.is_file(), "the input log must never be deleted"
     _assert_workspace_clean(_workspace_root(tmp_path))
 
@@ -166,6 +169,41 @@ def test_program_resolved_from_path_is_accepted(tmp_path: Path) -> None:
     result = adapter.export(log)
 
     assert result.export.schema_version == 2
+
+
+def test_explicit_relative_executable_resolves_absolute_and_survives_cwd_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bindir = tmp_path / "tools"
+    bindir.mkdir()
+    script = _fake_ei(bindir, "ok")
+    log = _log_file(tmp_path, _certified_payload())
+    root = _workspace_root(tmp_path)
+    monkeypatch.chdir(bindir)
+    adapter = EiV2ProcessAdapter(ei_command=("./fake-ei-ok.sh",), workspace_root=root)
+
+    monkeypatch.chdir(tmp_path)
+    result = adapter.export(log)
+
+    assert result.ei_command[0] == str(script.resolve())
+    assert Path(result.ei_command[0]).is_absolute()
+    assert result.export.schema_version == 2
+    _assert_workspace_clean(root)
+
+
+def test_symlinked_executable_resolves_to_a_stable_target(tmp_path: Path) -> None:
+    target = _fake_ei(tmp_path, "ok")
+    link = tmp_path / "ei-link"
+    link.symlink_to(target)
+    root = _workspace_root(tmp_path)
+    adapter = EiV2ProcessAdapter(ei_command=(str(link),), workspace_root=root)
+    log = _log_file(tmp_path, _certified_payload())
+
+    result = adapter.export(log)
+
+    assert result.ei_command[0] == str(target.resolve())
+    assert result.export.schema_version == 2
+    _assert_workspace_clean(root)
 
 
 def test_missing_executable_is_a_configuration_error(tmp_path: Path) -> None:
@@ -317,6 +355,17 @@ def test_malformed_export_json_is_a_format_error(tmp_path: Path) -> None:
     _assert_workspace_clean(_workspace_root(tmp_path))
 
 
+def test_invalid_utf8_export_is_a_format_error(tmp_path: Path) -> None:
+    adapter = _adapter(_fake_ei(tmp_path, "badbytes"), tmp_path)
+    log = _log_file(tmp_path, _certified_payload())
+
+    with pytest.raises(EiProcessOutputFormatError) as excinfo:
+        adapter.export(log)
+
+    assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
+    _assert_workspace_clean(_workspace_root(tmp_path))
+
+
 def test_config_write_failure_is_a_typed_workspace_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -342,6 +391,25 @@ def test_unreadable_export_is_a_typed_workspace_error(tmp_path: Path) -> None:
     with pytest.raises(EiProcessWorkspaceError, match="could not read"):
         adapter.export(log)
 
+    _assert_workspace_clean(_workspace_root(tmp_path))
+
+
+def test_workspace_enumeration_failure_is_a_typed_workspace_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _fake_ei(tmp_path, "ok")
+    log = _log_file(tmp_path, _certified_payload())
+
+    def _raise_os_error(self: object) -> object:
+        raise OSError("simulated enumeration failure")
+
+    monkeypatch.setattr(Path, "iterdir", _raise_os_error)
+    adapter = _adapter(script, tmp_path)
+
+    with pytest.raises(EiProcessWorkspaceError, match="could not enumerate"):
+        adapter.export(log)
+
+    monkeypatch.undo()
     _assert_workspace_clean(_workspace_root(tmp_path))
 
 
